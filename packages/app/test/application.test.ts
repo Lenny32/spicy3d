@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { ICommand, IDocument, IView, IVisualFactory, Serialized } from "@spicy3d/core";
-import { Logger, ObservableCollection, PubSub } from "@spicy3d/core";
+import { DOCUMENT_FORMAT_VERSION, Logger, ObservableCollection, PubSub } from "@spicy3d/core";
 import { createMockView, createMockVisualWithDocument } from "@spicy3d/core/test-utils";
 import { Application } from "../src/application";
 
@@ -33,7 +33,7 @@ function makeVisualFactory(): IVisualFactory {
 
 function makeSerializedDocData(name: string, id: string): Serialized {
     return {
-        version: __DOCUMENT_VERSION__,
+        formatVersion: DOCUMENT_FORMAT_VERSION,
         name,
         id,
         models: {
@@ -321,20 +321,22 @@ describe("Application", () => {
             expect(sharedApp.activeView).not.toBeNull();
         });
 
-        test("should return undefined when version mismatches", async () => {
-            const originalAlert = globalThis.alert;
-            globalThis.alert = (() => {}) as any;
+        test("should return undefined and open no view for a newer document format", async () => {
+            const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
 
             try {
-                const badVersionData = {
+                const newerData = {
                     ...validSerializedData,
-                    version: "0.0.1",
+                    formatVersion: DOCUMENT_FORMAT_VERSION + 1,
                 } as unknown as Serialized;
 
-                const doc = await sharedApp.loadDocument(badVersionData);
+                const doc = await sharedApp.loadDocument(newerData);
+
                 expect(doc).toBeUndefined();
+                expect(sharedApp.activeView).toBeUndefined();
+                expect(pub).toHaveBeenCalledWith("showToast", "error.document.newerFormat");
             } finally {
-                globalThis.alert = originalAlert;
+                pub.mockRestore();
             }
         });
     });

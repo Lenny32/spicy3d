@@ -532,6 +532,11 @@ export default {
         "entity.editable": "Editable Entity",
         "entity.parameter": "Parameter Entity",
         "error.default:{0}": "error: {0}",
+        "error.document.migrationFailed:{0}":
+            "This document could not be upgraded to the current format: {0}",
+        "error.document.newerFormat":
+            "This document was saved with a newer Spicy3D — please reload the page to update",
+        "error.document.notSpicy3D": "This file is not a Spicy3D document",
         "error.export.noNodeCanBeExported": "No node can be exported",
         "error.import.unsupportedFileType:{0}": "Unsupported file type: {0}",
         "error.input.cannotInputANumber": "Overlap with reference point, 1 number cannot be entered",
@@ -627,6 +632,7 @@ export default {
         "mcp.tokenHint":
             "The bridge only accepts this page if it presents the same token. It is generated for you and saved in this browser; if you generate a new one, copy the updated config into your agent again.",
         "model.visible": "Visible",
+        "node.unknown.warning": "Kept unchanged: its plugin is not loaded",
         "option.command.circularPattern": "Circular Pattern",
         "option.command.continuity": "Continuity",
         "option.command.deleteObjects": "Delete Objects",

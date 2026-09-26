@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 export * from "./features";
+export * from "./migrations";
 export * from "./parametricBodyNode";
 export * from "./program";
 export * from "./sketch";
