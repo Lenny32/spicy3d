@@ -238,7 +238,7 @@ describe("AutosaveService", () => {
         edit("changed");
         await rs.advanceTimersByTimeAsync(5 * MINUTE);
         expect(document.isDirty).toBe(false);
-        expect(status.lastAutosavedAt(document)).toBeGreaterThan(0);
+        expect(status.lastAutosavedAt(document)).toBe(Date.parse("2026-09-27T12:05:00Z"));
 
         const saved = await document.save("manual");
 
