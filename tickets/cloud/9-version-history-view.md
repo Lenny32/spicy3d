@@ -40,7 +40,7 @@ A dedicated view listing every version of a cloud document, with preview, restor
 - [x] Preview is read-only and cannot overwrite the head. (the preview is a separate document on a read-only repository that refuses every save; tests against the fake document server)
 - [x] Restore creates a new head version; the previous head stays in history. (tests against the fake document server)
 - [x] Labeling an autosave keeps it through pruning (SRV-06 test). (mocked: the client's `PATCH` against the fake server and its simplified pruner; the real rule — `Label == null && !Pinned` — read in SpicySrv's `AutosavePruner`)
-- [ ] Compare lists semantic differences. (the Compare buttons use core's `IDocumentDiffer`; the shipped `NodeListDiffer` placeholder only lists items added, removed, renamed or changed — CLOUD-12 registers the semantic one)
+- [x] Compare lists semantic differences. (core's `SemanticDiffer` is the default `IDocumentDiffer` since CLOUD-12: the merge engine's two-way diff as display lines — "Extrude 1: depth 10 mm → 15 mm", "Sketch 1: +3 lines, −1 constraint", "Box 1 deleted"; `packages/builder/test/semanticDiff.test.ts` in English, `cloud/test/versionHistory.test.ts` through the history)
 
 ## Dependencies and complexity
 

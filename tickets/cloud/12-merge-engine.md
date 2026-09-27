@@ -32,10 +32,10 @@ export function applyResolutions(result: MergeResult, choices: Resolution[]): Re
 
 ## Acceptance criteria
 
-- [ ] All CLOUD-11 fixtures pass.
-- [ ] Property tests (fast-check): `merge(b, x, b) = x`, `merge(b, b, y) = y`, `merge(b, x, x) = x` without conflicts.
-- [ ] Every serializable class has a rule or the explicit atomic fallback.
-- [ ] Validation reports only merge-introduced failures.
+- [x] All CLOUD-11 fixtures pass. (31 cases, `packages/builder/test/mergeFixtures.test.ts`: expected document and conflicts, deep-frozen inputs, determinism, every choice of every conflict; `rebuild-failure` via the kernel test below)
+- [x] Property tests (fast-check): `merge(b, x, b) = x`, `merge(b, b, y) = y`, `merge(b, x, x) = x` without conflicts. (`packages/builder/test/mergeProperties.test.ts` over generated documents with random edits, also with manifest inputs; 3000 runs each passed once, 150 in CI)
+- [x] Every serializable class has a rule or the explicit atomic fallback. (`packages/builder/test/mergeRules.test.ts`, its source scan fixed to take the first class after the decorator)
+- [x] Validation reports only merge-introduced failures. (`packages/parametric/test/mergeValidation.kernel.test.ts`: every fixture with the real kernel — only `rebuild-failure-thin-wall` reports, dangling locations and parents' failures skipped; progress, cancel, cached side reports)
 
 ## Dependencies and complexity
 
