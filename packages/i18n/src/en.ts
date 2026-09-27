@@ -574,7 +574,8 @@ export default {
         "account.token.scopes": "Permissions",
         "account.token.scope.mcpRead": "Read the open model and take screenshots (mcp:read)",
         "account.token.scope.mcpWrite": "Edit the open model (mcp:write)",
-        "account.token.scope.documentsRead": "Read cloud documents and their history (documents:read)",
+        "account.token.scope.documentsRead":
+            "Let agents list documents and history (also grants read access to all document content) (documents:read)",
         "account.token.expiry": "Expires",
         "account.token.expiry.days{0}": "In {0} days",
         "account.token.expiry.never": "Never",

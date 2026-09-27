@@ -7,10 +7,12 @@ import { showCreateToken } from "../ui/accountSettings";
 import { accountUiContext } from "../ui/index";
 
 /**
- * A new token for an MCP client: reading the model and editing it, plus the cloud library the
- * server's own tools list (spicy3d_list_documents, spicy3d_document_history — CLOUD-15).
+ * A new token for an MCP client: reading the model and editing it. Not `documents:read`: it would
+ * also let whoever holds the token (it sits in plain text in the client's config) download every
+ * document through the REST API, no tab and no pairing needed — the dialog offers it as an explicit
+ * opt-in ("Let agents list documents and history"), which the server's list/history tools need.
  */
-export const MCP_SCOPES = ["mcp:read", "mcp:write", "documents:read"];
+export const MCP_SCOPES = ["mcp:read", "mcp:write"];
 
 /**
  * Remote MCP (CLOUD-14): while someone is signed in to a server with the relay

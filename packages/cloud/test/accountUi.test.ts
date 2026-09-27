@@ -3,9 +3,11 @@
 
 import { rs } from "@rstest/core";
 import { formatDateTime, formatRelative, PubSub, parseUtc, TitleBar } from "@spicy3d/core";
+import { en } from "@spicy3d/i18n";
 import type { Account } from "../src/account/account";
 import type { ConfigResponse } from "../src/api";
 import { CloudConnection } from "../src/cloud";
+import { MCP_SCOPES } from "../src/mcp";
 import { startAccountUi } from "../src/ui";
 import { AccountButton } from "../src/ui/accountButton";
 import { showAccountSettings, showCreateToken, showDeleteAccount } from "../src/ui/accountSettings";
@@ -683,6 +685,47 @@ describe("account settings", () => {
         expect(JSON.parse(configs[2].textContent ?? "").mcpServers.spicy3d.env).toEqual({
             SPICY3D_TOKEN: "spicy_pat_s3cret",
         });
+    });
+
+    test("an MCP token gets documents:read only when the user opts in to agents listing documents", async () => {
+        const server = new FakeServer();
+        const account = await signedInAccount(server);
+        const created = {
+            token: "spicy_pat_s3cret",
+            id: "t1",
+            name: "Laptop",
+            prefix: "spicy_pat_s3",
+            scopes: ["mcp:read", "mcp:write", "documents:read"],
+            createdAt: "2026-09-27T10:00:00Z",
+            expiresAt: null,
+        };
+        server.on("POST /api/me/tokens", json(201, created));
+        const ctx = { ...context(account), mcpEndpoint: "https://spicy.lan/mcp" };
+        const dialog = showCreateToken(ctx, () => {}, { scopes: MCP_SCOPES }).dialog;
+        const optIn = Array.from(dialog.querySelectorAll("label")).find((l) =>
+            l.textContent?.includes("account.token.scope.documentsRead"),
+        );
+        const box = optIn?.querySelector<HTMLInputElement>("input[type=checkbox]");
+        expect(box).not.toBeNull();
+        expect(box!.checked).toBe(false);
+
+        box!.checked = true;
+        type(dialog, "name", "Laptop");
+        type(dialog, "currentPassword", "pw");
+        submit(dialog);
+
+        await rs.waitFor(() => expect(server.requests).toHaveLength(1));
+        expect(server.requests[0].body).toMatchObject({
+            scopes: ["mcp:read", "mcp:write", "documents:read"],
+        });
+    });
+
+    test("MCP tokens don't carry documents:read by default (it reads every document through the API)", () => {
+        expect(MCP_SCOPES).toEqual(["mcp:read", "mcp:write"]);
+        // The opt-in says what else it grants.
+        expect(en.translation["account.token.scope.documentsRead"]).toContain(
+            "also grants read access to all document content",
+        );
     });
 
     test("delete account: the typed email must match; then the account is deleted and signed out", async () => {
