@@ -203,11 +203,32 @@ export abstract class ParameterShapeNode extends ShapeNode {
         equals?: IEqualityComparer<this[K]> | undefined,
     ): boolean {
         if (this.setProperty(property, newValue, onPropertyChanged, equals)) {
-            this.setShape(this.generateShape());
+            if (this._deferredShapeUpdates > 0) this._shapeUpdatePending = true;
+            else this.setShape(this.generateShape());
             return true;
         }
 
         return false;
+    }
+
+    private _deferredShapeUpdates = 0;
+    private _shapeUpdatePending = false;
+
+    /**
+     * Runs `action` with the shape regenerated once at the end instead of after every parameter
+     * it sets: each regeneration is a kernel rebuild plus a remesh of the view.
+     */
+    batchShapeUpdates(action: () => void): void {
+        this._deferredShapeUpdates++;
+        try {
+            action();
+        } finally {
+            this._deferredShapeUpdates--;
+            if (this._deferredShapeUpdates === 0 && this._shapeUpdatePending) {
+                this._shapeUpdatePending = false;
+                this.setShape(this.generateShape());
+            }
+        }
     }
 
     constructor(options: ParameterShapeNodeOptions) {

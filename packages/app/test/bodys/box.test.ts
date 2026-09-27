@@ -184,4 +184,43 @@ describe("BoxNode", () => {
             expect(result.isOk).toBe(false);
         });
     });
+    describe("batchShapeUpdates", () => {
+        test("regenerates the shape once for all the parameters set inside", () => {
+            const box = rs.fn((_plane: Plane, _dx: number, _dy: number, _dz: number) =>
+                Result.ok(createMockShape() as unknown as IShape),
+            );
+            setupShapeFactoryMock({ box });
+            const node = new BoxNode({ document: doc, plane: defaultPlane(), dx: 10, dy: 20, dz: 30 });
+            expect(node.shape.isOk).toBe(true);
+            box.mockClear();
+
+            node.batchShapeUpdates(() => {
+                node.dx = 11;
+                node.dy = 21;
+                node.dz = 31;
+            });
+
+            expect(box).toHaveBeenCalledTimes(1);
+            expect(box.mock.calls[0].slice(1)).toEqual([11, 21, 31]);
+        });
+
+        test("regenerates nothing when no parameter changed, and every set outside regenerates", () => {
+            const box = rs.fn((_plane: Plane, _dx: number, _dy: number, _dz: number) =>
+                Result.ok(createMockShape() as unknown as IShape),
+            );
+            setupShapeFactoryMock({ box });
+            const node = new BoxNode({ document: doc, plane: defaultPlane(), dx: 10, dy: 20, dz: 30 });
+            expect(node.shape.isOk).toBe(true);
+            box.mockClear();
+
+            node.batchShapeUpdates(() => {
+                node.dx = 10;
+            });
+            expect(box).not.toHaveBeenCalled();
+
+            node.dx = 12;
+            node.dy = 22;
+            expect(box).toHaveBeenCalledTimes(2);
+        });
+    });
 });
