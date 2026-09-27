@@ -10,8 +10,8 @@ import style from "./panel.module.css";
 import { type RemoteAgent, type RemoteMcpSnapshot, remoteMcpState } from "./remoteState";
 
 /**
- * One chip per bound session: "● Claude Code (token Laptop)" and "Disconnect agent". Clicking the
- * name opens the MCP panel. Hidden while no session targets this tab.
+ * One chip per bound session: "● claude-code" (the token name in the tooltip) and "Disconnect
+ * agent". Clicking the name opens the MCP panel. Hidden while no session targets this tab.
  */
 export class AgentBadge extends HTMLElement {
     private unsubscribe?: () => void;
@@ -42,13 +42,13 @@ export class AgentBadge extends HTMLElement {
         const chip = div(
             {
                 className: style.agentBadge,
-                title: I18n.translate(denied ? "mcp.agent.deniedTitle" : "mcp.agent.title"),
+                title: `${describeAgent(agent)}: ${I18n.translate(denied ? "mcp.agent.deniedTitle" : "mcp.agent.title")}`,
             },
             span({ className: style.dot }),
             span({
-                textContent: describeAgent(agent),
+                className: style.agentName,
+                textContent: agent.clientName,
                 onclick: () => PubSub.default.pub("toggleChatPanel"),
-                style: { cursor: "pointer" },
             }),
             button({
                 className: style.agentBadgeButton,

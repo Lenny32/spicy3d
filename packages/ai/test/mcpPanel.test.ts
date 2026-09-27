@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { AgentBadge } from "../src/mcp/agentBadge";
 import { createMcpPanel } from "../src/mcp/panel";
 import { remoteMcpState } from "../src/mcp/remote";
 import { loadMcpSettings } from "../src/mcp/settings";
@@ -66,6 +67,35 @@ describe("McpPanel", () => {
         expect(panel.textContent).toContain("mcp.status.connected");
         expect(panel.textContent).toContain("run_program");
         expect(panel.textContent).toContain("mcp.disconnect");
+    });
+});
+
+describe("AgentBadge", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+        remoteMcpState.update({ status: "unavailable", agents: [] });
+    });
+
+    test("shows one chip per bound session while connected, none otherwise", () => {
+        const badge = new AgentBadge();
+        document.body.append(badge);
+        expect(badge.children).toHaveLength(0);
+
+        remoteMcpState.update({
+            status: "connected",
+            agents: [
+                { id: "a1", clientName: "claude-code", tokenName: "Laptop" },
+                { id: "a2", clientName: "cursor", pairing: "deny" },
+            ],
+        });
+        const chips = Array.from(badge.querySelectorAll<HTMLElement>("[data-agent-id]"));
+        expect(chips.map((c) => c.dataset["agentId"])).toEqual(["a1", "a2"]);
+        expect(chips[0].textContent).toBe("claude-codemcp.agent.disconnect");
+        expect(chips[0].title).toContain("Laptop");
+        expect(chips[1].dataset["denied"]).toBe("");
+
+        remoteMcpState.update({ status: "offline" });
+        expect(badge.children).toHaveLength(0);
     });
 });
 

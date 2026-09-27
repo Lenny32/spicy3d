@@ -116,7 +116,12 @@ export interface RelayTransportOptions {
     gate: PairingGate;
     onWelcome?: (welcome: { tabId?: string; maxMessageBytes?: number }) => void;
     onAgents?: (agents: RemoteAgent[]) => void;
+    /** A request named its session (`_meta`), with the client info the agent list may still lack. */
+    onAgentSeen?: (agent: RemoteAgent) => void;
 }
+
+/** The name shown for a session whose client did not say who it is (yet). */
+export const UNNAMED_CLIENT = "MCP client";
 
 function text(value: unknown): string | undefined {
     return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -133,7 +138,7 @@ export function parseAgent(value: unknown): RemoteAgent | undefined {
     if (!id) return undefined;
     return {
         id,
-        clientName: text(raw.clientInfo?.name) ?? "MCP client",
+        clientName: text(raw.clientInfo?.name) ?? UNNAMED_CLIENT,
         clientVersion: text(raw.clientInfo?.version),
         tokenName: text(raw.tokenName),
     };
@@ -212,6 +217,7 @@ export class RelayTransport implements Transport {
                 this.cancelled.add(String(requestId));
         }
         const agent = method && message.id !== undefined ? this.agentOf(message) : undefined;
+        if (agent) this.options.onAgentSeen?.(agent);
         if (!agent || NO_PAIRING_NEEDED.has(method as string)) {
             this.deliver(message);
             return;

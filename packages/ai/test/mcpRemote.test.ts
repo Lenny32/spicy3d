@@ -456,6 +456,35 @@ describe("RemoteMcpSession", () => {
         session.close();
     });
 
+    test("a session listed before its client said who it is gets the name from its requests", async () => {
+        const { session, state } = setup();
+        session.start();
+        const socket = FakeSocket.all[0];
+        socket.open();
+        socket.deliver({
+            jsonrpc: "2.0",
+            method: RELAY.agents,
+            params: { agents: [{ id: "a1", clientInfo: null }] },
+        });
+        await settle();
+        expect(state.current.agents[0].clientName).toBe("MCP client");
+
+        socket.deliver({
+            jsonrpc: "2.0",
+            id: "s1",
+            method: "tools/list",
+            params: { _meta: { [RELAY.agentMetaKey]: AGENT } },
+        });
+        await settle();
+
+        expect(state.current.agents[0]).toMatchObject({
+            id: "a1",
+            clientName: "claude-code",
+            tokenName: "Laptop",
+        });
+        session.close();
+    });
+
     test("a dropped connection reconnects; a 1008 close (signed out) does not", async () => {
         rs.useFakeTimers();
         const { session, state } = setup();

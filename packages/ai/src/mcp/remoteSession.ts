@@ -4,7 +4,13 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Logger } from "@spicy3d/core";
 import { setImageByteBudget } from "../tools/imageEncoding";
-import { CLOSE_POLICY_VIOLATION, PageSocketTransport, RelayTransport, type TabInfo } from "./pageTransport";
+import {
+    CLOSE_POLICY_VIOLATION,
+    PageSocketTransport,
+    RelayTransport,
+    type TabInfo,
+    UNNAMED_CLIENT,
+} from "./pageTransport";
 import { PairingGate } from "./pairing";
 import type { RemoteAgent, RemoteMcpLink, RemoteMcpState } from "./remoteState";
 import type { McpServerOptions } from "./server";
@@ -43,6 +49,8 @@ export class RemoteMcpSession {
     private readonly session: McpSession;
     private relay?: RelayTransport;
     private unwatch?: () => void;
+    /** Client info from the requests' `_meta`, for sessions the relay listed before their initialize. */
+    private readonly seen = new Map<string, RemoteAgent>();
 
     constructor(
         readonly link: RemoteMcpLink,
@@ -63,6 +71,7 @@ export class RemoteMcpSession {
                         if (maxMessageBytes) setImageByteBudget(maxMessageBytes - ENVELOPE_BYTES);
                     },
                     onAgents: (agents) => this.onAgents(agents),
+                    onAgentSeen: (agent) => this.onAgentSeen(agent),
                 }),
             onConnected: (transport) => this.onConnected(transport as RelayTransport),
             canRetry: (transport) => this.canRetry(transport as RelayTransport),
@@ -118,8 +127,20 @@ export class RemoteMcpSession {
             }
         }
         this.options.state.update({
-            agents: agents.map((agent) => ({ ...agent, pairing: this.gate.decisionOf(agent.id) })),
+            agents: agents.map((agent) => {
+                const named =
+                    agent.clientName === UNNAMED_CLIENT ? (this.seen.get(agent.id) ?? agent) : agent;
+                return { ...named, pairing: this.gate.decisionOf(agent.id) };
+            }),
         });
+    }
+
+    private onAgentSeen(agent: RemoteAgent) {
+        if (agent.clientName === UNNAMED_CLIENT || this.seen.get(agent.id)?.clientName === agent.clientName)
+            return;
+        this.seen.set(agent.id, agent);
+        const listed = this.options.state.current.agents;
+        if (listed.some((a) => a.id === agent.id && a.clientName === UNNAMED_CLIENT)) this.onAgents(listed);
     }
 
     private canRetry(relay: RelayTransport): boolean {
