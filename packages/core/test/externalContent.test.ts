@@ -14,16 +14,41 @@ describe("ExternalContentPolicy", () => {
         DeploymentConfig.reset();
     });
 
-    test.each([
-        "plugin",
-        "file",
-    ] as const)("the page's own origin is allowed (%s), relative URLs too", (kind) => {
-        expect(verdict("https://spicy.lan/plugins/macro/", kind)).toBe("allowed");
-        expect(verdict("plugins/macro/", kind)).toBe("allowed");
-        const decision = ExternalContentPolicy.evaluate("models/box.step", kind, { pageUrl: PAGE });
+    test("on the page's origin: plugins under the app's plugins/ folder, files under the app's folder", () => {
+        expect(verdict("https://spicy.lan/app/plugins/macro/", "plugin")).toBe("allowed");
+        expect(verdict("plugins/macro/", "plugin")).toBe("allowed");
+        expect(verdict("plugins/macro.spicyplugin", "plugin")).toBe("allowed");
+        const decision = ExternalContentPolicy.evaluate("models/box.step", "file", { pageUrl: PAGE });
         expect(decision.verdict === "allowed" && decision.url.href).toBe(
             "https://spicy.lan/app/models/box.step",
         );
+        expect(verdict("plugins/macro/", "file")).toBe("allowed");
+    });
+
+    test.each([
+        ["https://spicy.lan/app/models/x.spicyplugin", "plugin"],
+        ["https://spicy.lan/app/plugins/", "plugin"],
+        ["https://spicy.lan/other/plugins/x/", "plugin"],
+        ["https://spicy.lan/plugins/x/", "plugin"],
+        ["https://spicy.lan/other/box.step", "file"],
+        // The server's paths: an uploaded blob must never load as a plugin or open unasked.
+        ["https://spicy.lan/api/blobs/ab12?x=.spicyplugin", "plugin"],
+        ["https://spicy.lan/API/blobs/ab12", "file"],
+        ["https://spicy.lan/app/api/blobs/ab12", "file"],
+        ["https://spicy.lan/app/plugins/../../api/blobs/ab12", "plugin"],
+        ["https://spicy.lan/ws/events", "file"],
+        ["https://spicy.lan/mcp", "file"],
+    ] as const)("on the page's origin, %s (%s) asks", (url, kind) => {
+        expect(verdict(url, kind)).toBe("ask");
+    });
+
+    test("an app served from the origin's root: its plugins/ folder, not the server's paths", () => {
+        const root = (url: string, kind: "plugin" | "file") =>
+            ExternalContentPolicy.evaluate(url, kind, { pageUrl: "https://spicy.lan/" }).verdict;
+        expect(root("/plugins/macro/", "plugin")).toBe("allowed");
+        expect(root("/models/a.step", "file")).toBe("allowed");
+        expect(root("/api/blobs/ab12", "file")).toBe("ask");
+        expect(root("/api/blobs/ab12", "plugin")).toBe("ask");
     });
 
     test("another scheme or port of the same host is another origin", () => {
@@ -59,6 +84,9 @@ describe("ExternalContentPolicy", () => {
         expect(verdict("https://plugins.example.lan/a.step", "file")).toBe("ask");
         expect(verdict("https://models.example.lan/a.step", "file")).toBe("allowed");
         expect(verdict("https://x.cdn.example/p/", "plugin")).toBe("allowed");
+        // A wildcard needs two labels after "*.".
+        DeploymentConfig.set({ security: { pluginOrigins: ["https://*.com", "https://*.lan:8443"] } });
+        expect(ExternalContentPolicy.allowedOrigins("plugin")).toEqual([]);
         expect(verdict("https://cdn.example/p/", "plugin")).toBe("ask");
     });
 
@@ -134,6 +162,8 @@ describe("originMatches", () => {
         ["https://*.a.example", "https://b.a.example:8443/x", false],
         ["https://*.a.example:8443", "https://b.a.example:8443/x", true],
         ["https://*.a.example", "https://evil-a.example/x", false],
+        ["https://*.com", "https://evil.com/x", false],
+        ["https://*.lan:8443", "https://evil.lan:8443/x", false],
     ])("%s vs %s → %s", (entry, url, expected) => {
         expect(originMatches(entry, new URL(url))).toBe(expected);
     });

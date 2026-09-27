@@ -100,7 +100,8 @@ async function smokePlugin() {
     );
     return zip.generateAsync({ type: "nodebuffer" });
 }
-const PLUGIN_PATH = "/smoke/smoke.spicyplugin";
+// Under the app's plugins/ folder: the only same-origin place plugins load from without asking (CLOUD-17).
+const PLUGIN_PATH = "/plugins/smoke/smoke.spicyplugin";
 const pluginArchive = args.url ? undefined : await smokePlugin();
 
 /** dist/ as docker/default.conf.template serves it, plus the smoke plugin. */

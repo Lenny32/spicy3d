@@ -34,13 +34,24 @@ const ALLOWLIST_KEYS: Record<ExternalContentKind, string> = {
     file: "fileOrigins",
 };
 
-const ORIGIN_PATTERN = /^https?:\/\/(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:\d{1,5})?$/;
+/** `scheme://host[:port]`; a wildcard (`*.`) needs at least two labels after it (no `*.com`). */
+const ORIGIN_PATTERN =
+    /^https?:\/\/(\*\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+|[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)(:\d{1,5})?$/;
+
+/**
+ * Paths of the server on the app's origin (SpicySrv's proxy sends them to the API), at the origin's
+ * root and under the app's folder: never loaded as a plugin or a file without asking.
+ */
+export const RESERVED_SERVER_PATHS: readonly string[] = ["api", "ws", "mcp"];
 
 /**
  * Which external URLs load without asking (CLOUD-17). The rules:
  *
  * - only `http:` / `https:` URLs, resolved against the page (so `plugins/x/` is the app's own);
- * - the page's own origin and the deployment's allowlist (`deployment.json`:
+ * - on the page's own origin, plugins under the app's `plugins/` folder and files under the app's
+ *   folder load at once — not the server's paths ({@link RESERVED_SERVER_PATHS}: an uploaded blob
+ *   must never become a plugin); anything else there asks like another origin;
+ * - the deployment's allowlist (`deployment.json`:
  *   `{ "security": { "pluginOrigins": [...], "fileOrigins": [...] } }`, entries like
  *   `https://plugins.example.com`, or a subdomain wildcard: `*.` before the host) load at once;
  * - a plugin origin the user trusted earlier loads at once only while **no** cloud session may
@@ -101,7 +112,8 @@ export class ExternalContentPolicy {
         if (url.username || url.password) {
             return { verdict: "refused", reason: "URLs with credentials are not loaded" };
         }
-        if (url.origin === safeOrigin(pageUrl)) return { verdict: "allowed", url };
+        if (url.origin === safeOrigin(pageUrl) && isAppPath(url, pageUrl, kind))
+            return { verdict: "allowed", url };
         if (ExternalContentPolicy.allowedOrigins(kind).some((entry) => originMatches(entry, url))) {
             return { verdict: "allowed", url };
         }
@@ -114,6 +126,19 @@ export class ExternalContentPolicy {
         }
         return { verdict: "ask", url };
     }
+}
+
+/** The part of the app's own origin a plugin (`<app folder>/plugins/`) or a file (the app's folder) loads from. */
+function isAppPath(url: URL, pageUrl: string, kind: ExternalContentKind): boolean {
+    const folder = new URL(".", pageUrl).pathname;
+    const path = url.pathname;
+    const segments = (from: string) => path.slice(from.length).split("/");
+    if (segments("/")[0] && RESERVED_SERVER_PATHS.includes(segments("/")[0].toLowerCase())) return false;
+    if (!path.startsWith(folder)) return false;
+    const [first, second] = segments(folder);
+    if (RESERVED_SERVER_PATHS.includes(first.toLowerCase())) return false;
+    // `plugins/<name>…`, not the folder itself.
+    return kind === "file" || (first === "plugins" && second !== undefined && second !== "");
 }
 
 function safeOrigin(url: string): string | undefined {
@@ -130,6 +155,8 @@ export function originMatches(entry: string, url: URL): boolean {
     if (!wildcard) return entry === url.origin;
     const [, protocol, rest] = wildcard;
     if (url.protocol !== protocol) return false;
+    // At least two labels after `*.` (`*.example.com`, never `*.com`).
+    if (!rest.replace(/:\d+$/, "").includes(".")) return false;
     const host = url.port ? `${url.hostname}:${url.port}` : url.hostname;
     return host.endsWith(`.${rest}`);
 }
