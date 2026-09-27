@@ -37,7 +37,7 @@ export function imageBudgetFor(maxMessageBytes: number): number {
 
 /**
  * Runs one tool call with an image budget: the remote relay's calls get one derived from its
- * `maxMessageBytes`, the local bridge and the in-app assistant none. Tool calls of the MCP server
+ * `maxMessageBytes`, the in-app assistant none. Tool calls of the MCP server
  * run one at a time (one queue per page), so the budget never leaks into another server's call.
  */
 export async function withImageByteBudget<T>(budget: number | undefined, run: () => Promise<T>): Promise<T> {

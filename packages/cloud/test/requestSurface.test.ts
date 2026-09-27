@@ -32,10 +32,6 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     },
     "packages/cloud/src/sync/events.ts": { count: 1, why: "WebSocket to /ws/events (Origin checked)" },
     "packages/core/src/deploymentConfig.ts": { count: 3, why: "GET of the app's own deployment.json" },
-    "packages/mcp-bridge/src/remote.mjs": {
-        count: 6,
-        why: "the stdio bridge (Node) to /mcp with a bearer token, no cookie",
-    },
     "packages/ui/src/mainWindow.ts": { count: 1, why: "GET of the app's own iconfont.js" },
 };
 

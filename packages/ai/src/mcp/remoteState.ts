@@ -3,6 +3,7 @@
 
 // SDK-free: remote MCP's state as the panel and the agent badge see it (see remote.ts).
 
+import type { I18nKeys } from "@spicy3d/core";
 import { type McpToolCallRecord, SnapshotStore } from "./state";
 
 /** What the cloud module provides while a signed-in user can reach the relay (SRV-09). */
@@ -39,6 +40,11 @@ export interface RemoteAgent {
 
 export interface RemoteMcpSnapshot {
     link?: RemoteMcpLink;
+    /**
+     * Set by the cloud module while the server offers the relay but nobody is signed in: opens its
+     * sign-in dialog. Undefined without such a server (no server, or MCP turned off there).
+     */
+    signIn?: () => void;
     status: RemoteMcpStatus;
     /** The relay's id for this tab (`notifications/spicy3d/welcome`). */
     tabId?: string;
@@ -54,3 +60,19 @@ export class RemoteMcpState extends SnapshotStore<RemoteMcpSnapshot> {
 }
 
 export const remoteMcpState = new RemoteMcpState();
+
+/** The status line of each state; `unavailable` depends on whether signing in would help. */
+export function remoteStatusKey(state: Pick<RemoteMcpSnapshot, "status" | "signIn">): I18nKeys {
+    switch (state.status) {
+        case "unavailable":
+            return state.signIn ? "mcp.remote.status.unavailable" : "mcp.remote.status.noServer";
+        case "idle":
+            return "mcp.remote.status.idle";
+        case "connecting":
+            return "mcp.remote.status.connecting";
+        case "connected":
+            return "mcp.remote.status.connected";
+        case "offline":
+            return "mcp.remote.status.offline";
+    }
+}

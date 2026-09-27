@@ -1,11 +1,10 @@
 name: Deploy
 
-# Continuous delivery: builds the web application, deploys it to GitHub Pages, publishes it as a
-# Docker image and builds the MCP bridge that matches it (package-mcp-bridge.yml).
+# Continuous delivery: builds the web application, deploys it to GitHub Pages and publishes it as a
+# Docker image.
 #
 # - Push to main or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
-#   site; the bridge executables are built and verified (run artifact) but not published. A manual
-#   run asks for the Docker image version (empty = package.json's version).
+#   site. A manual run asks for the Docker image version (empty = package.json's version).
 # - Docker image: the same dist/ in the hardened nginx-unprivileged runtime (Dockerfile, target
 #   `prebuilt`: port 8080, non-root, read-only root file system, its own CSP). Job `image` runs it
 #   as SpicySrv's compose does (read-only, no capabilities), checks the headers and the
@@ -14,8 +13,6 @@ name: Deploy
 #   main, develop or a tag only, job `docker` pushes it to ghcr.io/<owner>/<repo> as `latest` and
 #   `<image version>`, for linux/amd64 and linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs
 #   the package to be public (Packages > spicy3d > Package settings) or a `docker login ghcr.io`.
-# - Bridge releases are published by hand: Actions > Package MCP bridge > Run workflow, with
-#   publish = release. The site links the release of package.json's version.
 #
 # One-time setup: Settings > Pages > Source = "GitHub Actions".
 
@@ -42,14 +39,12 @@ jobs:
         name: Resolve version
         runs-on: ubuntu-latest
         outputs:
-            version: ${{ steps.version.outputs.version }}
             image-version: ${{ steps.version.outputs.image-version }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
-            # A build-only bridge version: this workflow never publishes the executables.
             # The image version: the manual run's input, else package.json's version.
             - id: version
               env:
@@ -61,7 +56,6 @@ jobs:
                       echo "::error::Invalid image version '$image' (a Docker tag other than 'latest')"
                       exit 1
                   fi
-                  echo "version=$pkg-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
                   echo "image-version=$image" >> "$GITHUB_OUTPUT"
                   echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg, image version $image" >> "$GITHUB_STEP_SUMMARY"
 
@@ -83,7 +77,7 @@ jobs:
 
             - run: npm run test
 
-            # Packs the npx bridge tarball into public/downloads/mcp-bridge/, bundles the app, builds the plugins.
+            # Bundles the app, builds the plugins.
             - name: Build
               run: npm run build
               env:
@@ -92,7 +86,6 @@ jobs:
             - name: Check output
               run: |
                   test -f dist/index.html
-                  ls dist/downloads/mcp-bridge/spicy3d-mcp-bridge-*.tgz
                   ls dist/*.wasm
 
             - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -232,21 +225,9 @@ jobs:
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
 
-    mcp-bridge:
-        name: MCP bridge
-        needs: prepare
-        uses: ./.github/workflows/package-mcp-bridge.yml
-        # A called workflow cannot exceed its caller's permissions, and GitHub checks them statically:
-        # the release job asks for contents: write even though artifact-only never publishes.
-        permissions:
-            contents: write
-        with:
-            version: ${{ needs.prepare.outputs.version }}
-            publish: artifact-only
-
     deploy:
         name: Deploy to GitHub Pages
-        needs: [web, mcp-bridge]
+        needs: web
         runs-on: ubuntu-latest
         permissions:
             pages: write

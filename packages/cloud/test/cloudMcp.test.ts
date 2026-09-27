@@ -33,7 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
     localStorage.clear();
-    remoteMcpState.update({ link: undefined, status: "unavailable", agents: [] });
+    remoteMcpState.update({ link: undefined, signIn: undefined, status: "unavailable", agents: [] });
 });
 
 describe("startCloudMcp", () => {
@@ -100,6 +100,26 @@ describe("startCloudMcp", () => {
         expect(remoteMcpState.current.link).toBeUndefined();
     });
 
+    test("signed out, the MCP panel is offered the sign-in; signing in replaces it with the link", async () => {
+        const server = new FakeServer();
+        server.on("GET /api/me", problem(401, "unauthorized"));
+        const connection = new CloudConnection(config(true), server.client());
+        const stop = startCloudMcp(connection);
+        await connection.account.refresh();
+        expect(connection.account.status).toBe("signedOut");
+        expect(remoteMcpState.current.signIn).toBeTypeOf("function");
+        expect(remoteMcpState.current.link).toBeUndefined();
+
+        server.on("GET /api/me", json(200, USER));
+        await connection.account.refresh();
+
+        expect(remoteMcpState.current.signIn).toBeUndefined();
+        expect(remoteMcpState.current.link).not.toBeUndefined();
+        stop();
+        expect(remoteMcpState.current.signIn).toBeUndefined();
+        expect(remoteMcpState.current.link).toBeUndefined();
+    });
+
     test("does nothing when the server has the relay off", async () => {
         const server = new FakeServer();
         server.on("GET /api/me", json(200, USER));
@@ -109,5 +129,6 @@ describe("startCloudMcp", () => {
         startCloudMcp(connection);
 
         expect(remoteMcpState.current.link).toBeUndefined();
+        expect(remoteMcpState.current.signIn).toBeUndefined();
     });
 });

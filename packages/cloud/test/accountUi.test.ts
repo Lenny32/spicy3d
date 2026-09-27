@@ -673,7 +673,7 @@ describe("account settings", () => {
         await rs.waitFor(() => expect(dialog.querySelector("[data-mcp-config]")).not.toBeNull());
         expect(server.requests[0].body).toMatchObject({ scopes: ["mcp:read", "mcp:write"] });
         const configs = Array.from(dialog.querySelectorAll<HTMLElement>("[data-mcp-config]"));
-        expect(configs.map((c) => c.dataset["mcpConfig"])).toEqual(["claudeCode", "http", "stdio"]);
+        expect(configs.map((c) => c.dataset["mcpConfig"])).toEqual(["claudeCode", "http"]);
         // The command reads the token from the environment: it never enters the shell history.
         expect(configs[0].textContent).toBe(
             'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer $SPICY3D_TOKEN"',
@@ -681,9 +681,6 @@ describe("account settings", () => {
         expect(dialog.textContent).toContain("mcp.remote.shellHistoryHint");
         expect(JSON.parse(configs[1].textContent ?? "").mcpServers.spicy3d.headers).toEqual({
             Authorization: "Bearer spicy_pat_s3cret",
-        });
-        expect(JSON.parse(configs[2].textContent ?? "").mcpServers.spicy3d.env).toEqual({
-            SPICY3D_TOKEN: "spicy_pat_s3cret",
         });
         // Shown once, kept nowhere (CLOUD-17): no browser storage holds the secret.
         const stored = (storage: Storage) =>

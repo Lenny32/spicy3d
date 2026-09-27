@@ -18,18 +18,11 @@ import { buildSkillTool, MCP_SKILLS } from "../skills";
 import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
 import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
-import {
-    buildCloudTools,
-    documentStorageInfo,
-    forgetCloudCaller,
-    LIST_CLOUD_DOCUMENTS_TOOL,
-} from "../tools/cloudTools";
+import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { documentSnapshot } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
-
-export type McpConnection = "bridge" | "relay";
 
 /** The relay names the MCP session of every request in `_meta` (pageTransport.ts `RELAY`). */
 const AGENT_META_KEY = "spicy3d/agent";
@@ -48,17 +41,11 @@ export interface McpServerOptions {
      * `buildCloudTools()`. They follow the other tools, which the in-app assistant shares.
      */
     cloudTools?: Tool[];
-    /**
-     * What the client connects through: the local bridge (default) or the server's relay, which
-     * answers spicy3d_list_documents / spicy3d_document_history itself — the tab's own listing is
-     * hidden there, and the instructions name the tools the client really has.
-     */
-    connection?: McpConnection;
-    /** Defaults to `buildMcpInstructions(connection)`. */
+    /** Defaults to `buildMcpInstructions()`. */
     instructions?: string;
     /** Reported once per finished call, for the status badge. */
     onToolCall?: (name: string, isError: boolean) => void;
-    /** Defaults to one queue shared by every server of this page (bridge, relay, reconnects). */
+    /** Defaults to one queue shared by every server of this page (reconnects included). */
     queue?: SerialQueue;
     /** The largest base64 image a call's result may carry (the relay's message limit); none by default. */
     imageByteBudget?: () => number | undefined;
@@ -160,23 +147,20 @@ function readResource(uri: string, instructions: string): { mimeType: string; te
 
 /**
  * An MCP server over the same tool registry the in-app assistant uses. It is transport-agnostic:
- * `session.ts` connects it to the local bridge over a WebSocket, tests use an in-memory pair.
+ * `remoteSession.ts` connects it to the server's relay over a WebSocket, tests use an in-memory pair.
  */
 export function createMcpServer(options: McpServerOptions = {}): Server {
-    const connection = options.connection ?? "bridge";
-    const instructions = options.instructions ?? buildMcpInstructions(connection);
+    const instructions = options.instructions ?? buildMcpInstructions();
     // The in-app registry's load_skill knows the in-app skills; MCP clients also get theirs.
     const registry =
         options.tools ?? buildTools().map((t) => (t.name === "load_skill" ? buildSkillTool(MCP_SKILLS) : t));
     const baseTools = [...registry, usageGuideTool(instructions)];
-    const cloudTools = (options.cloudTools ?? buildCloudTools()).filter(
-        (t) => connection === "bridge" || t.name !== LIST_CLOUD_DOCUMENTS_TOOL,
-    );
+    const cloudTools = options.cloudTools ?? buildCloudTools();
     const queue = options.queue ?? PAGE_QUEUE;
     const server = new Server(
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
         {
-            // listChanged: the bridge announces a changed list whenever a tab connects or leaves.
+            // listChanged: sent when signing in or out adds or removes the cloud tools.
             capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
             instructions,
         },
@@ -192,7 +176,8 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         return agentCloudLink() ? [...tools, ...cloudTools] : tools;
     };
 
-    // The bridge carries one MCP session per connection; the relay names each request's session.
+    // The relay names each request's session; a request without one (tests, an in-memory pair)
+    // belongs to the connection.
     const connectionCaller = `connection-${++connections}`;
     const callers = new Set<string>();
     const callerOf = (meta: Record<string, unknown> | undefined): string => {
@@ -201,8 +186,8 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     };
 
     // Signing in or out adds or removes the cloud tools: the client is told to list them again.
-    // Watched only while connected: a server whose connect failed (a bridge not running yet,
-    // retried every few seconds) must not leave a listener behind.
+    // Watched only while connected: a server whose connect failed (the relay not reachable yet,
+    // retried with backoff) must not leave a listener behind.
     let stopWatching: (() => void) | undefined;
     const connect = server.connect.bind(server);
     server.connect = async (transport) => {

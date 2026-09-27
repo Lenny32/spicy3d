@@ -7,10 +7,10 @@ import { Logger } from "./foundation";
  * Settings of one deployment that must not be baked into the build, so the same build runs on a
  * LAN-only server and on a public host: `deployment.json` next to `index.html` (the app's folder),
  * `{}` by default (`public/deployment.json`). An operator replaces it (e.g. mounts a file over it in
- * the web image) to point the MCP panel's downloads at the server or offer an on-prem LLM endpoint.
+ * the web image) to offer an on-prem LLM endpoint or trust the LAN's plugin origins.
  *
  * Core only fetches and holds the object; each module reads and validates its own section
- * (`ai`, `mcpBridge`, …) with `DeploymentConfig.section`, so an invalid section never breaks others.
+ * (`ai`, `security`, …) with `DeploymentConfig.section`, so an invalid section never breaks others.
  */
 export class DeploymentConfig {
     static readonly FILE = "deployment.json";
@@ -98,18 +98,6 @@ export interface DeploymentConfigLoadOptions {
 export function appFolderUrl(): string {
     const page = globalThis.document?.baseURI ?? globalThis.location?.href ?? "http://localhost/";
     return new URL(".", page).href;
-}
-
-/**
- * `value` as an absolute URL, resolved against the app's folder when relative
- * (`downloads/mcp-bridge/` → `https://host/sub/downloads/mcp-bridge/`); undefined when invalid.
- */
-export function resolveAppUrl(value: string, base: string = appFolderUrl()): string | undefined {
-    try {
-        return new URL(value, base).href;
-    } catch {
-        return undefined;
-    }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

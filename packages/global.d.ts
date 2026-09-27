@@ -43,5 +43,3 @@ declare namespace jest {
 
 declare var __APP_VERSION__: string;
 declare var __IS_PRODUCTION__: boolean;
-/** Folder URL (ending in "/") holding the spicy3d-mcp-bridge-<platform> release executables. */
-declare var __MCP_BRIDGE_DOWNLOAD_URL__: string;

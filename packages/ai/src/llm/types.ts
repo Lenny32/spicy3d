@@ -18,7 +18,7 @@ export interface Tool {
 
 /** Who is calling, when the front end knows (MCP: the session, so its open questions end with it). */
 export interface ToolCallContext {
-    /** Stable per MCP session: the relay's agent id, or the local bridge connection's. */
+    /** Stable per MCP session: the relay's agent id (or the connection's, when a request names none). */
     caller?: string;
 }
 

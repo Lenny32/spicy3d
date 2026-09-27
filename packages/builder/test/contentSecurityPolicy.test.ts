@@ -37,8 +37,8 @@ describe("the web image's Content-Security-Policy", () => {
         expect(script.some((x) => x === "*" || x === "https:" || x === "http:" || x === "data:")).toBe(false);
     });
 
-    test("connect-src: the app's origin and the local bridge only, no https: wildcard", () => {
-        expect(policy().get("connect-src")).toEqual(["'self'", "ws://127.0.0.1:*", "ws://localhost:*"]);
+    test("connect-src: the app's origin only, no https: wildcard", () => {
+        expect(policy().get("connect-src")).toEqual(["'self'"]);
     });
 
     test("index.html carries no inline script", () => {

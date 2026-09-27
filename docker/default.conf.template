@@ -27,14 +27,14 @@ server {
     #   of manifest/CSS, icons), e.g. "https://plugins.example.lan";
     # - style-src 'unsafe-inline': elements get inline styles, plugins and the macro editor (ace) inject <style>;
     # - img-src data: blob: (icons, thumbnails, screenshots), worker-src blob:;
-    # - connect-src: the server's /api, /ws and /mcp are 'self'; ws://127.0.0.1 / localhost is the local MCP bridge
-    #   (the app refuses any other bridge address); SPICY3D_CONNECT_ORIGINS (default empty) adds what else the page
-    #   may reach: the assistant's LLM endpoints, hosts `?url=` may open files from (docs/security.md). No `https:`
-    #   wildcard: a plugin or an injected script cannot send documents to an arbitrary host.
+    # - connect-src: the server's /api, /ws and /mcp are 'self'; SPICY3D_CONNECT_ORIGINS (default empty) adds what
+    #   else the page may reach: the assistant's LLM endpoints, hosts `?url=` may open files from
+    #   (docs/security.md). No `https:` wildcard: a plugin or an injected script cannot send documents to an
+    #   arbitrary host.
     # Nothing inline: index.html has no inline script, iconfont.js is a file (its <style> injection is off).
     # docs/security.md lists why each relaxation stays and what removes it.
     # scripts/smoke-offline.mjs serves the build with this very policy (it reads it from this file).
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: ${SPICY3D_PLUGIN_ORIGINS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${SPICY3D_PLUGIN_ORIGINS}; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* ${SPICY3D_CONNECT_ORIGINS} ${SPICY3D_PLUGIN_ORIGINS}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: ${SPICY3D_PLUGIN_ORIGINS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${SPICY3D_PLUGIN_ORIGINS}; font-src 'self' data:; connect-src 'self' ${SPICY3D_CONNECT_ORIGINS} ${SPICY3D_PLUGIN_ORIGINS}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy same-origin always;

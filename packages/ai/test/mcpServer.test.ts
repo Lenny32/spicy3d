@@ -206,7 +206,7 @@ describe("image budget per server", () => {
         return seen;
     }
 
-    test("the relay's calls run under its budget, the local bridge's under none", async () => {
+    test("the relay's calls run under its budget, a server without one under none", async () => {
         expect(await budgetSeenBy(() => 5000)).toBe(5000);
         expect(await budgetSeenBy()).toBeUndefined();
         expect(imageByteBudget()).toBeUndefined();

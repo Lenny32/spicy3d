@@ -25,27 +25,19 @@ export function buildSystemPrompt(): SystemPrompt {
  * and no document snapshot (the client reads the `spicy3d://document` resource or calls
  * get_document_state when it needs the scene).
  */
-export function buildMcpInstructions(connection: "bridge" | "relay" = "bridge"): string {
-    return [mcpIntroSection(), policySection(MCP_SKILLS), cloudSection(connection), rulesSection()].join(
-        "\n\n",
-    );
+export function buildMcpInstructions(): string {
+    return [mcpIntroSection(), policySection(MCP_SKILLS), cloudSection(), rulesSection()].join("\n\n");
 }
 
 /**
- * The cloud workflow (CLOUD-15), for the connection the client really has: through the server's
- * relay the server lists documents and their history itself; through the local bridge the tab lists
- * them (spicy3d_list_cloud_documents) and there is no history tool. Instructions are sent once per
- * session while the cloud tools come and go with the sign-in, so the section says when it applies.
+ * The cloud workflow (CLOUD-15): the server lists documents and their history itself, the tab
+ * opens, creates and saves them. Instructions are sent once per session while the cloud tools come
+ * and go with the sign-in, so the section says when it applies.
  */
-function cloudSection(connection: "bridge" | "relay"): string {
-    const listing =
-        connection === "relay"
-            ? `- spicy3d_list_documents and spicy3d_document_history are answered by the server (no tab needed), and only for an access token the user created with "Let agents list documents and history" (documents:read); without it they are not listed — ask the user for the document's name and open it once they tell you, or ask them to create a token with that option. The other spicy3d_* document tools act in the tab.`
-            : `- spicy3d_list_cloud_documents lists the user's cloud documents (through this tab); there is no version history tool on this connection, so spicy3d_open_document's version argument needs a version id the user gives you.`;
-    const list = connection === "relay" ? "spicy3d_list_documents" : "spicy3d_list_cloud_documents";
+function cloudSection(): string {
     return `Cloud documents (when spicy3d_open_document / spicy3d_save are listed: the user is signed in to Spicy3D cloud in the tab):
-${listing}
-- Workflow: ${list} → spicy3d_open_document { id } → inspect (spicy3d://document, get_document_state) → edit → select_nodes + fit_content + capture_screenshot to verify → spicy3d_save { label } with a short label of what changed. Load the cloud-documents skill for the details.
+- spicy3d_list_documents and spicy3d_document_history are answered by the server (no tab needed), and only for an access token the user created with "Let agents list documents and history" (documents:read); without it they are not listed — ask the user for the document's name and open it once they tell you, or ask them to create a token with that option. The other spicy3d_* document tools act in the tab.
+- Workflow: spicy3d_list_documents → spicy3d_open_document { id } → inspect (spicy3d://document, get_document_state) → edit → select_nodes + fit_content + capture_screenshot to verify → spicy3d_save { label } with a short label of what changed. Load the cloud-documents skill for the details.
 - spicy3d_open_document may answer status waitingForUser (the user is asked about their unsaved changes): call it again with the same arguments, nothing else meanwhile. A declined open means stop and tell the user.
 - A version opened with spicy3d_open_document { id, version } is a read-only preview; it can't be saved.
 - spicy3d_save reports what the version was stored as: when the user's own save joined yours it is theirs (manual or auto, without your label).

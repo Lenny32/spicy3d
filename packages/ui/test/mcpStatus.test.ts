@@ -10,9 +10,8 @@ rs.mock("../src/statusbar/mcpStatus.module.css", () => ({
 
 // Only the SDK-free state store is needed; the panel half of @spicy3d/ai stays out.
 const aiState = rs.hoisted(() => {
-    const { McpState } = require("@spicy3d/ai/src/mcp/state");
-    const { RemoteMcpState } = require("@spicy3d/ai/src/mcp/remoteState");
-    return { mcpState: new McpState(), remoteMcpState: new RemoteMcpState() };
+    const { RemoteMcpState, remoteStatusKey } = require("@spicy3d/ai/src/mcp/remoteState");
+    return { remoteMcpState: new RemoteMcpState(), remoteStatusKey };
 });
 rs.mock("@spicy3d/ai", () => aiState);
 
@@ -22,45 +21,37 @@ import { McpStatusIndicator } from "../src/statusbar/mcpStatus";
 describe("McpStatusIndicator", () => {
     afterEach(() => {
         document.body.innerHTML = "";
-        aiState.mcpState.update({ status: "idle" });
-        aiState.remoteMcpState.update({ status: "unavailable" });
-    });
-
-    test("shows remote access through the server while the bridge is idle", () => {
-        const indicator = new McpStatusIndicator();
-        document.body.append(indicator);
-        aiState.remoteMcpState.update({ status: "connected" });
-        expect(indicator.dataset["status"]).toBe("connected");
-
-        aiState.mcpState.update({ status: "offline" });
-        expect(indicator.dataset["status"]).toBe("offline");
-
-        aiState.mcpState.update({ status: "idle" });
-        aiState.remoteMcpState.update({ status: "unavailable" });
-        expect(indicator.dataset["status"]).toBe("idle");
+        aiState.remoteMcpState.update({ status: "unavailable", signIn: undefined });
     });
 
     test.each([
-        ["idle", "mcp.status.idle"],
-        ["connecting", "mcp.status.connecting"],
-        ["connected", "mcp.status.connected"],
-        ["offline", "mcp.status.offline"],
-    ] as const)("reflects %s state", (status, key) => {
+        ["idle", "idle", "mcp.remote.status.idle"],
+        ["connecting", "connecting", "mcp.remote.status.connecting"],
+        ["connected", "connected", "mcp.remote.status.connected"],
+        ["offline", "offline", "mcp.remote.status.offline"],
+        ["unavailable", "idle", "mcp.remote.status.noServer"],
+    ] as const)("reflects the %s state", (status, shown, key) => {
         const indicator = new McpStatusIndicator();
         document.body.append(indicator);
-        aiState.mcpState.update({ status });
-        expect(indicator.dataset["status"]).toBe(status);
+        aiState.remoteMcpState.update({ status });
+        expect(indicator.dataset["status"]).toBe(shown);
         expect(indicator.title).toBe(I18n.translate(key));
+    });
+
+    test("signed out of a server with MCP, the tooltip says to sign in", () => {
+        const indicator = new McpStatusIndicator();
+        document.body.append(indicator);
+        aiState.remoteMcpState.update({ status: "unavailable", signIn: () => {} });
+        expect(indicator.title).toBe(I18n.translate("mcp.remote.status.unavailable"));
     });
 
     test("stops tracking state once removed", () => {
         const indicator = new McpStatusIndicator();
         document.body.append(indicator);
         indicator.remove();
-        aiState.mcpState.update({ status: "connected" });
+        aiState.remoteMcpState.update({ status: "connected" });
         expect(indicator.dataset["status"]).toBe("idle");
     });
-
     test("click toggles the MCP panel", () => {
         const original = PubSub.default.pub;
         const pub = rs.fn((..._args: unknown[]) => {});

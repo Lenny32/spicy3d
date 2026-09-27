@@ -18,12 +18,9 @@ import {
     remoteClaudeCodeCommand,
     remoteClientConfigs,
     remoteJsonConfig,
-    remoteStdioConfig,
-    serverUrlOf,
 } from "../src/mcp/remote";
 import { RemoteMcpSession, relayRetryDelay } from "../src/mcp/remoteSession";
 import { createMcpServer, SerialQueue } from "../src/mcp/server";
-import { defaultSettings } from "../src/mcp/settings";
 
 type Message = JSONRPCMessage & {
     id?: string | number;
@@ -129,12 +126,7 @@ describe("remote client configs", () => {
         expect(remoteClaudeCodeCommand(ENDPOINT, true)).toContain(
             '"Authorization: Bearer $env:SPICY3D_TOKEN"',
         );
-        const [claude] = remoteClientConfigs(
-            ENDPOINT,
-            "spicy_pat_x",
-            defaultSettings(),
-            "https://spicy.lan/",
-        );
+        const [claude] = remoteClientConfigs(ENDPOINT, "spicy_pat_x");
         expect(claude.text).not.toContain("spicy_pat_x");
     });
 
@@ -146,48 +138,10 @@ describe("remote client configs", () => {
         });
     });
 
-    test("the stdio fallback runs the bridge in server mode with the token in its environment", () => {
-        const settings = {
-            ...defaultSettings(),
-            runner: "executable" as const,
-            executablePath: "/opt/bridge",
-        };
-        const server = JSON.parse(remoteStdioConfig(ENDPOINT, settings, "https://spicy.lan/", "tok"))
-            .mcpServers.spicy3d;
-        expect(server).toEqual({
-            command: "/opt/bridge",
-            args: ["--server", "https://spicy.lan"],
-            env: { SPICY3D_TOKEN: "tok" },
-        });
-    });
-
-    test("the stdio fallback over npx uses the site's bundled tarball, allowed as a remote package", () => {
-        const settings = { ...defaultSettings(), runner: "node" as const, bridgeCommand: "" };
-        const server = JSON.parse(remoteStdioConfig(ENDPOINT, settings, "https://spicy.lan/", "tok"))
-            .mcpServers.spicy3d;
-        expect(server.command).toBe("npx");
-        expect(server.args).toEqual([
-            "-y",
-            "--allow-remote=all",
-            `--package=https://spicy.lan/downloads/mcp-bridge/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz`,
-            "spicy3d-mcp-bridge",
-            "--server",
-            "https://spicy.lan",
-        ]);
-    });
-
-    test("the file configs default to a <token> placeholder", () => {
-        const configs = remoteClientConfigs(ENDPOINT, undefined, defaultSettings(), "https://spicy.lan/");
-        expect(configs.map((c) => c.kind)).toEqual(["claudeCode", "http", "stdio"]);
+    test("the file config defaults to a <token> placeholder", () => {
+        const configs = remoteClientConfigs(ENDPOINT);
+        expect(configs.map((c) => c.kind)).toEqual(["claudeCode", "http"]);
         expect(configs[1].text).toContain("<token>");
-        expect(configs[2].text).toContain("<token>");
-    });
-
-    test.each([
-        ["https://spicy.lan/mcp", "https://spicy.lan"],
-        ["https://host/app/mcp/", "https://host/app"],
-    ])("serverUrlOf(%s) = %s", (endpoint, server) => {
-        expect(serverUrlOf(endpoint)).toBe(server);
     });
 });
 

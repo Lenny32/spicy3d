@@ -18,7 +18,6 @@ into the build (CLOUD-16):
 
 ```json
 {
-    "mcpBridge": { "downloadUrl": "downloads/mcp-bridge/bin/" },
     "ai": {
         "presets": [
             {
@@ -41,7 +40,6 @@ into the build (CLOUD-16):
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `mcpBridge.downloadUrl` | the release of this version on GitHub (build-time `SPICY3D_BRIDGE_DOWNLOAD_URL`) | Folder the MCP panel links the bridge executables from (`spicy3d-mcp-bridge-<os>-<cpu>[.exe]`); relative = the app's folder. |
 | `ai.presets` | none | Endpoints offered first in the assistant's settings: `id`, `label`, `provider` (`anthropic`, `completions`, `responses`), `baseURL`, `defaultModel`. Invalid entries are ignored. |
 | `ai.defaultPreset` | the first preset | The preset a first-time user starts from. |
 | `ai.hideBuiltInPresets` | `false` | Hide the public Anthropic/OpenAI presets (only with at least one valid preset of your own). |
@@ -92,8 +90,7 @@ stays read-only):
 - **its own Content-Security-Policy**. SpicySrv's Caddy sets `SPICY_WEB_CSP` only when the image sends
   none, and that default (`script-src 'self' 'wasm-unsafe-eval'`) stops the app at startup: the OCCT
   module's embind glue needs `'unsafe-eval'` (`new Function`) until it is built with
-  `-sDYNAMIC_EXECUTION=0`; inline styles need `style-src 'unsafe-inline'`; the local MCP bridge
-  needs `connect-src ws://127.0.0.1:*`. There is no `https:` wildcard in `connect-src` (CLOUD-17):
+  `-sDYNAMIC_EXECUTION=0`; inline styles need `style-src 'unsafe-inline'`. There is no `https:` wildcard in `connect-src` (CLOUD-17):
   other hosts the page must reach are listed in `SPICY3D_CONNECT_ORIGINS`. The smoke test serves
   the build with the policy read from this file, so it fails when the app outgrows it.
   `SPICY_WEB_CSP` on the server therefore has no effect with this image. Why each relaxation stays,
@@ -119,7 +116,7 @@ stays read-only):
 - `absolute_redirect off`: a redirect (a folder without its trailing slash) keeps the address the
   browser used, not nginx's own port behind the proxy.
 
-To change `deployment.json` or add the bridge executables, mount them (SpicySrv
+To change `deployment.json`, mount it (SpicySrv
 `deploy/docker-compose.override.yml`):
 
 ```yaml
@@ -130,7 +127,6 @@ services:
       SPICY3D_CONNECT_ORIGINS: https://llm.example.lan      # optional: the assistant's endpoint
     volumes:
       - ./web/deployment.json:/usr/share/nginx/html/deployment.json:ro
-      - ./web/mcp-bridge:/usr/share/nginx/html/downloads/mcp-bridge/bin:ro   # the release's spicy3d-mcp-bridge-* files
 ```
 
 ## LAN without internet access
@@ -142,12 +138,8 @@ services:
    server refuses a non-loopback `http://` `SPICY_PUBLIC_URL` for that reason). Opened that way, the
    app shows a banner saying HTTPS is required and keeps working locally.
 2. Move the images with `docker save` / `docker load` (SpicySrv `deploy/README.md`).
-3. MCP bridge: put the release's executables (with their `spicy3d-mcp-bridge-LICENSE.txt` and
-   `-THIRD-PARTY-NOTICES.txt`) next to the app and point `mcpBridge.downloadUrl` at
-   them (above). The Node.js alternative works too: the page's `npx` command fetches the bridge
-   tarball the app serves at `downloads/mcp-bridge/spicy3d-mcp-bridge-<version>.tgz`, which bundles
-   its dependencies, so npx needs no npm registry (it needs Node.js 20+ on the machine;
-   `--allow-remote=all` is required by npm 12 for a package from a URL).
+3. MCP: nothing to install on the clients' side — they connect to the server's `/mcp` with a
+   personal access token (the MCP panel shows the configs once signed in).
 4. Assistant: offer the on-prem endpoint and hide the public ones (`ai` above), and allow the page to
    reach it (`SPICY3D_CONNECT_ORIGINS`).
 
@@ -162,11 +154,10 @@ npm run smoke -- --url https://spicy.lan/ --expect-server
 
 The same image and `deployment.json` work on a public HTTPS host: set the server's
 `SPICY_PUBLIC_URL` and TLS (Let's Encrypt), nothing to rebuild. Without a `deployment.json` of your
-own the MCP panel links the GitHub release and the assistant offers the public LLM APIs.
+own the assistant offers the public LLM APIs.
 
 ## Paths the app and SpicySrv share
 
 SpicySrv's proxy sends `/api/*`, `/ws/*`, `/mcp` and `/mcp/*` to the API and everything else to this
-image, so the app must not serve anything under those paths: the npx tarball moved from `mcp/` to
-`downloads/mcp-bridge/` for that reason. The dev server proxies the same paths when
+image, so the app must not serve anything under those paths. The dev server proxies the same paths when
 `SPICY3D_API_URL` is set (README, Development with a server).
