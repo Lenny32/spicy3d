@@ -6,8 +6,17 @@ set -eu
 set -f # no pathname expansion of "*." origins
 
 check() { # <variable name> <scheme pattern> <value>
+    # The raw value goes into the header as is: nothing but origin characters and single spaces
+    # (no tab, newline, quote or ';'), checked on the whole value before its words.
+    case "$3" in
+        *[!A-Za-z0-9:/.*\ -]* | *"  "*)
+            echo "$0: $1: only origins separated by single spaces are accepted" >&2
+            exit 1
+            ;;
+    esac
     for origin in $3; do
-        if ! printf '%s\n' "$origin" | grep -Eq "^$2://(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]{1,5})?$"; then
+        # A wildcard needs at least two labels after "*." (https://*.example.com, never https://*.com).
+        if ! printf '%s\n' "$origin" | grep -Eq "^$2://(\*\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+|[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)(:[0-9]{1,5})?$"; then
             echo "$0: $1: '$origin' is not an origin like https://host.example.com[:port]" >&2
             exit 1
         fi
