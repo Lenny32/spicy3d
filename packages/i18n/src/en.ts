@@ -1321,5 +1321,18 @@ export default {
         "cloud.status.mergePreview": "Merge preview",
         "cloud.status.mergePreviewHint":
             "The merge with your current choices, not saved: finish it in the conflict panel",
+        "items.menu.show": "Show",
+        "items.menu.hide": "Hide",
+        "items.menu.delete{0}": "Delete {0} objects",
+        "prompt.delete.title": "Delete and break dependent objects?",
+        "prompt.delete.dependents{0}":
+            "These objects are built from what you are deleting and will fail to rebuild: {0}. You can undo the deletion afterwards.",
+        "prompt.delete.more{0}": "and {0} more",
+        "features.delete.title": "Delete this feature?",
+        "features.delete.warning{0}{1}":
+            "The {1} features after “{0}” may be built on its faces and edges, and can fail to rebuild without it. You can undo the deletion afterwards.",
+        "home.menu.duplicate": "Duplicate",
+        "home.menu.copyName{0}": "{0} (copy)",
+        "home.toast.duplicated{0}": "“{0}” was duplicated",
     },
 } satisfies Locale;

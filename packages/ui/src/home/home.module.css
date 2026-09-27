@@ -570,3 +570,20 @@
         }
     }
 }
+
+.renameInput {
+    min-width: 320px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--panel-background-color);
+    color: var(--foreground-color);
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+
+    &:focus {
+        border-color: var(--primary-color);
+    }
+}

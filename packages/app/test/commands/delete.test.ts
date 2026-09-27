@@ -27,7 +27,7 @@ describe("Delete", () => {
         expect(steps.length).toBe(1);
     });
 
-    test("executeMainTask should remove nodes using Transaction pattern", () => {
+    test("deleteChosen should remove nodes using Transaction pattern", () => {
         const originalExecute = Transaction.execute;
         Transaction.execute = ((_doc: unknown, _label: string, fn: () => void) => {
             fn();
@@ -52,7 +52,7 @@ describe("Delete", () => {
         }
     });
 
-    test("executeMainTask should show toast when no nodes selected", () => {
+    test("deleteChosen should show toast when no nodes selected", async () => {
         let toastMessage = "";
         const originalPub = PubSub.default.pub;
         PubSub.default.pub = ((channel: string, message: string) => {
@@ -66,14 +66,14 @@ describe("Delete", () => {
             const cmd = new Delete();
             (cmd as any).stepDatas = [{ nodes: undefined }];
             (cmd as any)._application = { activeView: { document: doc } };
-            (cmd as any).executeMainTask();
+            await (cmd as any).deleteChosen();
             expect(toastMessage).toBe("toast.select.noSelected");
         } finally {
             PubSub.default.pub = originalPub;
         }
     });
 
-    test("executeMainTask should show toast when nodes array is empty", () => {
+    test("deleteChosen should show toast when nodes array is empty", async () => {
         let toastMessage = "";
         const originalPub = PubSub.default.pub;
         PubSub.default.pub = ((channel: string, message: string) => {
@@ -87,14 +87,14 @@ describe("Delete", () => {
             const cmd = new Delete();
             (cmd as any).stepDatas = [{ nodes: [] }];
             (cmd as any)._application = { activeView: { document: doc } };
-            (cmd as any).executeMainTask();
+            await (cmd as any).deleteChosen();
             expect(toastMessage).toBe("toast.select.noSelected");
         } finally {
             PubSub.default.pub = originalPub;
         }
     });
 
-    test("executeMainTask should clear current node if it is in deleted nodes", () => {
+    test("deleteChosen should clear current node if it is in deleted nodes", async () => {
         const doc = createMockDocument();
         const nodeToDelete = { id: "target", parent: folderParent([]) };
         doc.modelManager.currentNode = nodeToDelete as any;
@@ -109,7 +109,7 @@ describe("Delete", () => {
             const cmd = new Delete();
             (cmd as any)._application = { activeView: { document: doc } };
             (cmd as any).stepDatas = [{ nodes: [nodeToDelete] }];
-            (cmd as any).executeMainTask();
+            await (cmd as any).deleteChosen();
 
             expect(doc.modelManager.currentNode).toBe(doc.modelManager.rootNode);
         } finally {
@@ -117,7 +117,7 @@ describe("Delete", () => {
         }
     });
 
-    test("should not delete a consumed boolean tool and show a hint", () => {
+    test("should not delete a consumed boolean tool and show a hint", async () => {
         const toasts: string[] = [];
         const originalPub = PubSub.default.pub;
         PubSub.default.pub = ((channel: string, message: string) => {
@@ -133,7 +133,7 @@ describe("Delete", () => {
             (cmd as any)._application = { activeView: { document: doc } };
             (cmd as any).stepDatas = [{ nodes: [tool] }];
 
-            (cmd as any).executeMainTask();
+            await (cmd as any).deleteChosen();
 
             expect(removed.length).toBe(0);
             expect(toasts).toEqual(["toast.consumedTool.forbidden"]);
@@ -142,7 +142,7 @@ describe("Delete", () => {
         }
     });
 
-    test("should delete free nodes while skipping consumed tools", () => {
+    test("should delete free nodes while skipping consumed tools", async () => {
         const toasts: string[] = [];
         const originalPub = PubSub.default.pub;
         PubSub.default.pub = ((channel: string, message: string) => {
@@ -153,6 +153,7 @@ describe("Delete", () => {
 
         try {
             const doc = createMockDocument();
+            doc.modelManager.rootNode = { id: "root" } as any;
             const removedFree: unknown[] = [];
             const removedTool: unknown[] = [];
             const free = { id: "free", parent: folderParent(removedFree) };
@@ -161,7 +162,7 @@ describe("Delete", () => {
             (cmd as any)._application = { activeView: { document: doc } };
             (cmd as any).stepDatas = [{ nodes: [free, tool] }];
 
-            (cmd as any).executeMainTask();
+            await (cmd as any).deleteChosen();
 
             expect(removedFree).toEqual([free]);
             expect(removedTool).toEqual([]);
@@ -170,5 +171,72 @@ describe("Delete", () => {
             PubSub.default.pub = originalPub;
             Transaction.execute = originalExecute;
         }
+    });
+
+    describe("with dependents", () => {
+        /** root → [sketch, body]; the body reads the sketch by id. */
+        function modelWithDependent(removed: unknown[]) {
+            const root = { id: "root", firstChild: undefined as unknown };
+            Object.setPrototypeOf(root, FolderNode.prototype);
+            const sketch = {
+                id: "sketch",
+                name: "Sketch 1",
+                parent: root,
+                nextSibling: undefined as unknown,
+            };
+            const body = {
+                id: "body",
+                name: "Body 1",
+                parent: root,
+                nextSibling: undefined,
+                referencedNodeIds: () => ["sketch"],
+            };
+            (root as any).remove = (child: unknown) => removed.push(child);
+            root.firstChild = sketch;
+            sketch.nextSibling = body;
+            return { root, sketch, body };
+        }
+
+        async function run(answer: "common.delete" | "common.cancel") {
+            const dialogs: { title: string; text: string }[] = [];
+            const originalPub = PubSub.default.pub;
+            const originalExecute = Transaction.execute;
+            PubSub.default.pub = ((channel: string, ...args: any[]) => {
+                if (channel !== "showDialog") return;
+                dialogs.push({ title: args[0], text: args[1].textContent });
+                args[2].find((x: { content: string }) => x.content === answer).onclick();
+            }) as any;
+            Transaction.execute = ((_doc: unknown, _label: string, fn: () => void) => fn()) as any;
+            try {
+                const removed: unknown[] = [];
+                const { root, sketch } = modelWithDependent(removed);
+                const doc = createMockDocument();
+                doc.modelManager.rootNode = root as any;
+                const cmd = new Delete();
+                (cmd as any)._application = { activeView: { document: doc } };
+                (cmd as any).stepDatas = [{ nodes: [sketch] }];
+                await (cmd as any).deleteChosen();
+                return { dialogs, removed, sketch };
+            } finally {
+                PubSub.default.pub = originalPub;
+                Transaction.execute = originalExecute;
+            }
+        }
+
+        test("asks before deleting a node another one is built from, naming it", async () => {
+            const { dialogs, removed, sketch } = await run("common.delete");
+
+            expect(dialogs.length).toBe(1);
+            expect(dialogs[0].title).toBe("prompt.delete.title");
+            expect(dialogs[0].text).toContain("Body 1");
+            expect(removed).toEqual([sketch]);
+        });
+
+        test("keeps everything when the user cancels", async () => {
+            const { dialogs, removed } = await run("common.cancel");
+
+            expect(dialogs.length).toBe(1);
+            expect(removed).toEqual([]);
+        });
     });
 });

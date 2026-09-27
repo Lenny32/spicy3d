@@ -28,6 +28,7 @@ import {
     watchRelativeTimes,
 } from "@spicy3d/core";
 import { a, button, collection, div, img, input, label, span, svg } from "@spicy3d/element";
+import { type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { AutosaveSelector } from "./autosaveSelector";
 import style from "./home.module.css";
 import { LanguageSelector } from "./languageSelector";
@@ -378,7 +379,119 @@ export class Home extends HTMLElement {
             this.cardActions(item, repository),
         );
         card.dataset["id"] = item.id;
+        this.onCardMenu(card, () => this.documentMenu(item, repository));
         return card;
+    }
+
+    /** Right-click on a card opens its context menu at the pointer. */
+    private onCardMenu(card: HTMLElement, entries: () => ContextMenuEntry[]) {
+        card.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showContextMenu({ x: e.clientX, y: e.clientY }, entries());
+        });
+    }
+
+    /** The card's actions, plus open, rename and duplicate. */
+    private documentMenu(item: DocumentMeta, repository: IDocumentRepository): ContextMenuEntry[] {
+        const cloud = this.app.repositories.cloud;
+        const entries: ContextMenuEntry[] = [
+            {
+                icon: "icon-folder-open",
+                label: "command.doc.open",
+                run: () => this.handleDocumentClick(item, repository),
+            },
+            "separator",
+            {
+                icon: "icon-edit",
+                label: "common.rename",
+                disabled: repository.rename === undefined,
+                run: () => this.rename(item, repository),
+            },
+            {
+                icon: "icon-copy",
+                label: "home.menu.duplicate",
+                run: () => void this.duplicate(item, repository),
+            },
+            "separator",
+        ];
+        if (item.location === "local" && cloud) {
+            entries.push({
+                icon: "icon-export",
+                label: "cloud.document.saveToCloud",
+                run: () => void this.moveToCloud(item, cloud),
+            });
+        } else if (item.location === "cloud") {
+            entries.push({
+                icon: "icon-save",
+                label: "home.action.moveToDevice",
+                run: () =>
+                    void this.transfer(
+                        item,
+                        this.app.repositories.local,
+                        false,
+                        "home.toast.movedToDevice{0}",
+                    ),
+            });
+        }
+        entries.push(
+            {
+                icon: "icon-download",
+                label: "cloud.document.download",
+                run: () => void this.download(item, repository),
+            },
+            "separator",
+            {
+                icon: "icon-delete",
+                label: "common.delete",
+                danger: true,
+                run: () => void this.delete(item, repository),
+            },
+        );
+        return entries;
+    }
+
+    /** Renames the stored document (metadata only in the cloud) and the open one, if it is open. */
+    private rename(item: DocumentMeta, repository: IDocumentRepository) {
+        const box = input({ className: style.renameInput, value: item.name });
+        box.setAttribute("aria-label", I18n.translate("common.name"));
+        PubSub.default.pub("showDialog", "common.rename", box, [
+            {
+                content: "common.rename",
+                onclick: async () => {
+                    const name = box.value.trim();
+                    if (name === "" || name === item.name || !repository.rename) return;
+                    const renamed = await repository.rename(item.id, name);
+                    if (!renamed.isOk) {
+                        PubSub.default.pub("showToast", ...repositoryErrorMessage(renamed.error));
+                        return;
+                    }
+                    for (const document of this.app.documents) {
+                        if (document.id === item.id && document.repository === repository) {
+                            document.name = name;
+                        }
+                    }
+                    await this.refresh();
+                },
+            },
+            { content: "common.cancel" },
+        ]);
+        setTimeout(() => {
+            box.focus();
+            box.select();
+        });
+    }
+
+    /** A copy next to the original, under a new id ("Name (copy)"). */
+    private async duplicate(item: DocumentMeta, repository: IDocumentRepository) {
+        const name = I18n.translate("home.menu.copyName{0}", item.name);
+        const result = await transferDocument(this.app, { ...item, name }, repository, { keepSource: true });
+        if (!result.isOk) {
+            PubSub.default.pub("showToast", ...repositoryErrorMessage(result.error));
+        } else if (result.value.status === "saved") {
+            PubSub.default.pub("showToast", "home.toast.duplicated{0}", item.name);
+        }
+        await this.refresh();
     }
 
     private trashCard(item: DocumentMeta, cloud: IDocumentRepository) {
@@ -388,19 +501,28 @@ export class Home extends HTMLElement {
             this.documentDescription(item, true),
             div(
                 { className: style.actions },
-                this.actionButton("home.trash.restore", async () => {
-                    const restored = await cloud.restore?.(item.id);
-                    if (restored?.isOk) {
-                        PubSub.default.pub("showToast", "home.toast.restored{0}", item.name);
-                    } else {
-                        PubSub.default.pub("showToast", "error.repository.restoreFailed{0}", item.name);
-                    }
-                    await this.refresh();
-                }),
+                this.actionButton("home.trash.restore", () => this.restoreFromTrash(item, cloud)),
             ),
         );
         card.dataset["id"] = item.id;
+        this.onCardMenu(card, () => [
+            {
+                icon: "icon-back",
+                label: "home.trash.restore",
+                run: () => void this.restoreFromTrash(item, cloud),
+            },
+        ]);
         return card;
+    }
+
+    private async restoreFromTrash(item: DocumentMeta, cloud: IDocumentRepository) {
+        const restored = await cloud.restore?.(item.id);
+        if (restored?.isOk) {
+            PubSub.default.pub("showToast", "home.toast.restored{0}", item.name);
+        } else {
+            PubSub.default.pub("showToast", "error.repository.restoreFailed{0}", item.name);
+        }
+        await this.refresh();
     }
 
     private documentDescription(item: DocumentMeta, trashed = false) {

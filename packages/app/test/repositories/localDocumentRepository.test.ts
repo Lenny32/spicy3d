@@ -178,4 +178,26 @@ describe("LocalDocumentRepository", () => {
         expect((await repository.stat("a")).value).toEqual({ name: "Bracket" });
         expect((await repository.stat("missing")).value).toBeUndefined();
     });
+
+    test("rename changes the stored name and the listing, keeping the date", async () => {
+        await save("a", "Part A", "data:image/png;base64,xx");
+
+        const renamed = await repository.rename("a", "Bracket");
+
+        expect(renamed.isOk).toBe(true);
+        expect((await repository.load("a")).value!.data["name"]).toBe("Bracket");
+        expect((await repository.list()).value!.items).toEqual([
+            {
+                id: "a",
+                name: "Bracket",
+                updatedAt: 1000,
+                thumbnail: "data:image/png;base64,xx",
+                location: "local",
+            },
+        ]);
+    });
+
+    test("renaming a missing document is notFound", async () => {
+        expect((await repository.rename("missing", "x")).error).toEqual({ kind: "notFound", id: "missing" });
+    });
 });

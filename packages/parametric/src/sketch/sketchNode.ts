@@ -7,6 +7,7 @@ import {
     type IDocument,
     type IEdge,
     type INode,
+    type INodeReferences,
     type IShape,
     type IShapeMeshData,
     isPropertyChanged,
@@ -61,7 +62,7 @@ export interface SketchNodeOptions {
 }
 
 @serializable()
-export class SketchNode extends ParameterShapeNode {
+export class SketchNode extends ParameterShapeNode implements INodeReferences {
     override display(): I18nKeys {
         return "body.sketch";
     }
@@ -106,6 +107,16 @@ export class SketchNode extends ParameterShapeNode {
         return this.constructionPlaneRefJson === undefined
             ? undefined
             : (JSON.parse(this.constructionPlaneRefJson) as ConstructionRef);
+    }
+
+    /** `INodeReferences`: the plane's source (face or datum) and every projected edge's body. */
+    referencedNodeIds(): string[] {
+        const construction = this.constructionPlaneRef;
+        return [
+            ...(this.planeRef === undefined ? [] : [this.planeRef.nodeId]),
+            ...(construction !== undefined && "nodeId" in construction ? [construction.nodeId] : []),
+            ...(this.data.externalRefs ?? []).map((ref) => ref.nodeId),
+        ];
     }
 
     override get shape(): Result<IShape> {

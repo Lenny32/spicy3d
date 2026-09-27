@@ -13,6 +13,7 @@ export * from "./groupNode";
 export * from "./meshNode";
 export * from "./node";
 export * from "./nodeIcon";
+export * from "./nodeReferences";
 export * from "./nodeWarning";
 export * from "./shapeNode";
 export * from "./unknownNode";

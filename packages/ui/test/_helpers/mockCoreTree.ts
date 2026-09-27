@@ -65,6 +65,8 @@ rs.mock("@spicy3d/core", () => {
         VisualNode,
         Annotation,
         FolderNode,
+        isConsumedTool: (node: { parent?: { isFolder?: boolean } }) =>
+            node.parent !== undefined && !(node.parent instanceof FolderNode),
         NodeSelectionHandler,
         ShapeSelectionHandler,
         NodeUtils: {

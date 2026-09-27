@@ -1243,6 +1243,17 @@ export const I18N_KEYS = [
     "cloud.merge.viewChanges",
     "cloud.status.mergePreview",
     "cloud.status.mergePreviewHint",
+    "items.menu.show",
+    "items.menu.hide",
+    "items.menu.delete{0}",
+    "prompt.delete.title",
+    "prompt.delete.dependents{0}",
+    "prompt.delete.more{0}",
+    "features.delete.title",
+    "features.delete.warning{0}{1}",
+    "home.menu.duplicate",
+    "home.menu.copyName{0}",
+    "home.toast.duplicated{0}",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

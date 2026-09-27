@@ -8,6 +8,7 @@ import {
     type IDocument,
     type INode,
     type INodeLinkedList,
+    isConsumedTool,
     type ModelManager,
     type NodeRecord,
     NodeSelectionHandler,
@@ -18,6 +19,10 @@ import {
     Transaction,
     VisualNode,
 } from "@spicy3d/core";
+import { input } from "@spicy3d/element";
+import { type ContextMenuEntry, showContextMenu } from "../../contextMenu";
+import { showDialog } from "../../dialog";
+import inputStyle from "../../property/input.module.css";
 import { ProjectPropertiesItem } from "./projectPropertiesItem";
 import style from "./tree.module.css";
 import { TreeItem } from "./treeItem";
@@ -209,6 +214,7 @@ export class Tree extends HTMLElement {
         item.addEventListener("drop", this.onDrop);
         item.addEventListener("click", this.onClick);
         item.addEventListener("dblclick", this.onDoubleClick);
+        item.addEventListener("contextmenu", this.onContextMenu);
     }
 
     private removeEvents(item: HTMLElement) {
@@ -219,6 +225,7 @@ export class Tree extends HTMLElement {
         item.removeEventListener("drop", this.onDrop);
         item.removeEventListener("click", this.onClick);
         item.removeEventListener("dblclick", this.onDoubleClick);
+        item.removeEventListener("contextmenu", this.onContextMenu);
     }
 
     private getTreeItem(item: HTMLElement | null): TreeItem | undefined {
@@ -254,6 +261,91 @@ export class Tree extends HTMLElement {
         }
         PubSub.default.pub("nodeDoubleClicked", node);
     };
+
+    /**
+     * Right-click: the row joins the selection unless it is already part of it (then the menu acts
+     * on the whole selection, like a file manager), and the context menu opens at the pointer.
+     */
+    private readonly onContextMenu = (event: MouseEvent) => {
+        const node = this.getTreeItem(event.target as HTMLElement)?.node;
+        if (node === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!this.canSelect()) return;
+        if (!this.selectedNodes.has(node)) {
+            this.document.selection.setSelectedNodes([node], false);
+            this.handleLastClickItem(node);
+        }
+        const nodes = this.selectedNodes.has(node) ? [...this.selectedNodes] : [node];
+        showContextMenu({ x: event.clientX, y: event.clientY }, this.contextMenuEntries(nodes));
+    };
+
+    private contextMenuEntries(nodes: INode[]): ContextMenuEntry[] {
+        const single = nodes.length === 1 ? nodes[0] : undefined;
+        const root = this.document.modelManager.rootNode;
+        const free = nodes.filter((x) => !isConsumedTool(x));
+        // The document's own row: renamed and hidden like any row, never deleted.
+        const deletable = free.filter((x) => x !== root);
+        const allHidden = free.length > 0 && free.every((x) => !x.visible);
+        return [
+            {
+                icon: "icon-edit",
+                label: "common.rename",
+                disabled: single === undefined,
+                run: () => single && this.rename(single),
+            },
+            {
+                icon: allHidden ? "icon-eye" : "icon-eye-slash",
+                label: allHidden ? "items.menu.show" : "items.menu.hide",
+                disabled: free.length === 0,
+                run: () => this.setVisible(free, allHidden),
+            },
+            "separator",
+            {
+                icon: "icon-folder-plus",
+                label: "items.tool.newFolder",
+                run: () => PubSub.default.pub("executeCommand", "create.folder"),
+            },
+            "separator",
+            {
+                icon: "icon-delete",
+                label: nodes.length > 1 ? "items.menu.delete{0}" : "common.delete",
+                args: [nodes.length],
+                danger: true,
+                // Consumed boolean tools are removed through their body's feature list.
+                disabled: deletable.length === 0,
+                run: () => PubSub.default.pub("executeCommand", "modify.deleteNode"),
+            },
+        ];
+    }
+
+    private rename(node: INode) {
+        const box = input({ className: inputStyle.box, value: node.name });
+        showDialog("common.rename", box, () => {
+            const name = box.value.trim();
+            if (name === "" || name === node.name) return;
+            if (node === this.document.modelManager.rootNode) {
+                this.document.name = name;
+                return;
+            }
+            Transaction.execute(this.document, "rename", () => {
+                node.name = name;
+            });
+        });
+        setTimeout(() => {
+            box.focus();
+            box.select();
+        });
+    }
+
+    private setVisible(nodes: INode[], visible: boolean) {
+        Transaction.execute(this.document, "change visible", () => {
+            nodes.forEach((x) => {
+                x.visible = visible;
+            });
+        });
+        this.document.visual.update();
+    }
 
     private handleShiftClick(item: INode) {
         if (this.lastClicked) {

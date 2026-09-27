@@ -35,9 +35,6 @@ rs.mock("../src/property/featureListProperty.module.css", () => ({
     warningText: "fl-warning-text",
     param: "fl-param",
     reference: "fl-reference",
-    menu: "fl-menu",
-    menuItem: "fl-menu-item",
-    menuIcon: "fl-menu-icon",
     dropBefore: "fl-drop-before",
     dropAfter: "fl-drop-after",
 }));
@@ -60,6 +57,7 @@ rs.mock("../src/dialog", () => ({
     showDialog: showDialogMock,
 }));
 
+import { closeContextMenu } from "../src/contextMenu";
 import { FeatureListProperty } from "../src/property/featureListProperty";
 import { mustQuery } from "./_helpers/domHelpers";
 
@@ -86,19 +84,16 @@ function openMenu(prop: FeatureListProperty) {
     (more as unknown as { _onclick: (e: MouseEvent) => void })._onclick({
         stopPropagation: () => {},
     } as MouseEvent);
-    return mustQuery<HTMLElement>(document.body, ".fl-menu");
+    return mustQuery<HTMLElement>(document.body, ".ctx-menu");
 }
 
 function clickMenuItem(menu: HTMLElement, index: number) {
-    const items = menu.querySelectorAll(".fl-menu-item");
-    (items[index] as unknown as { _onclick: (e: MouseEvent) => void })._onclick({
-        stopPropagation: () => {},
-    } as MouseEvent);
+    menu.querySelectorAll<HTMLButtonElement>(".ctx-item")[index].click();
 }
 
 describe("FeatureListProperty", () => {
     afterEach(() => {
-        document.body.querySelectorAll(".fl-menu").forEach((x) => x.remove());
+        closeContextMenu();
         showDialogMock.clear();
     });
 
@@ -267,11 +262,49 @@ describe("FeatureListProperty", () => {
         const prop = new FeatureListProperty(doc, node);
         const menu = openMenu(prop);
 
-        expect(menu.querySelectorAll(".fl-menu-item").length).toBe(3);
+        expect(menu.querySelectorAll(".ctx-item").length).toBe(3);
 
         clickMenuItem(menu, 2);
+        // The last feature: nothing follows it, so it goes without asking.
+        expect(showDialogMock.calls.length).toBe(0);
         expect(node.removeFeature).toHaveBeenCalledWith("b1");
-        expect(document.body.querySelector(".fl-menu")).toBeNull();
+        expect(document.body.querySelector(".ctx-menu")).toBeNull();
+    });
+
+    test("a right-click on a row header opens the same menu at the pointer", () => {
+        const prop = new FeatureListProperty(createMockDocument(), featureNode([]));
+        const header = mustQuery<HTMLElement>(prop, ".fl-header");
+        const event = new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: 30,
+            clientY: 40,
+        });
+        header.dispatchEvent(event);
+
+        expect(event.defaultPrevented).toBe(true);
+        const menu = mustQuery<HTMLElement>(document.body, ".ctx-menu");
+        expect(menu.querySelectorAll(".ctx-item").length).toBe(3);
+        expect(menu.style.top).toBe("40px");
+        expect(menu.style.left).toBe("30px");
+    });
+
+    test("deleting a feature that others follow asks first", () => {
+        const items: FeatureItem[] = [
+            { id: "f1", display: "command.feature.fuse", name: "Base", parameters: [] },
+            { id: "f2", display: "command.feature.fuse", parameters: [] },
+            { id: "f3", display: "command.feature.fuse", parameters: [] },
+        ];
+        const node = { ...featureNode([]), featureItems: () => items } as unknown as INode & IFeatureListNode;
+        const prop = new FeatureListProperty(createMockDocument(), node);
+        clickMenuItem(openMenu(prop), 2);
+
+        expect(node.removeFeature).not.toHaveBeenCalled();
+        expect(showDialogMock.calls.length).toBe(1);
+        const buttons = showDialogMock.calls[0][2] as unknown as { content: string; onclick?: () => void }[];
+        expect(buttons.map((x) => x.content)).toEqual(["common.delete", "common.cancel"]);
+        buttons[0].onclick!();
+        expect(node.removeFeature).toHaveBeenCalledWith("f1");
     });
 
     test("the suppress menu entry toggles the feature", () => {

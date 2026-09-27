@@ -12,6 +12,7 @@ import {
     type IFeatureListNode,
     type INode,
     type INodeLinkedList,
+    type INodeReferences,
     type IShape,
     isPropertyChanged,
     NodeChildList,
@@ -105,7 +106,7 @@ export interface ParametricBodyNodeOptions {
 @serializable()
 export class ParametricBodyNode
     extends ParameterShapeNode
-    implements IFeatureListNode, INodeLinkedList, IBodyTimelineNode
+    implements IFeatureListNode, INodeLinkedList, INodeReferences, IBodyTimelineNode
 {
     /**
      * Consumed boolean tools live under the body (see `syncConsumedTools`). Children
@@ -686,6 +687,11 @@ export class ParametricBodyNode
         return this.features.some((feature) =>
             (featureHandler(feature.type)?.nodeIds(feature) ?? []).includes(nodeId),
         );
+    }
+
+    /** `INodeReferences`: every node the feature list reads (sketches, tools, press-pull sources). */
+    referencedNodeIds(): string[] {
+        return [...this.referencedIds()];
     }
 
     /** Every node id the feature list reads, watched or not — a missing one is never watched. */

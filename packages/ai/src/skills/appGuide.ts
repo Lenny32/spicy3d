@@ -101,7 +101,7 @@ ${navigationProfiles()}
     `## Model tree and property panel
 - The model tree selects nodes exactly as the viewport does; the eye icon on a row shows or hides that node.
 - Drag a row onto a folder to re-parent it. Only folders accept a drop — releasing beside a node makes it a sibling.
-- There is no rename in the tree and no right-click menu: rename a node in the property panel's Name field.
+- Right-click a row for its menu: Rename, Show/Hide, New folder, Delete (acting on the whole selection when the row is part of it). The property panel's Name field renames too. Deleting something another object is built from (a sketch a body extrudes, a body a sketch projects from) asks first; so does deleting a feature that others follow in a body's feature list (whose rows also have a right-click menu).
 - Three different removals, and users mix them up: {modify.deleteNode} removes the selected nodes entirely (this is what the Delete key runs); {modify.removeShapes} picks sub-shapes (edges or faces) on a shape and deletes just those, rebuilding the node; {modify.removeFeature} picks a face a feature created (for instance the rounded face of a fillet) and removes that feature. The last two replace the node with the healed shape, so undo is the way back.
 - Double-click a sketch node to open it for editing.
 - The property panel shows the selected node's Name, a transform expander (translation / scale / rotation), the shape's own parameters, and — for a parametric body — its feature list.

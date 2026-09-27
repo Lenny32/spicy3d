@@ -281,7 +281,7 @@ describe("PropertyView", () => {
             const menu = openMoreMenu(pv);
             const reselectIcon = menu.querySelector('svg[icon="icon-sync-alt"]');
             expect(reselectIcon).not.toBeNull();
-            (reselectIcon!.parentElement as any)._onclick({ stopPropagation: () => {} });
+            (reselectIcon!.closest("button") as HTMLButtonElement).click();
             expect(node.reselectShapes).toHaveBeenCalledWith("f1");
             menu.remove();
         });
@@ -332,7 +332,7 @@ describe("PropertyView", () => {
 
             // The menu holds rename/suppress/delete only — no reselect entry.
             const menu = openMoreMenu(pv);
-            expect(menu.querySelectorAll("div").length).toBe(3);
+            expect(menu.querySelectorAll("button").length).toBe(3);
             expect(menu.querySelector('svg[icon="icon-sync-alt"]')).toBeNull();
             menu.remove();
         });
