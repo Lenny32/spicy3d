@@ -84,6 +84,28 @@ export class LocalDocumentRepository implements IDocumentRepository {
         });
     }
 
+    /** Renames the stored document and its listing entry; its date stays (no new save). */
+    async rename(id: string, name: string): Promise<Result<void, DocumentRepositoryError>> {
+        return this.attempt(async () => {
+            const [data, recent] = await Promise.all([
+                this.storage.get(Constants.DBName, Constants.DocumentTable, id) as Promise<
+                    Serialized | undefined
+                >,
+                this.storage.get(Constants.DBName, Constants.RecentTable, id) as Promise<
+                    RecentDocumentDTO | undefined
+                >,
+            ]);
+            if (data === undefined && recent === undefined) return Result.err({ kind: "notFound", id });
+            if (data !== undefined) {
+                await this.storage.put(Constants.DBName, Constants.DocumentTable, id, { ...data, name });
+            }
+            if (recent !== undefined) {
+                await this.storage.put(Constants.DBName, Constants.RecentTable, id, { ...recent, name });
+            }
+            return Result.ok(undefined);
+        });
+    }
+
     async delete(id: string): Promise<Result<void, DocumentRepositoryError>> {
         return this.attempt(async () => {
             await Promise.all([

@@ -24,6 +24,7 @@ import {
     unitSpecEquals,
 } from "@spicy3d/core";
 import { div, input, span, svg } from "@spicy3d/element";
+import { type ContextMenuAnchor, type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { showDialog } from "../dialog";
 import commonStyle from "./common.module.css";
 import style from "./featureListProperty.module.css";
@@ -46,13 +47,14 @@ function unitSpecLabelKey(unit: UnitSpec | undefined): I18nKeys | undefined {
 /**
  * Renders the ordered feature list of an `IFeatureListNode` (e.g. a parametric
  * body): one collapsible row per feature — the header expands the inline parameter
- * editor, rows are drag-reordered, and a hover "⋯" button opens a floating menu
- * (rename / reselect / suppress / delete). Edits go through the node's methods
+ * editor, rows are drag-reordered, and a hover "⋯" button or a right-click opens
+ * the context menu (rename / reselect / suppress / delete). Edits go through the node's methods
  * inside a transaction, so every change is one undo step.
  */
 export class FeatureListProperty extends HTMLElement {
     private readonly expanded = new Set<string>();
-    private menu: HTMLElement | undefined;
+    /** Closes this list's context menu (a no-op once another menu replaced it). */
+    private closeMenu: () => void = () => {};
     private draggingId: string | undefined;
     private dropTarget: DropTarget | undefined;
     private stopFocus?: () => void;
@@ -146,6 +148,11 @@ export class FeatureListProperty extends HTMLElement {
                 icon: expanded ? "icon-angle-down" : "icon-angle-right",
             }),
         );
+        header.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openMenu({ x: e.clientX, y: e.clientY }, item);
+        });
         header.draggable = true;
         header.addEventListener("dragstart", this.handleDragStart(item));
         header.addEventListener("dragend", () => this.clearDrag());
@@ -263,82 +270,30 @@ export class FeatureListProperty extends HTMLElement {
         return isLength ? formatLengthParameter(value, documentLengthUnit(this.document)) : String(value);
     }
 
-    // --- floating menu ---
+    // --- menu ---
 
-    private openMenu(anchor: Element, item: FeatureItem) {
-        this.closeMenu();
-        const entries: [icon: string, display: I18nKeys, action: () => void][] = [
-            ["icon-edit", "common.rename", () => this.rename(item)],
+    private openMenu(anchor: ContextMenuAnchor, item: FeatureItem) {
+        const entries: ContextMenuEntry[] = [
+            { icon: "icon-edit", label: "common.rename", run: () => this.rename(item) },
         ];
         if (item.reselectable) {
-            entries.push(["icon-sync-alt", "features.reselect", () => this.node.reselectShapes?.(item.id)]);
+            entries.push({
+                icon: "icon-sync-alt",
+                label: "features.reselect",
+                run: () => this.node.reselectShapes?.(item.id),
+            });
         }
         entries.push(
-            [
-                item.suppressed ? "icon-eye" : "icon-eye-slash",
-                item.suppressed ? "features.unsuppress" : "features.suppress",
-                () => this.toggleSuppressed(item),
-            ],
-            ["icon-delete", "common.delete", () => this.removeItem(item)],
+            {
+                icon: item.suppressed ? "icon-eye" : "icon-eye-slash",
+                label: item.suppressed ? "features.unsuppress" : "features.suppress",
+                run: () => this.toggleSuppressed(item),
+            },
+            "separator",
+            { icon: "icon-delete", label: "common.delete", danger: true, run: () => this.removeItem(item) },
         );
-        const menu = div(
-            { className: style.menu },
-            ...entries.map(([icon, display, action]) =>
-                div(
-                    {
-                        className: style.menuItem,
-                        onclick: (e: MouseEvent) => {
-                            e.stopPropagation();
-                            this.closeMenu();
-                            action();
-                        },
-                    },
-                    svg({ className: style.menuIcon, icon }),
-                    span({ textContent: new Localize(display) }),
-                ),
-            ),
-        );
-        document.body.appendChild(menu);
-        const { top, left } = this.menuPosition(anchor.getBoundingClientRect(), menu);
-        menu.style.top = `${top}px`;
-        menu.style.left = `${left}px`;
-        this.menu = menu;
-        document.addEventListener("click", this.handleOutsideClick, true);
-        document.addEventListener("keydown", this.handleMenuKeyDown);
+        this.closeMenu = showContextMenu(anchor, entries);
     }
-
-    /**
-     * Keeps the floating menu inside the viewport: flips above the anchor when it
-     * would overflow the bottom edge, and clamps horizontally.
-     */
-    private menuPosition(anchorRect: DOMRect, menu: HTMLElement) {
-        const margin = 4;
-        const height = menu.offsetHeight;
-        const width = menu.offsetWidth;
-        let top = anchorRect.bottom + 2;
-        if (top + height > window.innerHeight - margin) {
-            top = Math.max(margin, anchorRect.top - height - 2);
-        }
-        let left = Math.max(anchorRect.left, anchorRect.right - width);
-        left = Math.min(left, window.innerWidth - width - margin);
-        return { top, left: Math.max(margin, left) };
-    }
-
-    private closeMenu() {
-        if (this.menu === undefined) return;
-        this.menu.remove();
-        this.menu = undefined;
-        document.removeEventListener("click", this.handleOutsideClick, true);
-        document.removeEventListener("keydown", this.handleMenuKeyDown);
-    }
-
-    private readonly handleOutsideClick = (e: Event) => {
-        if (this.menu !== undefined && !this.menu.contains(e.target as Node)) this.closeMenu();
-    };
-
-    private readonly handleMenuKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") this.closeMenu();
-    };
 
     private rename(item: FeatureItem) {
         const box = input({ className: inputStyle.box, value: item.name ?? I18n.translate(item.display) });
@@ -472,11 +427,28 @@ export class FeatureListProperty extends HTMLElement {
         return Number.isFinite(asNumber) ? asNumber : text;
     }
 
+    /**
+     * Features after this one may be built on its faces and edges, so deleting it can break them:
+     * asked first unless it is the last feature (undo still brings it back).
+     */
     private removeItem(item: FeatureItem) {
-        Transaction.execute(this.document, "remove feature", () => {
-            this.node.removeFeature(item.id);
-            this.document.visual.update();
-        });
+        const remove = () =>
+            Transaction.execute(this.document, "remove feature", () => {
+                this.node.removeFeature(item.id);
+                this.document.visual.update();
+            });
+        const items = this.node.featureItems();
+        const later = items.length - 1 - items.findIndex((x) => x.id === item.id);
+        if (later <= 0) {
+            remove();
+            return;
+        }
+        const name = item.name ?? I18n.translate(item.display);
+        showDialog(
+            "features.delete.title",
+            div({ textContent: I18n.translate("features.delete.warning{0}{1}", name, later) }),
+            [{ content: "common.delete", onclick: remove }, { content: "common.cancel" }],
+        );
     }
 
     private toggleSuppressed(item: FeatureItem) {

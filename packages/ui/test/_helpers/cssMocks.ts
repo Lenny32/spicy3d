@@ -32,3 +32,11 @@ rs.mock("../../src/project/tree/treeItemGroup.module.css", () => ({
     header: "tig-header",
     children: "tig-children",
 }));
+
+rs.mock("../../src/contextMenu.module.css", () => ({
+    menu: "ctx-menu",
+    item: "ctx-item",
+    danger: "ctx-danger",
+    icon: "ctx-icon",
+    separator: "ctx-separator",
+}));

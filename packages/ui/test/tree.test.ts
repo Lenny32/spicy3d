@@ -38,6 +38,13 @@ rs.mock("../src/project/tree/treeModel.module.css", () => ({
     panel: "tm-panel",
 }));
 
+const { showDialogMock } = rs.hoisted(() => ({
+    showDialogMock: rs.fn((_title: string, _content: HTMLElement, _onConfirm?: () => void) => {}),
+}));
+rs.mock("../src/dialog", () => ({ showDialog: showDialogMock }));
+rs.mock("../src/property/input.module.css", () => ({ box: "ip-box" }));
+import "./_helpers/cssMocks";
+
 // Mock core: marker classes for instanceof checks, immediate Transaction, no-op Binding
 import "./_helpers/mockCoreTree";
 
@@ -47,6 +54,7 @@ import "./_helpers/mockElement";
 // Core value imports must come AFTER the mock helper — importing them earlier would
 // load the real "@spicy3d/core" before the mock registers.
 import { NodeSelectionHandler, VisualNode } from "@spicy3d/core";
+import { closeContextMenu } from "../src/contextMenu";
 import { Tree } from "../src/project/tree/tree";
 import { TreeGroup } from "../src/project/tree/treeItemGroup";
 import { TreeModel } from "../src/project/tree/treeModel";
@@ -63,7 +71,7 @@ class MockNode {
     firstChild: MockNode | undefined;
     nextSibling: MockNode | undefined;
 
-    constructor(readonly name: string) {}
+    constructor(public name: string) {}
 
     private handlers = new Set<PropertyHandler>();
     onPropertyChanged(handler: PropertyHandler) {
@@ -490,6 +498,105 @@ describe("Tree", () => {
             expect(fixture.doc.selection.clearSelection).toHaveBeenCalledTimes(1);
             expect(getPubSubPubs()).toContainEqual({ topic: "showProjectProperties", args: [fixture.doc] });
             expect(fixture.doc.selection.setSelectedNodes).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("context menu", () => {
+        function withSelectionHandler() {
+            fixture = createFixture();
+            fixture.doc.visual.eventHandler = new (
+                NodeSelectionHandler as unknown as new () => unknown
+            )() as typeof fixture.doc.visual.eventHandler;
+            return fixture;
+        }
+
+        function rightClick(node: MockNode) {
+            const row = fixture.tree.treeItem(node as unknown as INode) as HTMLElement;
+            const event = new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: 5,
+                clientY: 6,
+            });
+            row.dispatchEvent(event);
+            return event;
+        }
+
+        function menuItems() {
+            return [...document.body.querySelectorAll<HTMLButtonElement>(".ctx-item")];
+        }
+
+        afterEach(() => {
+            closeContextMenu();
+            showDialogMock.mockClear();
+        });
+
+        test("a right-click selects the row and opens rename / hide / new folder / delete", () => {
+            withSelectionHandler();
+            const event = rightClick(fixture.model1);
+
+            expect(event.defaultPrevented).toBe(true);
+            expect(fixture.doc.selection.setSelectedNodes).toHaveBeenCalledWith([fixture.model1], false);
+            expect(menuItems().map((x) => x.textContent)).toEqual([
+                "common.rename",
+                "items.menu.hide",
+                "items.tool.newFolder",
+                "common.delete",
+            ]);
+            expect(menuItems().every((x) => !x.disabled)).toBe(true);
+        });
+
+        test("delete runs the delete command on the selection", () => {
+            withSelectionHandler();
+            rightClick(fixture.model1);
+
+            menuItems()[3].click();
+
+            expect(getPubSubPubs()).toContainEqual({ topic: "executeCommand", args: ["modify.deleteNode"] });
+        });
+
+        test("on a selected row the menu acts on the whole selection", () => {
+            withSelectionHandler();
+            fixture.doc.emitSelection([fixture.model1, fixture.model2] as unknown as INode[]);
+            rightClick(fixture.model2);
+
+            expect(fixture.doc.selection.setSelectedNodes).not.toHaveBeenCalled();
+            const [rename, hide, , remove] = menuItems();
+            expect(rename.disabled).toBe(true);
+            expect(remove.textContent).toBe("items.menu.delete2");
+            hide.click();
+            expect(fixture.model1.visible).toBe(false);
+            expect(fixture.model2.visible).toBe(false);
+        });
+
+        test("rename asks for the name and applies it trimmed", () => {
+            withSelectionHandler();
+            rightClick(fixture.model1);
+
+            menuItems()[0].click();
+
+            expect(showDialogMock).toHaveBeenCalledTimes(1);
+            const [title, box, confirm] = showDialogMock.mock.calls[0];
+            expect(title).toBe("common.rename");
+            expect((box as HTMLInputElement).value).toBe("model1");
+            (box as HTMLInputElement).value = "  Bracket  ";
+            confirm!();
+            expect(fixture.model1.name).toBe("Bracket");
+        });
+
+        test("the document's own row cannot be deleted", () => {
+            withSelectionHandler();
+            rightClick(fixture.root);
+
+            expect(menuItems()[3].disabled).toBe(true);
+        });
+
+        test("no menu while a command owns the selection", () => {
+            fixture = createFixture();
+            const event = rightClick(fixture.model1);
+
+            expect(event.defaultPrevented).toBe(true);
+            expect(document.body.querySelector(".ctx-menu")).toBeNull();
         });
     });
 });

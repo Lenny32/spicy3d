@@ -18,6 +18,7 @@ import {
     type ToastAction,
 } from "@spicy3d/core";
 import { createMockApplication, MemoryDocumentRepository } from "@spicy3d/core/test-utils";
+import { closeContextMenu } from "../src/contextMenu";
 import { formatBytes, Home } from "../src/home/home";
 
 const UPDATED_AT = Date.parse("2026-09-27T12:00:00Z");
@@ -353,6 +354,103 @@ describe("home with the cloud", () => {
         expect(image).not.toBeNull();
         await rs.waitFor(() => expect(image!.getAttribute("src")).toBe("blob:thumb"));
         expect(thumbnailUrl).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("card context menu", () => {
+    afterEach(() => closeContextMenu());
+
+    const openMenu = (card: HTMLElement) => {
+        const event = new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: 1,
+            clientY: 1,
+        });
+        card.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        return [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    };
+    const labels = (items: HTMLButtonElement[]) => items.map((x) => x.textContent);
+    const itemIn = (items: HTMLButtonElement[], text: string) => {
+        const found = items.find((x) => x.textContent === text);
+        expect(found).toBeDefined();
+        return found!;
+    };
+
+    test("a device card offers open, rename, duplicate, download and delete (rename only where supported)", async () => {
+        await render();
+        const items = openMenu(cards("local")[0]);
+
+        expect(labels(items)).toEqual([
+            "command.doc.open",
+            "common.rename",
+            "home.menu.duplicate",
+            "cloud.document.download",
+            "common.delete",
+        ]);
+        expect(itemIn(items, "common.rename").disabled).toBe(true);
+    });
+
+    test("duplicate saves a copy under a new id next to the original", async () => {
+        await render();
+        itemIn(openMenu(cards("local")[0]), "home.menu.duplicate").click();
+
+        await rs.waitFor(() => expect(local.documents.size).toBe(2));
+        const copy = [...local.documents.values()].find((x) => x.id !== "l1");
+        expect(copy!.name).toBe("home.menu.copyNameBracket");
+        expect(local.documents.get("l1")!.name).toBe("Bracket");
+        expect(published).toContainEqual(["showToast", ["home.toast.duplicated{0}", "Bracket"]]);
+        await rs.waitFor(() => expect(cards("local")).toHaveLength(2));
+    });
+
+    test("rename asks for the name and renames the stored and the open document", async () => {
+        const rename = rs.fn(async (id: string, name: string) => {
+            const stored = local.documents.get(id)!;
+            local.documents.set(id, { ...stored, name });
+            return Result.ok(undefined);
+        });
+        (local as unknown as { rename: typeof rename }).rename = rename;
+        const open = { id: "l1", repository: local, name: "Bracket" };
+        (app as unknown as { documents: Set<unknown> }).documents = new Set([open]);
+        await render();
+
+        itemIn(openMenu(cards("local")[0]), "common.rename").click();
+        const [title, box, buttons] = lastDialogButtons();
+        expect(title).toBe("common.rename");
+        (box as HTMLInputElement).value = "  Bracket v2 ";
+        await buttons.find((b) => b.content === "common.rename")!.onclick!();
+
+        expect(rename).toHaveBeenCalledWith("l1", "Bracket v2");
+        expect(open.name).toBe("Bracket v2");
+        await rs.waitFor(() => expect(home.textContent).toContain("Bracket v2"));
+    });
+
+    test("delete from the menu asks like the card's button", async () => {
+        const confirm = rs.spyOn(window, "confirm").mockReturnValue(false);
+        await render();
+
+        itemIn(openMenu(cards("local")[0]), "common.delete").click();
+
+        await rs.waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+        expect(local.documents.has("l1")).toBe(true);
+    });
+
+    test("signed in: device cards can go to the cloud, cloud cards to this device; trash cards restore", async () => {
+        const cloud = new TrashRepository();
+        app.repositories.cloud = cloud;
+        await add(cloud, "c1", "Gear");
+        await add(cloud, "c2", "Old");
+        await cloud.delete("c2");
+        await render();
+
+        expect(labels(openMenu(cards("local")[0]))).toContain("cloud.document.saveToCloud");
+        expect(labels(openMenu(cards("cloud")[0]))).toContain("home.action.moveToDevice");
+
+        buttonIn(home, "home.trash.button").click();
+        await rs.waitFor(() => expect(sections()).toEqual(["trash"]));
+        itemIn(openMenu(cards("trash")[0]), "home.trash.restore").click();
+        await rs.waitFor(() => expect(cloud.documents.has("c2")).toBe(true));
     });
 });
 

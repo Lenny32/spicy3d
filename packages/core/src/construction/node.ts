@@ -5,7 +5,7 @@ import type { IDocument } from "../document";
 import { Id, PubSub, Result } from "../foundation";
 import type { I18nKeys } from "../i18n";
 import { BoundingBox, Matrix4, XYZ } from "../math";
-import { GeometryNode, type INode } from "../model";
+import { GeometryNode, type INode, type INodeReferences } from "../model";
 import { serializable, serialize } from "../serialize";
 import { type ICurve, type IFace, type IShapeMeshData, MeshDataUtils } from "../shape";
 import { evaluateConstruction } from "./evaluate";
@@ -29,7 +29,7 @@ export interface ConstructionNodeOptions {
 }
 
 @serializable()
-export class ConstructionNode extends GeometryNode {
+export class ConstructionNode extends GeometryNode implements INodeReferences {
     private _evaluating = false;
     private _notifying = false;
     private _cached?: Result<ConstructionGeometry>;
@@ -156,7 +156,8 @@ export class ConstructionNode extends GeometryNode {
         return this._error;
     }
 
-    private syncWatches(): void {
+    /** `INodeReferences`: the datums and shapes the definition is built from. */
+    referencedNodeIds(): string[] {
         const ids = new Set<string>();
         const visit = (value: unknown): void => {
             if (!value || typeof value !== "object") return;
@@ -172,6 +173,11 @@ export class ConstructionNode extends GeometryNode {
             }
         };
         visit(this.definition);
+        return [...ids];
+    }
+
+    private syncWatches(): void {
+        const ids = new Set<string>(this.referencedNodeIds());
         let ownParent = this.parent;
         while (ownParent) {
             ids.add(ownParent.id);
