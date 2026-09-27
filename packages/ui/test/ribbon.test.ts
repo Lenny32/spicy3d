@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
 import type { CommandKeys, IApplication, PushButton, Ribbon } from "@spicy3d/core";
-import { CommandStore, PubSub, RibbonGroup, RibbonTab } from "@spicy3d/core";
+import { CommandStore, PubSub, RibbonGroup, RibbonTab, TitleBar } from "@spicy3d/core";
 
 // CSS modules under test (plus those of the ribbon buttons pulled in transitively)
 rs.mock("../src/ribbon/ribbon.module.css", () => ({
@@ -26,6 +26,7 @@ rs.mock("../src/ribbon/ribbon.module.css", () => ({
     name: "r-name",
     close: "r-close",
     right: "r-right",
+    titleBarItems: "r-title-bar-items",
     tabContentPanel: "r-tab-content-panel",
     groupPanel: "r-group-panel",
     disabled: "r-disabled",
@@ -160,6 +161,19 @@ describe("RibbonUI", () => {
         const { ui } = createRibbonUI();
         const link = mustQuery(ui, "a");
         expect(link.getAttribute("href")).toBe("https://github.com/Lenny32/spicy3d");
+    });
+
+    test("renders the title bar items modules add, before the github link", () => {
+        const item = document.createElement("button");
+        TitleBar.items.push(item);
+        try {
+            const { ui } = createRibbonUI();
+            const right = mustQuery(ui, ".r-right");
+            expect(right.firstElementChild?.contains(item)).toBe(true);
+            expect(right.lastElementChild?.tagName).toBe("A");
+        } finally {
+            TitleBar.items.remove(item);
+        }
     });
 
     test("should render ribbon groups for each tab", () => {

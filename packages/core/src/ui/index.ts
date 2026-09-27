@@ -7,4 +7,5 @@ export * from "./combobox";
 export * from "./dialog";
 export * from "./floatPanel";
 export * from "./ribbon";
+export * from "./titleBar";
 export * from "./window";
