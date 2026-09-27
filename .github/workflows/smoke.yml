@@ -1,0 +1,51 @@
+name: Offline smoke test
+
+# CLOUD-16: the production build must work on a LAN without internet access. Builds the app, checks
+# that nothing in it points at another origin (scripts/check-external-urls.mjs), then opens it in
+# headless Chromium with every request to another origin blocked (scripts/smoke-offline.mjs): the
+# app starts, the WebAssembly kernel works, local save/open works, and the insecure-context banner
+# shows over plain HTTP on a LAN name only.
+
+on:
+    push:
+        branches: ["main", "develop"]
+    pull_request:
+        branches: ["main", "develop"]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    smoke:
+        name: Build and smoke test offline
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+                  cache: npm
+
+            - run: npm ci
+
+            - name: Build
+              run: npm run build
+              env:
+                  NODE_ENV: production
+
+            - name: No external URLs
+              run: npm run check:urls
+
+            - name: Install headless Chromium
+              run: npx playwright install --with-deps --only-shell chromium
+
+            - name: Smoke test
+              run: npm run smoke
