@@ -39,6 +39,9 @@ export type HtmlTextOptions = {
     onCreated?: (element: HTMLElement) => void;
 };
 
+/** Longest side of the document thumbnail taken on every save (home page, cloud versions). */
+export const DOCUMENT_THUMBNAIL_MAX_SIZE = 512;
+
 export interface IView extends IPropertyChanged, IDisposable {
     readonly document: IDocument;
     readonly cameraController: ICameraController;
@@ -51,7 +54,14 @@ export interface IView extends IPropertyChanged, IDisposable {
     workplane: Plane;
     update(): void;
     up(): XYZ;
-    toImage(): string;
+    /** The view as a PNG data URL (transparent where nothing is drawn), scaled down to fit `maxSize`. */
+    toImage(maxSize?: number): string;
+    /**
+     * The view freshly rendered into a 2D canvas over the viewport's background colour, scaled down
+     * to fit `maxSize` (never up); the caller encodes it (asynchronously, with `toBlob`).
+     * `undefined` when the browser gives no 2D context.
+     */
+    snapshot(maxSize?: number): HTMLCanvasElement | undefined;
     direction(): XYZ;
     rayAt(mx: number, my: number): Ray;
     screenToWorld(mx: number, my: number): XYZ;

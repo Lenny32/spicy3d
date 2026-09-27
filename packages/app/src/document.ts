@@ -7,6 +7,7 @@ import {
     type CloseDocumentOptions,
     combineSaves,
     DOCUMENT_FORMAT_VERSION,
+    DOCUMENT_THUMBNAIL_MAX_SIZE,
     type DocumentFormatError,
     DocumentMigrations,
     type DocumentRepositoryError,
@@ -234,7 +235,7 @@ export class Document extends Observable implements IDocument {
             name: this.name,
             data: this.serialize(),
             kind,
-            thumbnail: this.ownView()?.toImage(),
+            thumbnail: this.ownView()?.toImage(DOCUMENT_THUMBNAIL_MAX_SIZE),
             baseVersion: this.version,
             ...(label && { label }),
         });

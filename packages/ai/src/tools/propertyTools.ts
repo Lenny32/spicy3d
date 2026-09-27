@@ -7,6 +7,7 @@ import {
     type INode,
     isConsumedTool,
     Node,
+    ParameterShapeNode,
     type Property,
     PropertyUtils,
     PubSub,
@@ -277,9 +278,14 @@ function applyUpdates(doc: IDocument, node: INode, updates: Map<string, unknown>
     // Assignment inside one transaction, so a parameter edit is a single undo step and the
     // node re-generates its shape.
     Transaction.execute(doc, "AI set node properties", () => {
-        for (const [name, value] of updates) {
-            (node as unknown as Record<string, unknown>)[name] = value;
-        }
+        const assign = () => {
+            for (const [name, value] of updates) {
+                (node as unknown as Record<string, unknown>)[name] = value;
+            }
+        };
+        // One rebuild for all the parameters, not one per parameter.
+        if (node instanceof ParameterShapeNode) node.batchShapeUpdates(assign);
+        else assign();
         doc.visual.update();
     });
 
