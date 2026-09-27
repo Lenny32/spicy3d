@@ -32,6 +32,8 @@ export interface McpServerOptions {
     instructions?: string;
     /** Reported once per finished call, for the status badge. */
     onToolCall?: (name: string, isError: boolean) => void;
+    /** Defaults to one queue shared by every server of this page (bridge, relay, reconnects). */
+    queue?: SerialQueue;
 }
 
 /**
@@ -48,6 +50,9 @@ export class SerialQueue {
         return next;
     }
 }
+
+/** The page's tool calls run one at a time, whichever connection they come from. */
+const PAGE_QUEUE = new SerialQueue();
 
 /**
  * The tools' error convention (`{"error": …}` as the whole payload, see agent.ts `invokeTool`)
@@ -125,7 +130,7 @@ function readResource(uri: string, instructions: string): { mimeType: string; te
 export function createMcpServer(options: McpServerOptions = {}): Server {
     const instructions = options.instructions ?? buildMcpInstructions();
     const baseTools = [...(options.tools ?? buildTools()), usageGuideTool(instructions)];
-    const queue = new SerialQueue();
+    const queue = options.queue ?? PAGE_QUEUE;
     const server = new Server(
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
         {

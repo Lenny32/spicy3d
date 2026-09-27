@@ -4,6 +4,7 @@
 import { I18n, type IDocument, Material, Transaction, type XYZLike } from "@spicy3d/core";
 import type { Tool, ToolResult } from "../llm/types";
 import { getDocument } from "./documentContext";
+import { encodeImage, IMAGE_FORMATS, type ImageEncodeOptions, type ImageFormat } from "./imageEncoding";
 
 const Z_UP: XYZLike = { x: 0, y: 0, z: 1 };
 
@@ -73,15 +74,18 @@ export function buildViewTools(): Tool[] {
 /**
  * The viewport image as a tool result: the JSON payload plus the screenshot itself, so the model
  * sees the result and the picture in one step. Shared with `click_view`, whose whole point after a
- * select is to show the highlight.
+ * select is to show the highlight. Re-encoded only when asked, or when it exceeds the relay's
+ * budget (`setImageByteBudget`).
  */
-export function imageResult(view: { toImage(): string }, payload: Record<string, unknown>): ToolResult {
-    const dataUrl = view.toImage();
-    const comma = dataUrl.indexOf(",");
-    const mediaType = dataUrl.slice(dataUrl.indexOf(":") + 1, dataUrl.indexOf(";")) || "image/png";
+export async function imageResult(
+    view: { toImage(): string },
+    payload: Record<string, unknown>,
+    options: ImageEncodeOptions = {},
+): Promise<ToolResult> {
+    const image = await encodeImage(view.toImage(), options);
     return {
-        content: JSON.stringify({ ...payload, mediaType }),
-        images: [{ mediaType, data: dataUrl.slice(comma + 1) }],
+        content: JSON.stringify({ ...payload, mediaType: image.mediaType }),
+        images: [image],
     };
 }
 
@@ -89,15 +93,60 @@ function textResult(value: unknown): ToolResult {
     return { content: JSON.stringify(value) };
 }
 
+/** capture_screenshot's optional encoding arguments, or the message saying what is wrong. */
+export function parseImageOptions(args: Record<string, unknown>): ImageEncodeOptions | string {
+    const options: ImageEncodeOptions = {};
+    const { format, maxSize, quality } = args;
+    if (format !== undefined) {
+        if (!IMAGE_FORMATS.includes(format as ImageFormat))
+            return `format must be one of ${IMAGE_FORMATS.join(", ")}`;
+        options.format = format as ImageFormat;
+    }
+    if (maxSize !== undefined) {
+        if (typeof maxSize !== "number" || !Number.isInteger(maxSize) || maxSize < 64 || maxSize > 4096)
+            return "maxSize must be an integer number of pixels in [64, 4096]";
+        options.maxSize = maxSize;
+    }
+    if (quality !== undefined) {
+        if (typeof quality !== "number" || !(quality > 0 && quality <= 1)) return "quality must be in (0, 1]";
+        options.quality = quality;
+    }
+    return options;
+}
+
 function captureScreenshotTool(): Tool {
     return {
         name: "capture_screenshot",
-        description: "Capture the current viewport as an image so you can see the model's current state.",
-        parameters: { type: "object", properties: {} },
-        handler: async () => {
+        description:
+            "Capture the current viewport as an image so you can see the model's current state. Lossless PNG at the viewport's size by default; pass format jpeg/webp and/or maxSize to get a smaller image.",
+        parameters: {
+            type: "object",
+            properties: {
+                format: {
+                    type: "string",
+                    enum: [...IMAGE_FORMATS],
+                    description: "Image encoding (default png; jpeg/webp are much smaller)",
+                },
+                maxSize: {
+                    type: "integer",
+                    minimum: 64,
+                    maximum: 4096,
+                    description: "Longest side in pixels; the image is scaled down to fit (never up)",
+                },
+                quality: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    maximum: 1,
+                    description: "jpeg/webp quality (default 0.85)",
+                },
+            },
+        },
+        handler: async (args) => {
             const view = globalThis.app.activeView;
             if (!view) return textResult({ error: "no active view" });
-            return imageResult(view, { ok: true });
+            const options = parseImageOptions(args);
+            if (typeof options === "string") return textResult({ error: options });
+            return imageResult(view, { ok: true }, options);
         },
     };
 }

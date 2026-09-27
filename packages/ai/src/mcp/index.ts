@@ -5,10 +5,13 @@
 // dynamic import() only — settings.ts, state.ts and the panel are the eager, SDK-free half.
 
 import { Logger } from "@spicy3d/core";
+import { RemoteMcpSession } from "./remoteSession";
+import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import { McpSession } from "./session";
 import { parseBridgeUrl } from "./settings";
 import { mcpState } from "./state";
 
+export { RemoteMcpSession } from "./remoteSession";
 export { createMcpServer } from "./server";
 export { McpSession } from "./session";
 
@@ -43,4 +46,27 @@ export function disconnectMcpBridge(): void {
     session?.close();
     session = undefined;
     mcpState.update({ status: "idle", bridge: undefined });
+}
+
+let remote: RemoteMcpSession | undefined;
+
+/**
+ * Expose this tab to the user's MCP clients through the server's relay (`link.pageSocket`),
+ * replacing a remote session already running. Independent of the local bridge session.
+ */
+export function connectMcpRemote(link: RemoteMcpLink): void {
+    if (remote?.link === link && !remote.stopped) return;
+    remote?.close();
+    remote = new RemoteMcpSession(link, { state: remoteMcpState }).start();
+}
+
+/** Leave the relay; `status` says why (`idle`: turned off, `unavailable`: signed out). */
+export function disconnectMcpRemote(status: Extract<RemoteMcpStatus, "idle" | "unavailable">): void {
+    remote?.close();
+    remote = undefined;
+    remoteMcpState.update({ status, agents: [], tabId: undefined });
+}
+
+export function disconnectRemoteAgent(agentId: string): void {
+    remote?.disconnectAgent(agentId);
 }
