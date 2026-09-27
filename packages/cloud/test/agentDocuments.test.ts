@@ -7,7 +7,7 @@ import { buildCloudTools } from "@spicy3d/ai/src/tools/cloudTools";
 import { type IDocument, type IView, Logger, type SaveConflict, type Serialized } from "@spicy3d/core";
 import { CloudAgentDocuments } from "../src/mcp/agentDocuments";
 import { FakeDocumentServer } from "./_helpers/fakeDocumentServer";
-import { FakeServer, TestRequest } from "./_helpers/fakeServer";
+import { FakeServer, json, TestRequest } from "./_helpers/fakeServer";
 import {
     Device,
     documentData,
@@ -79,6 +79,17 @@ describe("the agent's cloud link", () => {
         a.dispose();
         devices = [];
 
+        expect(agentCloudLink()).toBeUndefined();
+    });
+
+    test("signing out takes it back, which ends the agents' open questions (CLOUD-17)", async () => {
+        const a = await device();
+        expect(agentCloudLink()).toBeInstanceOf(CloudAgentDocuments);
+
+        server.on("POST /api/auth/logout", json(204));
+        await a.account.signOut();
+
+        await until(() => agentCloudLink() === undefined, "the link taken back");
         expect(agentCloudLink()).toBeUndefined();
     });
 
