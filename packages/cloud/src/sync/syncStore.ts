@@ -50,27 +50,43 @@ export interface SyncRecord {
     /** Several pending saves collapse into one push: `manual` wins over `auto`, `merge` over both. */
     pendingKind?: PendingKind;
     pendingLabel?: string;
-    /** Saves made while a push was in flight: the kind (and label) of the push after it. */
+    /** Saves made since `attempt` was made: the kind (and label) of the push after it. */
     nextKind?: PendingKind;
     nextLabel?: string;
     /** A pending merge's second parent: the version this device's line was based on before the merge. */
     mergeParent?: string;
     /** When the oldest pending save was made (epoch milliseconds). */
     pendingSince?: number;
-    /** The `Idempotency-Key` of the pending push, reused by every retry (also after a reload). */
-    pushKey?: string;
-    /** What the key was made for: another snapshot, kind or base needs another key. */
-    pushKeyFor?: string;
+    /**
+     * The push of `localSnapshot` being made, exactly as sent — the server binds an
+     * `Idempotency-Key` to every field of the request (SpicySrv `StorageInput.RequestHash`, the
+     * tab's `clientId` included), so a retry (also after a reload, from another tab) resends the
+     * same fields to be replayed, never refused as `idempotency_key_reused`.
+     */
+    attempt?: PushAttempt;
     /**
      * Pushes that got no answer (they may have reached the server): when the head moved, a version
-     * with one of these manifests is this device's own, and the merge base.
+     * with one of these manifests saved by that client is this device's own, and the merge base.
      */
-    unconfirmed?: { manifestSha256: string; blobs: string[] }[];
+    unconfirmed?: { manifestSha256: string; blobs: string[]; clientId?: string }[];
     lastError?: { kind: string; message?: string; at: number };
     /** The tab that made the pending save. */
     clientId: string;
     /** Epoch milliseconds of the last change of the record. */
     updatedAt: number;
+}
+
+/** A push as sent, kept so every retry sends the same request (see {@link SyncRecord.attempt}). */
+export interface PushAttempt {
+    idempotencyKey: string;
+    name: string;
+    baseVersion?: string;
+    mergeParent?: string;
+    kind: PendingKind;
+    label?: string;
+    manifestSha256: string;
+    clientId: string;
+    deviceName: string;
 }
 
 /** The records of the offline sync. A failing store logs and reads as empty. */

@@ -2,8 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type IDocument, Logger } from "@spicy3d/core";
+import { AutosaveHolds, type IDocument, Logger, Result, type Serialized } from "@spicy3d/core";
 import { IndexedDbBlobCache, MemoryBlobCache } from "../src/documents/blobCache";
+import { keepMineChoice } from "../src/documents/cloudDocuments";
 import { EditLocks } from "../src/documents/editLocks";
 import { VersionHistory } from "../src/history/versionHistory";
 import { IndexedDbSyncStore, MemorySyncStore } from "../src/sync/syncStore";
@@ -459,13 +460,15 @@ describe("ownership, storage, errors", () => {
     });
 
     test("the cache is kept under its cap without losing a pending save or its base", async () => {
-        const a = await device();
+        let clock = Date.now();
+        const a = await device(undefined, { cache: new MemoryBlobCache(() => clock) });
         const doc = await a.create("doc-1", { w: "10" });
         a.network.down = true;
         doc.edit("w", "11");
         await doc.save("auto");
         for (let i = 0; i < 5; i++) await a.cache.put(`junk-${i}`, new Uint8Array(1000));
         (a.engine.options as { cacheLimitBytes?: number }).cacheLimitBytes = 1;
+        clock += 2 * 60_000;
 
         const freed = await a.engine.evict();
 
@@ -582,6 +585,17 @@ describe("ownership, storage, errors", () => {
 });
 
 describe("fault injection", () => {
+    /** Resolves a waiting conflict keeping this device's side, as the MVP dialog's merge does. */
+    async function keepMine(a: Device) {
+        const conflict = a.engine.syncConflictOf("doc-1");
+        if (!conflict?.result) return;
+        const choices = conflict.result.conflicts.map((x) => ({
+            path: x.path,
+            choice: keepMineChoice(x.choices),
+        }));
+        await a.engine.resolve("doc-1", choices);
+    }
+
     test.each(
         Array.from({ length: 16 }, (_, i) => i + 1),
     )("a flapping network converges (seed %i): server head == local base, local clean, no lost edits", async (seed) => {
@@ -590,21 +604,33 @@ describe("fault injection", () => {
         events.random = seeded(seed + 100);
         events.dropRate = 0.2;
         events.duplicateRate = 0.3;
-        const a = await device(network);
-        const doc = await a.create("doc-1", { a0: "0", b0: "0" });
+        let clock = Date.now();
+        const store = new MemorySyncStore();
+        const cache = new MemoryBlobCache(() => clock);
+        const options = { store, cache, sync: { cacheLimitBytes: 2048 } };
+        let a = await device(network, options);
+        const settings = a.account.deviceSettings;
+        let doc = await a.create("doc-1", { a0: "0", b0: "0", s: "0" });
 
         network.faults = { drop: 0.15, loseAnswer: 0.15, duplicate: 0.1, timeout: 0.05 };
         const mine: Record<string, string> = {};
         const theirs: Record<string, string> = {};
-        for (let step = 0; step < 24; step++) {
+        const shared = new Set<string>(["0"]);
+        let reloads = 0;
+        for (let step = 0; step < 30; step++) {
+            clock += 2 * 60_000;
             const roll = random();
-            if (roll < 0.5) {
+            if (roll < 0.3) {
                 const key = `a${Math.floor(random() * 4)}`;
                 mine[key] = `${step}`;
                 doc.edit(key, `${step}`);
                 await doc.save(random() < 0.3 ? "manual" : "auto");
-            } else if (roll < 0.7) {
-                // Device B, on the other variables: every merge is clean.
+            } else if (roll < 0.37) {
+                // Unsaved: saved by a later save (or at the end).
+                const key = `a${Math.floor(random() * 4)}`;
+                mine[key] = `${step}`;
+                doc.edit(key, `${step}`);
+            } else if (roll < 0.5) {
                 const key = `b${Math.floor(random() * 4)}`;
                 theirs[key] = `${step}`;
                 await docs.saveContentElsewhere(
@@ -612,11 +638,49 @@ describe("fault injection", () => {
                     (current) => documentData("doc-1", { ...valuesOf(current), [key]: `${step}` }),
                     "Device B",
                 );
+            } else if (roll < 0.56) {
+                // Both devices change the same variable: a conflict, resolved keeping mine.
+                shared.add(`a${step}`).add(`b${step}`);
+                doc.edit("s", `a${step}`);
+                await doc.save("auto");
+                await docs.saveContentElsewhere(
+                    "doc-1",
+                    (current) => documentData("doc-1", { ...valuesOf(current), s: `b${step}` }),
+                    "Device B",
+                );
+            } else if (roll < 0.61) {
+                // A full disk for one save: it fails, the edit stays unsaved.
+                const key = `a${Math.floor(random() * 4)}`;
+                mine[key] = `${step}`;
+                doc.edit(key, `${step}`);
+                cache.failWrites = true;
+                await doc.save("auto");
+                cache.failWrites = false;
+            } else if (roll < 0.66) {
+                await a.engine.evict();
+            } else if (roll < 0.72) {
+                if (!doc.isDirty) {
+                    // A reload: a new tab (new client id) over the same storage and cookies.
+                    await a.engine.settle();
+                    a.dispose();
+                    devices.splice(devices.indexOf(a), 1);
+                    a = await device(network, { ...options, settings });
+                    const reopened = await a.app.openDocument("doc-1", a.repository);
+                    if (reopened) {
+                        doc = reopened as unknown as SyncDoc;
+                        reloads++;
+                    } else {
+                        // Offline and nothing cached yet: open once the network is back.
+                        network.down = false;
+                        doc = await a.open("doc-1");
+                    }
+                }
             } else if (roll < 0.8) {
                 events.dropAll();
             } else if (roll < 0.9) {
                 network.down = !network.down;
             }
+            await keepMine(a);
             await sleep(random() * 15);
         }
 
@@ -624,13 +688,18 @@ describe("fault injection", () => {
         network.faults = {};
         events.dropRate = 0;
         events.duplicateRate = 0;
+        if (doc.isDirty) await doc.save("auto");
         a.engine.refreshAll();
         try {
-            await until(
-                () => a.repository.stateOf("doc-1") === "saved" && !doc.isDirty && doc.version === head().id,
-                "convergence",
-                5000,
-            );
+            const start = Date.now();
+            while (
+                !(a.repository.stateOf("doc-1") === "saved" && !doc.isDirty && doc.version === head().id)
+            ) {
+                if (Date.now() - start > 8000) throw new Error("timed out waiting for convergence");
+                await keepMine(a);
+                if (doc.isDirty && a.repository.stateOf("doc-1") !== "conflict") await doc.save("auto");
+                await sleep(10);
+            }
         } catch (error) {
             const record = await a.store.get("doc-1");
             throw new Error(
@@ -640,44 +709,13 @@ describe("fault injection", () => {
                     dirty: doc.isDirty,
                     version: doc.version,
                     head: head().id,
-                    headKind: head().kind,
                     record: { ...record, localSnapshot: record?.localSnapshot?.manifestSha256 },
                     doc: doc.values,
                     server: headValues(),
                     toasts: a.toasts,
-                    replaced: doc.replaced,
-                    conflict: (() => {
-                        const c = a.engine.syncConflictOf("doc-1");
-                        return {
-                            local: c?.local,
-                            base: c?.base,
-                            theirs: c?.theirs,
-                            result:
-                                c?.result === undefined
-                                    ? "none"
-                                    : c.result.conflicts.map((x) => [
-                                          x.kind,
-                                          x.path,
-                                          x.base,
-                                          x.ours,
-                                          x.theirs,
-                                      ]),
-                            inputs: c?.result && [
-                                valuesOf(c.result.inputs.base),
-                                valuesOf(c.result.inputs.ours),
-                                valuesOf(c.result.inputs.theirs),
-                            ],
-                        };
-                    })(),
-                    versions: docs.documents
-                        .get("doc-1")!
-                        .versions.map((v) => [
-                            v.id.slice(-2),
-                            v.parentIds.map((p) => p.slice(-2)),
-                            v.kind,
-                            v.clientId?.slice(0, 5),
-                            JSON.stringify(valuesOf(docs.content(v))),
-                        ]),
+                    conflict: a.engine
+                        .syncConflictOf("doc-1")
+                        ?.result?.conflicts.map((x) => [x.kind, x.path]),
                 })}`,
             );
         }
@@ -688,8 +726,252 @@ describe("fault injection", () => {
         expect(record?.baseVersion?.id).toBe(head().id);
         const final = headValues();
         expect(doc.values).toEqual(final);
-        for (const [key, value] of Object.entries({ ...mine, ...theirs }))
+        for (const [key, value] of Object.entries({ ...mine, ...theirs })) {
             expect([key, final[key]]).toEqual([key, value]);
-        expect(Object.values(network.injected).reduce((sum, x) => sum + x, 0)).toBeGreaterThan(0);
-    }, 20_000);
+        }
+        expect(shared.has(final["s"])).toBe(true);
+        expect(Object.values(network.injected).reduce((sum, x) => sum + x, 0) + reloads).toBeGreaterThan(0);
+    }, 30_000);
+});
+
+describe("review fixes", () => {
+    test("a retry from a reloaded tab (new client id) resends the first attempt: replayed, one version", async () => {
+        const store = new MemorySyncStore();
+        const cache = new MemoryBlobCache();
+        const network = new FlakyNetwork(server);
+        const first = await device(network, { store, cache });
+        const doc = await first.create("doc-1", { w: "10" });
+        const versions = docs.documents.get("doc-1")!.versions.length;
+        network.loseAnswerOnce((r) => r.method === "POST" && r.url.endsWith("/versions"), true);
+        doc.edit("w", "11");
+        await doc.save("manual");
+        await until(() => network.injected.loseAnswer === 1, "the lost answer");
+        await first.engine.settle();
+        first.dispose();
+        devices.splice(devices.indexOf(first), 1);
+        network.down = false;
+
+        const second = await device(network, { store, cache, settings: first.account.deviceSettings });
+        const reopened = await second.open("doc-1");
+        await until(() => second.repository.stateOf("doc-1") === "saved", "replayed");
+
+        expect(docs.documents.get("doc-1")!.versions.length).toBe(versions + 1);
+        expect(head().kind).toBe("manual");
+        expect(reopened.version).toBe(head().id);
+        const posts = server.requests.filter((r) => r.method === "POST" && r.path.endsWith("/versions"));
+        expect(new Set(posts.map((r) => r.headers["idempotency-key"])).size).toBe(1);
+        expect(new Set(posts.map((r) => (r.body as { clientId: string }).clientId)).size).toBe(1);
+    });
+
+    test("idempotency_key_reused: a new key, and the version that landed is recognized", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10" });
+        const versions = docs.documents.get("doc-1")!.versions.length;
+        a.network.loseAnswerOnce((r) => r.method === "POST" && r.url.endsWith("/versions"), true);
+        doc.edit("w", "11");
+        await doc.save("auto");
+        await until(() => a.network.injected.loseAnswer === 1, "the lost answer");
+        await a.engine.settle();
+        // An attempt kept by an older client: same key, other fields.
+        const record = (await a.store.get("doc-1"))!;
+        await a.store.put({ ...record, attempt: { ...record.attempt!, deviceName: "renamed" } });
+        a.network.down = false;
+        a.engine.refreshAll();
+
+        await until(() => a.repository.stateOf("doc-1") === "saved", "recovered");
+        expect(server.requests.some((r) => r.path.endsWith("/versions") && r.method === "POST")).toBe(true);
+        expect(docs.documents.get("doc-1")!.versions.length).toBe(versions + 1);
+        expect((await a.store.get("doc-1"))?.localDirty).toBe(false);
+        expect(doc.version).toBe(head().id);
+    });
+
+    test("a save that can't be stored on this device (full disk) fails as quota and changes nothing", async () => {
+        const cache = new MemoryBlobCache();
+        const a = await device(undefined, { cache });
+        const doc = await a.create("doc-1", { w: "10" });
+        cache.failWrites = true;
+        doc.edit("w", "11");
+
+        const saved = await doc.save("auto");
+
+        expect(saved.isOk).toBe(false);
+        expect(!saved.isOk && saved.error.kind).toBe("quota");
+        expect(doc.isDirty).toBe(true);
+        expect((await a.store.get("doc-1"))?.localDirty).toBe(false);
+        cache.failWrites = false;
+        await doc.save("auto");
+        await until(() => headValues()["w"] === "11", "saved once there is room");
+    });
+
+    test("an unsaved-edits conflict saved meanwhile resolves as a pending one: pushed, no loop", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10" });
+        doc.edit("w", "20");
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "30" }));
+        await until(() => a.repository.stateOf("doc-1") === "conflict", "conflict");
+        expect(a.engine.syncConflictOf("doc-1")?.local).toBe("unsaved");
+        expect(AutosaveHolds.isHeld).toBe(true);
+
+        await doc.save("manual");
+        expect(a.engine.syncConflictOf("doc-1")?.local).toBe("pending");
+        const path = a.engine.syncConflictOf("doc-1")!.result!.conflicts[0].path;
+        expect((await a.engine.resolve("doc-1", [{ path, choice: "ours" }])).isOk).toBe(true);
+        await until(() => a.repository.stateOf("doc-1") === "saved" && head().kind === "merge", "pushed");
+        await sleep(30);
+
+        expect(a.repository.stateOf("doc-1")).toBe("saved");
+        expect(headValues()).toEqual({ w: "20" });
+        expect(doc.isDirty).toBe(false);
+        expect(AutosaveHolds.isHeld).toBe(false);
+    });
+
+    test("a manual save made while a push is in flight is pushed as manual", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10" });
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let held = false;
+        server.on("POST /api/documents/doc-1/versions", async (request) => {
+            if (!held) {
+                held = true;
+                await gate;
+            }
+            return server.fallback!(request);
+        });
+        doc.edit("w", "11");
+        await doc.save("auto");
+        await until(() => held, "the push in flight");
+        doc.edit("w", "12");
+        await doc.save("manual");
+        release();
+
+        await until(
+            () => headValues()["w"] === "12" && a.repository.stateOf("doc-1") === "saved",
+            "both pushed",
+        );
+        const kinds = docs.documents.get("doc-1")!.versions.map((v) => v.kind);
+        expect(kinds.slice(-2)).toEqual(["auto", "manual"]);
+    });
+
+    test("started offline from the cached user: nothing is pushed until the server confirms the session", async () => {
+        const store = new MemorySyncStore();
+        const cache = new MemoryBlobCache();
+        const network = new FlakyNetwork(server);
+        const first = await device(network, { store, cache });
+        const doc = await first.create("doc-1", { w: "10" });
+        network.down = true;
+        doc.edit("w", "11");
+        await doc.save("auto");
+        first.dispose();
+        devices.splice(devices.indexOf(first), 1);
+
+        const second = await device(network, { store, cache, settings: first.account.deviceSettings });
+        expect(second.account.isUnconfirmed).toBe(true);
+        server.on("GET /api/me", json(401, { status: 401, code: "unauthorized" }));
+        server.requests.length = 0;
+        network.down = false;
+        second.engine.refreshAll();
+        await until(() => second.account.status === "expired", "the session checked");
+        await sleep(30);
+
+        expect(server.calls.filter((c) => c.startsWith("POST"))).toEqual([]);
+        expect(second.account.deviceSettings.lastUser()).toBeUndefined();
+        expect((await store.get("doc-1"))?.localDirty).toBe(true);
+    });
+
+    test("a clean merge that breaks the model where neither side did waits as a rebuild-failure conflict", async () => {
+        const nodes = [{ __cla$$__: "GroupNode", id: "n1", name: "Part", visible: true }];
+        const evaluate = rs.fn(async (data: Serialized) => {
+            const values = valuesOf(data);
+            const broken = values["w"] === "99" && values["h"] === "6";
+            return Result.ok(
+                new Map(broken ? [["node/n1/rebuild", { nodeId: "n1", label: "Part", error: "boom" }]] : []),
+            );
+        });
+        const a = await device(undefined, { sync: { evaluator: { evaluate } } });
+        const doc = await a.create("doc-1", { w: "10", h: "5" }, nodes);
+        a.network.down = true;
+        doc.edit("h", "6");
+        await doc.save("auto");
+        const theirs = await docs.saveContentElsewhere(
+            "doc-1",
+            documentData("doc-1", { w: "99", h: "5" }, "Bracket", nodes),
+        );
+        a.network.down = false;
+        a.engine.refreshAll();
+
+        await until(() => a.repository.stateOf("doc-1") === "conflict", "conflict");
+        expect(a.engine.syncConflictOf("doc-1")?.result?.conflicts.map((c) => c.kind)).toEqual([
+            "rebuild-failure",
+        ]);
+        expect(head().id).toBe(theirs.id);
+        expect(doc.values).toEqual({ w: "10", h: "6" });
+        expect(evaluate).toHaveBeenCalled();
+    });
+
+    test("pending changes another tab let go are pushed on the next refresh", async () => {
+        const store = new MemorySyncStore();
+        const cache = new MemoryBlobCache();
+        const network = new FlakyNetwork(server);
+        const first = await device(network, { store, cache });
+        const doc = await first.create("doc-1", { w: "10" });
+        network.down = true;
+        doc.edit("w", "11");
+        await doc.save("auto");
+        first.dispose();
+        devices.splice(devices.indexOf(first), 1);
+        network.down = false;
+        const locks = new SharedLocks();
+        locks.held.add("spicy3d.document.doc-1");
+        const other = await device(network, { store, cache, locks: new EditLocks(locks, undefined) });
+        await sleep(30);
+        expect(headValues()).toEqual({ w: "10" });
+
+        locks.held.delete("spicy3d.document.doc-1");
+        other.engine.refreshAll();
+        await until(() => headValues()["w"] === "11", "pushed by this tab");
+    });
+
+    test("a closed document in conflict lets its lock go (resumed when opened again)", async () => {
+        const locks = new SharedLocks();
+        const a = await device(undefined, { locks: new EditLocks(locks, undefined) });
+        const doc = await a.create("doc-1", { w: "10" });
+        a.network.down = true;
+        doc.edit("w", "20");
+        await doc.save("auto");
+        await doc.close({ discardChanges: true });
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "30" }));
+        a.network.down = false;
+        a.engine.refreshAll();
+
+        await until(() => a.repository.stateOf("doc-1") === "conflict", "conflict");
+        await until(() => !locks.held.has("spicy3d.document.doc-1"), "the lock let go");
+        expect((await a.store.get("doc-1"))?.localDirty).toBe(true);
+        await sleep(30);
+        expect(locks.held.has("spicy3d.document.doc-1")).toBe(false);
+    });
+
+    test("another device saving this device's unanswered content is not taken for this device's push", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10", h: "5" });
+        const base = head().id;
+        a.network.down = true;
+        doc.edit("w", "11");
+        await doc.save("auto");
+        await until(() => a.repository.stateOf("doc-1") === "offline", "offline");
+        await docs.saveContentElsewhere("doc-1", doc.serialize(), "Tablet");
+        const theirs = await docs.saveContentElsewhere(
+            "doc-1",
+            documentData("doc-1", { w: "11", h: "7" }),
+            "Tablet",
+        );
+        a.network.down = false;
+        a.engine.refreshAll();
+
+        await until(() => head().kind === "merge" && a.repository.stateOf("doc-1") === "saved", "merged");
+        expect(head().parentIds).toEqual([theirs.id, base]);
+        expect(headValues()).toEqual({ w: "11", h: "7" });
+    });
 });

@@ -30,7 +30,10 @@ export class FakeDocumentServer {
     readonly documents = new Map<string, FakeDocument>();
     /** SHA-256 of every `PUT /api/blobs/{sha}` that stored a blob, in order. */
     readonly uploaded: string[] = [];
-    private readonly keys = new Map<string, { documentId: string; versionId: string; create: boolean }>();
+    private readonly keys = new Map<
+        string,
+        { documentId: string; versionId: string; create: boolean; hash: string }
+    >();
     /** Called with every new head (a save, a create, another device's save): SRV-07's events. */
     readonly headListeners = new Set<(documentId: string, version: VersionResponse) => void>();
     private clock = Date.parse("2026-09-27T10:00:00Z");
@@ -285,8 +288,17 @@ export class FakeDocumentServer {
         if (!id && method === "POST") {
             const body = request.body as { id: string; name: string; version: NewVersionRequest };
             const replay = key ? this.keys.get(key) : undefined;
-            if (replay?.create && replay.documentId === body.id) {
-                return this.response(this.documents.get(body.id)!, 201);
+            const hash = requestHash(body.id, body.name, body.version);
+            if (replay) {
+                if (replay.hash !== hash) return problem(422, "idempotency_key_reused");
+                // SpicySrv answers the version it created, even when another save came since.
+                const document = this.documents.get(body.id)!;
+                const created = document.versions.find((v) => v.id === replay.versionId)!;
+                return json(
+                    201,
+                    { ...this.summary(document), head: created, headVersionId: created.id },
+                    { "Idempotent-Replayed": "true" },
+                );
             }
             if (this.documents.has(body.id)) return problem(409, "document_exists");
             const missing = this.missing(body.version);
@@ -301,7 +313,7 @@ export class FakeDocumentServer {
             };
             this.documents.set(body.id, created);
             const version = this.storeVersion(created, body.version, []);
-            if (key) this.keys.set(key, { documentId: body.id, versionId: version.id, create: true });
+            if (key) this.keys.set(key, { documentId: body.id, versionId: version.id, create: true, hash });
             return this.response(created, 201);
         }
         if (!document) return problem(404, "not_found");
@@ -321,6 +333,8 @@ export class FakeDocumentServer {
         if (parts[3] === "versions" && method === "POST") {
             const body = request.body as NewVersionRequest;
             const replay = key ? this.keys.get(key) : undefined;
+            const hash = requestHash(id, null, body);
+            if (replay && replay.hash !== hash) return problem(422, "idempotency_key_reused");
             if (replay && !replay.create && replay.documentId === id) {
                 const version = document.versions.find((v) => v.id === replay.versionId)!;
                 return json(201, version, { ETag: `"${version.id}"`, "Idempotent-Replayed": "true" });
@@ -343,7 +357,7 @@ export class FakeDocumentServer {
             const missing = this.missing(body);
             if (missing.length > 0) return problem(422, "blobs_missing", { missing });
             const version = this.storeVersion(document, body, parents);
-            if (key) this.keys.set(key, { documentId: id, versionId: version.id, create: false });
+            if (key) this.keys.set(key, { documentId: id, versionId: version.id, create: false, hash });
             return json(201, version, { ETag: `"${version.id}"` });
         }
         if (parts[3] === "restore" && method === "POST") {
@@ -387,6 +401,29 @@ export class FakeDocumentServer {
               })
             : problem(404, "not_found");
     }
+}
+
+const optional = (value: string | null | undefined) => (value?.trim() ? value.trim() : null);
+
+/**
+ * SpicySrv's `StorageInput.RequestHash`: what an `Idempotency-Key` is bound to — the document (and
+ * its name on create) and every field of the version, parents and blobs as sorted sets. A key
+ * reused for any other request answers 422 `idempotency_key_reused`.
+ */
+export function requestHash(documentId: string, name: string | null, version: NewVersionRequest): string {
+    return JSON.stringify([
+        documentId,
+        name,
+        [...new Set(version.parentIds ?? [])].sort(),
+        version.kind,
+        optional(version.label),
+        version.manifestSha256,
+        [...new Set(version.blobs ?? [])].sort(),
+        version.thumbnailSha256 ?? null,
+        version.formatVersion,
+        optional(version.deviceName),
+        optional(version.clientId),
+    ]);
 }
 
 /** The client's config with the storage limits the repository reads. */

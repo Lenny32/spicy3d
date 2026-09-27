@@ -10,8 +10,10 @@ import {
     I18n,
     type IApplication,
     type IDocument,
+    type IMergeEvaluator,
     type LoadedDocument,
     Logger,
+    MergeEvaluators,
     type MergeResolution,
     type MergeResult,
     mergeDocuments,
@@ -26,6 +28,7 @@ import {
     type SaveRequest,
     type Serialized,
     UserActivity,
+    validateMerge,
 } from "@spicy3d/core";
 import { newIdempotencyKey } from "../client";
 import type { EditLocks } from "../documents/editLocks";
@@ -42,6 +45,7 @@ import {
     combineKinds,
     type ISyncStore,
     type LocalSnapshot,
+    type PushAttempt,
     retainedBlobs,
     type SyncRecord,
     type SyncVersionRef,
@@ -108,6 +112,8 @@ export interface SyncEngineOptions {
     now?: () => number;
     /** `navigator.storage.persist()`, asked once. */
     requestPersistence?: () => Promise<boolean>;
+    /** Rebuilds a merge before it is pushed (default: the app's registered `MergeEvaluators.current`). */
+    evaluator?: IMergeEvaluator;
 }
 
 /** The undo step of a newer version applied in place (its undo goes back to the version before). */
@@ -129,6 +135,8 @@ interface Entry {
     running?: Promise<void>;
     again: boolean;
     conflict?: SyncConflict;
+    /** Autosave held while the document waits in `conflict`. */
+    releaseConflictHold?: () => void;
     /** Resolution holds (CLOUD-13's panel): no pushes, no pulls applied. */
     holds: number;
     /** A push is in flight (saves made meanwhile are counted as the next push's). */
@@ -168,6 +176,13 @@ function sideOf(ref: SyncVersionRef | undefined): SyncSide {
     return side;
 }
 
+/** A save that could not be kept on this device: a full disk is `quota`. */
+function storageError(docId: string, error: unknown): DocumentRepositoryError {
+    Logger.warn(`[cloud] ${docId}: cannot keep the save on this device: ${error}`);
+    const quota = (error as { name?: string } | null)?.name === "QuotaExceededError";
+    return quota ? { kind: "quota" } : { kind: "failed", message: String(error) };
+}
+
 function isQuota(failure: PushFailure): boolean {
     return (
         failure.error.kind === "quota" ||
@@ -205,6 +220,9 @@ export class SyncEngine implements IRepositorySync {
     private idlePoll?: ReturnType<typeof setInterval>;
     private evictTimer?: ReturnType<typeof setTimeout>;
     private persistenceAsked = false;
+    private noEvaluatorLogged = false;
+    /** Cancels a merge validation still running when the sync stops. */
+    private readonly abort = new AbortController();
     private started = false;
     private stopped = false;
 
@@ -246,6 +264,8 @@ export class SyncEngine implements IRepositorySync {
             events.start();
             this.cleanups.push(() => events.stop());
         }
+        // Another tab let a document go: its pending changes may be this tab's to push now.
+        this.cleanups.push(this.options.locks.onReleasedElsewhere(() => void this.resumePending()));
         globalThis.addEventListener?.("online", this.refreshAll);
         globalThis.addEventListener?.("focus", this.refreshAll);
         globalThis.document?.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -261,11 +281,13 @@ export class SyncEngine implements IRepositorySync {
     stop(): void {
         if (this.stopped) return;
         this.stopped = true;
+        this.abort.abort();
         for (const cleanup of this.cleanups.splice(0)) cleanup();
         for (const [id, entry] of this.entries) {
             clearTimeout(entry.timer);
             clearTimeout(entry.pullTimer);
             if (entry.backgroundLock) this.options.locks.release(id);
+            entry.releaseConflictHold?.();
         }
         this.stopIdlePoll();
         clearTimeout(this.evictTimer);
@@ -482,6 +504,9 @@ export class SyncEngine implements IRepositorySync {
         for (const record of await this.pendingRecords()) {
             if (this.stopped) return;
             const id = record.docId;
+            const entry = this.entries.get(id);
+            // Already pushed from here, or waiting in conflict for its next opening.
+            if (entry?.backgroundLock || (entry?.state === "conflict" && !this.openDocument(id))) continue;
             if (this.openDocument(id)) {
                 this.schedulePass(id, 0);
                 continue;
@@ -530,7 +555,12 @@ export class SyncEngine implements IRepositorySync {
         const prepared = await this.repository.prepare(request.data, request.thumbnail);
         if (!prepared.isOk) return Result.err(prepared.error);
         const { bytes, ...snapshot } = prepared.value;
-        await Promise.all([...bytes].map(([sha, blob]) => this.repository.cache.put(sha, blob)));
+        // Stored for sure before the record points at them (else a reload would find nothing).
+        try {
+            await Promise.all([...bytes].map(([sha, blob]) => this.repository.cache.putStrict(sha, blob)));
+        } catch (error) {
+            return Result.err(storageError(request.id, error));
+        }
 
         const saved = await this.withRecord(request.id, async () => {
             const stored = await this.record(request.id);
@@ -559,7 +589,8 @@ export class SyncEngine implements IRepositorySync {
             record.name = request.name;
             record.localSnapshot = { ...snapshot, savedAt: now };
             record.localDirty = true;
-            if (entry.pushing) {
+            // An attempt made (maybe in flight): this save is the next push's.
+            if (record.attempt) {
                 record.nextKind = combineKinds(record.nextKind, request.kind);
                 if (request.label) record.nextLabel = request.label;
             } else {
@@ -574,14 +605,12 @@ export class SyncEngine implements IRepositorySync {
                 entry.saves++;
                 return Result.ok(record);
             } catch (error) {
-                Logger.warn(`[cloud] ${request.id}: cannot keep the save on this device: ${error}`);
-                const quota = (error as { name?: string } | null)?.name === "QuotaExceededError";
-                return Result.err<DocumentRepositoryError>(
-                    quota ? { kind: "quota" } : { kind: "failed", message: String(error) },
-                );
+                return Result.err<DocumentRepositoryError>(storageError(request.id, error));
             }
         });
         if (!saved.isOk) return Result.err(saved.error);
+        // Saved while waiting for the user: resolving it now merges (and pushes) this save.
+        if (entry.conflict) entry.conflict = { ...entry.conflict, local: "pending" };
         this.askPersistence();
         if (entry.state === "clean" || entry.state === "error" || entry.state === "offline") {
             this.setState(request.id, entry.state === "offline" ? "offline" : "dirty");
@@ -769,6 +798,16 @@ export class SyncEngine implements IRepositorySync {
 
     private async pass(docId: string, entry: Entry): Promise<void> {
         if (this.stopped || !this.repository.account.isSignedIn) return;
+        const account = this.repository.account;
+        if (account.isUnconfirmed && !(await account.confirmSession())) {
+            // Started offline from the cached user: nothing goes to the server before it says who
+            // is signed in (a 401 ends that session; offline: asked again later).
+            if (account.isSignedIn) {
+                this.setState(docId, "offline");
+                this.retry(docId, entry, { error: { kind: "offline" }, retryable: true });
+            }
+            return;
+        }
         const document = this.openDocument(docId);
         if (!this.owns(docId)) {
             // Read-only here (another tab syncs it): newer versions are still shown when clean.
@@ -835,37 +874,57 @@ export class SyncEngine implements IRepositorySync {
 
     // ---- Push --------------------------------------------------------------------------------
 
+    /**
+     * The attempt to push the record's snapshot: the one kept with the record when it is for this
+     * snapshot on this base (a retry resends it field for field), else a new one — written before
+     * anything is sent. Saves made from then on count as the next push's (`nextKind`).
+     */
+    private async attemptFor(docId: string, snapshotSha: string): Promise<PushAttempt | undefined> {
+        return this.withRecord(docId, async () => {
+            const current = await this.record(docId);
+            if (!current?.localDirty || current.localSnapshot?.manifestSha256 !== snapshotSha)
+                return undefined;
+            const reusable =
+                current.attempt &&
+                current.attempt.manifestSha256 === snapshotSha &&
+                current.attempt.baseVersion === current.baseVersion?.id &&
+                current.attempt.mergeParent === current.mergeParent;
+            if (reusable) return current.attempt;
+            // A stale attempt (another snapshot or base): its saves meanwhile join this push.
+            if (current.attempt) this.fold(current);
+            const attempt: PushAttempt = {
+                idempotencyKey: newIdempotencyKey(),
+                name: current.name,
+                kind: current.pendingKind ?? "auto",
+                manifestSha256: snapshotSha,
+                clientId: this.repository.clientId,
+                deviceName: this.repository.account.deviceSettings.effectiveDeviceName,
+            };
+            if (current.baseVersion?.id) attempt.baseVersion = current.baseVersion.id;
+            if (current.mergeParent) attempt.mergeParent = current.mergeParent;
+            if (current.pendingLabel) attempt.label = current.pendingLabel;
+            current.attempt = attempt;
+            await this.options.store.put(current);
+            return attempt;
+        }).catch(() => undefined);
+    }
+
+    /** The kinds and label of the saves made since the attempt join the pending ones; no attempt. */
+    private fold(record: SyncRecord) {
+        if (record.nextKind) record.pendingKind = combineKinds(record.pendingKind, record.nextKind);
+        if (record.nextLabel) record.pendingLabel = record.nextLabel;
+        record.nextKind = undefined;
+        record.nextLabel = undefined;
+        record.attempt = undefined;
+    }
+
     private async push(docId: string, entry: Entry, record: SyncRecord): Promise<void> {
         const snapshot = record.localSnapshot;
         if (!snapshot) return;
-        const kind: SaveKind = record.pendingKind ?? "auto";
-        const base = record.baseVersion?.id;
-        const fingerprint = [
-            base,
-            record.mergeParent,
-            snapshot.manifestSha256,
-            snapshot.thumbnailSha256,
-            kind,
-            record.pendingLabel,
-        ]
-            .map((x) => x ?? "")
-            .join("|");
-        let key = record.pushKey;
-        if (record.pushKeyFor !== fingerprint || !key) {
-            // Kept with the record before sending: a retry after a reload replays the same request.
-            key = newIdempotencyKey();
-            const written = await this.withRecord(docId, async () => {
-                const current = await this.record(docId);
-                if (current?.localSnapshot?.manifestSha256 !== snapshot.manifestSha256) return false;
-                current.pushKey = key;
-                current.pushKeyFor = fingerprint;
-                await this.options.store.put(current);
-                return true;
-            }).catch(() => false);
-            if (!written) {
-                entry.again = true;
-                return;
-            }
+        const attempt = await this.attemptFor(docId, snapshot.manifestSha256);
+        if (!attempt) {
+            entry.again = true;
+            return;
         }
 
         this.setState(docId, "pushing");
@@ -875,16 +934,18 @@ export class SyncEngine implements IRepositorySync {
             outcome = await this.withTimeout(
                 this.repository.push({
                     id: docId,
-                    name: record.name,
-                    baseVersion: base,
-                    mergeParent: record.mergeParent,
-                    kind,
-                    label: record.pendingLabel,
+                    name: attempt.name,
+                    baseVersion: attempt.baseVersion,
+                    mergeParent: attempt.mergeParent,
+                    kind: attempt.kind,
+                    label: attempt.label,
                     manifestSha256: snapshot.manifestSha256,
                     blobs: snapshot.blobs,
                     thumbnailSha256: snapshot.thumbnailSha256,
                     formatVersion: snapshot.formatVersion,
-                    idempotencyKey: key,
+                    idempotencyKey: attempt.idempotencyKey,
+                    clientId: attempt.clientId,
+                    deviceName: attempt.deviceName,
                     bytes: (sha) => this.repository.cache.get(sha),
                 }),
             );
@@ -893,7 +954,14 @@ export class SyncEngine implements IRepositorySync {
         }
 
         if (!outcome.isOk) {
-            await this.foldNextKind(docId, outcome.error.retryable ? snapshot : undefined);
+            if (outcome.error.code === "idempotency_key_reused") {
+                // The key was bound to another request (an older client, a record written by one):
+                // the version may exist; a new attempt goes through the 409 / landed-push path.
+                await this.dropAttempt(docId, snapshot, attempt.clientId);
+                entry.again = true;
+                return;
+            }
+            if (outcome.error.retryable) await this.rememberUnanswered(docId, snapshot, attempt.clientId);
             // A full quota doesn't free itself: the user is told, the next save tries again.
             if (outcome.error.retryable && !isQuota(outcome.error))
                 this.deferPush(docId, entry, outcome.error);
@@ -902,7 +970,7 @@ export class SyncEngine implements IRepositorySync {
         }
         entry.attempt = 0;
         if (outcome.value.status === "conflict") {
-            await this.foldNextKind(docId);
+            await this.dropAttempt(docId);
             await this.diverged(docId, entry);
             return;
         }
@@ -910,11 +978,8 @@ export class SyncEngine implements IRepositorySync {
         const clean = await this.withRecord(docId, async () => {
             const current = await this.record(docId);
             if (!current) return true;
-            const blobs = [...snapshot.blobs];
-            current.baseVersion = versionRef(version, blobs);
+            current.baseVersion = versionRef(version, [...snapshot.blobs]);
             current.mergeParent = undefined;
-            current.pushKey = undefined;
-            current.pushKeyFor = undefined;
             current.lastError = undefined;
             current.unconfirmed = undefined;
             current.updatedAt = this.now();
@@ -927,13 +992,14 @@ export class SyncEngine implements IRepositorySync {
                 current.pendingLabel = undefined;
                 current.pendingSince = undefined;
             } else {
-                // Saved while pushing: that save goes next, on top of what was just pushed.
+                // Saved since the attempt: those saves go next, on top of what was just pushed.
                 current.pendingKind = current.nextKind ?? "auto";
                 current.pendingLabel = current.nextLabel;
                 current.pendingSince = current.localSnapshot?.savedAt ?? this.now();
             }
             current.nextKind = undefined;
             current.nextLabel = undefined;
+            current.attempt = undefined;
             await this.options.store.put(current);
             return same;
         });
@@ -949,30 +1015,38 @@ export class SyncEngine implements IRepositorySync {
         }
     }
 
-    /**
-     * A push that didn't go through: the saves made meanwhile join the pending kind. `unanswered`:
-     * no answer came, the version may exist (see {@link SyncRecord.unconfirmed}).
-     */
-    private async foldNextKind(docId: string, unanswered?: LocalSnapshot) {
+    /** The attempt is over (answered 409, or its key refused): folded; its snapshot maybe landed. */
+    private async dropAttempt(docId: string, unanswered?: LocalSnapshot, clientId?: string) {
         await this.withRecord(docId, async () => {
             const current = await this.record(docId);
             if (!current) return;
-            if (!current.nextKind && !unanswered) return;
-            if (current.nextKind) {
-                current.pendingKind = combineKinds(current.pendingKind, current.nextKind);
-                if (current.nextLabel) current.pendingLabel = current.nextLabel;
-                current.nextKind = undefined;
-                current.nextLabel = undefined;
-            }
-            if (unanswered) {
-                const unconfirmed = (current.unconfirmed ?? []).filter(
-                    (x) => x.manifestSha256 !== unanswered.manifestSha256,
-                );
-                unconfirmed.push({ manifestSha256: unanswered.manifestSha256, blobs: unanswered.blobs });
-                current.unconfirmed = unconfirmed.slice(-MAX_UNCONFIRMED);
-            }
+            this.fold(current);
+            if (unanswered) this.addUnconfirmed(current, unanswered, clientId);
             await this.options.store.put(current).catch(() => undefined);
         });
+    }
+
+    /** No answer came: the attempt stays (its retry replays), its snapshot may have landed. */
+    private async rememberUnanswered(docId: string, snapshot: LocalSnapshot, clientId: string) {
+        await this.withRecord(docId, async () => {
+            const current = await this.record(docId);
+            if (!current) return;
+            this.addUnconfirmed(current, snapshot, clientId);
+            await this.options.store.put(current).catch(() => undefined);
+        });
+    }
+
+    private addUnconfirmed(record: SyncRecord, snapshot: LocalSnapshot, clientId?: string) {
+        const unconfirmed = (record.unconfirmed ?? []).filter(
+            (x) => x.manifestSha256 !== snapshot.manifestSha256,
+        );
+        const entry: NonNullable<SyncRecord["unconfirmed"]>[number] = {
+            manifestSha256: snapshot.manifestSha256,
+            blobs: snapshot.blobs,
+        };
+        if (clientId) entry.clientId = clientId;
+        unconfirmed.push(entry);
+        record.unconfirmed = unconfirmed.slice(-MAX_UNCONFIRMED);
     }
 
     /**
@@ -983,7 +1057,10 @@ export class SyncEngine implements IRepositorySync {
         docId: string,
         record: SyncRecord,
     ): Promise<Result<CloudVersion | undefined, DocumentRepositoryError>> {
-        const unconfirmed = new Set((record.unconfirmed ?? []).map((x) => x.manifestSha256));
+        // By manifest and by the client that sent it: another device saving the same content is not us.
+        const unconfirmed = new Set(
+            (record.unconfirmed ?? []).map((x) => `${x.manifestSha256}|${x.clientId ?? ""}`),
+        );
         if (unconfirmed.size === 0) return Result.ok(undefined);
         let cursor: string | undefined;
         for (let page = 0; page < 10; page++) {
@@ -992,7 +1069,9 @@ export class SyncEngine implements IRepositorySync {
             if (!versions.isOk) return Result.err(versions.error);
             for (const version of versions.value.items) {
                 if (version.id === record.baseVersion?.id) return Result.ok(undefined);
-                if (unconfirmed.has(version.manifestSha256) && version.clientId) return Result.ok(version);
+                if (version.clientId && unconfirmed.has(`${version.manifestSha256}|${version.clientId}`)) {
+                    return Result.ok(version);
+                }
             }
             cursor = versions.value.nextCursor;
             if (!cursor) return Result.ok(undefined);
@@ -1230,8 +1309,7 @@ export class SyncEngine implements IRepositorySync {
                 if (!current) return undefined;
                 current.baseVersion = versionRef(landed, blobs);
                 current.unconfirmed = undefined;
-                current.pushKey = undefined;
-                current.pushKeyFor = undefined;
+                this.fold(current);
                 // A merge that landed is done; what is pending now is an ordinary save on top of it.
                 if (current.pendingKind === "merge") {
                     current.pendingKind = "auto";
@@ -1265,7 +1343,8 @@ export class SyncEngine implements IRepositorySync {
                 this.setState(docId, "diverged");
                 return;
             }
-            // Synchronous from here to the replacement: no save can serialize in between.
+            const position = document.history.position();
+            const saves = entry.saves;
             const merged = mergeDocuments(base, document.serialize(), theirs);
             if (!merged.isOk || merged.value.conflicts.length > 0) {
                 this.enterConflict(
@@ -1278,20 +1357,39 @@ export class SyncEngine implements IRepositorySync {
                 );
                 return;
             }
+            const validated = await this.validate(merged.value);
+            if (!validated) return;
+            if (validated.conflicts.length > 0) {
+                // The merge breaks the model where neither side did: the user decides (CLOUD-13).
+                this.enterConflict(docId, entry, record, version, validated, "pending");
+                return;
+            }
+            if (!(await this.canReplace(document, entry))) {
+                this.setState(docId, "diverged");
+                return;
+            }
+            if (document.history.position() !== position || entry.saves !== saves) {
+                // Edited or saved while validating: merged again with that.
+                entry.again = true;
+                return;
+            }
+            // Synchronous from the check to the replacement: no save can serialize in between.
             const applied = applyMergeToDocument(document, merged.value);
             if (!applied.isOk) {
                 this.enterConflict(docId, entry, record, version, merged.value, "pending");
                 return;
             }
-            document.markSaved();
+            const appliedAt = document.history.position();
             document.version = version.id;
-            await this.recordMerge(
+            const recorded = await this.recordMerge(
                 docId,
                 entry,
                 version,
                 merged.value.merged,
                 documentThumbnail(this.app, document),
             );
+            // Clean once the merge is kept here (a save made meanwhile marked itself).
+            if (recorded === "merged") document.markSaved(appliedAt);
         } else {
             const merged = mergeDocuments(base, inputs.value.ours!, theirs);
             if (!merged.isOk || merged.value.conflicts.length > 0) {
@@ -1305,11 +1403,40 @@ export class SyncEngine implements IRepositorySync {
                 );
                 return;
             }
+            const validated = await this.validate(merged.value);
+            if (!validated) return;
+            if (validated.conflicts.length > 0) {
+                this.enterConflict(docId, entry, record, version, validated, "pending");
+                return;
+            }
             await this.recordMerge(docId, entry, version, merged.value.merged);
         }
         PubSub.default.pub("showToast", "cloud.sync.mergedFrom{0}", this.deviceLabel(version.deviceName));
         this.setState(docId, "dirty");
         entry.again = true;
+    }
+
+    /**
+     * The kernel's check of a clean merge before it is pushed (`validateMerge`): features that fail
+     * only after the merge come back as `rebuild-failure` conflicts. Without an evaluator (no app,
+     * tests) or when it fails to run, the merge goes as it is; `undefined`: the sync stopped.
+     */
+    private async validate(result: MergeResult): Promise<MergeResult | undefined> {
+        const evaluator = this.options.evaluator ?? MergeEvaluators.current;
+        if (!evaluator) {
+            if (!this.noEvaluatorLogged)
+                Logger.info("[cloud] no merge evaluator: merges are pushed unvalidated");
+            this.noEvaluatorLogged = true;
+            return result;
+        }
+        const validated = await validateMerge(result, { evaluator, signal: this.abort.signal });
+        if (this.stopped) return undefined;
+        if (!validated.isOk) {
+            if (validated.error.kind === "cancelled") return undefined;
+            Logger.warn(`[cloud] merge validation failed (${validated.error.message}): pushed unvalidated`);
+            return result;
+        }
+        return validated.value;
     }
 
     /**
@@ -1322,17 +1449,17 @@ export class SyncEngine implements IRepositorySync {
         head: CloudVersion,
         merged: Serialized,
         thumbnail?: string,
-    ): Promise<void> {
+    ): Promise<"merged" | "newer"> {
         // A save written from now on serialized the merged document: it is newer than `merged`.
         const savesAtMerge = entry.saves;
         const prepared = await this.repository.prepare(merged, thumbnail);
         if (!prepared.isOk) throw new Error(`merged document refused: ${prepared.error.kind}`);
         const { bytes, ...snapshot } = prepared.value;
-        await Promise.all([...bytes].map(([sha, blob]) => this.repository.cache.put(sha, blob)));
+        await Promise.all([...bytes].map(([sha, blob]) => this.repository.cache.putStrict(sha, blob)));
         const theirsBlobs = await this.repository.manifestOf(head);
-        await this.withRecord(docId, async () => {
+        return this.withRecord(docId, async () => {
             const current = await this.record(docId);
-            if (!current) return;
+            if (!current) return "newer";
             const previousBase = current.baseVersion?.id;
             // Saved after the merge was applied: that save contains it and is newer, keep it. A save
             // written before (while the inputs were fetched) is older than the merge: replaced.
@@ -1342,10 +1469,10 @@ export class SyncEngine implements IRepositorySync {
             current.mergeParent = previousBase;
             current.pendingKind = "merge";
             current.localDirty = true;
-            current.pushKey = undefined;
-            current.pushKeyFor = undefined;
+            this.fold(current);
             current.updatedAt = this.now();
             await this.options.store.put(current);
+            return newer ? "newer" : "merged";
         });
     }
 
@@ -1363,8 +1490,7 @@ export class SyncEngine implements IRepositorySync {
                 current.pendingSince = undefined;
             }
             current.mergeParent = undefined;
-            current.pushKey = undefined;
-            current.pushKeyFor = undefined;
+            this.fold(current);
             await this.options.store.put(current);
         });
         const document = this.openDocument(docId);
@@ -1453,12 +1579,25 @@ export class SyncEngine implements IRepositorySync {
         const first = entry.state !== "conflict";
         entry.conflict = conflict;
         entry.pullRequested = false;
+        // No autosave while it waits: the user decides first (manual saves still land here).
+        entry.releaseConflictHold ??= AutosaveHolds.hold(`sync conflict ${docId}`);
+        if (entry.backgroundLock && !this.openDocument(docId)) {
+            // Closed: nobody can resolve it here; the record stays, the next opening merges again.
+            entry.backgroundLock = false;
+            this.options.locks.release(docId);
+        }
         this.setState(docId, "conflict");
         this.emit(docId);
         if (first) {
             const name = this.openDocument(docId)?.name ?? record?.name ?? docId;
             PubSub.default.pub("showToast", "cloud.sync.conflict{0}", name);
         }
+    }
+
+    private clearConflict(entry: Entry) {
+        entry.conflict = undefined;
+        entry.releaseConflictHold?.();
+        entry.releaseConflictHold = undefined;
     }
 
     /** A newer head while in conflict: merged again, the conflict updated (choices are reapplied by path). */
@@ -1535,7 +1674,16 @@ export class SyncEngine implements IRepositorySync {
         if (!inputs.isOk || !inputs.value.base) {
             return Result.err({ kind: "failed", message: inputs.isOk ? "no base" : inputs.error.kind });
         }
-        await nextTask();
+        // Whether this device has a pending save now (an unsaved-edits conflict may have been saved
+        // meanwhile): read with no save in between, then merged and applied synchronously.
+        let pending = false;
+        for (let attempt = 0; ; attempt++) {
+            const saves = entry.saves;
+            pending = (await this.record(docId))?.localDirty === true;
+            await nextTask();
+            if (entry.saves === saves && entry.savesInFlight === 0) break;
+            if (attempt === 10) return Result.err({ kind: "failed", message: "saving" });
+        }
         const ours = document ? document.serialize() : inputs.value.ours!;
         const merged = mergeDocuments(inputs.value.base, ours, inputs.value.theirs);
         if (!merged.isOk) return Result.err({ kind: "failed", message: merged.error.kind });
@@ -1550,22 +1698,23 @@ export class SyncEngine implements IRepositorySync {
             this.emit(docId);
             return Result.err({ kind: "unresolved", result: resolved.value });
         }
-        const pending = conflict.local === "pending";
+        let appliedAt: object | undefined;
         if (document) {
             const applied = applyMergeToDocument(document, resolved.value);
             if (!applied.isOk) return Result.err({ kind: "failed", message: applied.error.kind });
+            appliedAt = document.history.position();
             document.version = version.id;
-            if (pending) document.markSaved();
         }
-        entry.conflict = undefined;
-        if (pending && record) {
-            await this.recordMerge(
+        this.clearConflict(entry);
+        if (pending) {
+            const recorded = await this.recordMerge(
                 docId,
                 entry,
                 version,
                 resolved.value.merged,
                 document && documentThumbnail(this.app, document),
             );
+            if (document && recorded === "merged") document.markSaved(appliedAt);
             this.setState(docId, "dirty");
         } else {
             const manifest = await this.repository.manifestOf(version);
@@ -1595,11 +1744,10 @@ export class SyncEngine implements IRepositorySync {
             current.baseVersion = versionRef(version, manifest.isOk ? manifest.value.blobs : []);
             current.mergeParent = undefined;
             current.pendingKind = "manual";
-            current.pushKey = undefined;
-            current.pushKeyFor = undefined;
+            this.fold(current);
             await this.options.store.put(current);
         });
-        entry.conflict = undefined;
+        this.clearConflict(entry);
         this.setState(docId, "dirty");
         if (document) {
             document.version = version.id;
@@ -1615,7 +1763,7 @@ export class SyncEngine implements IRepositorySync {
     /** "Open latest": this device's pending changes are dropped (the caller reopens the head). */
     async discardLocal(docId: string): Promise<void> {
         const entry = this.entry(docId);
-        entry.conflict = undefined;
+        this.clearConflict(entry);
         await this.withRecord(docId, async () => {
             const current = await this.record(docId);
             if (!current) return;
@@ -1625,8 +1773,7 @@ export class SyncEngine implements IRepositorySync {
             current.pendingLabel = undefined;
             current.pendingSince = undefined;
             current.mergeParent = undefined;
-            current.pushKey = undefined;
-            current.pushKeyFor = undefined;
+            this.fold(current);
             current.nextKind = undefined;
             current.nextLabel = undefined;
             await this.options.store.put(current);
@@ -1648,6 +1795,8 @@ export class SyncEngine implements IRepositorySync {
     /** (Re)connected, back online, window focus: every open document's head is checked again. */
     readonly refreshAll = () => {
         if (this.stopped) return;
+        // Closed documents with pending changes another tab left (or that were read-only here).
+        void this.resumePending();
         for (const document of this.app.documents) {
             if (document.repository === this.repository) this.requestPull(document.id, 0);
         }

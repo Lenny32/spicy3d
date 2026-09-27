@@ -119,6 +119,9 @@ export interface PushRequest {
     formatVersion: number;
     /** The same for every retry of this push. */
     idempotencyKey: string;
+    /** Sent as is when given (a retry resends the first attempt's), else this tab's. */
+    clientId?: string;
+    deviceName?: string;
     /** The bytes of a hash the server lacks. */
     bytes: (sha256: string) => Promise<Uint8Array | undefined>;
 }
@@ -669,8 +672,8 @@ export class CloudDocumentRepository implements IDocumentRepository {
             blobs: [...new Set(request.blobs)],
             thumbnailSha256: thumbnailSha256 ?? null,
             formatVersion: request.formatVersion,
-            deviceName: this.account.deviceSettings.effectiveDeviceName,
-            clientId: this.clientId,
+            deviceName: request.deviceName ?? this.account.deviceSettings.effectiveDeviceName,
+            clientId: request.clientId ?? this.clientId,
         };
         const key = request.idempotencyKey;
         const send = (): Promise<Result<SavedVersion, CloudError>> =>

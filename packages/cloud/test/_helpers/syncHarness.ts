@@ -24,7 +24,7 @@ import { CloudDocuments } from "../../src/documents/cloudDocuments";
 import { EditLocks, type LockManagerLike } from "../../src/documents/editLocks";
 import type { CloudDocumentRepository } from "../../src/documents/repository";
 import { EventsChannel, type SocketLike } from "../../src/sync/events";
-import type { SyncEngine } from "../../src/sync/syncEngine";
+import type { SyncEngine, SyncEngineOptions } from "../../src/sync/syncEngine";
 import { type ISyncStore, MemorySyncStore } from "../../src/sync/syncStore";
 import { CONFIG, type FakeDocumentServer } from "./fakeDocumentServer";
 import { BASE, type FakeServer, json, USER } from "./fakeServer";
@@ -79,22 +79,24 @@ export class FlakyNetwork {
     ) {}
 
     /** One-shot: the next request matching loses its answer (it still reaches the server). */
-    loseAnswerOnce(matches: (request: Request) => boolean) {
-        this.once.push(matches);
+    loseAnswerOnce(matches: (request: Request) => boolean, thenDown = false) {
+        this.once.push({ matches, thenDown });
     }
 
-    private readonly once: ((request: Request) => boolean)[] = [];
+    private readonly once: { matches: (request: Request) => boolean; thenDown: boolean }[] = [];
 
     readonly fetch = async (request: Request): Promise<Response> => {
         if (this.down) {
             this.injected.refused++;
             throw new TypeError("Failed to fetch");
         }
-        const scripted = this.once.findIndex((matches) => matches(request));
+        const scripted = this.once.findIndex((x) => x.matches(request));
         if (scripted >= 0) {
-            this.once.splice(scripted, 1);
+            const [{ thenDown }] = this.once.splice(scripted, 1);
             this.injected.loseAnswer++;
             await this.server.fetch(request);
+            // The network goes with the answer (nothing retried before the test says so).
+            if (thenDown) this.down = true;
             throw new TypeError("connection reset");
         }
         const roll = this.random();
@@ -350,14 +352,19 @@ export function valuesOf(data: Serialized): Record<string, string> {
 }
 
 /** A small document whose content is its variables (merged by id, CLOUD-12). */
-export function documentData(id: string, values: Record<string, string>, name = "Bracket"): Serialized {
+export function documentData(
+    id: string,
+    values: Record<string, string>,
+    name = "Bracket",
+    nodes: Serialized[] = [],
+): Serialized {
     return {
         __cla$$__: "Document",
         formatVersion: 1,
         moduleVersions: {},
         id,
         name,
-        models: { components: [], nodes: [], materials: [] },
+        models: { components: [], nodes, materials: [] },
         variables: Object.entries(values).map(([key, expression]) => ({
             id: key,
             name: key,
@@ -379,6 +386,8 @@ export interface DeviceOptions {
     activity?: UserActivity;
     settings?: CloudDeviceSettings;
     locks?: EditLocks;
+    /** More sync engine options (an evaluator, the cache cap…). */
+    sync?: Partial<SyncEngineOptions>;
 }
 
 /**
@@ -442,6 +451,7 @@ export class Device {
                 pullDelayMs: 10,
                 requestPersistence: async () => true,
                 activity: options.activity ?? new UserActivity({ isDialogOpen: () => false }),
+                ...options.sync,
             },
         });
     }
@@ -479,8 +489,8 @@ export class Device {
     }
 
     /** A new document saved to the cloud from this device (created by its first push). */
-    async create(id: string, values: Record<string, string>): Promise<SyncDoc> {
-        const document = new SyncDoc(this.app, documentData(id, values), this.repository);
+    async create(id: string, values: Record<string, string>, nodes: Serialized[] = []): Promise<SyncDoc> {
+        const document = new SyncDoc(this.app, documentData(id, values, "Bracket", nodes), this.repository);
         await document.save("manual");
         await this.engine.settle();
         return document;
