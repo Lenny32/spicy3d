@@ -40,9 +40,6 @@ const ALLOWED = [
     // Links the user may open; nothing loads them.
     [/^https:\/\/github\.com\/Lenny32\/spicy3d(\/|$)/, "repository link"],
     [/^https:\/\/github\.com\/xiangechen\/chili3d(\/|$)/, "upstream repository link"],
-    // LLM endpoints the user picks in the assistant's settings (deployment.json can offer others or hide them).
-    [/^https:\/\/api\.anthropic\.com(\/|$)/, "LLM preset, used only when chosen"],
-    [/^https:\/\/api\.openai\.com\/v1(\/|$)/, "LLM preset, used only when chosen"],
     // References in comments, licenses and error messages of the app and its dependencies.
     [
         /^https:\/\/github\.com\/(ai\/nanoid|ajaxorg\/ace|babel\/babel|facebook\/regenerator)\//,
