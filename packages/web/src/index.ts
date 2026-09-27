@@ -5,7 +5,10 @@ import { bridgeUrlFor, loadMcpSettings } from "@spicy3d/ai";
 import { AppBuilder } from "@spicy3d/builder";
 import { type IApplication, Logger } from "@spicy3d/core";
 import { Loading } from "./loading";
-import { parseStartupParams } from "./startupParams";
+import { parseStartupParams, takeAccountLink } from "./startupParams";
+
+// Before anything reads the URL: an account email link opens its dialog once the cloud is up.
+const accountLink = takeAccountLink(window.location, window.history);
 
 const loading = new Loading();
 document.body.appendChild(loading);
@@ -38,7 +41,7 @@ new AppBuilder()
     .useParametric()
     .useThree()
     .useUI()
-    .useCloud()
+    .useCloud({ accountLink })
     .build()
     .then(handleApplicaionBuilt)
     .catch((err) => {

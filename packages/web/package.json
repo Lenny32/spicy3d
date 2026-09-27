@@ -5,6 +5,7 @@
     "main": "src/index.ts",
     "devDependencies": {
         "@spicy3d/ai": "*",
-        "@spicy3d/builder": "*"
+        "@spicy3d/builder": "*",
+        "@spicy3d/cloud": "*"
     }
 }

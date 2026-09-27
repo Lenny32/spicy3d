@@ -20,6 +20,15 @@ export default defineConfig({
     experiments: {
         css: true,
     },
+    devServer: {
+        // Account email links point at app routes (`/verify-email?…`, `/reset-password?…`,
+        // `/confirm-email-change?…`); like docker/nginx.conf, they serve the app.
+        historyApiFallback: {
+            rewrites: [
+                { from: /^\/(verify-email|reset-password|confirm-email-change)\/?$/, to: "/index.html" },
+            ],
+        },
+    },
     // The CLI turns lazy compilation on for dev by default; its empty trigger responses
     // log "XML Parsing Error: no root element found" in Firefox.
     lazyCompilation: false,
