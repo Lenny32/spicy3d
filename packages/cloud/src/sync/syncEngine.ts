@@ -2115,9 +2115,17 @@ export class SyncEngine implements IRepositorySync {
             current.baseVersion = previous.baseVersion;
             current.mergeParent = previous.mergeParent;
             current.unconfirmed = previous.unconfirmed;
-            if (current.pendingKind)
-                current.pendingKind = combineKinds(previous.pendingKind, current.pendingKind);
-            current.pendingLabel = current.pendingLabel ?? previous.pendingLabel;
+            if (current.pendingKind) {
+                // Core's `combineSaves`: a label only stays with the kind it was saved with.
+                const joined = combinePending(
+                    previous.pendingKind,
+                    previous.pendingLabel,
+                    current.pendingKind,
+                    current.pendingLabel,
+                );
+                current.pendingKind = joined.kind;
+                current.pendingLabel = joined.label;
+            } else current.pendingLabel = current.pendingLabel ?? previous.pendingLabel;
             if (snapshot && current.localSnapshot?.manifestSha256 === snapshot.manifestSha256) {
                 current.localSnapshot = previous.localSnapshot;
                 current.localDirty = previous.localDirty;
