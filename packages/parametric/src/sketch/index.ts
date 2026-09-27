@@ -4,6 +4,7 @@
 export * from "./autoConstraints";
 export * from "./editor/sketchEditor";
 export * from "./externalRef";
+export * from "./mergeReveal";
 export * from "./planegcs";
 export * from "./ribbon";
 export * from "./sketchIds";
@@ -12,9 +13,13 @@ export * from "./sketchNode";
 export * from "./solver";
 import "./commands";
 
-import { PubSub } from "@spicy3d/core";
+import { MergePathRevealers, PubSub } from "@spicy3d/core";
 import { SketchEditor } from "./editor/sketchEditor";
+import { sketchMergeRevealer } from "./mergeReveal";
 import { SketchNode } from "./sketchNode";
+
+// A conflict about a sketch entity, selected in the conflict panel, selects that entity.
+MergePathRevealers.register(sketchMergeRevealer);
 
 // Double-clicking a sketch node in the project tree enters its editing session.
 PubSub.default.sub("nodeDoubleClicked", (node) => {

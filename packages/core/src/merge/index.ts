@@ -7,6 +7,7 @@ export { expressionNames } from "./integrity";
 export { deepFreeze, JsonEquality } from "./json";
 export { mergeOrder, stableKeys } from "./listOrder";
 export * from "./merge";
+export * from "./reveal";
 export * from "./rules";
 export * from "./rulesDoc";
 export { sha256HexSync } from "./sha256";

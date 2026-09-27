@@ -113,5 +113,25 @@ describe("Toast", () => {
             expect(run).toHaveBeenCalledTimes(1);
             expect(getToast()).toBeNull();
         });
+
+        test("shows several actions in order; the one clicked runs and dismisses", () => {
+            const view = rs.fn();
+            const undo = rs.fn();
+            Toast.action("cloud.sync.mergedFrom{0}", [
+                { label: "cloud.merge.viewChanges", run: view },
+                { label: "cloud.merge.undo", run: undo },
+            ]);
+            const buttons = [...(getToast()?.querySelectorAll("button") ?? [])];
+            expect(buttons.map((b) => b.textContent)).toEqual([
+                "cloud.merge.viewChanges",
+                "cloud.merge.undo",
+            ]);
+
+            buttons[1].click();
+
+            expect(undo).toHaveBeenCalledTimes(1);
+            expect(view).not.toHaveBeenCalled();
+            expect(getToast()).toBeNull();
+        });
     });
 });

@@ -2,7 +2,13 @@
 // See LICENSE file in the project root for full license information.
 
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
-import type { FeatureItem, IFeatureListNode, INode } from "@spicy3d/core";
+import {
+    type FeatureItem,
+    type IFeatureListNode,
+    type INode,
+    requestFeatureFocus,
+    takeFeatureFocus,
+} from "@spicy3d/core";
 
 // test-utils must load BEFORE the core-mock helper so the real core module is
 // fully cached by the time `rs.mock("@spicy3d/core")` registers.
@@ -107,6 +113,26 @@ describe("FeatureListProperty", () => {
 
         expandFirstRow(prop);
         expect(prop.querySelector(".fl-param")).toBeNull();
+    });
+
+    test("a feature asked to be opened (the conflict panel) is expanded, built before or after the request", () => {
+        const doc = createMockDocument();
+        const node = featureNode([{ key: "length", display: "common.name", value: 12 }]);
+        requestFeatureFocus(node, "b1");
+        const built = new FeatureListProperty(doc, node);
+        expect(built.querySelector(".fl-param")).not.toBeNull();
+
+        Object.assign(node, { onPropertyChanged: () => {}, removePropertyChanged: () => {} });
+        const shown = new FeatureListProperty(doc, node);
+        document.body.append(shown);
+        try {
+            expect(shown.querySelector(".fl-param")).toBeNull();
+            requestFeatureFocus(node, "b1");
+            expect(shown.querySelector(".fl-param")).not.toBeNull();
+            expect(takeFeatureFocus(node)).toBeUndefined();
+        } finally {
+            shown.remove();
+        }
     });
 
     test("renders a checkbox for boolean parameters", () => {

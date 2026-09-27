@@ -88,3 +88,31 @@ export function isFeatureListNode(node: unknown): node is IFeatureListNode {
         typeof candidate?.removeFeature === "function"
     );
 }
+
+// Asks the timeline (the feature list shown for a selected body) to open one feature, e.g. the
+// conflict panel's "open failing feature". The request is kept until a feature list of that node
+// takes it, so it works whether the list is already shown or is built by the selection that
+// follows the request. (Functions, not a class: they are usable while the module graph loads.)
+
+let pendingFocus: { node: INode; featureId: string } | undefined;
+const focusListeners = new Set<(node: INode, featureId: string) => void>();
+
+/** Asks the feature list of `node` to open `featureId`. */
+export function requestFeatureFocus(node: INode, featureId: string): void {
+    pendingFocus = { node, featureId };
+    for (const listener of [...focusListeners]) listener(node, featureId);
+}
+
+/** The feature asked to be opened in `node`'s list, once (the request is consumed). */
+export function takeFeatureFocus(node: INode): string | undefined {
+    const pending = pendingFocus;
+    if (pending?.node !== node) return undefined;
+    pendingFocus = undefined;
+    return pending.featureId;
+}
+
+/** Called on every request; returns the unsubscribe function. */
+export function onFeatureFocusRequested(listener: (node: INode, featureId: string) => void): () => void {
+    focusListeners.add(listener);
+    return () => focusListeners.delete(listener);
+}

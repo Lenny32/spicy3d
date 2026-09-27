@@ -23,19 +23,28 @@ export class Toast {
         Toast.display(style.warning, message);
     };
 
-    /** A toast with one action (e.g. "Undo"); the action closes it. */
-    static readonly action = (message: I18nKeys, action: ToastAction, ...args: any[]) => {
+    /** A toast with one action (e.g. "Undo") or several, in order; an action closes it. */
+    static readonly action = (
+        message: I18nKeys,
+        action: ToastAction | readonly ToastAction[],
+        ...args: any[]
+    ) => {
         const toast = Toast.display(style.info, I18n.translate(message, ...args), ACTION_TOAST_MS);
         toast.classList.add(style.withAction);
+        const actions: readonly ToastAction[] = Array.isArray(action) ? action : [action as ToastAction];
         toast.append(
-            button({
-                className: style.action,
-                textContent: I18n.translate(action.label),
-                onclick: () => {
-                    Toast.dismiss(toast);
-                    action.run();
-                },
-            }),
+            ...actions.map((item) =>
+                button({
+                    className: style.action,
+                    textContent: I18n.translate(item.label),
+                    onclick: (e: MouseEvent) => {
+                        // The toast is a <label>: its activation must not click the first button too.
+                        e.preventDefault();
+                        Toast.dismiss(toast);
+                        item.run();
+                    },
+                }),
+            ),
         );
     };
 
