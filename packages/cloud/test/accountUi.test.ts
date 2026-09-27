@@ -535,6 +535,26 @@ describe("account settings", () => {
         expect(account.deviceSettings.keepOfflineCopies).toBe(true);
     });
 
+    test("Enter in the display name saves that section and keeps the settings open", async () => {
+        const { server, account, dialog } = await openSettings();
+        server.on("PATCH /api/me", json(200, { ...USER, displayName: "Ada L." }));
+        const name = inputOf(dialog, "displayName");
+        name.value = "Ada L.";
+
+        const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true, bubbles: true });
+        name.dispatchEvent(enter);
+        submit(dialog);
+
+        expect(enter.defaultPrevented).toBe(true);
+        await rs.waitFor(() => expect(account.user?.displayName).toBe("Ada L."));
+        expect(server.requests.find((r) => r.method === "PATCH")?.body).toEqual({ displayName: "Ada L." });
+        expect(dialog.isConnected).toBe(true);
+        const close = Array.from(dialog.querySelectorAll("button")).find(
+            (b) => b.textContent === "common.close",
+        );
+        expect(close?.type).toBe("button");
+    });
+
     test("the device name and where new documents go are device settings", async () => {
         const { account, dialog } = await openSettings();
         const name = inputOf(dialog, "deviceName");

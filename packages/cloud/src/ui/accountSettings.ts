@@ -66,6 +66,18 @@ function smallButton(label: I18nKeys, onclick: () => void | Promise<void>, kind?
     return b;
 }
 
+/**
+ * Enter in `input` runs its section's button instead of submitting the settings dialog (which
+ * holds every section in one form).
+ */
+function submitOnEnter(input: HTMLInputElement, action: HTMLButtonElement) {
+    input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        if (!action.disabled) action.click();
+    });
+}
+
 /** An inline status line under a section (success notice or error). */
 function statusLine() {
     const el = div({});
@@ -117,7 +129,9 @@ export function showAccountSettings(ctx: AccountUiContext): Modal {
             }),
             privacyZone(ctx, () => modal),
         ],
-        actions: [{ label: "common.close", submit: true }],
+        // Not a submit action: Enter in a section's field submits that section (see submitOnEnter),
+        // never the whole dialog, so it can't close with the typed value unsaved.
+        actions: [{ label: "common.close" }],
     });
     // Signed out meanwhile (another tab, revoked session, deletion): nothing here applies anymore.
     const onStatus = (property: string | number | symbol) => {
@@ -151,6 +165,7 @@ function profileSection(ctx: AccountUiContext) {
             else status.error(result.error);
         }
     });
+    submitOnEnter(nameField.input, save);
     return section(
         "account.settings.profile",
         nameField.root,
@@ -553,6 +568,11 @@ function deviceSection(ctx: AccountUiContext) {
     deviceName.input.onchange = () => {
         settings.deviceName = deviceName.input.value;
     };
+    deviceName.input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        settings.deviceName = deviceName.input.value;
+    });
     const newInCloud = checkbox(
         "account.settings.newDocumentsInCloud",
         settings.newDocumentLocation === "cloud",
