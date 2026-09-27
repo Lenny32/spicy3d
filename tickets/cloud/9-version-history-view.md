@@ -36,11 +36,11 @@ A dedicated view listing every version of a cloud document, with preview, restor
 
 ## Acceptance criteria
 
-- [ ] History lists versions with local times, kinds, devices; autosaves collapsed.
-- [ ] Preview is read-only and cannot overwrite the head.
-- [ ] Restore creates a new head version; the previous head stays in history.
-- [ ] Labeling an autosave keeps it through pruning (SRV-06 test).
-- [ ] Compare lists semantic differences.
+- [x] History lists versions with local times, kinds, devices; autosaves collapsed. (tests against the fake document server)
+- [x] Preview is read-only and cannot overwrite the head. (the preview is a separate document on a read-only repository that refuses every save; tests against the fake document server)
+- [x] Restore creates a new head version; the previous head stays in history. (tests against the fake document server)
+- [x] Labeling an autosave keeps it through pruning (SRV-06 test). (mocked: the client's `PATCH` against the fake server and its simplified pruner; the real rule — `Label == null && !Pinned` — read in SpicySrv's `AutosavePruner`)
+- [ ] Compare lists semantic differences. (the Compare buttons use core's `IDocumentDiffer`; the shipped `NodeListDiffer` placeholder only lists items added, removed, renamed or changed — CLOUD-12 registers the semantic one)
 
 ## Dependencies and complexity
 
