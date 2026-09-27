@@ -7,5 +7,5 @@ coverage
 .clang-format
 CMakeUserPresets.json
 types
-public/mcp/
+public/downloads/
 dist-bridge/

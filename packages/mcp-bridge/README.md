@@ -11,7 +11,7 @@ MCP client ──stdio──> spicy3d-mcp-bridge ──ws://127.0.0.1:7777──
 Nothing to clone or build. Get the bridge either way:
 
 - **Standalone executable** (nothing else to install): download it for your platform from the [release](https://github.com/Lenny32/spicy3d/releases) matching your Spicy3D version. The MCP panel links the right files.
-- **Node.js 20+**: `npx` fetches the bridge package that every Spicy3D site serves at `mcp/spicy3d-mcp-bridge-<version>.tgz`, or from npm once published.
+- **Node.js 20+**: `npx` fetches the bridge package that every Spicy3D site serves at `downloads/mcp-bridge/spicy3d-mcp-bridge-<version>.tgz` (dependencies bundled, so no npm registry is needed; npm 12 needs `--allow-remote=all` for it), or from npm once published.
 
 ## Setup
 
