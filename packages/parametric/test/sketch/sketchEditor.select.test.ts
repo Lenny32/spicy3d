@@ -177,7 +177,7 @@ describe("SketchEditor entity selection", () => {
     });
 
     test("Escape clears the selection first and exits on the second press", () => {
-        const { app, doc, view, restoreFactory } = setup();
+        const { doc, view, restoreFactory } = setup();
         try {
             const node = new SketchNode({ document: doc, plane: Plane.XY });
             const editor = SketchEditor.enter(node);

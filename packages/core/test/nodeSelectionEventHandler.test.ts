@@ -235,7 +235,7 @@ describe("NodeSelectionHandler", () => {
         });
 
         test("should set selected nodes when highlights exist", () => {
-            const { handler, view, selection, context, nodesByVisual } = setupNodeSelectionHandler();
+            const { handler, view, selection, nodesByVisual } = setupNodeSelectionHandler();
 
             const visualObj = createMockVisualObject();
             const node = createMockNode("testNode");
@@ -288,7 +288,7 @@ describe("NodeSelectionHandler", () => {
 
     describe("cleanHighlights", () => {
         test("should remove highlight state from all highlighted objects", () => {
-            const { handler, addCalls, removeCalls } = setupNodeSelectionHandler();
+            const { handler, removeCalls } = setupNodeSelectionHandler();
 
             const visualObj1 = createMockVisualObject();
             const visualObj2 = createMockVisualObject();
@@ -526,7 +526,7 @@ describe("NodeSelectionHandler", () => {
 
     describe("pointerOut", () => {
         test("should clean up on primary pointer out", () => {
-            const { handler, view, addCalls, removeCalls } = setupNodeSelectionHandler();
+            const { handler, view, removeCalls } = setupNodeSelectionHandler();
 
             // Set up some highlights
             const visualObj = createMockVisualObject();

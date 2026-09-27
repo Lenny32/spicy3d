@@ -3,7 +3,6 @@
 
 import type { EdgeMeshData, FaceMeshData, MeshLike, MeshOption, VertexMeshData } from "@spicy3d/core";
 import {
-    AlwaysDepth,
     BufferAttribute,
     BufferGeometry,
     DoubleSide,

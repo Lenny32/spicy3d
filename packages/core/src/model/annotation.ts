@@ -6,7 +6,6 @@ import { Id } from "../foundation";
 import type { I18nKeys } from "../i18n";
 import { BoundingBox, type XYZ } from "../math";
 import { serializable, serialize } from "../serialize";
-import { Node } from "./node";
 import { VisualNode } from "./visualNode";
 
 export const AnnotationTypes = ["dimension", "text", "refInfiniteLine", "refSegment"] as const;

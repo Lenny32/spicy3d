@@ -336,7 +336,7 @@ describe("SketchEditor constraint badge interaction", () => {
     });
 
     test("Escape clears the constraint selection before the entity selection", () => {
-        const { app, view, badges, editor, handler, restoreFactory } = setupHorizontalLine();
+        const { view, badges, editor, handler, restoreFactory } = setupHorizontalLine();
         try {
             const badge = lastBadge(badges, "H");
             badge.options.onClick({ stopPropagation: rs.fn(), shiftKey: false });

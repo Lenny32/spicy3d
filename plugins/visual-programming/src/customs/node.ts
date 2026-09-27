@@ -224,8 +224,8 @@ export class CustomNodeElement extends LitElement {
                                 ></rete-ref>
                             </span>
                             ${
-                                input && (!input.control || !input.showControl)
-                                    ? html` <div class="input-title">${input?.label}</div>`
+                                !input.control || !input.showControl
+                                    ? html` <div class="input-title">${input.label}</div>`
                                     : null
                             }
                             ${

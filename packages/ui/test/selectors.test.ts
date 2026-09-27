@@ -9,7 +9,6 @@ import { ThemeSelector } from "../src/home/themeSelector";
 
 describe("LanguageSelector", () => {
     let originalLanguage: string;
-    let originalLanguages: ReturnType<typeof I18n.getLanguages>;
 
     beforeEach(() => {
         originalLanguage = Config.instance.language;

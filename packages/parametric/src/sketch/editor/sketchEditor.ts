@@ -39,7 +39,7 @@ import { computeSketchRollback, rollbackRestoreOrder } from "../sketchRollback";
 import { SketchSolver, type SolveOutcome } from "../solver";
 import type { SketchTransform } from "../utilityOperations";
 import * as datumPrompt from "./datumPrompt";
-import { type DimensionAnchor, toDisplayDatum, toStorageDatum } from "./dimensionLayout";
+import { type DimensionAnchor, toDisplayDatum } from "./dimensionLayout";
 import { SketchAnnotationManager } from "./sketchAnnotations";
 import { SketchEventHandler } from "./sketchEventHandler";
 import { SolverFeedback } from "./solverFeedback";

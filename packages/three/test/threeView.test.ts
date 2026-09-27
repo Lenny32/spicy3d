@@ -14,18 +14,15 @@ import {
     Result,
     type ShapeNode,
     ShapeTypes,
-    type VisualNode,
     XY,
     XYZ,
 } from "@spicy3d/core";
 import { TestDocument } from "@spicy3d/core/test-utils";
 import {
-    BufferGeometry,
     DirectionalLight,
     Group,
     Layers,
     type Mesh,
-    MeshBasicMaterial,
     OrthographicCamera,
     PerspectiveCamera,
     Raycaster,
@@ -34,7 +31,6 @@ import {
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { Constants } from "../src/constants";
 import { ThreeGeometry } from "../src/threeGeometry";
-import { ThreeView } from "../src/threeView";
 import type { ThreeVisualContext } from "../src/threeVisualContext";
 import { ThreeComponentObject, ThreeMeshObject, type ThreeVisualObject } from "../src/threeVisualObject";
 import {

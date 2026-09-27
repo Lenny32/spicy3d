@@ -87,7 +87,7 @@ describe("Sew", () => {
 
     describe("executeMainTask", () => {
         test("should add a sewed EditableShapeNode to the root and remove both originals", () => {
-            const { cmd, rootNode, parent1, parent2 } = buildSewCommand();
+            const { cmd, rootNode, parent1 } = buildSewCommand();
 
             (cmd as any).executeMainTask();
 

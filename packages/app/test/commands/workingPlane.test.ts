@@ -277,7 +277,7 @@ describe("FromSection", () => {
             const restoreTx = stubTransactionRun();
             try {
                 const cmd = new FromSection();
-                const { doc } = wireCommand(cmd);
+                wireCommand(cmd);
                 (cmd as any)._application = { activeView: undefined };
 
                 const curve = {

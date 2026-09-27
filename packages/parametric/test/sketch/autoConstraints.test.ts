@@ -64,7 +64,7 @@ describe("applyAutoConstraints", () => {
         solver.solve(true);
 
         expect(added.map((x) => x.kind)).toEqual([ConstraintKind.Horizontal]);
-        const [x1, y1] = solver.pointOf({ entityId: id, pointIndex: 0 });
+        const [, y1] = solver.pointOf({ entityId: id, pointIndex: 0 });
         const [, y2] = solver.pointOf({ entityId: id, pointIndex: 1 });
         expect(Math.abs(y2 - y1)).toBeLessThan(Precision.Distance);
         solver.dispose();

@@ -6,6 +6,7 @@ import type { HTMLProps } from "./htmlProps";
 
 export function setProperties<T extends { [K: string]: any }>(left: T, prop: HTMLProps<T>) {
     for (const key in prop) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
         const value = prop[key];
         if (value instanceof Localize && (key === "textContent" || key === "title")) {
             value.set(left, key);

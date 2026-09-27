@@ -61,7 +61,6 @@ describe("Tip", () => {
 
         test("should not re-add same style class multiple times", () => {
             const tip = new Tip("msg", "info");
-            const classesAfterFirst = tip.className;
             tip.set("msg", "error");
             tip.set("msg", "error"); // same type again
             const classList = Array.from(tip.classList);

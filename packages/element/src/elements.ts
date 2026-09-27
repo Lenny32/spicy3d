@@ -13,7 +13,8 @@ export function createIcon(icon: CommandIcon): Element {
 
     switch (icon.type) {
         case "svg":
-            return createSvgElement(icon.value);
+            // Plugin-supplied markup is untrusted: rendered as an image, SVG cannot run scripts or event handlers.
+            return img({ src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon.value)}` });
         case "png": {
             const base64 = uint8ArrayToBase64(icon.value);
             const dataUrl = `data:image/png;base64,${base64}`;
@@ -34,12 +35,6 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
         binary += String.fromCharCode(bytes[i]);
     }
     return btoa(binary);
-}
-
-function createSvgElement(svgString: string): SVGSVGElement {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgString, "image/svg+xml");
-    return doc.documentElement as unknown as SVGSVGElement;
 }
 
 export function createElement<K extends keyof HTMLElementTagNameMap>(tag: K) {

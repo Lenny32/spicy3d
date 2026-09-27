@@ -157,9 +157,13 @@ describe("createIcon", () => {
         expect(useEl.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#icon-box");
     });
 
-    test("should create SVG element for svg type", () => {
-        const el = createIcon({ type: "svg", value: "<svg><circle/></svg>" });
-        expect(el.tagName).toBe("svg");
+    test("should render svg type as an img data URL so plugin markup cannot run scripts", () => {
+        const markup = '<svg onload="alert(1)"><circle/></svg>';
+        const el = createIcon({ type: "svg", value: markup });
+        expect(el.tagName).toBe("IMG");
+        expect((el as HTMLImageElement).src).toBe(
+            `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`,
+        );
     });
 
     test("should create img for png type", () => {

@@ -103,7 +103,7 @@ describe("VisualNode", () => {
             expect(calls.length).toBeGreaterThanOrEqual(1);
             const lastCall = calls[calls.length - 1];
             expect(lastCall.node).toBe(visualNode);
-            expect(lastCall.visible).toBe(true && true);
+            expect(lastCall.visible).toBe(true);
 
             // Restore original function
             document.visual.context.setVisible = originalSetVisible;

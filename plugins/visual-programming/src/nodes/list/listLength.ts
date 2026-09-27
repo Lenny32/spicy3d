@@ -2,7 +2,6 @@
 // See LICENSE file in the project root for full license information.
 
 import { ClassicPreset } from "rete";
-import { zipTrees } from "../../tree";
 import type { INodeEditor } from "../../types";
 
 export class ListLengthNode extends ClassicPreset.Node<

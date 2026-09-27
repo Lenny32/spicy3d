@@ -4,7 +4,7 @@
 import { VisualConfig } from "../config";
 import type { IDocument } from "../document";
 import { type IEqualityComparer, Logger, PubSub, Result } from "../foundation";
-import { I18n, type I18nKeys } from "../i18n";
+import type { I18nKeys } from "../i18n";
 import { Matrix4 } from "../math";
 import { property } from "../property";
 import { serializable, serialize } from "../serialize";
