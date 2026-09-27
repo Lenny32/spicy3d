@@ -66,6 +66,32 @@ export interface SaveOptions {
     label?: string;
 }
 
+/** A save as it was asked for: why, and its label. */
+export interface SaveIntent {
+    kind: SaveKind;
+    label?: string;
+}
+
+const isManual = (kind: SaveKind) => kind === "manual" || kind === "restore";
+
+/**
+ * The one save several requests share (a follow-up save, or saves made before a push): a merge
+ * stays one, a manual save wins; otherwise the latest save's kind — its snapshot is the one written,
+ * so an agent's `mcp` save that the user's autosave joined afterwards is an `auto` version (it holds
+ * the user's later edits), and an autosave the agent's save joined is the agent's. A label stays only
+ * with the save whose kind the result keeps: an agent's label never ends up on the user's manual save.
+ */
+export function combineSaves(previous: SaveIntent | undefined, next: SaveIntent): SaveIntent {
+    if (!previous) return next;
+    let kind: SaveKind;
+    if (previous.kind === "merge" || next.kind === "merge") kind = "merge";
+    else if (isManual(next.kind)) kind = next.kind;
+    else if (isManual(previous.kind)) kind = previous.kind;
+    else kind = next.kind;
+    const label = kind === next.kind ? next.label : kind === previous.kind ? previous.label : undefined;
+    return label ? { kind, label } : { kind };
+}
+
 export interface SaveRequest {
     id: string;
     name: string;

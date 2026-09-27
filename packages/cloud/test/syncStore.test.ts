@@ -12,6 +12,7 @@ import {
 } from "../src/documents/blobCache";
 import {
     combineKinds,
+    combinePending,
     IndexedDbSyncStore,
     type PendingKind,
     retainedBlobs,
@@ -140,12 +141,30 @@ describe("sync store", () => {
         ["merge", "manual", "merge"],
         ["auto", "restore", "manual"],
         ["auto", "mcp", "mcp"],
+        // The user's later autosave holds their own edits too: no longer the agent's version.
+        ["mcp", "auto", "auto"],
+        ["mcp", "manual", "manual"],
+        ["manual", "mcp", "manual"],
     ] as [
         PendingKind | undefined,
         SaveKind,
         PendingKind,
     ][])("pending %s + %s → %s", (pending, next, expected) => {
         expect(combineKinds(pending, next)).toBe(expected);
+    });
+
+    test("an agent's label stays only while the push is the agent's save", () => {
+        expect(combinePending(undefined, undefined, "mcp", "Agent: hole")).toEqual({
+            kind: "mcp",
+            label: "Agent: hole",
+        });
+        // The user's later autosave or a manual save joined: their version, not labelled as the agent's.
+        expect(combinePending("mcp", "Agent: hole", "auto", undefined)).toEqual({ kind: "auto" });
+        expect(combinePending("mcp", "Agent: hole", "manual", undefined)).toEqual({ kind: "manual" });
+        expect(combinePending("manual", undefined, "mcp", "Agent: hole")).toEqual({ kind: "manual" });
+        // The agent's next save carries its own label (or none).
+        expect(combinePending("mcp", "first", "mcp", "second")).toEqual({ kind: "mcp", label: "second" });
+        expect(combinePending("auto", undefined, "mcp", "late")).toEqual({ kind: "mcp", label: "late" });
     });
 
     test("a pending record keeps its snapshot and its base; a clean one keeps nothing", () => {

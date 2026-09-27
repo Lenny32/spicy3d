@@ -258,6 +258,27 @@ describe("Document", () => {
             expect(repository.saves[1].label).toBeUndefined();
         });
 
+        test("an autosave joining an agent's queued save makes it the user's: auto, the label dropped", async () => {
+            const release: (() => void)[] = [];
+            repository.save = async (request) => {
+                repository.saves.push(request);
+                await new Promise<void>((resolve) => release.push(resolve));
+                return Result.ok({ status: "saved", updatedAt: 1 });
+            };
+
+            const first = document.save("manual");
+            const second = document.save("mcp", { label: "Agent: hole" });
+            const third = document.save("auto");
+            release.shift()!();
+            await first;
+            await rs.waitFor(() => expect(repository.saves).toHaveLength(2));
+            release.shift()!();
+            await Promise.all([second, third]);
+
+            expect(repository.saves[1].kind).toBe("auto");
+            expect(repository.saves[1].label).toBeUndefined();
+        });
+
         test("settled waits for the running and queued saves", async () => {
             let finish!: () => void;
             repository.save = async (request) => {

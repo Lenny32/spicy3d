@@ -5,6 +5,7 @@ import {
     type Act,
     AnalysisManager,
     type CloseDocumentOptions,
+    combineSaves,
     DOCUMENT_FORMAT_VERSION,
     type DocumentFormatError,
     DocumentMigrations,
@@ -45,9 +46,6 @@ import { registerPrerequisiteInspectAnalyses } from "./analysis/prerequisites";
 import { Picker } from "./picker";
 import { askToSaveChanges } from "./saveChangesPrompt";
 import { SelectionManager } from "./selectionManager";
-
-/** The kind a shared follow-up save takes: manual wins, an agent's save wins over an autosave. */
-const SAVE_KIND_RANK: Record<SaveKind, number> = { auto: 0, mcp: 1, merge: 1, restore: 1, manual: 2 };
 
 interface FollowUpSave {
     kind: SaveKind;
@@ -177,16 +175,17 @@ export class Document extends Observable implements IDocument {
     /**
      * Saves one at a time: a save requested while one runs waits for it (its base version is the
      * one that save produces, so the two never conflict with each other), and every request made
-     * meanwhile shares that single follow-up save — of the strongest kind asked for (manual, then
-     * mcp, then auto) and with the last label given.
+     * meanwhile shares that single follow-up save, its kind and label combined by `combineSaves`
+     * (manual wins, else the latest request's kind; a label only with the kind it was given for).
      */
     save(
         kind: SaveKind = "manual",
         options: SaveOptions = {},
     ): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         if (this.followUp) {
-            if (SAVE_KIND_RANK[kind] > SAVE_KIND_RANK[this.followUp.kind]) this.followUp.kind = kind;
-            if (options.label) this.followUp.label = options.label;
+            const combined = combineSaves(this.followUp, { kind, label: options.label });
+            this.followUp.kind = combined.kind;
+            this.followUp.label = combined.label;
             return this.followUp.promise;
         }
         if (!this.running) return this.startSave(kind, options.label);
