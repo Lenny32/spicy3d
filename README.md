@@ -57,7 +57,43 @@ npm run format  # Biome + clang-format
 
 The WebAssembly module is prebuilt and committed. To rebuild it from `cpp/`, run `npm run setup:wasm` once, then `npm run build:wasm`.
 
-With Docker, `docker compose up -d` builds the app and serves it on port 8080.
+With Docker, `docker compose up -d` builds the app and serves it on port 8080 (local documents only).
+
+### Development with a server
+
+Accounts, cloud documents and remote MCP need a [SpicySrv](https://github.com/Lenny32/SpicySrv) (private). The
+dev server can proxy the server's paths (`/api/*`, `/ws/*`, `/mcp`, `/mcp/*`) so the app and the API share one
+origin, like behind the server's proxy in production:
+
+```bash
+# in the SpicySrv checkout: PostgreSQL, then the API on http://localhost:5080
+docker run -d --name spicy-db -p 5432:5432 \
+  -e POSTGRES_USER=spicy -e POSTGRES_PASSWORD=spicy -e POSTGRES_DB=spicy postgres:18.6-alpine
+Spicy__PublicUrl=http://localhost:8080 dotnet run --project src/Spicy.Api
+
+# here: open http://localhost:8080, the account button appears in the title bar
+SPICY3D_API_URL=http://localhost:5080 npm run dev
+```
+
+- `Spicy__PublicUrl` must be the address you open, exactly (`http://localhost:8080`; `127.0.0.1` is another
+  origin): the server accepts unsafe requests and WebSockets only from that origin, and its email links point there.
+  Another dev port: `npm run dev -- --port 8180` and `Spicy__PublicUrl=http://localhost:8180`.
+- Plain `http` works on `localhost` only. `localhost` is a secure context, so the browser keeps the server's
+  `__Host-spicy_session` cookie (Secure); `http://<lan-ip>:8080` (e.g. from a phone) is not: signing in "works", then
+  every request is 401. For other devices use the server's compose stack with TLS (`SPICY_TLS=internal`).
+- With the Aspire AppHost (`aspire run` in SpicySrv, adds smtp4dev for email), change its `Spicy__PublicUrl` line in
+  `src/Spicy.AppHost/AppHost.cs` to the dev server's origin and point `SPICY3D_API_URL` at the API endpoint it prints.
+- `SPICY3D_API_URL` is the API's own address (scheme, host, port; e.g. `http://localhost:5080` or
+  `http://127.0.0.1:5080`), read when the dev server starts. The browser's `Host` and `Origin` (the dev server's) are
+  passed on unchanged, as SpicySrv's proxy does. Without it nothing is proxied and the app stays local-only.
+
+### Deployment
+
+The same build runs on a LAN-only server and on a public host; per-deployment settings (MCP bridge downloads, the
+assistant's LLM endpoints) go in `deployment.json`. The Docker image (`spicy3d-web`, port 8080, non-root, read-only)
+is what SpicySrv's compose runs. See [docs/deployment.md](docs/deployment.md). Checks: `npm run check:urls` (no
+external URLs), `npm run smoke` (the build in headless Chromium with other origins blocked; needs
+`npx playwright install chromium-headless-shell` once).
 
 ## Layout
 

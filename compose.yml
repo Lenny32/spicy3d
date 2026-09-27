@@ -1,7 +1,14 @@
+# The web app alone (no server: local documents only), run like SpicySrv's compose runs the image.
+# With a server, use SpicySrv's deploy/ compose instead; it pulls this image as spicy3d-web:<version>.
 services:
   spicy3d:
     build:
       dockerfile: Dockerfile
+    image: spicy3d-web:local
     restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     ports:
-      - "8080:80"
+      - "8080:8080"

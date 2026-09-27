@@ -17,6 +17,7 @@ import {
 } from "@spicy3d/core";
 import { div, hr, toBase64Img } from "@spicy3d/element";
 import type JSZip from "jszip";
+import { linkPluginModules, type PluginModuleSource } from "./pluginModules";
 
 const untrustedDomains: string[] = [];
 
@@ -124,16 +125,8 @@ export class PluginManager implements IPluginManager {
             return;
         }
 
-        const importmap = await this.getImportmapFromZip(zip, manifest);
-        if (importmap) {
-            this.injectImportmap(JSON.stringify(importmap));
-
-            this.shouldRevokes.set(manifest.name, Object.values(importmap.imports));
-        }
-
         const code = await codeFile.async("text");
-        const blob = new Blob([code], { type: "application/javascript" });
-        const blobUrl = URL.createObjectURL(blob);
+        const blobUrl = await this.linkZipModules(zip, manifest, code);
         await Promise.try(async () => {
             const handlePluginIcon = async (plugin: Plugin) => {
                 await this.transformZipCommandIcon(zip, plugin);
@@ -159,11 +152,66 @@ export class PluginManager implements IPluginManager {
         };
 
         if (importmapPath) {
+            const linked = await this.linkUrlModules(name, baseUrl, importmapPath, {
+                code: await response.text(),
+                url: fullUrl,
+            });
+            if (linked) {
+                await this.loadMainCode(name, linked, handlePluginIcon).finally(() =>
+                    URL.revokeObjectURL(linked),
+                );
+                await this.loadCssFromUrl(baseUrl, name);
+                return;
+            }
             await this.loadImportmapFromUrl(baseUrl, importmapPath);
         }
 
         await this.loadMainCode(name, fullUrl, handlePluginIcon);
         await this.loadCssFromUrl(baseUrl, name);
+    }
+
+    /**
+     * A served plugin with an import map: its entry and mapped modules fetched and linked into
+     * blob: URLs (`linkPluginModules`) instead of an inline import map, which a strict CSP blocks.
+     * The entry then runs from a blob: URL (its `import.meta.url` is not the served file). Undefined
+     * (use the inline map) for a map with `scopes`, a module that can't be fetched, or a cycle.
+     */
+    private async linkUrlModules(
+        name: string,
+        baseUrl: string,
+        importmapPath: string,
+        main: PluginModuleSource,
+    ): Promise<string | undefined> {
+        const path = importmapPath.startsWith("/") ? importmapPath.substring(1) : importmapPath;
+        const importmapUrl = baseUrl + path;
+        try {
+            const response = await fetch(importmapUrl);
+            if (!response.ok) return undefined;
+            const json = await response.json();
+            if (json.scopes) {
+                Logger.warn(`[plugin] ${name}: its import map has scopes; using an inline import map`);
+                return undefined;
+            }
+            const sources: Record<string, PluginModuleSource> = {};
+            for (const [specifier, target] of Object.entries<string>(json.imports ?? {})) {
+                const url = new URL(target, importmapUrl).href;
+                const module = await fetch(url);
+                if (!module.ok) return undefined;
+                sources[specifier] = { code: await module.text(), url };
+            }
+            const linked = linkPluginModules(main, sources);
+            if (!linked.isOk) {
+                Logger.warn(`[plugin] ${name}: ${linked.error}; using an inline import map`);
+                return undefined;
+            }
+            this.shouldRevokes.set(name, linked.value.imports);
+            return linked.value.main;
+        } catch (error) {
+            Logger.warn(
+                `[plugin] ${name}: could not link its modules (${error}); using an inline import map`,
+            );
+            return undefined;
+        }
     }
 
     private async loadImportmapFromUrl(baseUrl: string, importmapPath: string) {
@@ -452,10 +500,44 @@ export class PluginManager implements IPluginManager {
         }
     }
 
+    /**
+     * The blob: URL of an archive's entry module, its import map applied by `linkPluginModules`
+     * (no inline import map, which a strict CSP blocks). A map with `scopes`, or modules importing
+     * each other in a cycle, fall back to an injected <script type="importmap">.
+     */
+    private async linkZipModules(zip: JSZip, manifest: PluginManifest, code: string): Promise<string> {
+        const importmap = await this.getImportmapFromZip(zip, manifest);
+        if (!importmap) return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+
+        let reason = "its import map has scopes";
+        if (!importmap.scopes) {
+            const linked = linkPluginModules({ code }, importmap.sources);
+            if (linked.isOk) {
+                this.shouldRevokes.set(manifest.name, linked.value.imports);
+                return linked.value.main;
+            }
+            reason = linked.error;
+        }
+        Logger.warn(
+            `[plugin] ${manifest.name}: ${reason}; using an inline import map, which a ` +
+                "Content-Security-Policy without 'unsafe-inline' blocks",
+        );
+        const imports: Record<string, string> = {};
+        for (const [specifier, source] of Object.entries(importmap.sources)) {
+            imports[specifier] = URL.createObjectURL(new Blob([source.code], { type: "text/javascript" }));
+        }
+        this.injectImportmap(JSON.stringify({ ...importmap.json, imports }));
+        this.shouldRevokes.set(manifest.name, Object.values(imports));
+        return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+    }
+
     private async getImportmapFromZip(
         zip: JSZip,
         manifest: PluginManifest,
-    ): Promise<{ imports: Record<string, string> } | undefined> {
+    ): Promise<
+        | { json: Record<string, unknown>; sources: Record<string, PluginModuleSource>; scopes: boolean }
+        | undefined
+    > {
         if (!manifest.importmap) return undefined;
 
         const codeFile = zip.file(manifest.importmap);
@@ -466,19 +548,17 @@ export class PluginManager implements IPluginManager {
 
         const importmap = await codeFile.async("text");
         const json = JSON.parse(importmap);
+        const sources: Record<string, PluginModuleSource> = {};
         for (const key in json.imports) {
             const importFile = zip.file(json.imports[key]);
             if (!importFile) {
                 alert(`${json.imports[key]} not found in plugin archive`);
                 continue;
             }
-            const importCode = await importFile.async("text");
-            const blob = new Blob([importCode], { type: "application/javascript" });
-            const blobUrl = URL.createObjectURL(blob);
-            json.imports[key] = blobUrl;
+            sources[key] = { code: await importFile.async("text") };
         }
 
-        return json;
+        return { json, sources, scopes: json.scopes !== undefined };
     }
 
     private injectImportmap(importmapJson: string) {

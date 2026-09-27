@@ -27,6 +27,8 @@ export default {
         "ai.error.prefix": "Error: {0}",
         "ai.error.unknownRef":
             'Unknown ref "{0}". Available refs: {1} — a ref exists only after the op defining it has run; check op order, and do not guess ids from numbering patterns.',
+        "ai.error.unreachable":
+            "Can't reach {0} ({1}). Check the network connection; on a network without internet access, choose an endpoint that is reachable from here in the chat settings (ask your administrator).",
         "ai.history": "Conversations",
         "ai.historyDelete": 'Delete "{0}"?',
         "ai.historyEmpty": "No conversations yet",
@@ -49,6 +51,8 @@ export default {
         "ai.untitled": "New conversation",
         "ai.workedFor": "Worked for {0}",
         "ai.working": "Working…",
+        "app.insecureContext":
+            "This page is served over plain HTTP, so the browser disables secure features: accounts and cloud documents, copy to clipboard, saving back to files. Open it over HTTPS (ask your administrator).",
         "arc.angle": "Angle",
         "arc.start": "Start",
         "axis.x": "X Axis",

@@ -9,6 +9,7 @@ export * from "./config";
 export * from "./constants";
 export * from "./construction";
 export * from "./dataExchange";
+export * from "./deploymentConfig";
 export * from "./document";
 export * from "./documentContent";
 export * from "./documentDiff";

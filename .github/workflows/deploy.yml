@@ -59,7 +59,7 @@ jobs:
 
             - run: npm run test
 
-            # Packs the npx bridge tarball into public/mcp/, bundles the app, builds the plugins.
+            # Packs the npx bridge tarball into public/downloads/mcp-bridge/, bundles the app, builds the plugins.
             - name: Build
               run: npm run build
               env:
@@ -68,7 +68,7 @@ jobs:
             - name: Check output
               run: |
                   test -f dist/index.html
-                  ls dist/mcp/spicy3d-mcp-bridge-*.tgz
+                  ls dist/downloads/mcp-bridge/spicy3d-mcp-bridge-*.tgz
                   ls dist/*.wasm
 
             - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

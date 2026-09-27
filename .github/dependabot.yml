@@ -11,3 +11,14 @@ updates:
       groups:
           actions:
               patterns: ["*"]
+
+    # The Dockerfile's digest-pinned base images (node, nginx-unprivileged).
+    - package-ecosystem: docker
+      directory: /
+      schedule:
+          interval: weekly
+      cooldown:
+          default-days: 7
+      groups:
+          docker:
+              patterns: ["*"]
