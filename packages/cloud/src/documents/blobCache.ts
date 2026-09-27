@@ -13,13 +13,22 @@ import { Logger } from "@spicy3d/core";
 export interface IBlobCache {
     get(sha256: string): Promise<Uint8Array | undefined>;
     put(sha256: string, bytes: Uint8Array): Promise<void>;
+    /**
+     * `put` that fails instead of logging (a full disk, private mode): what a pending save points at
+     * must really be stored before the save is reported kept.
+     */
+    putStrict(sha256: string, bytes: Uint8Array): Promise<void>;
     clear(): Promise<void>;
     /**
      * Removes least recently used entries until the cache holds at most `maxBytes`, never one of
-     * `keep`. Resolves the bytes removed.
+     * `keep` nor one written or read within {@link EVICTION_GRACE_MS} (a save running meanwhile
+     * may have just written it, after `keep` was computed). Resolves the bytes removed.
      */
     evict(maxBytes: number, keep: ReadonlySet<string>): Promise<number>;
 }
+
+/** Entries used this recently are never evicted (see `IBlobCache.evict`). */
+export const EVICTION_GRACE_MS = 60_000;
 
 /** Least recently used first: `Map` keeps insertion order and a read moves the entry to the end. */
 export class MemoryBlobCache implements IBlobCache {
@@ -30,6 +39,7 @@ export class MemoryBlobCache implements IBlobCache {
         if (bytes) {
             this.entries.delete(sha256);
             this.entries.set(sha256, bytes);
+            this.usedAt.set(sha256, this.now());
         }
         return bytes;
     }
@@ -37,19 +47,33 @@ export class MemoryBlobCache implements IBlobCache {
     async put(sha256: string, bytes: Uint8Array) {
         this.entries.delete(sha256);
         this.entries.set(sha256, bytes);
+        this.usedAt.set(sha256, this.now());
     }
+
+    async putStrict(sha256: string, bytes: Uint8Array) {
+        if (this.failWrites) throw Object.assign(new Error("quota"), { name: "QuotaExceededError" });
+        await this.put(sha256, bytes);
+    }
+
+    /** Tests: every strict write fails like a full disk. */
+    failWrites = false;
+    private readonly usedAt = new Map<string, number>();
+
+    constructor(private readonly now: () => number = () => Date.now()) {}
 
     async clear() {
         this.entries.clear();
+        this.usedAt.clear();
     }
 
     async evict(maxBytes: number, keep: ReadonlySet<string>): Promise<number> {
         let total = 0;
         for (const bytes of this.entries.values()) total += bytes.byteLength;
         let freed = 0;
+        const recent = this.now() - EVICTION_GRACE_MS;
         for (const [sha, bytes] of [...this.entries]) {
             if (total - freed <= maxBytes) break;
-            if (keep.has(sha)) continue;
+            if (keep.has(sha) || (this.usedAt.get(sha) ?? 0) >= recent) continue;
             this.entries.delete(sha);
             freed += bytes.byteLength;
         }
@@ -159,17 +183,21 @@ export class IndexedDbBlobCache implements IBlobCache {
 
     async put(sha256: string, bytes: Uint8Array): Promise<void> {
         try {
-            const [blobs, meta] = await this.stores("readwrite");
-            const now = this.now();
-            this.touched.set(sha256, now);
-            await Promise.all([
-                idbRequest(blobs.put(bytes, sha256)),
-                idbRequest(meta.put({ size: bytes.byteLength, usedAt: now } satisfies BlobMeta, sha256)),
-            ]);
+            await this.putStrict(sha256, bytes);
         } catch (error) {
             // Quota or private mode: the next load downloads it again.
             Logger.warn(`[cloud] cache write failed: ${error}`);
         }
+    }
+
+    async putStrict(sha256: string, bytes: Uint8Array): Promise<void> {
+        const [blobs, meta] = await this.stores("readwrite");
+        const now = this.now();
+        this.touched.set(sha256, now);
+        await Promise.all([
+            idbRequest(blobs.put(bytes, sha256)),
+            idbRequest(meta.put({ size: bytes.byteLength, usedAt: now } satisfies BlobMeta, sha256)),
+        ]);
     }
 
     async clear(): Promise<void> {
@@ -194,9 +222,11 @@ export class IndexedDbBlobCache implements IBlobCache {
             let total = entries.reduce((sum, x) => sum + x.size, 0);
             if (total <= maxBytes) return 0;
             const victims: string[] = [];
+            const recent = this.now() - EVICTION_GRACE_MS;
             for (const entry of entries.sort((a, b) => a.usedAt - b.usedAt)) {
                 if (total <= maxBytes) break;
-                if (keep.has(entry.sha)) continue;
+                const used = Math.max(entry.usedAt, this.touched.get(entry.sha) ?? 0);
+                if (keep.has(entry.sha) || used >= recent) continue;
                 victims.push(entry.sha);
                 total -= entry.size;
             }

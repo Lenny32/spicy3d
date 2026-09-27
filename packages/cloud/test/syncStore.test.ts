@@ -6,6 +6,7 @@ import { Logger, type SaveKind } from "@spicy3d/core";
 import {
     BLOB_META_STORE,
     CLOUD_CACHE_DB,
+    EVICTION_GRACE_MS,
     IndexedDbBlobCache,
     MemoryBlobCache,
 } from "../src/documents/blobCache";
@@ -34,11 +35,13 @@ afterEach(() => {
 
 describe("blob cache LRU", () => {
     test("memory: least recently used first, never one kept", async () => {
-        const cache = new MemoryBlobCache();
+        let now = 0;
+        const cache = new MemoryBlobCache(() => now);
         await cache.put("a", bytes(10));
         await cache.put("b", bytes(10));
         await cache.put("c", bytes(10));
         await cache.get("a");
+        now = EVICTION_GRACE_MS + 1;
 
         const freed = await cache.evict(20, new Set(["b"]));
 
@@ -69,6 +72,25 @@ describe("blob cache LRU", () => {
         expect(await cache.get("kept")).toEqual(bytes(40));
         expect(await cache.get("old")).toEqual(bytes(40));
         expect([...factory.store(CLOUD_CACHE_DB, BLOB_META_STORE)!.keys()].sort()).toEqual(["kept", "old"]);
+    });
+
+    test.each([
+        "memory",
+        "IndexedDB",
+    ])("%s: an entry written or read within the grace period is never evicted (a save may be writing it)", async (kind) => {
+        let now = 0;
+        const cache =
+            kind === "memory"
+                ? new MemoryBlobCache(() => now)
+                : new IndexedDbBlobCache(new FakeIndexedDbFactory().asFactory(), () => now);
+        await cache.put("old", bytes(10));
+        now = 10 * EVICTION_GRACE_MS;
+        await cache.put("fresh", bytes(10));
+        now += EVICTION_GRACE_MS - 1;
+
+        expect(await cache.evict(0, new Set())).toBe(10);
+        expect(await cache.get("old")).toBeUndefined();
+        expect(await cache.get("fresh")).toEqual(bytes(10));
     });
 
     test("IndexedDB: under the cap, nothing goes", async () => {
