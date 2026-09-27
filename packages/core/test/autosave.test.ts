@@ -117,6 +117,22 @@ describe("AutosaveSettings", () => {
         expect(offline.localIntervalMinutes).toBe(5);
     });
 
+    test("forgetAccount drops a cached account value even when nothing is attached", () => {
+        const kept = storage();
+        const first = new AutosaveSettings(kept);
+        first.intervalMinutes = 1;
+        first.attach({ save: () => {} }, "user-1");
+        first.applyStoreValue(30);
+        const later = new AutosaveSettings(kept);
+        expect(later.intervalMinutes).toBe(30);
+
+        later.forgetAccount();
+
+        expect(later.intervalMinutes).toBe(1);
+        expect(later.accountCache).toBeUndefined();
+        expect(kept.value(AutosaveSettings.ACCOUNT_STORAGE_KEY)).toBeUndefined();
+    });
+
     test("without a store, a store value is ignored", () => {
         const settings = new AutosaveSettings(storage());
         settings.applyStoreValue(30);

@@ -107,10 +107,12 @@ export class CloudUserSettings implements IAutosaveSettingsStore {
             this.server = undefined;
             void this.refresh();
         } else if (status === "signedOut") {
-            this.detach?.();
+            // Also when never attached: a value cached for a user of an earlier session (whose
+            // session ended meanwhile) must not keep applying, nor take this device's changes.
             this.detach = undefined;
             this.attachedUser = undefined;
             this.server = undefined;
+            this.settings.forgetAccount();
         }
         // `unknown` (not asked yet, or offline) and `expired`: the cached value keeps applying.
     }

@@ -120,11 +120,18 @@ export class AutosaveSettings extends Observable {
         }
         this.setProperty("intervalMinutes", cached.intervalMinutes);
         return () => {
-            if (this.store !== store) return;
-            this.store = undefined;
-            this.storage.remove(AutosaveSettings.ACCOUNT_STORAGE_KEY);
-            this.setProperty("intervalMinutes", this.localIntervalMinutes);
+            if (this.store === store) this.forgetAccount();
         };
+    }
+
+    /**
+     * Signed out (or the cached user turned out not to be signed in any more): the store is
+     * detached, the account's cached value forgotten and the local value applies again.
+     */
+    forgetAccount(): void {
+        this.store = undefined;
+        this.storage.remove(AutosaveSettings.ACCOUNT_STORAGE_KEY);
+        this.setProperty("intervalMinutes", this.localIntervalMinutes);
     }
 
     /** The server's value (it may come from another device): applied and cached, not sent back. */

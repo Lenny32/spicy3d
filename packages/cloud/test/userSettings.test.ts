@@ -229,6 +229,56 @@ describe("CloudUserSettings", () => {
         cloud.dispose();
     });
 
+    test("a cached account whose session ended is forgotten at startup (401 → signed out)", async () => {
+        const server = new FakeServer();
+        new FakeSettingsServer(server);
+        const kept = new ObjectStorage("spicy3d-test", `settings-${Math.random()}`);
+        const previous = new AutosaveSettings(kept);
+        previous.intervalMinutes = 2;
+        previous.attach({ save: () => {} }, "user-old");
+        previous.applyStoreValue(30);
+        // Next startup: the cached account value applies until the session is known.
+        const settings = new AutosaveSettings(kept);
+        expect(settings.intervalMinutes).toBe(30);
+        const account = accountOn(server);
+        const cloud = new CloudUserSettings(account, { settings });
+
+        server.on("GET /api/me", problem(401, "unauthorized"));
+        await account.refresh();
+
+        expect(account.status).toBe("signedOut");
+        expect(settings.intervalMinutes).toBe(2);
+        expect(settings.accountCache).toBeUndefined();
+        settings.intervalMinutes = 10;
+        expect(settings.accountCache).toBeUndefined();
+        expect(settings.localIntervalMinutes).toBe(10);
+        cloud.dispose();
+    });
+
+    test("another user signing in starts from this device's value, not the previous user's", async () => {
+        const server = new FakeServer();
+        const remote = new FakeSettingsServer(server);
+        remote.saveElsewhere({ intervalMinutes: 30, enabled: true });
+        const settings = localSettings(2);
+        const account = await signedInAccount(server);
+        const cloud = new CloudUserSettings(account, { settings });
+        await cloud.settled();
+        expect(settings.intervalMinutes).toBe(30);
+
+        // The other user's server has no settings yet: this device's value is uploaded for them.
+        const other = { ...USER, id: "0190a0c2-0000-7000-8000-00000000000b", email: "grace@example.test" };
+        remote.settings = {};
+        remote.version = 0;
+        server.on("GET /api/me", json(200, other));
+        await account.refresh();
+        await cloud.settled();
+
+        expect(settings.accountCache?.userId).toBe(other.id);
+        expect(settings.intervalMinutes).toBe(2);
+        expect(remote.settings).toEqual({ autosave: { intervalMinutes: 2, enabled: true } });
+        cloud.dispose();
+    });
+
     test("the account settings section shows the value, changes it and re-reads the server", async () => {
         const server = new FakeServer();
         const remote = new FakeSettingsServer(server);
