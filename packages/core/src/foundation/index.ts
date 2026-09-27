@@ -8,6 +8,7 @@ export * from "./comparers";
 export * from "./converter";
 export * from "./deepObserver";
 export * from "./disposable";
+export * from "./documentRepository";
 export * from "./dto";
 export * from "./equalityComparer";
 export * from "./gc";

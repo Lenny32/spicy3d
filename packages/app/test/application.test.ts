@@ -3,9 +3,21 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { ICommand, IDocument, IView, IVisualFactory, Serialized } from "@spicy3d/core";
-import { DOCUMENT_FORMAT_VERSION, Logger, ObservableCollection, PubSub } from "@spicy3d/core";
-import { createMockView, createMockVisualWithDocument } from "@spicy3d/core/test-utils";
+import {
+    DOCUMENT_FORMAT_VERSION,
+    encodeDocumentFile,
+    Logger,
+    ObservableCollection,
+    PubSub,
+} from "@spicy3d/core";
+import {
+    createMockView,
+    createMockVisualWithDocument,
+    MemoryDocumentRepository,
+} from "@spicy3d/core/test-utils";
 import { Application } from "../src/application";
+import { saveDocumentFile } from "../src/documentFiles";
+import { LocalDocumentRepository } from "../src/repositories";
 
 // IMPORTANT: Application constructor calls setCurrentApplication(this), which
 // throws if called more than once per module. We can only create ONE Application
@@ -289,6 +301,27 @@ describe("Application", () => {
             expect(doc!.id).toBe("doc-456");
         });
 
+        test("a document opened from the local storage saves back there", async () => {
+            sharedApp.storage.get = async () => validData;
+
+            const doc = await sharedApp.openDocument("doc-456");
+
+            expect(sharedApp.repositories.local).toBeInstanceOf(LocalDocumentRepository);
+            expect(doc!.repository).toBe(sharedApp.repositories.local);
+            expect(doc!.isDirty).toBe(false);
+        });
+
+        test("a document remembers the repository it was opened from", async () => {
+            const repository = new MemoryDocumentRepository();
+            await repository.save({ id: "doc-456", name: "SavedDoc", data: validData, kind: "manual" });
+
+            const doc = await sharedApp.openDocument("doc-456", repository);
+
+            expect(doc!.repository).toBe(repository);
+            await doc!.save();
+            expect(repository.saves.map((x) => x.id)).toEqual(["doc-456", "doc-456"]);
+        });
+
         test("should set activeView after opening document", async () => {
             sharedApp.storage.get = async () => validData;
 
@@ -431,6 +464,12 @@ describe("Application", () => {
             expect(result.opens[0]).toBe(cdFile);
             expect(result.imports).toHaveLength(0);
             expect(result.plugins).toHaveLength(0);
+        });
+
+        test("should group .spicy files as opens", () => {
+            const result = callGroupFiles([new File([""], "model.spicy"), new File([""], "B.SPICY")]);
+            expect(result.opens).toHaveLength(2);
+            expect(result.imports).toHaveLength(0);
         });
 
         test("should be case-insensitive for .cd extension", () => {
@@ -582,6 +621,73 @@ describe("Application", () => {
     });
 
     // ==========================================================================
+    // Dropping .spicy files
+    // ==========================================================================
+    describe("dropping a .spicy file", () => {
+        function dropEvent(dataTransfer: unknown) {
+            const event = new DragEvent("drop", { bubbles: true, cancelable: true });
+            Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+            return event;
+        }
+
+        function captureOpen() {
+            const callbacks: (() => Promise<void>)[] = [];
+            PubSub.default.sub("showPermanent", (callback: () => Promise<void>) => {
+                callbacks.push(callback);
+            });
+            return async () => {
+                for (const callback of callbacks) await callback();
+            };
+        }
+
+        test("opens the gzipped document", async () => {
+            const file = new File(
+                [await encodeDocumentFile(makeSerializedDocData("Dropped", "spicy-1"))],
+                "part.spicy",
+            );
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            const runOpen = captureOpen();
+
+            (sharedApp as any).handleDrop(dropEvent(dt));
+            await runOpen();
+
+            const doc = [...sharedApp.documents].find((d) => d.id === "spicy-1");
+            expect(doc?.name).toBe("Dropped");
+            expect(doc!.repository).toBe(sharedApp.repositories.local);
+        });
+
+        test("keeps the dropped file's handle so saving writes back to it", async () => {
+            const file = new File(
+                [await encodeDocumentFile(makeSerializedDocData("Handled", "spicy-2"))],
+                "part.spicy",
+            );
+            const written: Blob[] = [];
+            const handle = {
+                kind: "file",
+                name: "part.spicy",
+                createWritable: async () => ({
+                    write: async (blob: Blob) => {
+                        written.push(blob);
+                    },
+                    close: async () => {},
+                }),
+            } as unknown as FileSystemFileHandle;
+            const item = { kind: "file", getAsFile: () => file, getAsFileSystemHandle: async () => handle };
+            const runOpen = captureOpen();
+
+            (sharedApp as any).handleDrop(dropEvent({ files: [file], items: [item] }));
+            await runOpen();
+            const doc = [...sharedApp.documents].find((d) => d.id === "spicy-2");
+            expect(doc).not.toBeUndefined();
+            const saved = await saveDocumentFile(doc!);
+
+            expect(saved.unchecked()).toBe("written");
+            expect(written).toHaveLength(1);
+        });
+    });
+
+    // ==========================================================================
     // Drag event handlers
     // ==========================================================================
     describe("drag event handlers", () => {
@@ -668,8 +774,8 @@ describe("Application", () => {
     // beforeunload handler
     // ==========================================================================
     describe("handleWindowUnload", () => {
-        test("should prevent close when activeView is set", () => {
-            sharedApp.activeView = createMockView();
+        test("should prevent close while a document has unsaved changes", () => {
+            sharedApp.documents.add({ isDirty: true } as IDocument);
 
             const event = new Event("beforeunload") as BeforeUnloadEvent;
             let prevented = false;
@@ -679,14 +785,21 @@ describe("Application", () => {
 
             (sharedApp as any).handleWindowUnload(event);
             expect(prevented).toBe(true);
+            expect(event.returnValue).toBe("");
         });
 
-        test("should set returnValue when activeView is set", () => {
+        test("should not prevent close when every open document is saved", () => {
             sharedApp.activeView = createMockView();
+            sharedApp.documents.add({ isDirty: false } as IDocument);
+
             const event = new Event("beforeunload") as BeforeUnloadEvent;
+            let prevented = false;
+            event.preventDefault = () => {
+                prevented = true;
+            };
 
             (sharedApp as any).handleWindowUnload(event);
-            expect(event.returnValue).toBe("");
+            expect(prevented).toBe(false);
         });
 
         test("should not prevent close when activeView is undefined", () => {

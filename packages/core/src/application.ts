@@ -4,13 +4,25 @@
 import type { CommandKeys, ICommand } from "./command";
 import type { IDataExchange } from "./dataExchange";
 import type { IDocument } from "./document";
-import type { IPropertyChanged, IStorage, ObservableCollection } from "./foundation";
+import type {
+    DocumentRepositories,
+    IDocumentRepository,
+    IPropertyChanged,
+    IStorage,
+    ObservableCollection,
+} from "./foundation";
 import type { IPluginManager } from "./plugin";
 import type { Serialized } from "./serialize";
 import type { IService } from "./service";
 import type { IShapeConverter, IShapeFactory, IShapeProvider } from "./shape";
 import type { IWindow } from "./ui/window";
 import type { IView, IVisualFactory } from "./visual";
+
+/** Where an opened document came from, so it saves back there. */
+export interface DocumentSource {
+    repository?: IDocumentRepository;
+    version?: string;
+}
 
 export interface IApplication extends IPropertyChanged {
     readonly mainWindow?: IWindow;
@@ -19,6 +31,8 @@ export interface IApplication extends IPropertyChanged {
     readonly shapeProvider: IShapeProvider;
     readonly services: IService[];
     readonly storage: IStorage;
+    /** Document persistence: `local` always, `cloud` while signed in. */
+    readonly repositories: DocumentRepositories;
     readonly views: ObservableCollection<IView>;
     readonly documents: Set<IDocument>;
     readonly pluginManager: IPluginManager;
@@ -26,8 +40,10 @@ export interface IApplication extends IPropertyChanged {
     executingCommand: ICommand | undefined;
     activeView: IView | undefined;
     newDocument(name: string): Promise<IDocument>;
-    openDocument(id: string): Promise<IDocument | undefined>;
-    loadDocument(data: Serialized): Promise<IDocument | undefined>;
+    /** Opens a stored document; `repository` defaults to the local one. */
+    openDocument(id: string, repository?: IDocumentRepository): Promise<IDocument | undefined>;
+    /** Opens serialized data (e.g. a `.spicy` file); the document then saves to `source.repository`. */
+    loadDocument(data: Serialized, source?: DocumentSource): Promise<IDocument | undefined>;
     loadFileFromUrl(url: string): Promise<void>;
 }
 

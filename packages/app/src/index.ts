@@ -5,6 +5,8 @@ export * from "./application";
 export * from "./bodys";
 export * from "./commands";
 export * from "./document";
+export * from "./documentFiles";
 export * from "./pluginManager";
+export * from "./repositories";
 export * from "./services";
 export * from "./showPropertyEventHandler";

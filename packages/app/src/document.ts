@@ -4,15 +4,16 @@
 import {
     type Act,
     AnalysisManager,
-    Constants,
     DOCUMENT_FORMAT_VERSION,
     type DocumentFormatError,
     DocumentMigrations,
+    type DocumentRepositoryError,
+    type DocumentSource,
     History,
-    I18n,
     type I18nKeys,
     type IApplication,
     type IDocument,
+    type IDocumentRepository,
     Id,
     InternalClassName,
     type IPicker,
@@ -25,6 +26,9 @@ import {
     ObservableCollection,
     ProjectSettings,
     PubSub,
+    type Result,
+    type SaveKind,
+    type SaveOutcome,
     type Serialized,
     Serializer,
     VariableTable,
@@ -33,6 +37,7 @@ import { registerAdvancedInspectAnalyses } from "./analysis/advanced";
 import { registerBasicInspectAnalyses } from "./analysis/basic";
 import { registerPrerequisiteInspectAnalyses } from "./analysis/prerequisites";
 import { Picker } from "./picker";
+import { askToSaveChanges } from "./saveChangesPrompt";
 import { SelectionManager } from "./selectionManager";
 
 export class Document extends Observable implements IDocument {
@@ -52,6 +57,11 @@ export class Document extends Observable implements IDocument {
      * is not loaded), written back unchanged so their payloads keep the version they were saved at.
      */
     private foreignModuleVersions: Record<string, number> = {};
+    repository: IDocumentRepository;
+    version?: string;
+    /** `history.position()` at the last save (or at the opening). */
+    private savedPosition: object;
+    private closing = false;
 
     get name(): string {
         return this.getPrivateValue("name");
@@ -62,15 +72,25 @@ export class Document extends Observable implements IDocument {
         if (this.modelManager.rootNode) this.modelManager.rootNode.name = name;
     }
 
+    /** Whether the undo position differs from the one of the last save. Observable. */
+    get isDirty(): boolean {
+        return this.getPrivateValue("isDirty", false);
+    }
+
     constructor(
         readonly application: IApplication,
         name: string,
         readonly id: string = Id.generate(),
+        source: DocumentSource = {},
     ) {
         super();
         this.setPrivateValue("name", name);
+        this.repository = source.repository ?? application.repositories.local;
+        this.version = source.version;
         this.modelManager = new ModelManager(this);
         this.history = new History();
+        this.savedPosition = this.history.position();
+        this.history.onChanged.sub(this.updateDirty);
         this.variables = new VariableTable(this);
         this.settings = new ProjectSettings(this);
         this.selection = new SelectionManager(this);
@@ -101,6 +121,16 @@ export class Document extends Observable implements IDocument {
         return serialized;
     }
 
+    private readonly updateDirty = () => {
+        this.setProperty("isDirty", this.history.position() !== this.savedPosition);
+    };
+
+    /** Takes the current undo position as the saved one (after a save, or once loaded). */
+    private markSaved() {
+        this.savedPosition = this.history.position();
+        this.updateDirty();
+    }
+
     override disposeInternal(): void {
         super.disposeInternal();
 
@@ -115,45 +145,80 @@ export class Document extends Observable implements IDocument {
         this.acts.clear();
     }
 
-    async save() {
-        const data = this.serialize();
-        await this.application.storage.put(Constants.DBName, Constants.DocumentTable, this.id, data);
-        const image = this.application.activeView?.toImage();
-        await this.application.storage.put(Constants.DBName, Constants.RecentTable, this.id, {
+    async save(kind: SaveKind = "manual"): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        const position = this.history.position();
+        const result = await this.repository.save({
             id: this.id,
             name: this.name,
-            date: Date.now(),
-            image,
+            data: this.serialize(),
+            kind,
+            thumbnail: this.ownView()?.toImage(),
+            baseVersion: this.version,
         });
+        if (result.isOk && result.value.status === "saved") {
+            this.version = result.value.version ?? this.version;
+            // The position the data was serialized at: edits made while saving stay unsaved.
+            this.savedPosition = position;
+            this.updateDirty();
+        }
+        return result;
     }
 
-    async close() {
-        if (window.confirm(I18n.translate("prompt.saveDocument{0}", this.name))) {
-            await this.save();
-        }
+    /** The view the thumbnail is taken from: the active one when it shows this document. */
+    private ownView() {
+        const active = this.application.activeView;
+        return active?.document === this ? active : this.application.views.find((x) => x.document === this);
+    }
 
+    async close(): Promise<boolean> {
+        if (this.closing) return true;
+        if (this.isDirty && !(await this.saveBeforeClosing())) return false;
+
+        this.closing = true;
+        // Deregistered first: a view closing sees its document is no longer open and does not
+        // ask it to close again.
+        this.application.documents.delete(this);
         const views = this.application.views.filter((x) => x.document === this);
+        views.forEach((view) => view.close());
         this.application.views.remove(...views);
         this.application.activeView = this.application.views.at(0);
-        this.application.documents.delete(this);
 
         PubSub.default.pub("documentClosed", this);
 
         Logger.info(`document: ${this.name} closed`);
         this.dispose();
+        return true;
     }
 
-    static async open(application: IApplication, id: string) {
-        const data = (await application.storage.get(
-            Constants.DBName,
-            Constants.DocumentTable,
-            id,
-        )) as Serialized;
-        if (data === undefined) {
-            Logger.warn(`document: ${id} not find`);
-            return;
+    /** Resolves whether closing may go on: changes saved or discarded, not cancelled. */
+    private async saveBeforeClosing(): Promise<boolean> {
+        const choice = await askToSaveChanges(this.name);
+        if (choice === "cancel") return false;
+        if (choice === "discard") return true;
+        const saved = await this.save();
+        if (saved.isOk && saved.value.status === "saved") return true;
+        const [message, ...args] = saved.isOk
+            ? (["error.repository.conflict"] as [I18nKeys])
+            : repositoryErrorMessage(saved.error);
+        PubSub.default.pub("showToast", message, ...args);
+        return false;
+    }
+
+    static async open(
+        application: IApplication,
+        id: string,
+        repository: IDocumentRepository = application.repositories.local,
+    ): Promise<IDocument | undefined> {
+        const loaded = await repository.load(id);
+        if (!loaded.isOk) {
+            Logger.warn(`document: cannot open ${id} (${JSON.stringify(loaded.error)})`);
+            PubSub.default.pub("showToast", ...repositoryErrorMessage(loaded.error));
+            return undefined;
         }
-        const document = await Document.load(application, data);
+        const document = await Document.load(application, loaded.value.data, {
+            repository,
+            version: loaded.value.version,
+        });
         if (document !== undefined) {
             Logger.info(`document: ${document.name} opened`);
         }
@@ -165,7 +230,11 @@ export class Document extends Observable implements IDocument {
      * not a Spicy3D document, or that a newer build saved, is reported with a toast and left
      * untouched — `data` itself is never modified.
      */
-    static async load(app: IApplication, stored: Serialized): Promise<IDocument | undefined> {
+    static async load(
+        app: IApplication,
+        stored: Serialized,
+        source: DocumentSource = {},
+    ): Promise<IDocument | undefined> {
         const migrated = DocumentMigrations.migrate(stored);
         if (!migrated.isOk) {
             Document.reportFormatError(migrated.error);
@@ -173,7 +242,7 @@ export class Document extends Observable implements IDocument {
         }
         const data = migrated.value;
 
-        const document = new Document(app, data["name"], data["id"]);
+        const document = new Document(app, data["name"], data["id"], source);
         document.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
         document.history.disabled = true;
         // Before the models: a body's feature chain resolves its parameters against
@@ -189,6 +258,7 @@ export class Document extends Observable implements IDocument {
         await document.modelManager.deserialize(data["models"]);
         document.analyses.attachModel();
         document.history.disabled = false;
+        document.markSaved();
         return document;
     }
 
@@ -208,5 +278,21 @@ export class Document extends Observable implements IDocument {
                   ? ["error.document.newerFormat"]
                   : ["error.document.migrationFailed:{0}", `${error.module}@${error.from}: ${error.message}`];
         PubSub.default.pub("showToast", key, ...args);
+    }
+}
+
+/** The toast (key and arguments) telling the user why a repository operation failed. */
+export function repositoryErrorMessage(error: DocumentRepositoryError): [I18nKeys, ...unknown[]] {
+    switch (error.kind) {
+        case "offline":
+            return ["error.repository.offline"];
+        case "unauthorized":
+            return ["error.repository.unauthorized"];
+        case "notFound":
+            return ["error.repository.notFound"];
+        case "quota":
+            return ["error.repository.quota"];
+        case "failed":
+            return ["error.repository.failed:{0}", error.message];
     }
 }

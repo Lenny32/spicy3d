@@ -2,14 +2,14 @@
 // See LICENSE file in the project root for full license information.
 
 import {
-    Constants,
+    type DocumentMeta,
     I18n,
     type I18nKeys,
     type IApplication,
     Localize,
+    Logger,
     ObservableCollection,
     PubSub,
-    type RecentDocumentDTO,
 } from "@spicy3d/core";
 import { a, button, collection, div, img, label, span, svg } from "@spicy3d/element";
 import style from "./home.module.css";
@@ -50,9 +50,12 @@ export class Home extends HTMLElement {
     }
 
     private async getDocuments() {
-        return new ObservableCollection(
-            ...(await this.app.storage.page(Constants.DBName, Constants.RecentTable, 0)),
-        );
+        const page = await this.app.repositories.local.list();
+        if (!page.isOk) {
+            Logger.warn(`home: cannot list documents (${JSON.stringify(page.error)})`);
+            return new ObservableCollection<DocumentMeta>();
+        }
+        return new ObservableCollection(...page.value.items);
     }
 
     async render() {
@@ -174,7 +177,7 @@ export class Home extends HTMLElement {
         );
     }
 
-    private rightSection(documents: ObservableCollection<RecentDocumentDTO>) {
+    private rightSection(documents: ObservableCollection<DocumentMeta>) {
         return div(
             { className: style.right },
             div(
@@ -196,7 +199,7 @@ export class Home extends HTMLElement {
         );
     }
 
-    private documentCollection(documents: ObservableCollection<RecentDocumentDTO>) {
+    private documentCollection(documents: ObservableCollection<DocumentMeta>) {
         if (documents.length === 0) {
             return div({
                 className: style.empty,
@@ -210,54 +213,58 @@ export class Home extends HTMLElement {
         });
     }
 
-    private recentDocument(item: RecentDocumentDTO, documents: ObservableCollection<RecentDocumentDTO>) {
+    private recentDocument(item: DocumentMeta, documents: ObservableCollection<DocumentMeta>) {
         return div(
             {
                 className: style.document,
                 onclick: () => this.handleDocumentClick(item),
             },
-            img({ className: style.img, src: item.image }),
+            img({ className: style.img, src: item.thumbnail ?? "" }),
             this.documentDescription(item),
             this.deleteIcon(item, documents),
         );
     }
 
-    private documentDescription(item: RecentDocumentDTO) {
+    private documentDescription(item: DocumentMeta) {
         return div(
             { className: style.description },
             span({ className: style.title, textContent: item.name }),
             span({
                 className: style.date,
-                textContent: new Date(item.date).toLocaleDateString(),
+                textContent: new Date(item.updatedAt).toLocaleDateString(),
             }),
         );
     }
 
-    private deleteIcon(item: RecentDocumentDTO, documents: ObservableCollection<RecentDocumentDTO>) {
+    private deleteIcon(item: DocumentMeta, documents: ObservableCollection<DocumentMeta>) {
         return svg({
             className: style.delete,
             icon: "icon-times",
             onclick: async (e) => {
                 e.stopPropagation();
                 if (window.confirm(I18n.translate("prompt.deleteDocument{0}", item.name))) {
-                    await Promise.all([
-                        this.app.storage.delete(Constants.DBName, Constants.DocumentTable, item.id),
-                        this.app.storage.delete(Constants.DBName, Constants.RecentTable, item.id),
-                    ]);
-                    documents.remove(item);
+                    const deleted = await this.app.repositories.get(item.location)?.delete(item.id);
+                    if (deleted?.isOk) {
+                        documents.remove(item);
+                    } else {
+                        PubSub.default.pub("showToast", "error.repository.deleteFailed{0}", item.name);
+                    }
                 }
             },
         });
     }
 
-    private handleDocumentClick(item: RecentDocumentDTO) {
+    private handleDocumentClick(item: DocumentMeta) {
         if (this.hasOpen(item.id)) {
             PubSub.default.pub("displayHome", false);
         } else {
             PubSub.default.pub(
                 "showPermanent",
                 async () => {
-                    const document = await this.app.openDocument(item.id);
+                    const document = await this.app.openDocument(
+                        item.id,
+                        this.app.repositories.get(item.location),
+                    );
                     document?.application.activeView?.cameraController.fitContent();
                 },
                 "toast.excuting{0}",

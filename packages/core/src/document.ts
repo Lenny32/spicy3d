@@ -3,7 +3,17 @@
 
 import type { AnalysisManager } from "./analysis";
 import type { IApplication } from "./application";
-import type { History, IDisposable, IPropertyChanged, ObservableCollection } from "./foundation";
+import type {
+    DocumentRepositoryError,
+    History,
+    IDisposable,
+    IDocumentRepository,
+    IPropertyChanged,
+    ObservableCollection,
+    Result,
+    SaveKind,
+    SaveOutcome,
+} from "./foundation";
 import type { ModelManager } from "./modelManager";
 import type { IVariableTable } from "./parameters/variableTable";
 import type { IPicker, ISelection } from "./selection";
@@ -11,7 +21,7 @@ import type { Serialized } from "./serialize";
 import type { ProjectSettings } from "./units/projectSettings";
 import type { Act, IVisual } from "./visual";
 
-export const DOCUMENT_FILE_EXTENSION = ".cd";
+export const DOCUMENT_FILE_EXTENSION = ".spicy";
 export const PLUGIN_FILE_EXTENSION = ".spicyplugin";
 
 export interface IDocument extends IPropertyChanged, IDisposable {
@@ -30,7 +40,18 @@ export interface IDocument extends IPropertyChanged, IDisposable {
     name: string;
     acts: ObservableCollection<Act>;
     userData?: Record<string, unknown>;
-    save(): Promise<void>;
-    close(): Promise<void>;
+    /** Where the document is saved: the repository it was opened from (local for new ones). */
+    repository: IDocumentRepository;
+    /** The repository version the document was loaded from or last saved as (cloud only). */
+    version?: string;
+    /** Whether the undo position differs from the one of the last save (or of the opening). */
+    readonly isDirty: boolean;
+    /** Saves through `repository`; a successful save makes the document clean. */
+    save(kind?: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+    /**
+     * Asks to save unsaved changes, then closes the document and its views. Resolves `false`
+     * when the user cancels or the save fails (the document stays open).
+     */
+    close(): Promise<boolean>;
     serialize(): Serialized;
 }

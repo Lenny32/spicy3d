@@ -385,6 +385,34 @@ describe("ThreeView — close", () => {
         expect(doc.application.views).not.toContain(view);
     });
 
+    test("the last view of an open document lets the document close (it may ask to save)", () => {
+        const doc = new TestDocument();
+        (doc.application as any).documents = new Set([doc]);
+        const close = rs.fn(async () => false);
+        doc.close = close;
+        const { view } = createTestView({ document: doc });
+
+        view.close();
+
+        expect(close).toHaveBeenCalledTimes(1);
+        // The document declined (e.g. the user cancelled): the view stays open.
+        expect(view.isClosed).toBe(false);
+        expect(doc.application.views).toContain(view);
+    });
+
+    test("a view closed by its closing document closes for good", () => {
+        const doc = new TestDocument();
+        const close = rs.fn(async () => true);
+        doc.close = close;
+        const { view } = createTestView({ document: doc });
+
+        view.close();
+
+        // The document is no longer registered as open: no second close request.
+        expect(close).not.toHaveBeenCalled();
+        expect(view.isClosed).toBe(true);
+    });
+
     test("double close is a no-op", () => {
         const { view } = createTestView();
         view.close();

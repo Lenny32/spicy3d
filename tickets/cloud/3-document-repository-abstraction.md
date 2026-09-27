@@ -51,10 +51,10 @@ export interface IDocumentRepository {
 
 ## Acceptance criteria
 
-- [ ] No direct `storage.*` calls for documents remain outside `LocalDocumentRepository`.
-- [ ] Download → reopen a `.spicy` file round-trips the model.
-- [ ] `isDirty` toggles on edit / save / undo back to the saved point.
-- [ ] Existing tests pass; unit tests for the local repository.
+- [x] No direct `storage.*` calls for documents remain outside `LocalDocumentRepository`.
+- [x] Download → reopen a `.spicy` file round-trips the model.
+- [x] `isDirty` toggles on edit / save / undo back to the saved point.
+- [x] Existing tests pass; unit tests for the local repository.
 
 ## Dependencies and complexity
 

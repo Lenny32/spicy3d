@@ -4,6 +4,7 @@
 export * from "./documentFixtures";
 export * from "./i18n";
 export * from "./localStorageMock";
+export * from "./memoryDocumentRepository";
 export * from "./mockApplication";
 export * from "./mockCurve";
 export * from "./mockDocument";

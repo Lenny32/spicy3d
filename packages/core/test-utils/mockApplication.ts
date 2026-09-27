@@ -2,10 +2,12 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    DocumentRepositories,
     type IApplication,
     type ICommand,
     type IDataExchange,
     type IDocument,
+    type IDocumentRepository,
     type IPluginManager,
     type IShapeProvider,
     type IStorage,
@@ -13,6 +15,7 @@ import {
     type IVisualFactory,
     ObservableCollection,
 } from "../src";
+import { MemoryDocumentRepository } from "./memoryDocumentRepository";
 import { createMockVisualWithDocument } from "./mockVisual";
 
 export interface MockApplicationOverrides {
@@ -22,6 +25,8 @@ export interface MockApplicationOverrides {
     dataExchange?: Partial<IDataExchange>;
     services?: any[];
     pluginManager?: Partial<IPluginManager>;
+    /** Replaces the in-memory local repository. */
+    localRepository?: IDocumentRepository;
 }
 
 /**
@@ -33,6 +38,7 @@ export function createMockApplication(overrides: MockApplicationOverrides = {}):
     const mockViews = new ObservableCollection<IView>();
 
     const app: IApplication = {
+        repositories: new DocumentRepositories(overrides.localRepository ?? new MemoryDocumentRepository()),
         storage: {
             createDBIfNeeded: async () => {},
             get: async () => undefined,

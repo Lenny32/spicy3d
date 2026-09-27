@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { command, I18n, type IApplication, type ICommand, PubSub } from "@spicy3d/core";
+import { repositoryErrorMessage } from "../../document";
 
 @command({
     key: "doc.save",
@@ -10,12 +11,19 @@ import { command, I18n, type IApplication, type ICommand, PubSub } from "@spicy3
 })
 export class SaveDocument implements ICommand {
     async execute(app: IApplication): Promise<void> {
-        if (!app.activeView?.document) return;
+        const document = app.activeView?.document;
+        if (!document) return;
         PubSub.default.pub(
             "showPermanent",
             async () => {
-                await app.activeView?.document.save();
-                PubSub.default.pub("showToast", "toast.document.saved");
+                const result = await document.save("manual");
+                if (!result.isOk) {
+                    PubSub.default.pub("showToast", ...repositoryErrorMessage(result.error));
+                } else if (result.value.status === "conflict") {
+                    PubSub.default.pub("showToast", "error.repository.conflict");
+                } else {
+                    PubSub.default.pub("showToast", "toast.document.saved");
+                }
             },
             "toast.excuting{0}",
             I18n.translate("command.doc.save"),
