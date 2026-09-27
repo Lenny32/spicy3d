@@ -60,6 +60,12 @@ export interface LoadedDocument {
  */
 export type SaveKind = "manual" | "auto" | "merge" | "restore" | "mcp";
 
+/** Extras of `IDocument.save`. */
+export interface SaveOptions {
+    /** Cloud only: the label of the version (labelled versions are never pruned). */
+    label?: string;
+}
+
 export interface SaveRequest {
     id: string;
     name: string;

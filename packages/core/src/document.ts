@@ -13,6 +13,7 @@ import type {
     ObservableCollection,
     Result,
     SaveKind,
+    SaveOptions,
     SaveOutcome,
 } from "./foundation";
 import type { ModelManager } from "./modelManager";
@@ -54,9 +55,10 @@ export interface IDocument extends IPropertyChanged, IDisposable {
     readonly isDirty: boolean;
     /**
      * Saves through `repository`; a successful save makes the document clean. Saves run one at a
-     * time: one requested while another runs follows it (requests made meanwhile share it).
+     * time: one requested while another runs follows it (requests made meanwhile share it, with
+     * the strongest kind — manual, then mcp, then auto — and the last label given).
      */
-    save(kind?: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+    save(kind?: SaveKind, options?: SaveOptions): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
     /** Resolves once no save of the document is running or queued. */
     settled(): Promise<void>;
     /**
