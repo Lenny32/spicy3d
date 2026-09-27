@@ -21,8 +21,11 @@ import {
     ObservableCollection,
     PubSub,
     Result,
+    relativeTimeParts,
     repositoryErrorMessage,
+    setRelativeTime,
     transferDocument,
+    watchRelativeTimes,
 } from "@spicy3d/core";
 import { a, button, collection, div, img, input, label, span, svg } from "@spicy3d/element";
 import { AutosaveSelector } from "./autosaveSelector";
@@ -60,6 +63,7 @@ export class Home extends HTMLElement {
     });
     private showTrash = false;
     private searchTimer?: number;
+    private stopRelativeTimes?: () => void;
     /** Bumped on every refresh: an older listing that answers late is dropped. */
     private generation = 0;
 
@@ -75,11 +79,15 @@ export class Home extends HTMLElement {
 
     connectedCallback() {
         this.app.repositories.onPropertyChanged(this.onRepositoriesChanged);
+        this.stopRelativeTimes?.();
+        this.stopRelativeTimes = watchRelativeTimes(this.lists);
     }
 
     disconnectedCallback() {
         this.app.repositories.removePropertyChanged(this.onRepositoriesChanged);
         clearTimeout(this.searchTimer);
+        this.stopRelativeTimes?.();
+        this.stopRelativeTimes = undefined;
     }
 
     private readonly onRepositoriesChanged = (property: string | number | symbol) => {
@@ -377,7 +385,7 @@ export class Home extends HTMLElement {
         const card = div(
             { className: `${style.document} ${style.trashed}` },
             this.thumbnail(item, cloud),
-            this.documentDescription(item),
+            this.documentDescription(item, true),
             div(
                 { className: style.actions },
                 this.actionButton("home.trash.restore", async () => {
@@ -395,10 +403,8 @@ export class Home extends HTMLElement {
         return card;
     }
 
-    private documentDescription(item: DocumentMeta) {
-        const details: HTMLElement[] = [
-            span({ className: style.date, textContent: formatDateTime(item.updatedAt) }),
-        ];
+    private documentDescription(item: DocumentMeta, trashed = false) {
+        const details: HTMLElement[] = [this.documentDate(item, trashed)];
         if (item.sizeBytes !== undefined) {
             details.push(span({ className: style.size, textContent: formatBytes(item.sizeBytes) }));
         }
@@ -410,6 +416,23 @@ export class Home extends HTMLElement {
             title.append(span({ className: style.badge, textContent: I18n.translate("home.badge.cloud") }));
         }
         return div({ className: style.description }, title, div({ className: style.details }, ...details));
+    }
+
+    /**
+     * Cloud times are relative ("5 minutes ago", full time in the tooltip, refreshed while shown); a
+     * trashed document shows when it was deleted. Device documents keep their absolute date and time.
+     */
+    private documentDate(item: DocumentMeta, trashed: boolean): HTMLElement {
+        if (item.location !== "cloud") {
+            return span({ className: style.date, textContent: formatDateTime(item.updatedAt) });
+        }
+        if (trashed && item.deletedAt !== undefined) {
+            return span(
+                { className: style.date },
+                ...relativeTimeParts((time) => I18n.translate("home.trash.deleted{0}", time), item.deletedAt),
+            );
+        }
+        return setRelativeTime(span({ className: style.date }), item.updatedAt);
     }
 
     private actionButton(text: I18nKeys, run: () => Promise<void>) {

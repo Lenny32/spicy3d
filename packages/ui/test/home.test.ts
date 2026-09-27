@@ -9,6 +9,7 @@ import {
     type DocumentPage,
     type DocumentRepositoryError,
     formatDateTime,
+    formatRelative,
     type IApplication,
     PubSub,
     Result,
@@ -18,6 +19,9 @@ import {
 } from "@spicy3d/core";
 import { createMockApplication, MemoryDocumentRepository } from "@spicy3d/core/test-utils";
 import { formatBytes, Home } from "../src/home/home";
+
+const UPDATED_AT = Date.parse("2026-09-27T12:00:00Z");
+const DELETED_AT = Date.parse("2026-09-20T08:00:00Z");
 
 /** A cloud-like repository: sizes, a trash and restore. */
 class TrashRepository extends MemoryDocumentRepository {
@@ -37,7 +41,7 @@ class TrashRepository extends MemoryDocumentRepository {
         return Result.ok({
             items: page.value!.items.map((x) => ({
                 ...x,
-                updatedAt: Date.parse("2026-09-27T12:00:00Z"),
+                updatedAt: UPDATED_AT,
                 sizeBytes: 1_500_000,
             })),
         });
@@ -50,7 +54,7 @@ class TrashRepository extends MemoryDocumentRepository {
                 name: x.name,
                 updatedAt: 0,
                 location: "cloud" as const,
-                deletedAt: 1,
+                deletedAt: DELETED_AT,
             })),
         });
     }
@@ -139,16 +143,43 @@ describe("home with the cloud", () => {
         await add(cloud, "c1", "Gear");
     });
 
-    test("shows a Cloud and a This device section; cloud cards have a badge, local time and size", async () => {
+    test("shows a Cloud and a This device section; cloud cards have a badge, relative time and size", async () => {
         await render();
 
         expect(sections()).toEqual(["cloud", "local"]);
         const [card] = cards("cloud");
         expect(card.textContent).toContain("Gear");
         expect(card.textContent).toContain("home.badge.cloud");
-        expect(card.textContent).toContain(formatDateTime(Date.parse("2026-09-27T12:00:00Z")));
+        const time = card.querySelector<HTMLElement>("[data-relative-time]");
+        expect(time).not.toBeNull();
+        expect(time!.textContent).toBe(formatRelative(UPDATED_AT));
+        expect(time!.title).toBe(formatDateTime(UPDATED_AT));
         expect(card.textContent).toContain(formatBytes(1_500_000));
-        expect(cards("local")[0].textContent).not.toContain("home.badge.cloud");
+        const [localCard] = cards("local");
+        expect(localCard.textContent).not.toContain("home.badge.cloud");
+        expect(localCard.querySelector("[data-relative-time]")).toBeNull();
+    });
+
+    test("local documents keep their absolute date and time", async () => {
+        await render();
+
+        const meta = (await local.list()).value!.items[0];
+        expect(cards("local")[0].textContent).toContain(formatDateTime(meta.updatedAt));
+    });
+
+    test("relative times refresh every minute while the home page shows", async () => {
+        rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+        try {
+            await render();
+            const time = cards("cloud")[0].querySelector<HTMLElement>("[data-relative-time]")!;
+            time.textContent = "stale";
+
+            rs.advanceTimersByTime(60_000);
+
+            expect(time.textContent).toBe(formatRelative(UPDATED_AT));
+        } finally {
+            rs.useRealTimers();
+        }
     });
 
     test("signing out while the home page shows removes the cloud section", async () => {
@@ -203,6 +234,10 @@ describe("home with the cloud", () => {
         buttonIn(home, "home.trash.button").click();
         await rs.waitFor(() => expect(sections()).toEqual(["trash"]));
         expect(home.textContent).toContain("home.trash.retention30");
+        const deleted = cards("trash")[0].querySelector<HTMLElement>("[data-relative-time]");
+        expect(deleted).not.toBeNull();
+        expect(deleted!.parentElement!.textContent).toBe(`home.trash.deleted${formatRelative(DELETED_AT)}`);
+        expect(deleted!.title).toBe(formatDateTime(DELETED_AT));
 
         buttonIn(cards("trash")[0], "home.trash.restore").click();
 
