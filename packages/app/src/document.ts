@@ -27,7 +27,7 @@ import {
     ObservableCollection,
     ProjectSettings,
     PubSub,
-    type Result,
+    Result,
     repositoryErrorMessage,
     type SaveConflict,
     type SaveKind,
@@ -189,6 +189,11 @@ export class Document extends Observable implements IDocument {
     }
 
     private async saveNow(kind: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        // A save queued behind the one made while closing: the document is gone (disposed, its
+        // models cleared), and serializing it now would store an empty document over the real one.
+        if (this.closing || this._isDisposed) {
+            return Result.err({ kind: "failed", message: `${this.name} is closed` });
+        }
         const position = this.history.position();
         const result = await this.repository.save({
             id: this.id,

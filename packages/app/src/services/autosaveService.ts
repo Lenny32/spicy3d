@@ -99,6 +99,8 @@ export class AutosaveService implements IService {
         globalThis.addEventListener?.("pointerdown", this.onPointerDown, true);
         globalThis.addEventListener?.("pointerup", this.onPointerUp, true);
         globalThis.addEventListener?.("pointercancel", this.onPointerUp, true);
+        globalThis.addEventListener?.("blur", this.onPointerUp);
+        globalThis.document?.addEventListener("visibilitychange", this.onVisibilityChange);
         for (const document of this.app?.documents ?? []) this.watch(document);
         Logger.info(`${AutosaveService.name} started`);
     }
@@ -112,6 +114,8 @@ export class AutosaveService implements IService {
         globalThis.removeEventListener?.("pointerdown", this.onPointerDown, true);
         globalThis.removeEventListener?.("pointerup", this.onPointerUp, true);
         globalThis.removeEventListener?.("pointercancel", this.onPointerUp, true);
+        globalThis.removeEventListener?.("blur", this.onPointerUp);
+        globalThis.document?.removeEventListener("visibilitychange", this.onVisibilityChange);
         for (const document of [...this.watched.keys()]) this.unwatch(document);
         this.stopIdlePoll();
         if (this.status.fileAutosave === this.files) this.status.fileAutosave = undefined;
@@ -184,9 +188,14 @@ export class AutosaveService implements IService {
         this.pointerDown = true;
     };
 
+    /** Also on blur: a release outside the window (alt-tab mid-drag) never reaches it. */
     private readonly onPointerUp = () => {
         this.pointerDown = false;
         this.resumeIfIdle();
+    };
+
+    private readonly onVisibilityChange = () => {
+        if (globalThis.document?.visibilityState === "hidden") this.onPointerUp();
     };
 
     /** (Re)arms the document's timer for `since + interval`; off (0) or clean: no timer. */
@@ -206,12 +215,17 @@ export class AutosaveService implements IService {
         const entry = this.watched.get(document);
         if (!entry) return;
         entry.timer = undefined;
-        if (!document.isDirty) return;
+        // One at a time: the running autosave schedules the next one when it ends.
+        if (!document.isDirty || entry.saving) {
+            entry.waiting = false;
+            return;
+        }
         if (this.isBusy()) {
             entry.waiting = true;
             this.startIdlePoll();
             return;
         }
+        entry.waiting = false;
         void this.run(document, entry);
     }
 
@@ -220,7 +234,7 @@ export class AutosaveService implements IService {
         for (const [document, entry] of this.watched) {
             if (!entry.waiting) continue;
             entry.waiting = false;
-            if (document.isDirty) void this.run(document, entry);
+            if (document.isDirty && !entry.saving) void this.run(document, entry);
         }
         if (![...this.watched.values()].some((x) => x.waiting)) this.stopIdlePoll();
     };
@@ -254,6 +268,10 @@ export class AutosaveService implements IService {
     }
 
     private async autosave(document: IDocument, entry: Watched): Promise<AutosaveOutcome> {
+        // A save may be running (Ctrl+S, "save" in the close prompt): wait for it, then look again —
+        // it may have saved everything, or the document may have closed (never save a closed one).
+        await document.settled();
+        if (!this.watched.has(document) || !document.isDirty) return "skipped";
         if (document.repository.isReadOnly?.(document.id)) return "skipped";
         if (entry.conflictVersion !== undefined) {
             if (entry.conflictVersion === (document.version ?? null)) return "skipped";

@@ -6,6 +6,7 @@ import {
     AutosaveHolds,
     AutosaveSettings,
     AutosaveStatus,
+    type DialogButton,
     type FileAutosaveState,
     type IApplication,
     type ICommand,
@@ -13,6 +14,7 @@ import {
     type IFileAutosave,
     ObjectStorage,
     type PropertyChangedHandler,
+    PubSub,
     Result,
     type SaveOutcome,
     type SaveRequest,
@@ -45,6 +47,20 @@ function observableApp(): IApplication {
         listeners.delete(handler as Handler);
     };
     return app;
+}
+
+/** A repository that answers each save only once `release()` is called; `requested` = every call. */
+function slowRepository() {
+    const waiting: (() => void)[] = [];
+    const repository = new (class extends MemoryDocumentRepository {
+        readonly requested: SaveRequest[] = [];
+        override async save(request: SaveRequest) {
+            this.requested.push(request);
+            await new Promise<void>((resolve) => waiting.push(resolve));
+            return super.save(request);
+        }
+    })("cloud");
+    return Object.assign(repository, { release: () => waiting.splice(0).forEach((x) => x()) });
 }
 
 /** A per-file opt-in fake: every document is in the given state. */
@@ -235,12 +251,100 @@ describe("AutosaveService", () => {
         start();
         edit("first");
         await rs.advanceTimersByTimeAsync(5 * MINUTE);
-        expect(status.lastAutosavedAt(document)).toBeDefined();
+        expect(status.lastAutosavedAt(document)).toBe(Date.parse("2026-09-27T12:05:00Z"));
 
         edit("second");
         await document.save("manual");
 
         expect(status.lastAutosavedAt(document)).toBeUndefined();
+    });
+
+    test("saving 'yes' in the close prompt while an autosave is due never saves the closed document", async () => {
+        // The repository answers only when released, so the prompt's save is still running when
+        // the deferred autosave wakes up.
+        const slow = slowRepository();
+        document.repository = slow;
+        const prompts: DialogButton[][] = [];
+        const original = PubSub.default.pub.bind(PubSub.default);
+        const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(((
+            event: string,
+            ...args: unknown[]
+        ) => {
+            if (event === "showDialog") prompts.push(args[2] as DialogButton[]);
+            else (original as (e: string, ...a: unknown[]) => void)(event, ...args);
+        }) as typeof PubSub.default.pub);
+        try {
+            start();
+            edit("changed");
+            const closing = document.close();
+            dialogOpen = true;
+            await rs.advanceTimersByTimeAsync(5 * MINUTE);
+            expect(prompts).toHaveLength(1);
+
+            dialogOpen = false;
+            prompts[0].find((x) => x.content === "common.save")!.onclick?.();
+            await rs.advanceTimersByTimeAsync(2000);
+            slow.release();
+            expect(await closing).toBe(true);
+            await rs.advanceTimersByTimeAsync(10 * MINUTE);
+            slow.release();
+            await rs.advanceTimersByTimeAsync(0);
+
+            expect(slow.requested.map((x) => x.kind)).toEqual(["manual"]);
+            expect(slow.documents.get("doc-1")?.data["name"]).toBe("changed");
+            expect(slow.documents.get("doc-1")?.data["models"]).toEqual(slow.saves[0].data["models"]);
+        } finally {
+            pub.mockRestore();
+        }
+    });
+
+    test("a pointer released outside the window (blur, tab hidden) no longer counts as a drag", async () => {
+        start();
+        edit("changed");
+        globalThis.dispatchEvent(new Event("pointerdown"));
+        await rs.advanceTimersByTimeAsync(6 * MINUTE);
+        expect(repository.saves).toHaveLength(0);
+
+        globalThis.dispatchEvent(new Event("blur"));
+        await rs.advanceTimersByTimeAsync(0);
+        expect(kinds()).toEqual(["auto"]);
+
+        edit("again");
+        globalThis.dispatchEvent(new Event("pointerdown"));
+        await rs.advanceTimersByTimeAsync(6 * MINUTE);
+        const visibility = rs.spyOn(globalThis.document, "visibilityState", "get").mockReturnValue("hidden");
+        try {
+            globalThis.document.dispatchEvent(new Event("visibilitychange"));
+        } finally {
+            visibility.mockRestore();
+        }
+        await rs.advanceTimersByTimeAsync(0);
+        expect(kinds()).toEqual(["auto", "auto"]);
+    });
+
+    test("one autosave at a time: a deferred one and a re-armed timer never both start a save", async () => {
+        const slow = slowRepository();
+        document.repository = slow;
+        start();
+        edit("changed");
+        dialogOpen = true;
+        await rs.advanceTimersByTimeAsync(5 * MINUTE);
+        expect(slow.requested).toHaveLength(0);
+
+        // Deferred (waiting); the interval change re-arms the timer, which fires first.
+        dialogOpen = false;
+        settings.intervalMinutes = 1;
+        await rs.advanceTimersByTimeAsync(0);
+        expect(slow.requested).toHaveLength(1);
+
+        // The idle poll then finds the deferred one: it must not start a second save.
+        await rs.advanceTimersByTimeAsync(2000);
+        expect(slow.requested).toHaveLength(1);
+        slow.release();
+        await rs.advanceTimersByTimeAsync(0);
+        expect(slow.saves.map((x) => x.kind)).toEqual(["auto"]);
+        // Nothing was queued behind it either.
+        expect(slow.requested).toHaveLength(1);
     });
 
     test("a local document overwrites its copy in this browser", async () => {

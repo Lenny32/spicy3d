@@ -18,6 +18,7 @@ import {
     PubSub,
     Result,
     type SaveConflict,
+    type SaveRequest,
     type Serialized,
     Transaction,
     UnknownNode,
@@ -436,6 +437,29 @@ describe("Document", () => {
             expect(await closing).toBe(false);
             expect(mockApp.documents.has(document)).toBe(true);
             expect(pub).toHaveBeenCalledWith("showToast", "error.repository.quota");
+        });
+
+        test("a save queued behind the close prompt's save never serializes the closed document", async () => {
+            let release!: () => void;
+            const slow = new (class extends MemoryDocumentRepository {
+                override async save(request: SaveRequest) {
+                    await new Promise<void>((resolve) => {
+                        release = resolve;
+                    });
+                    return super.save(request);
+                }
+            })();
+            document.repository = slow;
+            const closing = document.close();
+            await answer("common.save");
+            const queued = document.save("auto");
+
+            release();
+            expect(await closing).toBe(true);
+            const refused = await queued;
+
+            expect(refused.isOk).toBe(false);
+            expect(slow.saves.map((x) => x.kind)).toEqual(["manual"]);
         });
 
         test("closing twice while the first close asks opens one dialog and shares its answer", async () => {
