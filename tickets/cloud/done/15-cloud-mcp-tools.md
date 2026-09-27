@@ -56,6 +56,17 @@ the sign-in comes or goes. Choices made:
   include `documents:read` (the server's list/history tools need it).
 - Not done: "Agent: …" transaction labels (the tools' undo steps are already named "AI …").
 
+Review fixes: tokens from the MCP panel no longer include `documents:read` (least privilege — it
+also opens every document to the REST API); the token dialog offers it as the explicit opt-in "Let
+agents list documents and history (also grants read access to all document content)", and the
+instructions / skill say list and history need it. The local bridge gets its own
+`spicy3d_list_cloud_documents` (through the tab's cloud repository; hidden on the relay, where the
+server's tool exists) and connection-specific instructions. A save conflict opens the conflict UI
+once per document. The server's sign-in listener no longer leaks per reconnect attempt. Save kinds
+and labels shared by one write follow core's `combineSaves` (manual wins, else the latest save's
+kind, a label only with its own kind), and `spicy3d_save` reports the kind stored. The open question
+closes with the session that asked or on sign-out; opening a version never asks.
+
 Live, against a SpicySrv copy (PostgreSQL in Docker, the built app in headless Chromium behind a
 same-origin proxy, the SDK client over Streamable HTTP with a token): after one Allow the client saw the
 three tab tools next to the server's; created "Live Bracket" + box + `spicy3d_save {label}`; left a
