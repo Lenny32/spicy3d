@@ -20,7 +20,7 @@ import { createMockApplication, MemoryDocumentRepository } from "@spicy3d/core/t
 import type { Account } from "../src/account/account";
 import { CloudConnection } from "../src/cloud";
 import { MemoryBlobCache } from "../src/documents/blobCache";
-import { CloudDocuments } from "../src/documents/cloudDocuments";
+import { CloudDocuments, keepMineChoice } from "../src/documents/cloudDocuments";
 import { conflictMessage, showConflictDialog } from "../src/documents/conflictDialog";
 import { EditLocks, type LockManagerLike } from "../src/documents/editLocks";
 import { CloudDocumentRepository } from "../src/documents/repository";
@@ -296,6 +296,17 @@ describe("edit locks and save state follow the documents", () => {
 
         expect(doc.events).toEqual(["settled", "save:auto"]);
         documents.dispose();
+    });
+});
+
+describe("merge keeping mine", () => {
+    test.each([
+        [["ours", "theirs"], "ours"],
+        [["ours-first", "theirs-first"], "ours-first"],
+        [["accept"], "accept"],
+        [["theirs", "ours"], "ours"],
+    ] as const)("%j → %s", (choices, expected) => {
+        expect(keepMineChoice(choices)).toBe(expected);
     });
 });
 

@@ -8,6 +8,7 @@ import {
     Id,
     Logger,
     PubSub,
+    type ResolutionChoice,
     SidePanels,
     TitleBar,
 } from "@spicy3d/core";
@@ -275,7 +276,7 @@ export class CloudDocuments {
                       const conflict = engine.syncConflictOf(id);
                       const choices = (conflict?.result?.conflicts ?? []).map((x) => ({
                           path: x.path,
-                          choice: x.choices[0],
+                          choice: keepMineChoice(x.choices),
                       }));
                       const resolved = await engine.resolve(id, choices);
                       return resolved.isOk;
@@ -373,6 +374,16 @@ export class CloudDocuments {
         await panel.history.closePreview();
         panel.history.dispose();
     };
+}
+
+/**
+ * "Keep mine" for one conflict: this device's side when offered, else this device's first (both
+ * kept), else as merged (a dangling reference or a rebuild failure, fixed afterwards).
+ */
+export function keepMineChoice(choices: readonly ResolutionChoice[]): ResolutionChoice {
+    if (choices.includes("ours")) return "ours";
+    if (choices.includes("ours-first")) return "ours-first";
+    return choices.includes("accept") ? "accept" : choices[0];
 }
 
 /** Starts cloud documents for the connection; returns the teardown. */
