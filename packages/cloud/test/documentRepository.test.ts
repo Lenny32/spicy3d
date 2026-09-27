@@ -217,6 +217,75 @@ describe("save", () => {
         expect(keys[1]).toBe(keys[0]);
     });
 
+    test("a retried save with another label or thumbnail is a new request (new key)", async () => {
+        const { server, repository } = await setup();
+        const cloudFallback = server.fallback!;
+        server.fallback = async (r) => {
+            if (r.path === "/api/documents" && r.method === "POST") throw new TypeError("Failed to fetch");
+            return cloudFallback(r);
+        };
+
+        await repository.save(request({ label: "A" }));
+        await repository.save(request({ label: "B" }));
+        await repository.save(request({ label: "B" }));
+
+        const keys = server.requests
+            .filter((r) => r.method === "POST" && r.path === "/api/documents")
+            .map((r) => r.headers["idempotency-key"]);
+        expect(keys).toHaveLength(3);
+        expect(keys[1]).not.toBe(keys[0]);
+        expect(keys[2]).toBe(keys[1]);
+    });
+
+    test("a replayed create whose head is no longer ours is a conflict on that head", async () => {
+        const { server, repository } = await setup();
+        const head = {
+            id: "0190a0c2-0000-7000-8000-000000000099",
+            documentId: "doc-1",
+            parentIds: ["x"],
+            kind: "manual",
+            label: null,
+            pinned: false,
+            createdAt: "2026-09-27T11:00:00Z",
+            deviceName: "Laptop – Chrome",
+            clientId: null,
+            formatVersion: 1,
+            manifestSha256: "f".repeat(64),
+            thumbnailSha256: null,
+            sizeBytes: 1,
+        };
+        server.on(
+            "POST /api/documents",
+            json(
+                201,
+                { id: "doc-1", name: "Bracket", head, headVersionId: head.id },
+                { "Idempotent-Replayed": "true" },
+            ),
+        );
+
+        const saved = await repository.save(request());
+
+        expect(saved.value).toEqual({
+            status: "conflict",
+            headVersion: head.id,
+            headCreatedAt: parseUtc(head.createdAt),
+            headDeviceName: "Laptop – Chrome",
+        });
+    });
+
+    test("loading a document starts from a clean save state (no stale conflict)", async () => {
+        const { cloud, repository } = await setup();
+        const first = await repository.save(request());
+        const base = first.value!.status === "saved" ? first.value!.version : undefined;
+        await cloud.saveElsewhere("doc-1");
+        await repository.save(request({ baseVersion: base, data: documentData("x") }));
+        expect(repository.stateOf("doc-1")).toBe("conflict");
+
+        await repository.load("doc-1");
+
+        expect(repository.stateOf("doc-1")).toBe("idle");
+    });
+
     test("offline marks the document offline; other failures are errors", async () => {
         const { server, repository } = await setup();
         server.on("POST /api/blobs/check", () => {

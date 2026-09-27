@@ -1,11 +1,19 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IApplication, type IDocument, Logger, PubSub, TitleBar } from "@spicy3d/core";
+import {
+    type IApplication,
+    type IDocument,
+    type IDocumentRepository,
+    Logger,
+    PubSub,
+    TitleBar,
+} from "@spicy3d/core";
 import type { SignOutEvent } from "../account/account";
 import type { CloudConnection } from "../cloud";
 import { defaultBlobCache, type IBlobCache } from "./blobCache";
 import { showConflictDialog } from "./conflictDialog";
+import { keepChangesAfterSignOut } from "./documentActions";
 import { EditLocks } from "./editLocks";
 import { CloudDocumentRepository, type CloudDocumentRepositoryOptions } from "./repository";
 import { DocumentStatusItem } from "./statusItem";
@@ -47,6 +55,7 @@ export class CloudDocuments {
         this.account.deviceSettings.onPropertyChanged(this.applyPreferred);
         PubSub.default.sub("documentOpened", this.onDocumentOpened);
         PubSub.default.sub("documentClosed", this.onDocumentClosed);
+        PubSub.default.sub("documentRepositoryChanged", this.onRepositoryChanged);
         if (options.titleBar !== false) {
             this.statusItem = new DocumentStatusItem({
                 app,
@@ -75,6 +84,7 @@ export class CloudDocuments {
         this.account.deviceSettings.removePropertyChanged(this.applyPreferred);
         PubSub.default.remove("documentOpened", this.onDocumentOpened);
         PubSub.default.remove("documentClosed", this.onDocumentClosed);
+        PubSub.default.remove("documentRepositoryChanged", this.onRepositoryChanged);
         if (this.statusItem) TitleBar.items.remove(this.statusItem);
         this.stop();
         this.locks.dispose();
@@ -119,8 +129,20 @@ export class CloudDocuments {
         this.app.repositories.preferred = "local";
     }
 
+    /**
+     * Signed out: the open cloud documents belong to that account, so they close — never into
+     * another user's account, never losing changes silently: unsaved ones are first offered as a
+     * copy on this device or a `.spicy` download.
+     */
     private readonly onSignOut = async ({ removeCachedDocuments }: SignOutEvent) => {
+        const repository = this.repository;
+        const open = [...this.app.documents].filter((x) => repository && x.repository === repository);
         this.stop();
+        for (const document of open) {
+            await document.settled();
+            if (document.isDirty) await keepChangesAfterSignOut(this.app, document);
+            await document.close({ discardChanges: true });
+        }
         if (removeCachedDocuments) await this.cache.clear();
     };
 
@@ -132,13 +154,27 @@ export class CloudDocuments {
     };
 
     private readonly onDocumentClosed = (document: IDocument) => {
-        if (document.repository === this.repository) this.locks.release(document.id);
+        if (document.repository !== this.repository) return;
+        this.locks.release(document.id);
+        this.repository?.resetState(document.id);
+    };
+
+    /** Moved to the cloud: this tab takes the edit lock; moved away: it lets go. */
+    private readonly onRepositoryChanged = (document: IDocument, previous: IDocumentRepository) => {
+        if (previous === this.repository && document.repository !== previous) {
+            this.locks.release(document.id);
+            this.repository?.resetState(document.id);
+        }
+        this.onDocumentOpened(document);
     };
 
     /** The editing tab, asked to hand over: saves unsaved changes first so nothing is lost. */
     private readonly beforeHandover = async (id: string) => {
         const document = [...this.app.documents].find((x) => x.id === id && x.repository === this.repository);
-        if (!document?.isDirty) return;
+        if (!document) return;
+        // A save already running must finish first; the one below then bases on it.
+        await document.settled();
+        if (!document.isDirty) return;
         const saved = await document.save("auto");
         if (!saved.isOk || saved.value.status !== "saved") {
             Logger.warn(`[cloud] ${id}: could not save before handing it over`);

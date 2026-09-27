@@ -19,6 +19,7 @@ import {
     type SaveOutcome,
     type SaveRequest,
     type SplitManifestOptions,
+    type StoredDocumentInfo,
     sha256Hex,
     splitManifest,
 } from "@spicy3d/core";
@@ -103,6 +104,19 @@ function noHead<T>(result: Result<T, CloudError>): Result<SavedVersion, CloudErr
     return result.isOk ? Result.err({ kind: "invalidResponse" }) : Result.err(result.error);
 }
 
+function replayedConflict(head: SavedVersion): CloudError {
+    return {
+        kind: "problem",
+        status: 409,
+        problem: {
+            code: "version_conflict",
+            headVersionId: head.id,
+            headCreatedAt: head.createdAt,
+            headDeviceName: head.deviceName ?? undefined,
+        },
+    };
+}
+
 class RepositoryFailure {
     constructor(readonly error: DocumentRepositoryError) {}
 }
@@ -131,7 +145,11 @@ export class CloudDocumentRepository implements IDocumentRepository {
     private readonly encodeThumbnail: (imageUrl: string) => Promise<Uint8Array | undefined>;
     private readonly createObjectUrl: (blob: Blob) => string;
 
+    /** The user this repository saves for; another one signed in never gets its documents. */
+    readonly ownerId: string | undefined;
+
     constructor(readonly options: CloudDocumentRepositoryOptions) {
+        this.ownerId = options.account.user?.id;
         this.cache = options.cache ?? defaultBlobCache();
         this.clientId = options.clientId ?? TAB_CLIENT_ID;
         this.encodeThumbnail = options.encodeThumbnail ?? encodeThumbnail;
@@ -159,7 +177,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
     }
 
     private setState(id: string, state: CloudSaveState) {
-        if (this.states.get(id) === state) return;
+        if (this.stateOf(id) === state) return;
         this.states.set(id, state);
         for (const listener of [...this.stateListeners]) listener(id, state);
     }
@@ -224,7 +242,21 @@ export class CloudDocumentRepository implements IDocumentRepository {
 
     // ---- Loading -----------------------------------------------------------------------------
 
+    /** Signed in (or expired, about to sign in again) as the user this repository belongs to. */
+    private isOwnersSession(): boolean {
+        const user = this.account.user;
+        return user !== undefined && user.id === this.ownerId;
+    }
+
+    /** Forgets the last save outcome of a document (it was closed or reloaded). */
+    resetState(id: string): void {
+        this.setState(id, "idle");
+    }
+
     async load(id: string): Promise<Result<LoadedDocument, DocumentRepositoryError>> {
+        if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
+        // A reload (open latest, taking over from another tab) starts from a clean state.
+        this.resetState(id);
         const document = await this.account.call((api) =>
             api.GET("/api/documents/{id}", { params: { path: { id } } }),
         );
@@ -285,6 +317,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
     // ---- Saving ------------------------------------------------------------------------------
 
     async save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
         if (this.options.editGuard?.isReadOnly(request.id)) return Result.err({ kind: "readOnly" });
         this.setState(request.id, "saving");
         let result: Result<SaveOutcome, DocumentRepositoryError>;
@@ -334,7 +367,9 @@ export class CloudDocumentRepository implements IDocumentRepository {
             deviceName: this.account.deviceSettings.effectiveDeviceName,
             clientId: this.clientId,
         };
-        const pendingKey = `${id}|${baseVersion ?? ""}|${manifestSha}|${request.kind}`;
+        const pendingKey = [id, baseVersion, manifestSha, request.kind, request.label, thumbnailSha]
+            .map((x) => x ?? "")
+            .join("|");
         const key = this.pendingKeys.get(pendingKey) ?? newIdempotencyKey();
         this.pendingKeys.set(pendingKey, key);
 
@@ -358,7 +393,16 @@ export class CloudDocumentRepository implements IDocumentRepository {
                               body: { id, name: request.name, version },
                           }),
                       )
-                      .then((r) => (r.isOk && r.value.data.head ? Result.ok(r.value.data.head) : noHead(r)));
+                      .then((r) => {
+                          if (!r.isOk || !r.value.data.head) return noHead(r);
+                          const head = r.value.data.head;
+                          // A replayed create answers the document's *current* head: when it is no
+                          // longer our version, a newer save got in meanwhile.
+                          if (r.value.replayed && head.manifestSha256 !== manifestSha) {
+                              return Result.err(replayedConflict(head));
+                          }
+                          return Result.ok(head);
+                      });
 
         let answer = await send();
         if (!answer.isOk && problemCode(answer.error) === "blobs_missing") {
@@ -481,6 +525,19 @@ export class CloudDocumentRepository implements IDocumentRepository {
             api.POST("/api/documents/{id}/restore", { params: { path: { id } } }),
         );
         return result.isOk ? Result.ok(undefined) : Result.err(toRepositoryError(result.error, id));
+    }
+
+    async stat(id: string): Promise<Result<StoredDocumentInfo | undefined, DocumentRepositoryError>> {
+        const result = await this.account.call((api) =>
+            api.GET("/api/documents/{id}", { params: { path: { id } } }),
+        );
+        if (!result.isOk) {
+            return result.error.kind === "problem" && result.error.status === 404
+                ? Result.ok(undefined)
+                : Result.err(toRepositoryError(result.error, id));
+        }
+        const { name, headVersionId, deletedAt } = result.value.data;
+        return Result.ok({ name, version: headVersionId ?? undefined, trashed: Boolean(deletedAt) });
     }
 
     /** The head version of a document, e.g. to tell whether another tab saved meanwhile. */

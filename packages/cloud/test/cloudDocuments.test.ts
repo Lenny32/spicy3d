@@ -64,9 +64,14 @@ class FakeOpenDocument {
     serialize() {
         return { __cla$$__: "Document", formatVersion: 1, id: this.id, name: this.name, models: {} };
     }
+    readonly events: string[] = [];
     async save(kind: SaveKind = "manual") {
         this.saves.push(kind);
+        this.events.push(`save:${kind}`);
         return this.nextSave;
+    }
+    async settled() {
+        this.events.push("settled");
     }
     async close(options: CloseDocumentOptions = {}) {
         this.closed.push(options);
@@ -177,6 +182,117 @@ describe("cloud repository while signed in", () => {
             kind: "manual",
         });
         expect(saved.error).toEqual({ kind: "readOnly" });
+        documents.dispose();
+    });
+});
+
+describe("signing out with cloud documents open", () => {
+    const dialogButton = (label: string) => {
+        const found = Array.from(document.querySelectorAll("dialog button")).find(
+            (b) => b.textContent === label,
+        );
+        expect(found).toBeDefined();
+        return found as HTMLButtonElement;
+    };
+
+    test("clean ones close; unsaved ones are offered as a copy on this device first", async () => {
+        const { server, app, account, documents } = await setup();
+        const cloud = documents.cloud!;
+        const clean = openDocument(app, "clean", cloud);
+        const dirty = openDocument(app, "dirty", cloud);
+        dirty.isDirty = true;
+        const local = openDocument(app, "local", app.repositories.local);
+        server.on("POST /api/auth/logout", json(204));
+
+        const signingOut = account.signOut();
+        await rs.waitFor(() => expect(document.querySelector("dialog")).not.toBeNull());
+        expect(document.querySelector("dialog")!.textContent).toContain("cloud.signedOut.unsaved");
+        dialogButton("cloud.document.saveCopyOnDevice").click();
+        await signingOut;
+
+        expect(clean.closed).toEqual([{ discardChanges: true }]);
+        expect(dirty.closed).toEqual([{ discardChanges: true }]);
+        expect(dirty.events[0]).toBe("settled");
+        expect(local.closed).toEqual([]);
+        const copies = (app.repositories.local as MemoryDocumentRepository).saves;
+        expect(copies).toHaveLength(1);
+        expect(copies[0].id).not.toBe("dirty");
+        expect(app.repositories.cloud).toBeUndefined();
+        documents.dispose();
+    });
+
+    test("Escape keeps the changes too; only 'discard' drops them", async () => {
+        const { server, app, account, documents } = await setup();
+        const dirty = openDocument(app, "dirty", documents.cloud!);
+        dirty.isDirty = true;
+        server.on("POST /api/auth/logout", json(204));
+
+        const signingOut = account.signOut();
+        await rs.waitFor(() => expect(document.querySelector("dialog")).not.toBeNull());
+        document.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true }));
+        await signingOut;
+
+        expect((app.repositories.local as MemoryDocumentRepository).saves).toHaveLength(1);
+        expect(dirty.closed).toEqual([{ discardChanges: true }]);
+        documents.dispose();
+    });
+
+    test("a repository never saves for another user who signed in on this device", async () => {
+        const { account, documents } = await setup();
+        const cloud = documents.cloud!;
+        (account as unknown as { setPrivateValue(k: string, v: unknown): void }).setPrivateValue("user", {
+            ...account.user!,
+            id: "someone-else",
+        });
+
+        const saved = await cloud.save({ id: "doc", name: "x", data: {} as never, kind: "manual" });
+        const loaded = await cloud.load("doc");
+
+        expect(saved.error).toEqual({ kind: "unauthorized" });
+        expect(loaded.error).toEqual({ kind: "unauthorized" });
+        documents.dispose();
+    });
+});
+
+describe("edit locks and save state follow the documents", () => {
+    test("a document moved to the cloud takes the lock; moved away, it lets go", async () => {
+        const { app, documents } = await setup();
+        const acquire = rs.spyOn(documents.locks, "acquire");
+        const release = rs.spyOn(documents.locks, "release");
+        const doc = openDocument(app, "doc", app.repositories.local);
+        const changed = (documents as unknown as { onRepositoryChanged(d: unknown, p: unknown): void })
+            .onRepositoryChanged;
+
+        doc.repository = documents.cloud!;
+        changed(doc, app.repositories.local);
+        expect(acquire).toHaveBeenCalledWith("doc");
+
+        doc.repository = app.repositories.local;
+        changed(doc, documents.cloud!);
+        expect(release).toHaveBeenCalledWith("doc");
+        documents.dispose();
+    });
+
+    test("closing a cloud document forgets its last save state", async () => {
+        const { app, documents } = await setup();
+        const cloud = documents.cloud!;
+        const doc = openDocument(app, "doc", cloud);
+        (cloud as unknown as { setState(id: string, s: string): void }).setState("doc", "conflict");
+
+        (documents as unknown as { onDocumentClosed(d: unknown): void }).onDocumentClosed(doc);
+
+        expect(cloud.stateOf("doc")).toBe("idle");
+        documents.dispose();
+    });
+
+    test("before handing over, a running save finishes, then unsaved changes are saved", async () => {
+        const { app, documents } = await setup();
+        const doc = openDocument(app, "doc", documents.cloud!);
+        doc.isDirty = true;
+
+        await (documents as unknown as { beforeHandover(id: string): Promise<void> }).beforeHandover("doc");
+
+        expect(doc.events).toEqual(["settled", "save:auto"]);
         documents.dispose();
     });
 });
@@ -360,6 +476,16 @@ describe("conflict dialog", () => {
         expect(copy.baseVersion).toBeUndefined();
         expect(doc.closed).toEqual([{ discardChanges: true }]);
         expect(openDocumentSpy).toHaveBeenCalledWith(copy.id, cloud);
+    });
+
+    test("without a known head, 'save mine as the latest version' is not offered", () => {
+        const app = createMockApplication();
+        const doc = openDocument(app, "doc-1", new MemoryDocumentRepository("cloud"));
+        void showConflictDialog(app, doc as unknown as IDocument, { status: "conflict" }, doc.repository);
+
+        const labels = Array.from(document.querySelectorAll("dialog button"), (b) => b.textContent);
+        expect(labels).toContain("cloud.conflict.openLatest");
+        expect(labels).not.toContain("cloud.conflict.saveLatest");
     });
 
     test("save mine as the latest version: saved on top of the head", async () => {
