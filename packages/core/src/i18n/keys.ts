@@ -19,6 +19,7 @@ export const I18N_KEYS = [
     "ai.error.nullRef",
     "ai.error.prefix",
     "ai.error.unknownRef",
+    "ai.error.unreachable",
     "ai.history",
     "ai.historyDelete",
     "ai.historyEmpty",

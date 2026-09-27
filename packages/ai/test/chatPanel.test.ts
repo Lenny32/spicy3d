@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type IDocument, PubSub } from "@spicy3d/core";
+import { DeploymentConfig, I18n, type IDocument, PubSub } from "@spicy3d/core";
 import { createMockDocument, mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ChatPanel } from "../src/chatPanel";
 import {
@@ -956,5 +956,96 @@ describe("ChatPanel questions", () => {
         expect(card!.classList.contains("askAnswered")).toBe(true);
         expect(card!.querySelector(".askQuestion")?.textContent).toBe("how big?");
         expect(card!.querySelector(".askAnswer")?.textContent).toBe("8mm");
+    });
+});
+
+describe("ChatPanel on a deployment without internet access", () => {
+    beforeEach(() => {
+        mockLocalStorage();
+        agentMock.pending.length = 0;
+        agentMock.runAgent.mock.calls.length = 0;
+    });
+
+    afterEach(() => {
+        PubSub.default.removeAll("activeViewChanged");
+        DeploymentConfig.reset();
+    });
+
+    /** The SDKs' error for a request that never got an answer (matched by class name). */
+    class APIConnectionError extends Error {}
+
+    test.each([
+        ["fetch's TypeError", () => new TypeError("Failed to fetch")],
+        ["the SDKs' APIConnectionError", () => new APIConnectionError("Connection error.")],
+    ])("an unreachable endpoint (%s) is named, with what to do", async (_case, error) => {
+        saveConfig({ provider: "anthropic", apiKey: "k", model: "m" });
+        agentMock.runAgent.mockImplementationOnce(async () => {
+            throw error();
+        });
+        const panel = new ChatPanel();
+        const anyPanel = panel as any;
+
+        const translate = rs.spyOn(I18n, "translate");
+        try {
+            anyPanel.input.value = "make a box";
+            await anyPanel.send();
+
+            expect(panel.querySelector(".error")).not.toBeNull();
+            expect(translate.mock.calls).toContainEqual([
+                "ai.error.unreachable",
+                "https://api.anthropic.com",
+            ]);
+        } finally {
+            translate.mockRestore();
+        }
+    });
+
+    test("other errors keep their own message", async () => {
+        saveConfig({ provider: "completions", baseURL: "https://llm.lan/v1", apiKey: "k", model: "m" });
+        agentMock.runAgent.mockImplementationOnce(async () => {
+            throw new Error("401 invalid key");
+        });
+        const panel = new ChatPanel();
+        const anyPanel = panel as any;
+
+        const translate = rs.spyOn(I18n, "translate");
+        try {
+            anyPanel.input.value = "make a box";
+            await anyPanel.send();
+
+            expect(panel.querySelector(".error")).not.toBeNull();
+            expect(translate.mock.calls).toContainEqual(["ai.error.prefix", "401 invalid key"]);
+            expect(translate.mock.calls.map((c) => c[0])).not.toContain("ai.error.unreachable");
+        } finally {
+            translate.mockRestore();
+        }
+    });
+
+    test("a first-time user starts from the deployment's own endpoint", () => {
+        DeploymentConfig.set({
+            ai: {
+                presets: [
+                    {
+                        id: "lan",
+                        label: "Company LLM",
+                        provider: "completions",
+                        baseURL: "https://llm.lan/v1",
+                        defaultModel: "qwen3",
+                    },
+                ],
+                defaultPreset: "lan",
+                hideBuiltInPresets: true,
+            },
+        });
+        const panel = new ChatPanel();
+        const anyPanel = panel as any;
+
+        anyPanel.showSettings();
+
+        const options = Array.from(anyPanel.providerSelect.options as HTMLOptionElement[], (o) => o.value);
+        expect(options).toEqual(["lan"]);
+        expect(anyPanel.providerSelect.value).toBe("lan");
+        expect(anyPanel.baseURLInput.value).toBe("https://llm.lan/v1");
+        expect(anyPanel.modelInput.value).toBe("qwen3");
     });
 });

@@ -27,10 +27,13 @@ import { runAgent } from "./llm/agent";
 import { buildSystemPrompt } from "./llm/prompt";
 import type { ChatMessage, ImagePart } from "./llm/types";
 import {
-    DEFAULT_ANTHROPIC_MODEL,
+    defaultPreset,
+    isUnreachableError,
     type LLMConfig,
     loadConfig,
     PROVIDER_PRESETS,
+    presetFor,
+    providerPresets,
     saveConfig,
 } from "./settings";
 import { buildTools } from "./tools";
@@ -379,7 +382,7 @@ export class ChatPanel extends HTMLElement {
     private createSettingsInputs() {
         this.providerSelect = select(
             { className: style.field },
-            ...PROVIDER_PRESETS.map((p) => option({ value: p.id, textContent: p.label })),
+            ...providerPresets().map((p) => option({ value: p.id, textContent: p.label })),
         );
         this.baseURLInput = input({ className: style.field, placeholder: "base URL (OpenAI-compatible)" });
         this.modelInput = input({ className: style.field, placeholder: "model" });
@@ -459,7 +462,7 @@ export class ChatPanel extends HTMLElement {
     }
 
     private fillFromPreset() {
-        const preset = PROVIDER_PRESETS.find((p) => p.id === this.providerSelect?.value);
+        const preset = providerPresets().find((p) => p.id === this.providerSelect?.value);
         if (preset && this.baseURLInput && this.modelInput) {
             this.baseURLInput.value = preset.baseURL ?? "";
             this.modelInput.value = preset.defaultModel;
@@ -471,13 +474,14 @@ export class ChatPanel extends HTMLElement {
         if (!this.settingsOverlay) return;
         const saved = loadConfig();
         if (saved && this.providerSelect && this.baseURLInput && this.modelInput && this.apiKeyInput) {
-            const preset = PROVIDER_PRESETS.find((p) => p.provider === saved.provider);
+            const preset = presetFor(saved);
             if (preset) this.providerSelect.value = preset.id;
             this.baseURLInput.value = saved.baseURL ?? "";
             this.modelInput.value = saved.model;
             this.apiKeyInput.value = saved.apiKey;
             if (this.usernameInput) this.usernameInput.value = preset?.id ?? saved.provider;
         } else {
+            if (this.providerSelect) this.providerSelect.value = defaultPreset().id;
             this.fillFromPreset();
         }
         this.settingsOverlay.style.display = "flex";
@@ -488,7 +492,7 @@ export class ChatPanel extends HTMLElement {
     }
 
     private async saveSettings() {
-        const preset = PROVIDER_PRESETS.find((p) => p.id === this.providerSelect?.value);
+        const preset = providerPresets().find((p) => p.id === this.providerSelect?.value);
         const config: LLMConfig = {
             provider: preset?.provider ?? "anthropic",
             baseURL: this.baseURLInput?.value || undefined,
@@ -767,12 +771,13 @@ export class ChatPanel extends HTMLElement {
     }
 
     private currentConfig(): LLMConfig {
+        const preset = defaultPreset();
         return (
             loadConfig() ?? {
-                provider: "anthropic",
-                baseURL: undefined,
+                provider: preset.provider,
+                baseURL: preset.baseURL,
                 apiKey: "",
-                model: DEFAULT_ANTHROPIC_MODEL,
+                model: preset.defaultModel,
             }
         );
     }
@@ -799,7 +804,7 @@ export class ChatPanel extends HTMLElement {
                 this.appendNoReply(assistantEl, thinkingEl);
             }
         } catch (err) {
-            showFooter = this.handleSendError(err, stream, thinkingEl, assistantEl);
+            showFooter = this.handleSendError(err, config, stream, thinkingEl, assistantEl);
         } finally {
             this.endTurn(showFooter, stream, assistantEl);
         }
@@ -932,6 +937,7 @@ export class ChatPanel extends HTMLElement {
     /** Returns true when the (partial) reply should still get a footer. */
     private handleSendError(
         err: unknown,
+        config: LLMConfig,
         stream: StreamState,
         thinkingEl: HTMLElement,
         assistantEl: HTMLElement,
@@ -944,7 +950,16 @@ export class ChatPanel extends HTMLElement {
             return false;
         }
         stream.el?.remove();
-        this.appendError((err as Error).message);
+        if (isUnreachableError(err)) {
+            // "Connection error." alone doesn't tell a LAN user the endpoint is on the internet.
+            const endpoint =
+                config.baseURL ??
+                PROVIDER_PRESETS.find((p) => p.provider === config.provider)?.baseURL ??
+                config.provider;
+            this.appendError(I18n.translate("ai.error.unreachable", endpoint));
+        } else {
+            this.appendError((err as Error).message);
+        }
         return false;
     }
 
