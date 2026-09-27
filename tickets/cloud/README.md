@@ -25,18 +25,18 @@ Client-side (this repository) tickets for the Spicy3D cloud: optional accounts, 
 
 | # | Ticket | Packages | Complexity | Depends on |
 |---|--------|----------|-----------|-----------|
-| 1 | [Rename to Spicy3D & restart versioning](1-rename-to-spicy3d.md) | all | M-H | – |
-| 2 | [Document format & migration framework](2-document-format-migrations.md) | core, app | M | 1 |
-| 3 | [Document repository abstraction](3-document-repository-abstraction.md) | core, app, ui | M | 2 |
-| 4 | [API client & server contract](4-api-client-contract.md) | cloud | M | SRV-01 |
-| 5 | [Account UI](5-account-ui.md) | cloud, ui, i18n | M-H | 4, SRV-03 |
-| 6 | [Cloud documents integration](6-cloud-documents.md) | cloud, ui, app | M-H | 3, 5, SRV-05 |
-| 7 | [Autosave](7-autosave.md) | app, cloud, ui | M | 3, 6, SRV-06 |
-| 8 | [Date & time display](8-date-time-display.md) | core, ui | S | 4 |
-| 9 | [Version history view](9-version-history-view.md) | cloud, ui | M-H | 6, 8 |
-| 10 | [Offline-first sync](10-offline-sync.md) | cloud | H | 6 |
-| 11 | [Merge model design](11-merge-model-design.md) | design | H | 2 |
-| 12 | [Merge engine](12-merge-engine.md) | core, parametric | H | 11 |
+| 1 | [Rename to Spicy3D & restart versioning](done/1-rename-to-spicy3d.md) | all | M-H | – |
+| 2 | [Document format & migration framework](done/2-document-format-migrations.md) | core, app | M | 1 |
+| 3 | [Document repository abstraction](done/3-document-repository-abstraction.md) | core, app, ui | M | 2 |
+| 4 | [API client & server contract](done/4-api-client-contract.md) | cloud | M | SRV-01 |
+| 5 | [Account UI](done/5-account-ui.md) | cloud, ui, i18n | M-H | 4, SRV-03 |
+| 6 | [Cloud documents integration](done/6-cloud-documents.md) | cloud, ui, app | M-H | 3, 5, SRV-05 |
+| 7 | [Autosave](done/7-autosave.md) | app, cloud, ui | M | 3, 6, SRV-06 |
+| 8 | [Date & time display](done/8-date-time-display.md) | core, ui | S | 4 |
+| 9 | [Version history view](done/9-version-history-view.md) | cloud, ui | M-H | 6, 8 |
+| 10 | [Offline-first sync](done/10-offline-sync.md) | cloud | H | 6 |
+| 11 | [Merge model design](done/11-merge-model-design.md) | design | H | 2 |
+| 12 | [Merge engine](done/12-merge-engine.md) | core, parametric | H | 11 |
 | 13 | [Conflict resolution UI](13-conflict-resolution-ui.md) | ui, cloud | H | 10, 12 |
 | 14 | [Remote MCP — page link](14-remote-mcp-page-link.md) | ai, mcp-bridge | M-H | 5, SRV-09 |
 | 15 | [Cloud-aware MCP tools](15-cloud-mcp-tools.md) | ai | M | 6, 14 |
