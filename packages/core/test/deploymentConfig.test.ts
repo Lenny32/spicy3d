@@ -41,6 +41,24 @@ describe("DeploymentConfig", () => {
         expect(DeploymentConfig.section("ai")).toBeUndefined();
     });
 
+    test("a server that never answers is given up on, and the request aborted", async () => {
+        let signal: AbortSignal | undefined;
+        const fetch = rs.fn((request: Request) => {
+            signal = request.signal;
+            return new Promise<Response>(() => {});
+        });
+        DeploymentConfig.set({ ai: { defaultPreset: "stale" } });
+
+        const loaded = await DeploymentConfig.load({
+            baseUrl: "https://cad.example.com/",
+            fetch,
+            timeoutMs: 20,
+        });
+
+        expect(loaded).toEqual({});
+        expect(signal?.aborted).toBe(true);
+    });
+
     test("a section that is not an object is ignored", () => {
         DeploymentConfig.set({ ai: "on", mcpBridge: ["x"] });
 
