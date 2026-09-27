@@ -213,8 +213,21 @@ export class Document extends Observable implements IDocument {
         return active?.document === this ? active : this.application.views.find((x) => x.document === this);
     }
 
-    async close(options: CloseDocumentOptions = {}): Promise<boolean> {
-        if (this.closing) return true;
+    /**
+     * One close at a time: a second request while the first asks to save (a double click) shares
+     * its answer instead of opening a second dialog.
+     */
+    close(options: CloseDocumentOptions = {}): Promise<boolean> {
+        if (this.closing) return Promise.resolve(true);
+        this.pendingClose ??= this.closeOnce(options).finally(() => {
+            this.pendingClose = undefined;
+        });
+        return this.pendingClose;
+    }
+
+    private pendingClose?: Promise<boolean>;
+
+    private async closeOnce(options: CloseDocumentOptions): Promise<boolean> {
         if (!options.discardChanges && this.isDirty && !(await this.saveBeforeClosing())) return false;
 
         this.closing = true;

@@ -438,6 +438,32 @@ describe("Document", () => {
             expect(pub).toHaveBeenCalledWith("showToast", "error.repository.quota");
         });
 
+        test("closing twice while the first close asks opens one dialog and shares its answer", async () => {
+            const first = document.close();
+            const second = document.close();
+            await Promise.resolve();
+
+            expect(dialogs).toHaveLength(1);
+            await answer("common.dontSave");
+
+            expect(await first).toBe(true);
+            expect(await second).toBe(true);
+        });
+
+        test("after a cancelled close, closing asks again", async () => {
+            const first = document.close();
+            await Promise.resolve();
+            await answer("common.cancel");
+            expect(await first).toBe(false);
+
+            const second = document.close();
+            await Promise.resolve();
+
+            expect(dialogs).toHaveLength(2);
+            await answer("common.dontSave");
+            expect(await second).toBe(true);
+        });
+
         test("discardChanges closes a dirty document without asking or saving", async () => {
             expect(document.isDirty).toBe(true);
 
