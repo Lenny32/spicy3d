@@ -4,9 +4,10 @@ name: Deploy
 # Docker image and builds the MCP bridge that matches it (package-mcp-bridge.yml).
 #
 # - Push to main or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
-#   site; the bridge executables are built and verified (run artifact) but not published.
+#   site; the bridge executables are built and verified (run artifact) but not published. A manual
+#   run asks for the Docker image version (empty = package.json's version).
 # - Docker image: the same dist/ served by nginx (Dockerfile, target `prebuilt`), pushed to
-#   ghcr.io/<owner>/<repo> as `latest` and `<app version>` (package.json), for linux/amd64 and
+#   ghcr.io/<owner>/<repo> as `latest` and `<image version>`, for linux/amd64 and
 #   linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs the package to be public (Packages >
 #   spicy3d > Package settings) or a `docker login ghcr.io`.
 # - Bridge releases are published by hand: Actions > Package MCP bridge > Run workflow, with
@@ -18,6 +19,11 @@ on:
     push:
         branches: ["main"]
     workflow_dispatch:
+        inputs:
+            version:
+                description: "Docker image version tag (e.g. 1.2.0); empty = package.json version"
+                required: false
+                type: string
 
 permissions:
     contents: read
@@ -33,19 +39,27 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             version: ${{ steps.version.outputs.version }}
-            app-version: ${{ steps.version.outputs.app-version }}
+            image-version: ${{ steps.version.outputs.image-version }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             # A build-only bridge version: this workflow never publishes the executables.
+            # The image version: the manual run's input, else package.json's version.
             - id: version
+              env:
+                  INPUT_VERSION: ${{ inputs.version }}
               run: |
                   pkg=$(node -p "require('./package.json').version")
+                  image="${INPUT_VERSION:-$pkg}"
+                  if [[ ! "$image" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ || "$image" == "latest" ]]; then
+                      echo "::error::Invalid image version '$image' (a Docker tag other than 'latest')"
+                      exit 1
+                  fi
                   echo "version=$pkg-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-                  echo "app-version=$pkg" >> "$GITHUB_OUTPUT"
-                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg" >> "$GITHUB_STEP_SUMMARY"
+                  echo "image-version=$image" >> "$GITHUB_OUTPUT"
+                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg, image version $image" >> "$GITHUB_STEP_SUMMARY"
 
     web:
         name: Build web application
@@ -121,7 +135,7 @@ jobs:
                   images: ghcr.io/${{ github.repository }}
                   tags: |
                       type=raw,value=latest
-                      type=raw,value=${{ needs.prepare.outputs.app-version }}
+                      type=raw,value=${{ needs.prepare.outputs.image-version }}
 
             # The prebuilt target only copies files (no RUN), so arm64 needs no QEMU.
             - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
