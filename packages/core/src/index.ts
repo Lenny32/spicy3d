@@ -20,6 +20,7 @@ export * from "./documentTransfer";
 export * from "./editor";
 export * from "./editSessions";
 export * from "./eventHandlers";
+export * from "./externalContent";
 export * from "./foundation";
 export * from "./guide";
 export * from "./i18n";
