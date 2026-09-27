@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Logger } from "@spicy3d/core";
+import { Logger, Result } from "@spicy3d/core";
 import type { ImagePart } from "../llm/types";
 
 export type ImageFormat = "png" | "jpeg" | "webp";
@@ -17,24 +17,42 @@ export interface ImageEncodeOptions {
     quality?: number;
 }
 
-/** A floor for the budget, so a misconfigured relay cannot shrink screenshots to nothing. */
-const MIN_BUDGET = 16 * 1024;
 const DEFAULT_QUALITY = 0.85;
-const MAX_ATTEMPTS = 6;
+/** Below this longest side a screenshot is useless; an image that still does not fit is an error. */
+const MIN_SIDE = 32;
+const MAX_ATTEMPTS = 16;
+/** Room kept in a relay message for the JSON-RPC envelope and the text part around the base64. */
+const MAX_ENVELOPE_BYTES = 64 * 1024;
 
-let byteBudget: number | undefined;
+let callBudget: number | undefined;
 
 /**
- * The largest base64 image a tool result may carry, or undefined for no limit. The remote relay
- * sets it from its `maxMessageBytes` (SRV-09): a larger screenshot is re-encoded as JPEG and
- * scaled down until it fits, rather than breaking the connection (close 1009).
+ * The base64 budget for images in one message of `maxMessageBytes` (the relay's limit, SRV-09):
+ * always below the limit, whatever its size, so a screenshot that fits the budget fits the message.
  */
-export function setImageByteBudget(bytes: number | undefined): void {
-    byteBudget = bytes === undefined ? undefined : Math.max(MIN_BUDGET, Math.floor(bytes));
+export function imageBudgetFor(maxMessageBytes: number): number {
+    const envelope = Math.min(MAX_ENVELOPE_BYTES, Math.ceil(maxMessageBytes / 8));
+    return Math.max(0, Math.floor(maxMessageBytes - envelope));
 }
 
+/**
+ * Runs one tool call with an image budget: the remote relay's calls get one derived from its
+ * `maxMessageBytes`, the local bridge and the in-app assistant none. Tool calls of the MCP server
+ * run one at a time (one queue per page), so the budget never leaks into another server's call.
+ */
+export async function withImageByteBudget<T>(budget: number | undefined, run: () => Promise<T>): Promise<T> {
+    const previous = callBudget;
+    callBudget = budget;
+    try {
+        return await run();
+    } finally {
+        callBudget = previous;
+    }
+}
+
+/** The budget of the tool call running now; undefined = no limit. */
 export function imageByteBudget(): number | undefined {
-    return byteBudget;
+    return callBudget;
 }
 
 export function parseDataUrl(dataUrl: string): ImagePart {
@@ -61,16 +79,24 @@ function fit(width: number, height: number, max: number | undefined) {
     return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
+function tooLarge(budget: number): string {
+    return `the screenshot does not fit the relay's message limit (${budget} bytes of image data) even scaled down; ask the server administrator to raise Mcp__MaxMessageMb`;
+}
+
 /**
- * The view image (a data URL) in the requested encoding and size, within the byte budget. Returns
- * the image untouched when nothing is asked and it fits, so the default stays lossless PNG.
- * Falls back to the original when the browser cannot re-encode (no canvas).
+ * The view image (a data URL) in the requested encoding and size, within the call's byte budget.
+ * Returns the image untouched when nothing is asked and it fits, so the default stays lossless PNG;
+ * an image that cannot be made to fit is an error, never sent (the relay would drop the tab).
  */
-export async function encodeImage(dataUrl: string, options: ImageEncodeOptions = {}): Promise<ImagePart> {
+export async function encodeImage(
+    dataUrl: string,
+    options: ImageEncodeOptions = {},
+): Promise<Result<ImagePart, string>> {
+    const budget = callBudget;
     const original = parseDataUrl(dataUrl);
+    const fits = (image: ImagePart) => budget === undefined || image.data.length <= budget;
     const wantsFormat = options.format !== undefined && mediaTypeOf(options.format) !== original.mediaType;
-    const fits = byteBudget === undefined || original.data.length <= byteBudget;
-    if (!wantsFormat && options.maxSize === undefined && fits) return original;
+    if (!wantsFormat && options.maxSize === undefined && fits(original)) return Result.ok(original);
 
     try {
         const image = await loadImage(dataUrl);
@@ -79,25 +105,26 @@ export async function encodeImage(dataUrl: string, options: ImageEncodeOptions =
         let format: ImageFormat = options.format ?? (original.mediaType === "image/png" ? "png" : "jpeg");
         let quality = options.quality ?? DEFAULT_QUALITY;
         let maxSize = options.maxSize;
-        let encoded: ImagePart = original;
         for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             const size = fit(width, height, maxSize);
             const canvas = document.createElement("canvas");
             canvas.width = size.width;
             canvas.height = size.height;
             const context = canvas.getContext("2d");
-            if (!context) return original;
+            if (!context) break;
             context.drawImage(image, 0, 0, size.width, size.height);
-            encoded = parseDataUrl(canvas.toDataURL(mediaTypeOf(format), quality));
-            if (byteBudget === undefined || encoded.data.length <= byteBudget) return encoded;
+            const encoded = parseDataUrl(canvas.toDataURL(mediaTypeOf(format), quality));
+            if (fits(encoded)) return Result.ok(encoded);
+            const side = Math.max(size.width, size.height);
+            if (side <= MIN_SIDE) break;
             // Too big for the relay: lossy from now on, then smaller.
             if (format === "png") format = "jpeg";
             else quality = Math.max(0.5, quality - 0.1);
-            maxSize = Math.round(Math.max(size.width, size.height) * 0.75);
+            maxSize = Math.max(MIN_SIDE, Math.round(side * 0.75));
         }
-        return encoded;
     } catch (error) {
         Logger.warn(`[ai] screenshot not re-encoded: ${error}`);
-        return original;
     }
+    // Could not re-encode (or not small enough): the original only when it fits.
+    return fits(original) ? Result.ok(original) : Result.err(tooLarge(budget ?? 0));
 }

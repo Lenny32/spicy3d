@@ -82,7 +82,9 @@ export async function imageResult(
     payload: Record<string, unknown>,
     options: ImageEncodeOptions = {},
 ): Promise<ToolResult> {
-    const image = await encodeImage(view.toImage(), options);
+    const encoded = await encodeImage(view.toImage(), options);
+    if (!encoded.isOk) return { content: JSON.stringify({ error: encoded.error }) };
+    const image = encoded.value;
     return {
         content: JSON.stringify({ ...payload, mediaType: image.mediaType }),
         images: [image],

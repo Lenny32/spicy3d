@@ -1,7 +1,13 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { encodeImage, parseDataUrl, setImageByteBudget } from "../src/tools/imageEncoding";
+import {
+    encodeImage,
+    imageBudgetFor,
+    imageByteBudget,
+    parseDataUrl,
+    withImageByteBudget,
+} from "../src/tools/imageEncoding";
 import { imageResult, parseImageOptions } from "../src/tools/viewTools";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
@@ -61,16 +67,47 @@ describe("parseImageOptions", () => {
     });
 });
 
+describe("image budget", () => {
+    test.each([
+        1 << 20,
+        10 << 20,
+        100_000,
+        5_000,
+    ])("the budget for %i bytes stays below the message limit", (max) => {
+        const budget = imageBudgetFor(max);
+        expect(budget).toBeGreaterThan(0);
+        expect(budget).toBeLessThan(max);
+    });
+
+    test("applies only inside the call that set it", async () => {
+        expect(imageByteBudget()).toBeUndefined();
+        const inside = await withImageByteBudget(1234, async () => imageByteBudget());
+        expect(inside).toBe(1234);
+        expect(imageByteBudget()).toBeUndefined();
+    });
+});
+
+/** A browser that cannot decode (or re-encode) the view image. */
+function stubBrokenImage() {
+    class BrokenImage {
+        onload?: () => void;
+        onerror?: () => void;
+        set src(_url: string) {
+            queueMicrotask(() => this.onerror?.());
+        }
+    }
+    rs.stubGlobal("Image", BrokenImage);
+}
+
 describe("encodeImage", () => {
     afterEach(() => {
-        setImageByteBudget(undefined);
         rs.unstubAllGlobals();
     });
 
     test("leaves the view's PNG untouched when nothing is asked and it fits", async () => {
-        await expect(encodeImage(PNG)).resolves.toEqual(parseDataUrl(PNG));
-        setImageByteBudget(1 << 20);
-        await expect(encodeImage(PNG)).resolves.toEqual({ mediaType: "image/png", data: "iVBORw0KGgo=" });
+        expect((await encodeImage(PNG)).value).toEqual(parseDataUrl(PNG));
+        const within = await withImageByteBudget(1 << 20, () => encodeImage(PNG));
+        expect(within.value).toEqual({ mediaType: "image/png", data: "iVBORw0KGgo=" });
     });
 
     test("scales to maxSize and encodes the requested format", async () => {
@@ -78,7 +115,8 @@ describe("encodeImage", () => {
         try {
             const image = await encodeImage(PNG, { format: "jpeg", maxSize: 800, quality: 0.6 });
 
-            expect(image.mediaType).toBe("image/jpeg");
+            expect(image.isOk).toBe(true);
+            expect(image.value.mediaType).toBe("image/jpeg");
             expect(canvas.encoded).toEqual([{ type: "image/jpeg", quality: 0.6, width: 800, height: 400 }]);
         } finally {
             canvas.restore();
@@ -88,11 +126,11 @@ describe("encodeImage", () => {
     test("an image over the relay's budget turns lossy, then smaller, until it fits", async () => {
         const canvas = stubCanvas();
         const big = `data:image/png;base64,${"A".repeat(40_000)}`;
-        setImageByteBudget(20_000);
         try {
-            const image = await encodeImage(big);
+            const image = await withImageByteBudget(20_000, () => encodeImage(big));
 
-            expect(image.data.length).toBeLessThanOrEqual(20_000);
+            expect(image.isOk).toBe(true);
+            expect(image.value.data.length).toBeLessThanOrEqual(20_000);
             expect(canvas.encoded.map((e) => e.type)).toEqual(["image/png", "image/jpeg", "image/jpeg"]);
             expect(canvas.encoded[0]).toMatchObject({ width: 2000, height: 1000 });
             expect(canvas.encoded.at(-1)?.width).toBeLessThan(2000);
@@ -100,13 +138,48 @@ describe("encodeImage", () => {
             canvas.restore();
         }
     });
+
+    test("an image that cannot be made to fit is an error, never sent", async () => {
+        const canvas = stubCanvas();
+        const big = `data:image/png;base64,${"A".repeat(40_000)}`;
+        try {
+            const image = await withImageByteBudget(5, () => encodeImage(big));
+
+            expect(image.isOk).toBe(false);
+            expect(image.error).toContain("message limit");
+        } finally {
+            canvas.restore();
+        }
+    });
+
+    test("without a canvas, an image over the budget is an error too", async () => {
+        stubBrokenImage();
+        const big = `data:image/png;base64,${"A".repeat(40_000)}`;
+        const image = await withImageByteBudget(1000, () => encodeImage(big));
+        expect(image.isOk).toBe(false);
+    });
 });
 
 describe("imageResult", () => {
+    afterEach(() => {
+        rs.unstubAllGlobals();
+    });
+
     test("passes the screenshot through as an image part and names its type", async () => {
         const result = await imageResult({ toImage: () => PNG }, { ok: true });
 
         expect(result.images).toEqual([{ mediaType: "image/png", data: "iVBORw0KGgo=" }]);
         expect(JSON.parse(result.content)).toEqual({ ok: true, mediaType: "image/png" });
+    });
+
+    test("a screenshot too large for the relay becomes an error result, without the image", async () => {
+        stubBrokenImage();
+        const big = `data:image/png;base64,${"A".repeat(40_000)}`;
+        const result = await withImageByteBudget(1000, () =>
+            imageResult({ toImage: () => big }, { ok: true }),
+        );
+
+        expect(result.images).toBeUndefined();
+        expect(JSON.parse(result.content).error).toContain("message limit");
     });
 });
