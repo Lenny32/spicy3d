@@ -11,7 +11,7 @@ import type { BannerOptions, DialogButton, FloatPanelOptions } from "../ui";
 import type { CursorType, IView } from "../visual";
 import type { AsyncController } from "./asyncController";
 import type { IDisposable } from "./disposable";
-import type { IDocumentRepository } from "./documentRepository";
+import type { IDocumentRepository, SaveKind } from "./documentRepository";
 import type { MessageType } from "./messageType";
 import type { Result } from "./result";
 
@@ -27,6 +27,8 @@ export interface PubSubEventMap {
     displayHome: (show: boolean) => void;
     documentClosed: (document: IDocument) => void;
     documentOpened: (document: IDocument) => void;
+    /** A document was saved (to its repository, or written back to its own file), as `kind`. */
+    documentSaved: (document: IDocument, kind: SaveKind) => void;
     /** An open document now saves to another repository (moved to or from the cloud). */
     documentRepositoryChanged: (document: IDocument, previous: IDocumentRepository) => void;
     editMaterial: (document: IDocument, material: Material, callback: (material: Material) => void) => void;

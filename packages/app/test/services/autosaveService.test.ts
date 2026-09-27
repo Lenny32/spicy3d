@@ -259,6 +259,20 @@ describe("AutosaveService", () => {
         expect(status.lastAutosavedAt(document)).toBeUndefined();
     });
 
+    test("a manual save of the clean autosaved document, or a move, clears 'Autosaved' too", async () => {
+        start();
+        edit("first");
+        await rs.advanceTimersByTimeAsync(5 * MINUTE);
+        expect(document.isDirty).toBe(false);
+
+        await document.save("manual");
+        expect(status.lastAutosavedAt(document)).toBeUndefined();
+
+        status.recordAutosave(document, 1);
+        PubSub.default.pub("documentRepositoryChanged", document, repository);
+        expect(status.lastAutosavedAt(document)).toBeUndefined();
+    });
+
     test("saving 'yes' in the close prompt while an autosave is due never saves the closed document", async () => {
         // The repository answers only when released, so the prompt's save is still running when
         // the deferred autosave wakes up.

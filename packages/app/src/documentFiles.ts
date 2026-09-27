@@ -195,6 +195,7 @@ export async function autosaveToOriginFile(document: IDocument): Promise<Result<
         await writable.write(blob);
         await writable.close();
         document.markSaved(position);
+        PubSub.default.pub("documentSaved", document, "auto");
         return Result.ok(undefined);
     } catch (error) {
         Logger.warn(`document file: cannot autosave to ${handle.name}`, error);
@@ -238,7 +239,10 @@ export async function saveDocumentFile(document: IDocument): Promise<Result<Docu
         // it is saved (no "unsaved changes" on close). A download or a newly picked file is a
         // copy and leaves the state alone; the local repository's copy may then be older, but
         // saving there still works as before.
-        if (origin && origin === handle) document.markSaved(position);
+        if (origin && origin === handle) {
+            document.markSaved(position);
+            PubSub.default.pub("documentSaved", document, "manual");
+        }
         return Result.ok("written");
     } catch (error) {
         Logger.warn(`document file: cannot write ${handle.name}`, error);

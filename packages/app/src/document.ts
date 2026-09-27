@@ -208,6 +208,7 @@ export class Document extends Observable implements IDocument {
             // The position the data was serialized at: edits made while saving stay unsaved.
             this.savedPosition = position;
             this.updateDirty();
+            PubSub.default.pub("documentSaved", this, kind);
         }
         return result;
     }

@@ -12,6 +12,7 @@ import {
     Logger,
     PubSub,
     type Result,
+    type SaveKind,
 } from "@spicy3d/core";
 import { autosaveToOriginFile, fileAutosave } from "../documentFiles";
 
@@ -93,6 +94,8 @@ export class AutosaveService implements IService {
         this.status.fileAutosave ??= this.files;
         PubSub.default.sub("documentOpened", this.watch);
         PubSub.default.sub("documentClosed", this.unwatch);
+        PubSub.default.sub("documentSaved", this.onSaved);
+        PubSub.default.sub("documentRepositoryChanged", this.onRepositoryChanged);
         this.settings.onPropertyChanged(this.onSettingsChanged);
         this.app?.onPropertyChanged(this.onAppChanged);
         this.removeHoldListener = AutosaveHolds.onReleased(this.resumeIfIdle);
@@ -108,6 +111,8 @@ export class AutosaveService implements IService {
     stop(): void {
         PubSub.default.remove("documentOpened", this.watch);
         PubSub.default.remove("documentClosed", this.unwatch);
+        PubSub.default.remove("documentSaved", this.onSaved);
+        PubSub.default.remove("documentRepositoryChanged", this.onRepositoryChanged);
         this.settings.removePropertyChanged(this.onSettingsChanged);
         this.app?.removePropertyChanged(this.onAppChanged);
         this.removeHoldListener?.();
@@ -171,9 +176,17 @@ export class AutosaveService implements IService {
         entry.waiting = false;
         clearTimeout(entry.timer);
         entry.timer = undefined;
-        // A save other than ours: the last save is no longer an autosave.
-        if (!entry.saving) this.status.clear(document);
     }
+
+    /** Any save but an autosave (manual, merge, restore…): the last save is no longer an autosave. */
+    private readonly onSaved = (document: IDocument, kind: SaveKind) => {
+        if (kind !== "auto") this.status.clear(document);
+    };
+
+    /** Moved to or from the cloud: its autosaves were elsewhere. */
+    private readonly onRepositoryChanged = (document: IDocument) => {
+        this.status.clear(document);
+    };
 
     private readonly onSettingsChanged = (property: keyof AutosaveSettings) => {
         if (property !== "intervalMinutes") return;
