@@ -7,6 +7,7 @@ import {
     cloudErrorMessage,
     cloudErrorMessageKey,
     codeForStatus,
+    describeCloudError,
     FIELD_MESSAGES,
     fieldErrorMessageKey,
     fieldErrorMessages,
@@ -122,5 +123,38 @@ describe("toProblem", () => {
         expect(codeForStatus(412)).toBe("precondition_failed");
         expect(codeForStatus(428)).toBe("precondition_required");
         expect(codeForStatus(500)).toBe("internal_error");
+    });
+});
+
+describe("describeCloudError", () => {
+    const limited = (retryAfterSeconds?: number): CloudError => ({
+        kind: "problem",
+        status: 429,
+        problem: { code: "too_many_requests" },
+        retryAfterSeconds,
+    });
+
+    test.each([
+        [30, { key: "error.cloud.retryInAMinute", args: [] }],
+        [60, { key: "error.cloud.retryInAMinute", args: [] }],
+        [61, { key: "error.cloud.retryInMinutes{0}", args: [2] }],
+        [900, { key: "error.cloud.retryInMinutes{0}", args: [15] }],
+    ])("a rate limit with Retry-After %i s says when to come back", (seconds, expected) => {
+        expect(describeCloudError(limited(seconds))).toEqual(expected);
+    });
+
+    test("without Retry-After: the generic message", () => {
+        expect(describeCloudError(limited())).toEqual({ key: "error.cloud.tooManyRequests", args: [] });
+    });
+
+    test("the English messages carry the minutes", () => {
+        expect(en.translation["error.cloud.retryInMinutes{0}"]).toContain("{0} minutes");
+    });
+
+    test("other errors: their key", () => {
+        expect(describeCloudError(problem(503, "email_disabled"))).toEqual({
+            key: "error.cloud.emailDisabled",
+            args: [],
+        });
     });
 });

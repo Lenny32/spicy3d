@@ -36,7 +36,14 @@ Optional accounts: everything works without one; signing in unlocks cloud storag
 - [ ] With email verification on (smtp4dev in dev), verify and reset links from the email complete the flow.
 - [ ] Delete account removes everything server-side and signs out; local documents remain.
 - [ ] Data export downloads a ZIP that reopens in Spicy3D.
-- [ ] App remains fully usable when never signed in.
+- [x] App remains fully usable when never signed in.
+
+Implementation notes (CLOUD-05 branch): the first four criteria are covered by tests against a mocked
+server only (`packages/cloud/test/account*.test.ts`) and still need a run against SpicySrv. The data
+export ZIP holds the server's `spicy3d.cloudVersion` envelopes (manifest + base64 blobs), which the app
+can reopen once CLOUD-06 defines the manifest; the "remove cached cloud copies" step is the
+`Account.addSignOutHandler` hook (`removeCachedDocuments`), filled by CLOUD-06 with the cache; the
+autosave interval goes in `AccountSettingsSections` (CLOUD-07).
 
 ## Dependencies and complexity
 

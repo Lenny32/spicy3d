@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { Application, CommandService, HotkeyService, ShowPropertyEventHandler } from "@spicy3d/app";
+import type { AccountLink } from "@spicy3d/cloud/src/links";
 import {
     Config,
     Constants,
@@ -28,6 +29,8 @@ import {
 export interface UseCloudOptions {
     /** Where the server's `/api` lives; defaults to the folder the app is served from (same origin). */
     baseUrl?: string;
+    /** An account email link the app was opened with (verify email, reset password…); see `takeAccountLink`. */
+    accountLink?: AccountLink;
 }
 
 export class AppBuilder {
@@ -137,19 +140,24 @@ export class AppBuilder {
     /**
      * Connects to a Spicy3D server when one answers `GET /api/config`; otherwise (static hosting,
      * no server) the cloud stays dormant and shows no UI. Runs after startup, and loads the API
-     * client only once a server is found.
+     * client and the account UI only once a server is found.
      */
     useCloud(options: UseCloudOptions = {}): this {
         this._started.push(async () => {
             const { discoverCloud } = await import("@spicy3d/cloud/src/config");
-            const discovery = await discoverCloud(options);
-            if (discovery.status === "dormant") return;
+            const { accountLink, ...connection } = options;
+            const discovery = await discoverCloud(connection);
+            if (discovery.status === "dormant") {
+                if (accountLink) Logger.warn("[cloud] opened with an account link, but no server answers");
+                return;
+            }
 
             Logger.info(
                 `initializing cloud (server ${discovery.config.version}, API ${discovery.config.apiVersion})`,
             );
             const cloud = await import("@spicy3d/cloud");
-            cloud.startCloud(discovery, options);
+            const started = cloud.startCloud(discovery, connection);
+            if (started) await cloud.startAccountUi(started, accountLink);
         });
         return this;
     }

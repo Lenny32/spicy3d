@@ -3,6 +3,7 @@
 
 import { rs } from "@rstest/core";
 import { type BannerOptions, PubSub } from "@spicy3d/core";
+import { Account } from "../src/account/account";
 import type { ConfigResponse } from "../src/api";
 import { CloudClient } from "../src/client";
 import { API_VERSION_BANNER_ID, Cloud, startCloud } from "../src/cloud";
@@ -44,6 +45,17 @@ describe("startCloud", () => {
         expect(connection?.client.baseUrl).toBe("https://spicy.test");
         expect(Cloud.current.connection).toBe(connection);
         expect(published).toEqual([]);
+    });
+
+    test("ready: the connection's account is the app's account, not signed in yet", () => {
+        expect(Cloud.current.account).toBeUndefined();
+
+        const connection = startCloud({ status: "ready", config }, { baseUrl: "https://spicy.test" });
+
+        expect(connection?.account).toBeInstanceOf(Account);
+        expect(connection?.account.client).toBe(connection?.client);
+        expect(Cloud.current.account).toBe(connection?.account);
+        expect(Cloud.current.account?.status).toBe("unknown");
     });
 
     test("ready: observers learn about the connection", () => {

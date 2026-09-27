@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { Observable, PubSub } from "@spicy3d/core";
+import { Account } from "./account/account";
 import type { ConfigResponse } from "./api";
 import { CloudClient, type CloudClientOptions } from "./client";
 import type { ApiCompatibility, CloudDiscovery } from "./config";
@@ -10,10 +11,15 @@ export type CloudOptions = CloudClientOptions;
 
 /** A reachable server that speaks this client's contract. */
 export class CloudConnection {
+    /** Who is signed in to this server; see {@link Account}. */
+    readonly account: Account;
+
     constructor(
         readonly config: ConfigResponse,
         readonly client: CloudClient,
-    ) {}
+    ) {
+        this.account = new Account(client);
+    }
 }
 
 /**
@@ -28,6 +34,11 @@ export class Cloud extends Observable {
     }
     set connection(value: CloudConnection | undefined) {
         this.setProperty("connection", value);
+    }
+
+    /** The account of the connected server; `undefined` while the cloud is dormant. */
+    get account(): Account | undefined {
+        return this.connection?.account;
     }
 }
 

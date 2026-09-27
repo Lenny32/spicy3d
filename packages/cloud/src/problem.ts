@@ -67,10 +67,13 @@ export const FIELD_MESSAGES = {
     manifest_too_large: "error.cloud.field.manifestTooLarge",
     name_required: "error.cloud.field.nameRequired",
     name_too_long: "error.cloud.field.nameTooLong",
+    password_common: "error.cloud.field.passwordCommon",
+    password_too_long: "error.cloud.field.passwordTooLong",
     password_too_short: "error.cloud.field.passwordTooShort",
     query_too_long: "error.cloud.field.queryTooLong",
     scopes_required: "error.cloud.field.scopesRequired",
     too_many_blobs: "error.cloud.field.tooManyBlobs",
+    unknown_scope: "error.cloud.field.unknownScope",
 } as const satisfies Record<string, I18nKeys>;
 
 /**
@@ -205,9 +208,30 @@ export function cloudErrorMessageKey(error: CloudError): I18nKeys {
     }
 }
 
+/** A translatable message: an i18n key and the arguments of its `{0}` placeholders. */
+export interface CloudErrorMessage {
+    key: I18nKeys;
+    args: unknown[];
+}
+
+/**
+ * The message of an error with its arguments. A rate limit (429) that says when to come back
+ * (`Retry-After`) reads "try again in N minutes" instead of the generic "wait a moment".
+ */
+export function describeCloudError(error: CloudError): CloudErrorMessage {
+    if (error.kind === "problem" && error.status === 429 && error.retryAfterSeconds !== undefined) {
+        const minutes = Math.max(1, Math.ceil(error.retryAfterSeconds / 60));
+        return minutes === 1
+            ? { key: "error.cloud.retryInAMinute", args: [] }
+            : { key: "error.cloud.retryInMinutes{0}", args: [minutes] };
+    }
+    return { key: cloudErrorMessageKey(error), args: [] };
+}
+
 /** The translated message of an error, for a toast or an inline hint. */
 export function cloudErrorMessage(error: CloudError): string {
-    return I18n.translate(cloudErrorMessageKey(error));
+    const { key, args } = describeCloudError(error);
+    return I18n.translate(key, ...args);
 }
 
 /** The i18n key of one field code of a `validation_failed` problem; unknown codes get a generic one. */

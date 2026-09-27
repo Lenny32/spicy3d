@@ -37,6 +37,7 @@ const cloudMock = rs.hoisted(() => ({
     discovery: { status: "dormant" } as { status: string; config?: unknown },
     discoverCalls: [] as unknown[],
     startCalls: [] as unknown[][],
+    accountUiCalls: [] as unknown[][],
     mainModuleLoaded: 0,
 }));
 
@@ -52,6 +53,10 @@ rs.mock("@spicy3d/cloud", () => {
     return {
         startCloud: (...args: unknown[]) => {
             cloudMock.startCalls.push(args);
+            return { connection: args[0] };
+        },
+        startAccountUi: async (...args: unknown[]) => {
+            cloudMock.accountUiCalls.push(args);
         },
     };
 });
@@ -233,6 +238,7 @@ describe("AppBuilder", () => {
         beforeEach(() => {
             cloudMock.discoverCalls.length = 0;
             cloudMock.startCalls.length = 0;
+            cloudMock.accountUiCalls.length = 0;
         });
 
         test("adds a post-startup step, not a startup init", () => {
@@ -253,6 +259,7 @@ describe("AppBuilder", () => {
 
             expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
             expect(cloudMock.startCalls).toEqual([]);
+            expect(cloudMock.accountUiCalls).toEqual([]);
             // Runs before the "a server" case, which is the first to import the client module.
             expect(cloudMock.mainModuleLoaded).toBe(0);
         });
@@ -266,7 +273,21 @@ describe("AppBuilder", () => {
 
             expect(cloudMock.discoverCalls).toEqual([{}]);
             expect(cloudMock.startCalls).toEqual([[discovery, {}]]);
+            expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, undefined]]);
             expect(cloudMock.mainModuleLoaded).toBe(1);
+        });
+
+        test("an account link goes to the account UI, not to discovery or the client", async () => {
+            const discovery = { status: "ready", config: { version: "0.0.1", apiVersion: "1" } };
+            cloudMock.discovery = discovery;
+            const accountLink = { kind: "verifyEmail" as const, userId: "u", token: "t" };
+            const builder = new AppBuilder().useCloud({ baseUrl: "https://spicy.test", accountLink });
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
+            expect(cloudMock.startCalls).toEqual([[discovery, { baseUrl: "https://spicy.test" }]]);
+            expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, accountLink]]);
         });
 
         test("a failing step is logged, never thrown into startup", async () => {
