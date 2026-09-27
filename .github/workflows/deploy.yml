@@ -6,7 +6,7 @@ name: Deploy
 # - Push to main or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
 #   site; the bridge executables are built and verified (run artifact) but not published.
 # - Docker image: the same dist/ served by nginx (Dockerfile, target `prebuilt`), pushed to
-#   ghcr.io/<owner>/<repo> as `latest`, `<app version>` and `sha-<short sha>`, for linux/amd64 and
+#   ghcr.io/<owner>/<repo> as `latest` and `<app version>` (package.json), for linux/amd64 and
 #   linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs the package to be public (Packages >
 #   spicy3d > Package settings) or a `docker login ghcr.io`.
 # - Bridge releases are published by hand: Actions > Package MCP bridge > Run workflow, with
@@ -120,9 +120,8 @@ jobs:
               with:
                   images: ghcr.io/${{ github.repository }}
                   tags: |
-                      type=raw,value=latest,enable={{is_default_branch}}
+                      type=raw,value=latest
                       type=raw,value=${{ needs.prepare.outputs.app-version }}
-                      type=sha
 
             # The prebuilt target only copies files (no RUN), so arm64 needs no QEMU.
             - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
