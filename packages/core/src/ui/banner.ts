@@ -20,6 +20,8 @@ export interface BannerOptions {
     message: I18nKeys;
     args?: unknown[];
     action?: BannerAction;
+    /** More than one action (shown after `action`, in order). */
+    actions?: BannerAction[];
     /** Offers a close button; `true` when omitted. */
     dismissible?: boolean;
 }

@@ -95,8 +95,11 @@ export type DocumentRepositoryError =
     | { kind: "unauthorized" }
     | { kind: "notFound"; id: string }
     | { kind: "quota" }
-    /** The document is being edited in another tab of this browser; this one only shows it. */
-    | { kind: "readOnly" }
+    /**
+     * The document is being edited in another tab of this browser and this one only shows it, or
+     * (`reason: "preview"`) it is an older version shown from the history, which is never saved.
+     */
+    | { kind: "readOnly"; reason?: "preview" }
     | { kind: "failed"; message: string };
 
 /**
@@ -200,7 +203,9 @@ export function repositoryErrorMessage(error: DocumentRepositoryError): [I18nKey
         case "quota":
             return ["error.repository.quota"];
         case "readOnly":
-            return ["error.repository.readOnly"];
+            return [
+                error.reason === "preview" ? "error.repository.readOnlyPreview" : "error.repository.readOnly",
+            ];
         case "failed":
             return ["error.repository.failed:{0}", error.message];
     }
