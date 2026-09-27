@@ -16,8 +16,10 @@ COPY . .
 RUN npm ci --no-audit --no-fund && NODE_ENV=production npm run build
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
-# Origins plugins may be loaded from besides the app's own, space-separated (Content-Security-Policy).
+# Origins plugins may be loaded from besides the app's own, and other origins the page may connect to (the
+# assistant's LLM endpoints), space-separated (Content-Security-Policy, docs/security.md).
 ENV SPICY3D_PLUGIN_ORIGINS="" \
+    SPICY3D_CONNECT_ORIGINS="" \
     NGINX_ENVSUBST_FILTER="^SPICY3D_" \
     NGINX_ENVSUBST_OUTPUT_DIR=/tmp/conf.d
 COPY --chmod=755 docker/19-spicy3d-plugin-origins.sh /docker-entrypoint.d/

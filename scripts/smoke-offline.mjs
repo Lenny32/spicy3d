@@ -50,11 +50,13 @@ if (!args.url && !existsSync(path.join(distDir, "index.html"))) {
 }
 
 // The policy the web image sends (docker/default.conf.template), so a directive the app outgrows fails here.
-// SPICY3D_PLUGIN_ORIGINS as the image's default: empty.
+// SPICY3D_PLUGIN_ORIGINS and SPICY3D_CONNECT_ORIGINS as the image's defaults: empty.
 const nginxConf = readFileSync(path.join(rootDir, "docker/default.conf.template"), "utf8");
 const CSP = /add_header Content-Security-Policy "([^"]+)"/
     .exec(nginxConf)?.[1]
     .replaceAll("${SPICY3D_PLUGIN_ORIGINS}", "")
+    .replaceAll("${SPICY3D_CONNECT_ORIGINS}", "")
+    .replace(/ {2,}/g, " ")
     .replace(/ +;/g, ";");
 if (!CSP) {
     console.error("docker/default.conf.template sends no Content-Security-Policy");
