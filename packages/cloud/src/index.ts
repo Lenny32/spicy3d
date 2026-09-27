@@ -7,6 +7,7 @@ export * from "./client";
 export * from "./cloud";
 export * from "./config";
 export * from "./documents";
+export * from "./history";
 export * from "./links";
 export * from "./problem";
 export * from "./settings";

@@ -7,10 +7,14 @@ import {
     type IDocumentRepository,
     Logger,
     PubSub,
+    SidePanels,
     TitleBar,
 } from "@spicy3d/core";
 import type { SignOutEvent } from "../account/account";
 import type { CloudConnection } from "../cloud";
+import { VersionHistoryPanel } from "../history/historyPanel";
+import { previewOf } from "../history/previewRepository";
+import { VersionHistory } from "../history/versionHistory";
 import { defaultBlobCache, type IBlobCache } from "./blobCache";
 import { showConflictDialog } from "./conflictDialog";
 import { keepChangesAfterSignOut } from "./documentActions";
@@ -39,6 +43,7 @@ export class CloudDocuments {
     readonly cache: IBlobCache;
     readonly locks: EditLocks;
     private repository?: CloudDocumentRepository;
+    private historyPanel?: VersionHistoryPanel;
     private readonly statusItem?: DocumentStatusItem;
     private readonly removeSignOutHandler: () => void;
 
@@ -63,6 +68,7 @@ export class CloudDocuments {
                 repository: () => this.repository,
                 takeOver: this.takeOver,
                 resolveConflict: this.resolveConflict,
+                openHistory: (document) => void this.openHistory(document),
             });
             // Left of the account button.
             TitleBar.items.push(this.statusItem);
@@ -77,6 +83,11 @@ export class CloudDocuments {
 
     get cloud(): CloudDocumentRepository | undefined {
         return this.repository;
+    }
+
+    /** The version history panel, while one is open. */
+    get history(): VersionHistoryPanel | undefined {
+        return this.historyPanel;
     }
 
     dispose(): void {
@@ -121,6 +132,7 @@ export class CloudDocuments {
     private stop() {
         const repository = this.repository;
         if (!repository) return;
+        void this.closeHistory();
         for (const document of this.app.documents) {
             if (document.repository === repository) this.locks.release(document.id);
         }
@@ -203,6 +215,46 @@ export class CloudDocuments {
         if (!head.isOk || head.value === document.version || document.isDirty) return;
         await document.close({ discardChanges: true });
         await this.app.openDocument(document.id, repository);
+    };
+
+    /**
+     * "Version history" of a cloud document (or of the one a preview shows): the side panel next
+     * to the viewport, one at a time — opening another document's closes the first.
+     */
+    readonly openHistory = (document: IDocument): VersionHistoryPanel | undefined => {
+        const repository = this.repository;
+        if (!repository) return undefined;
+        const documentId = previewOf(document)?.documentId ?? document.id;
+        if (!previewOf(document) && document.repository !== repository) return undefined;
+        if (this.historyPanel?.history.documentId === documentId) return this.historyPanel;
+        void this.closeHistory();
+        const fallbackName = document.name;
+        const history = new VersionHistory({
+            app: this.app,
+            repository,
+            documentId,
+            name: () =>
+                [...this.app.documents].find((x) => x.id === documentId && x.repository === repository)
+                    ?.name ?? fallbackName,
+        });
+        const panel = new VersionHistoryPanel({
+            history,
+            retention: this.connection.config.storage.autosaveRetention,
+            onClose: () => void this.closeHistory(),
+        });
+        this.historyPanel = panel;
+        SidePanels.items.push(panel);
+        return panel;
+    };
+
+    /** Closes the history panel, and the version it previews. */
+    readonly closeHistory = async (): Promise<void> => {
+        const panel = this.historyPanel;
+        if (!panel) return;
+        this.historyPanel = undefined;
+        SidePanels.items.remove(panel);
+        await panel.history.closePreview();
+        panel.history.dispose();
     };
 }
 

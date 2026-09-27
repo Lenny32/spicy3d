@@ -63,3 +63,29 @@
         border-color: var(--border-hover-color);
     }
 }
+
+.history {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--foreground-muted-color);
+    cursor: pointer;
+
+    & svg {
+        width: 14px;
+        height: 14px;
+        fill: currentColor;
+    }
+
+    &:hover {
+        color: var(--foreground-color);
+        background: color-mix(in srgb, var(--foreground-color) 8%, transparent);
+    }
+}
+
+.state[data-status="preview"] {
+    color: var(--primary-color);
+}

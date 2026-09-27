@@ -11,7 +11,8 @@ import {
     type IDocument,
     PubSub,
 } from "@spicy3d/core";
-import { button, div, span } from "@spicy3d/element";
+import { button, div, span, svg } from "@spicy3d/element";
+import { previewOf } from "../history/previewRepository";
 import accountStyle from "../ui/account.module.css";
 import { downloadDocument, saveCopyOnThisDevice, saveOpenDocumentToCloud } from "./documentActions";
 import style from "./documents.module.css";
@@ -58,6 +59,8 @@ export interface DocumentStatusContext {
     resolveConflict?: (document: IDocument) => Promise<void>;
     /** When each document was last autosaved (default: the app's). */
     autosave?: AutosaveStatus;
+    /** Opens the version history panel of a cloud document (or of the version a preview shows). */
+    openHistory?: (document: IDocument) => void;
 }
 
 /**
@@ -137,6 +140,18 @@ export class DocumentStatusItem extends HTMLElement {
             this.replaceChildren();
             return;
         }
+        if (previewOf(open)) {
+            // A version from the history: nowhere to save it, only "back to the history".
+            const label = span({
+                className: style.state,
+                textContent: I18n.translate("cloud.status.preview"),
+                title: I18n.translate("cloud.status.previewHint"),
+            });
+            label.dataset["status"] = "preview";
+            label.setAttribute("role", "status");
+            this.replaceChildren(label, ...this.historyButton(open));
+            return;
+        }
 
         const inCloud = open.repository === repository;
         const location = button({
@@ -191,8 +206,26 @@ export class DocumentStatusItem extends HTMLElement {
                 );
             }
         }
+        if (inCloud) children.push(...this.historyButton(open));
         this.replaceChildren(...children);
     };
+
+    private historyButton(document: IDocument): HTMLElement[] {
+        const openHistory = this.ctx.openHistory;
+        if (!openHistory) return [];
+        const history = button(
+            {
+                type: "button",
+                className: style.history,
+                title: I18n.translate("cloud.history.title"),
+                onclick: () => openHistory(document),
+            },
+            svg({ icon: "icon-history" }),
+        );
+        history.dataset["action"] = "history";
+        history.setAttribute("aria-label", I18n.translate("cloud.history.title"));
+        return [history];
+    }
 
     private toggleMenu(document: IDocument, inCloud: boolean) {
         if (this.menu) {
@@ -210,8 +243,12 @@ export class DocumentStatusItem extends HTMLElement {
                     void run().finally(this.render);
                 },
             });
+        const openHistory = this.ctx.openHistory;
         const items = inCloud
-            ? [item("cloud.document.saveCopyOnDevice", () => saveCopyOnThisDevice(this.ctx.app, document))]
+            ? [
+                  item("cloud.document.saveCopyOnDevice", () => saveCopyOnThisDevice(this.ctx.app, document)),
+                  ...(openHistory ? [item("cloud.history.title", async () => openHistory(document))] : []),
+              ]
             : [
                   item("cloud.document.saveToCloud", () =>
                       saveOpenDocumentToCloud(this.ctx.app, document, repository),

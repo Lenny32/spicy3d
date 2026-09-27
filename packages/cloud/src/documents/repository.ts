@@ -18,6 +18,7 @@ import {
     type SaveConflict,
     type SaveOutcome,
     type SaveRequest,
+    type Serialized,
     type SplitManifestOptions,
     type StoredDocumentInfo,
     sha256Hex,
@@ -32,6 +33,32 @@ import { encodeThumbnail, thumbnailType } from "./thumbnail";
 
 type DocumentSummary = ApiSchema<"DocumentSummary">;
 type NewVersionRequest = ApiSchema<"NewVersionRequest">;
+
+/** A version of a cloud document as the server lists it (`VersionResponse`). */
+export type CloudVersion = ApiSchema<"VersionResponse">;
+
+/** A page of a document's history, newest first. */
+export interface VersionPage {
+    items: CloudVersion[];
+    /** Pass as `cursor` for the next (older) page; `undefined` on the last page. */
+    nextCursor?: string;
+}
+
+export interface VersionListQuery {
+    cursor?: string;
+    /** Page size, 1–200 (the server's default is 50). */
+    limit?: number;
+}
+
+/** A label and pin change of a version (`PATCH /api/versions/{id}`); omitted fields are kept. */
+export interface VersionUpdate {
+    /** `""` removes the label. */
+    label?: string;
+    pinned?: boolean;
+}
+
+/** Restoring retries this many times when another save moved the head in between. */
+const RESTORE_ATTEMPTS = 3;
 
 /** At most this many hashes per `POST /api/blobs/check` (SpicySrv `MaxCheckHashes`). */
 const MAX_CHECK_HASHES = 1000;
@@ -119,6 +146,12 @@ function replayedConflict(head: SavedVersion): CloudError {
 
 class RepositoryFailure {
     constructor(readonly error: DocumentRepositoryError) {}
+}
+
+function failureOf(error: unknown): DocumentRepositoryError {
+    return error instanceof RepositoryFailure
+        ? error.error
+        : { kind: "failed", message: (error as Error).message };
 }
 
 /**
@@ -236,7 +269,11 @@ export class CloudDocumentRepository implements IDocumentRepository {
 
     async thumbnailUrl(meta: DocumentMeta): Promise<string | undefined> {
         const sha = this.thumbnailShas.get(meta.id);
-        if (!sha) return undefined;
+        return sha ? this.imageUrl(sha) : undefined;
+    }
+
+    /** The object URL of a thumbnail blob (a version's), downloaded once; `undefined` if unusable. */
+    imageUrl(sha: string): Promise<string | undefined> {
         let url = this.thumbnailUrls.get(sha);
         if (!url) {
             url = this.blob(sha).then(
@@ -277,10 +314,17 @@ export class CloudDocumentRepository implements IDocumentRepository {
         this.serverNames.set(id, name);
         if (head.thumbnailSha256) this.thumbnailShas.set(id, head.thumbnailSha256);
 
+        const data = await this.content(head);
+        // Renames are metadata only: the server's name is the document's name.
+        return data.isOk
+            ? Result.ok({ data: { ...data.value, name }, version: head.id })
+            : Result.err(data.error);
+    }
+
+    /** The serialized document a version holds: its manifest, assembled with its blobs (cached). */
+    private async content(version: CloudVersion): Promise<Result<Serialized, DocumentRepositoryError>> {
         try {
-            const manifest: unknown = JSON.parse(
-                decoder.decode(await this.blob(head.manifestSha256, head.id)),
-            );
+            const manifest = await this.manifest(version);
             const refs = manifestBlobRefs(manifest);
             const blobs = new Map<string, Uint8Array>();
             await mapLimit(refs, TRANSFER_CONCURRENCY, async (sha) => {
@@ -290,12 +334,15 @@ export class CloudDocumentRepository implements IDocumentRepository {
             if (!assembled.isOk) {
                 return Result.err({ kind: "failed", message: JSON.stringify(assembled.error) });
             }
-            // Renames are metadata only: the server's name is the document's name.
-            return Result.ok({ data: { ...assembled.value, name }, version: head.id });
+            return Result.ok(assembled.value);
         } catch (error) {
-            if (error instanceof RepositoryFailure) return Result.err(error.error);
-            return Result.err({ kind: "failed", message: (error as Error).message });
+            return Result.err(failureOf(error));
         }
+    }
+
+    /** A version's manifest (JSON), from the cache or `GET /api/versions/{id}`. Throws. */
+    private async manifest(version: CloudVersion): Promise<unknown> {
+        return JSON.parse(decoder.decode(await this.blob(version.manifestSha256, version.id)));
     }
 
     /**
@@ -335,11 +382,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
         try {
             result = await this.saveVersion(request);
         } catch (error) {
-            result = Result.err(
-                error instanceof RepositoryFailure
-                    ? error.error
-                    : { kind: "failed", message: (error as Error).message },
-            );
+            result = Result.err(failureOf(error));
         }
         if (!result.isOk) {
             this.setState(request.id, result.error.kind === "offline" ? "offline" : "error");
@@ -560,6 +603,104 @@ export class CloudDocumentRepository implements IDocumentRepository {
         );
         if (!result.isOk) return Result.err(toRepositoryError(result.error, id));
         return Result.ok(result.value.data.headVersionId ?? undefined);
+    }
+
+    // ---- History (SRV-05, SRV-06) ------------------------------------------------------------
+
+    /** A page of the document's versions, newest first (`GET /api/documents/{id}/versions`). */
+    async listVersions(
+        id: string,
+        { cursor, limit }: VersionListQuery = {},
+    ): Promise<Result<VersionPage, DocumentRepositoryError>> {
+        const result = await this.account.call((api) =>
+            api.GET("/api/documents/{id}/versions", { params: { path: { id }, query: { cursor, limit } } }),
+        );
+        if (!result.isOk) return Result.err(toRepositoryError(result.error, id));
+        const { items, nextCursor } = result.value.data;
+        const page: VersionPage = { items };
+        if (nextCursor) page.nextCursor = nextCursor;
+        return Result.ok(page);
+    }
+
+    /**
+     * The document a version holds, as saved (in its own format: the caller migrates, e.g. through
+     * `Document.load`). Its manifest and blobs are downloaded once, then read from the cache.
+     */
+    loadVersion(version: CloudVersion): Promise<Result<Serialized, DocumentRepositoryError>> {
+        if (!this.isOwnersSession()) return Promise.resolve(Result.err({ kind: "unauthorized" }));
+        return this.content(version);
+    }
+
+    /** Sets or clears the label, pins or unpins (a labeled or pinned autosave is never pruned). */
+    async updateVersion(
+        versionId: string,
+        { label, pinned }: VersionUpdate,
+    ): Promise<Result<CloudVersion, DocumentRepositoryError>> {
+        const result = await this.account.call((api) =>
+            api.PATCH("/api/versions/{versionId}", {
+                params: { path: { versionId } },
+                body: { label: label ?? null, pinned: pinned ?? null },
+            }),
+        );
+        return result.isOk ? Result.ok(result.value.data) : Result.err(toRepositoryError(result.error));
+    }
+
+    /**
+     * "Restore": a new head version (`kind: restore`, parent = the current head, `If-Match` it)
+     * with the content of `version` — history is never rewritten, the previous head stays. The
+     * content is referenced, not uploaded again: the same manifest, blobs and thumbnail. When
+     * another save moves the head in between, the restore goes on top of that one instead.
+     */
+    async restoreVersion(
+        id: string,
+        version: CloudVersion,
+    ): Promise<Result<CloudVersion, DocumentRepositoryError>> {
+        if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
+        if (this.isReadOnly(id)) return Result.err({ kind: "readOnly" });
+        let blobs: string[];
+        try {
+            blobs = manifestBlobRefs(await this.manifest(version));
+        } catch (error) {
+            return Result.err(failureOf(error));
+        }
+        let head = await this.headVersion(id);
+        const key = newIdempotencyKey();
+        for (let attempt = 0; attempt < RESTORE_ATTEMPTS; attempt++) {
+            if (!head.isOk) return Result.err(head.error);
+            const base = head.value;
+            if (!base) return Result.err({ kind: "notFound", id });
+            const body: NewVersionRequest = {
+                parentIds: [base],
+                kind: "restore",
+                label: null,
+                manifestSha256: version.manifestSha256,
+                blobs,
+                thumbnailSha256: version.thumbnailSha256,
+                formatVersion: Number(version.formatVersion) || DOCUMENT_FORMAT_VERSION,
+                deviceName: this.account.deviceSettings.effectiveDeviceName,
+                clientId: this.clientId,
+            };
+            const result = await this.account.call((api) =>
+                api.POST("/api/documents/{id}/versions", {
+                    params: {
+                        path: { id },
+                        header: { "If-Match": ifMatch(base), "Idempotency-Key": `${key}-${attempt}` },
+                    },
+                    body,
+                }),
+            );
+            if (result.isOk) {
+                if (version.thumbnailSha256) this.thumbnailShas.set(id, version.thumbnailSha256);
+                return Result.ok(result.value.data);
+            }
+            const error = result.error;
+            if (problemCode(error) !== "version_conflict" || error.kind !== "problem") {
+                return Result.err(toRepositoryError(error, id));
+            }
+            const next = error.problem.headVersionId;
+            head = next ? Result.ok(next) : await this.headVersion(id);
+        }
+        return Result.err({ kind: "failed", message: I18n.translate("cloud.history.restoreBusy") });
     }
 
     /** Removes the cached copies of cloud documents from this device. */
