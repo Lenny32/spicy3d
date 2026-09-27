@@ -1,8 +1,15 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { describe, expect, test } from "@rstest/core";
-import { type DocumentRepositoryError, PubSub, Result, type SaveOutcome } from "@spicy3d/core";
+import { describe, expect, rs, test } from "@rstest/core";
+import {
+    type DocumentRepositoryError,
+    type IDocument,
+    PubSub,
+    Result,
+    type SaveConflict,
+    type SaveOutcome,
+} from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { SaveDocument } from "../../../src/commands/application/saveDocument";
 
@@ -207,6 +214,23 @@ describe("SaveDocument callback", () => {
             await state.callback!();
 
             expect(state.toastMessage).toBe(message);
+        } finally {
+            restore();
+        }
+    });
+
+    test("a version conflict opens the conflict handler when there is one", async () => {
+        const conflict = { status: "conflict", headVersion: "h" } as const;
+        const { state, app, restore } = setupCallbackTest(Result.ok(conflict));
+        const handler = rs.fn(async (_doc: IDocument, _conflict: SaveConflict) => {});
+        app.repositories.conflictHandler = handler;
+
+        try {
+            await new SaveDocument().execute(app);
+            await state.callback!();
+
+            expect(handler).toHaveBeenCalledWith(app.activeView!.document, conflict);
+            expect(state.toastMessage).toBe("");
         } finally {
             restore();
         }

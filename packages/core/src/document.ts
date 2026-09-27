@@ -24,6 +24,11 @@ import type { Act, IVisual } from "./visual";
 export const DOCUMENT_FILE_EXTENSION = ".spicy";
 export const PLUGIN_FILE_EXTENSION = ".spicyplugin";
 
+export interface CloseDocumentOptions {
+    /** Close without asking to save; unsaved changes are lost. */
+    discardChanges?: boolean;
+}
+
 export interface IDocument extends IPropertyChanged, IDisposable {
     readonly analyses: AnalysisManager;
     readonly selection: ISelection;
@@ -50,8 +55,9 @@ export interface IDocument extends IPropertyChanged, IDisposable {
     save(kind?: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
     /**
      * Asks to save unsaved changes, then closes the document and its views. Resolves `false`
-     * when the user cancels or the save fails (the document stays open).
+     * when the user cancels or the save fails (the document stays open). `discardChanges` closes
+     * without asking, e.g. to reopen the latest cloud version.
      */
-    close(): Promise<boolean>;
+    close(options?: CloseDocumentOptions): Promise<boolean>;
     serialize(): Serialized;
 }

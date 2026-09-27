@@ -2,6 +2,8 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DocumentListQuery,
+    type DocumentLocation,
     type DocumentMeta,
     type DocumentPage,
     type DocumentRepositoryError,
@@ -14,20 +16,25 @@ import {
 
 /** An in-memory `IDocumentRepository` that records every save, for tests. */
 export class MemoryDocumentRepository implements IDocumentRepository {
-    readonly kind = "local";
     readonly saves: SaveRequest[] = [];
     readonly documents = new Map<string, SaveRequest>();
     /** When set, every operation fails with it. */
     failWith: DocumentRepositoryError | undefined;
 
-    async list(): Promise<Result<DocumentPage, DocumentRepositoryError>> {
+    constructor(readonly kind: DocumentLocation = "local") {}
+
+    async list(query: DocumentListQuery = {}): Promise<Result<DocumentPage, DocumentRepositoryError>> {
         if (this.failWith) return Result.err(this.failWith);
-        const items: DocumentMeta[] = [...this.documents.values()].map((x) => ({
+        const search = query.search?.toLowerCase();
+        const matching = [...this.documents.values()].filter(
+            (x) => !search || x.name.toLowerCase().includes(search),
+        );
+        const items: DocumentMeta[] = matching.map((x) => ({
             id: x.id,
             name: x.name,
             updatedAt: 0,
             thumbnail: x.thumbnail,
-            location: "local",
+            location: this.kind,
         }));
         return Result.ok({ items });
     }

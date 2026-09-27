@@ -17,6 +17,7 @@ import {
     ObservableCollection,
     PubSub,
     Result,
+    type SaveConflict,
     type Serialized,
     Transaction,
     UnknownNode,
@@ -380,6 +381,44 @@ describe("Document", () => {
             expect(await closing).toBe(false);
             expect(mockApp.documents.has(document)).toBe(true);
             expect(pub).toHaveBeenCalledWith("showToast", "error.repository.quota");
+        });
+
+        test("discardChanges closes a dirty document without asking or saving", async () => {
+            expect(document.isDirty).toBe(true);
+
+            expect(await document.close({ discardChanges: true })).toBe(true);
+
+            expect(dialogs).toHaveLength(0);
+            expect(repository.saves).toHaveLength(0);
+            expect(mockApp.documents.has(document)).toBe(false);
+        });
+
+        test("a conflicting save goes to the conflict handler and keeps the document open", async () => {
+            const handler = rs.fn(async (_doc: IDocument, _conflict: SaveConflict) => {});
+            mockApp.repositories.conflictHandler = handler;
+            repository.save = async () =>
+                Result.ok({ status: "conflict", headVersion: "h", headDeviceName: "Laptop" });
+            const closing = document.close();
+            await Promise.resolve();
+            await answer("common.save");
+
+            expect(await closing).toBe(false);
+            expect(handler).toHaveBeenCalledWith(document, {
+                status: "conflict",
+                headVersion: "h",
+                headDeviceName: "Laptop",
+            });
+            expect(mockApp.documents.has(document)).toBe(true);
+        });
+
+        test("without a conflict handler a conflict is only reported", async () => {
+            repository.save = async () => Result.ok({ status: "conflict" });
+            const closing = document.close();
+            await Promise.resolve();
+            await answer("common.save");
+
+            expect(await closing).toBe(false);
+            expect(pub).toHaveBeenCalledWith("showToast", "error.repository.conflict");
         });
 
         test("closes the document's views", async () => {

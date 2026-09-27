@@ -1,8 +1,15 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { command, I18n, type IApplication, type ICommand, PubSub } from "@spicy3d/core";
-import { repositoryErrorMessage } from "../../document";
+import {
+    command,
+    I18n,
+    type IApplication,
+    type ICommand,
+    PubSub,
+    repositoryErrorMessage,
+} from "@spicy3d/core";
+import { reportSaveConflict } from "../../document";
 
 @command({
     key: "doc.save",
@@ -20,7 +27,8 @@ export class SaveDocument implements ICommand {
                 if (!result.isOk) {
                     PubSub.default.pub("showToast", ...repositoryErrorMessage(result.error));
                 } else if (result.value.status === "conflict") {
-                    PubSub.default.pub("showToast", "error.repository.conflict");
+                    // Not awaited: the dialog outlives the progress indicator.
+                    void reportSaveConflict(app, document, result.value);
                 } else {
                     PubSub.default.pub("showToast", "toast.document.saved");
                 }

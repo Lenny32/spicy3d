@@ -246,7 +246,9 @@ export class Application extends Observable implements IApplication {
     }
 
     async newDocument(name: string): Promise<IDocument> {
-        const document = new Document(this, name);
+        const document = new Document(this, name, undefined, {
+            repository: this.repositories.forNewDocuments(),
+        });
         const lightGray = new Material({ document, name: "LightGray", color: 0xdedede });
         const deepGray = new Material({ document, name: "DeepGray", color: 0x898989 });
         document.modelManager.materials.push(lightGray, deepGray);

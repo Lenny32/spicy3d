@@ -273,6 +273,24 @@ describe("Application", () => {
             expect(materialNames).toContain("DeepGray");
         });
 
+        test("saves to this device unless the cloud is preferred and signed in", async () => {
+            const cloud = new MemoryDocumentRepository("cloud");
+            try {
+                expect((await sharedApp.newDocument("Local")).repository).toBe(sharedApp.repositories.local);
+
+                sharedApp.repositories.preferred = "cloud";
+                expect((await sharedApp.newDocument("Not signed in")).repository).toBe(
+                    sharedApp.repositories.local,
+                );
+
+                sharedApp.repositories.cloud = cloud;
+                expect((await sharedApp.newDocument("Cloud")).repository).toBe(cloud);
+            } finally {
+                sharedApp.repositories.cloud = undefined;
+                sharedApp.repositories.preferred = "local";
+            }
+        });
+
         test("should set activeView to the created view", async () => {
             const doc = await sharedApp.newDocument("TestDoc4");
             expect(sharedApp.activeView).not.toBeNull();

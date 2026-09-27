@@ -1,6 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import type { IDocument } from "../document";
+import type { I18nKeys } from "../i18n";
 import type { Serialized } from "../serialize";
 import { Observable } from "./observer";
 import type { Result } from "./result";
@@ -24,6 +26,10 @@ export interface DocumentMeta {
     headVersion?: string;
     /** Cloud only. */
     syncState?: SyncState;
+    /** Cloud only: size of the latest version (manifest and blobs, uncompressed), in bytes. */
+    sizeBytes?: number;
+    /** Cloud trash only: when the document was moved to the trash, epoch milliseconds. */
+    deletedAt?: number;
 }
 
 export interface DocumentListQuery {
@@ -48,8 +54,11 @@ export interface LoadedDocument {
     version?: string;
 }
 
-/** Why a save happens; the cloud keeps manual saves forever and prunes autosaves. */
-export type SaveKind = "manual" | "auto";
+/**
+ * Why a save happens (the server's `VersionKind`): the cloud keeps manual saves forever and prunes
+ * autosaves; `merge` and `restore` are written by the sync and the history view, `mcp` by an agent.
+ */
+export type SaveKind = "manual" | "auto" | "merge" | "restore" | "mcp";
 
 export interface SaveRequest {
     id: string;
@@ -63,11 +72,22 @@ export interface SaveRequest {
      * that is no longer the head answers `conflict` instead of overwriting.
      */
     baseVersion?: string;
+    /** Cloud only: an optional label of the version (labelled versions are never pruned). */
+    label?: string;
 }
 
-export type SaveOutcome =
-    | { status: "saved"; updatedAt: number; version?: string }
-    | { status: "conflict"; headVersion?: string };
+/** A save that was refused because another save moved the head first (cloud only). */
+export interface SaveConflict {
+    status: "conflict";
+    /** The current head, to base the next save on. */
+    headVersion?: string;
+    /** When the head was saved, epoch milliseconds. */
+    headCreatedAt?: number;
+    /** The device that saved the head, as it named itself. */
+    headDeviceName?: string;
+}
+
+export type SaveOutcome = { status: "saved"; updatedAt: number; version?: string } | SaveConflict;
 
 /** Expected failures of a repository; unexpected ones are reported as `failed`. */
 export type DocumentRepositoryError =
@@ -75,6 +95,8 @@ export type DocumentRepositoryError =
     | { kind: "unauthorized" }
     | { kind: "notFound"; id: string }
     | { kind: "quota" }
+    /** The document is being edited in another tab of this browser; this one only shows it. */
+    | { kind: "readOnly" }
     | { kind: "failed"; message: string };
 
 /**
@@ -86,8 +108,28 @@ export interface IDocumentRepository {
     list(query?: DocumentListQuery): Promise<Result<DocumentPage, DocumentRepositoryError>>;
     load(id: string): Promise<Result<LoadedDocument, DocumentRepositoryError>>;
     save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+    /** Deletes the document; the cloud moves it to the trash (see `restore`). */
     delete(id: string): Promise<Result<void, DocumentRepositoryError>>;
+    /** Renames without saving a new version (cloud: metadata only). */
+    rename?(id: string, name: string): Promise<Result<void, DocumentRepositoryError>>;
+    /** The trash: deleted documents that can still be restored, most recently deleted first. */
+    listTrash?(query?: DocumentListQuery): Promise<Result<DocumentPage, DocumentRepositoryError>>;
+    /** Brings a document back from the trash. */
+    restore?(id: string): Promise<Result<void, DocumentRepositoryError>>;
+    /** Days a deleted document stays restorable, when the repository has a trash. */
+    readonly trashRetentionDays?: number;
+    /**
+     * The image URL of a listed document's thumbnail when `meta.thumbnail` isn't set (the cloud
+     * downloads it on demand); `undefined` when it has none.
+     */
+    thumbnailUrl?(meta: DocumentMeta): Promise<string | undefined>;
 }
+
+/**
+ * Resolves a save that answered `conflict` (the cloud's "a newer version was saved" dialog). The
+ * cloud module registers it while signed in; without it the conflict is only reported.
+ */
+export type SaveConflictHandler = (document: IDocument, conflict: SaveConflict) => Promise<void>;
 
 /** The repositories available to the application: local always, cloud while signed in. */
 export class DocumentRepositories extends Observable {
@@ -102,11 +144,45 @@ export class DocumentRepositories extends Observable {
         this.setProperty("cloud", value);
     }
 
+    /** Where new documents go: the cloud when signed in and so configured, this device otherwise. */
+    get preferred(): DocumentLocation {
+        return this.getPrivateValue("preferred", "local");
+    }
+    set preferred(value: DocumentLocation) {
+        this.setProperty("preferred", value);
+    }
+
+    /** See {@link SaveConflictHandler}. */
+    conflictHandler: SaveConflictHandler | undefined;
+
+    /** The repository new documents save to: `preferred`, falling back to local. */
+    forNewDocuments(): IDocumentRepository {
+        return this.get(this.preferred) ?? this.local;
+    }
+
     get(location: DocumentLocation): IDocumentRepository | undefined {
         return location === "local" ? this.local : this.cloud;
     }
 
     all(): IDocumentRepository[] {
         return this.cloud ? [this.local, this.cloud] : [this.local];
+    }
+}
+
+/** The toast (key and arguments) telling the user why a repository operation failed. */
+export function repositoryErrorMessage(error: DocumentRepositoryError): [I18nKeys, ...unknown[]] {
+    switch (error.kind) {
+        case "offline":
+            return ["error.repository.offline"];
+        case "unauthorized":
+            return ["error.repository.unauthorized"];
+        case "notFound":
+            return ["error.repository.notFound"];
+        case "quota":
+            return ["error.repository.quota"];
+        case "readOnly":
+            return ["error.repository.readOnly"];
+        case "failed":
+            return ["error.repository.failed:{0}", error.message];
     }
 }

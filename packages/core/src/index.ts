@@ -11,6 +11,8 @@ export * from "./dataExchange";
 export * from "./document";
 export * from "./documentFile";
 export * from "./documentFormat";
+export * from "./documentManifest";
+export * from "./documentTransfer";
 export * from "./editor";
 export * from "./eventHandlers";
 export * from "./foundation";

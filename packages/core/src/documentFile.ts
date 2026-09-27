@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { DOCUMENT_FILE_EXTENSION } from "./document";
+import { decodeCloudVersionEnvelope, isCloudVersionEnvelope } from "./documentManifest";
 import { Result } from "./foundation";
 import type { Serialized } from "./serialize";
 
@@ -28,7 +29,8 @@ export async function encodeDocumentFile(data: Serialized): Promise<Blob> {
 
 /**
  * Decodes a `.spicy` file. Plain JSON (a legacy `.cd` file) is accepted too; the format is
- * told apart by the gzip magic bytes, not by the file name.
+ * told apart by the gzip magic bytes, not by the file name. A `.spicy` file of the server's data
+ * export (one cloud version: manifest and base64 blobs, SpicySrv#17) is reassembled into its document.
  */
 export async function decodeDocumentFile(file: Blob): Promise<Result<Serialized, DocumentFileError>> {
     try {
@@ -40,6 +42,12 @@ export async function decodeDocumentFile(file: Blob): Promise<Result<Serialized,
         const data: unknown = JSON.parse(text);
         if (typeof data !== "object" || data === null || Array.isArray(data)) {
             return Result.err({ kind: "unreadable", message: "not a JSON object" });
+        }
+        if (isCloudVersionEnvelope(data)) {
+            const document = decodeCloudVersionEnvelope(data);
+            return document.isOk
+                ? Result.ok(document.value)
+                : Result.err({ kind: "unreadable", message: JSON.stringify(document.error) });
         }
         return Result.ok(data as Serialized);
     } catch (error) {

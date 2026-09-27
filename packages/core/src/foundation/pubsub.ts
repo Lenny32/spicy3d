@@ -50,11 +50,18 @@ export interface PubSubEventMap {
     showProjectProperties(document: IDocument): void;
     showSelectionControl: (controller: AsyncController) => void;
     showToast: (message: I18nKeys, ...args: any[]) => void;
+    /** A toast with one action button (e.g. "Undo"), shown a little longer than a plain toast. */
+    showActionToast: (message: I18nKeys, action: ToastAction, ...args: any[]) => void;
     statusBarTip: (tip: I18nKeys) => void;
     toggleChatPanel: () => void;
     viewClosed: (view: IView) => void;
     viewCursor: (cursor: CursorType) => void;
     visibleChanged: (model: INode) => void;
+}
+
+export interface ToastAction {
+    label: I18nKeys;
+    run: () => void;
 }
 
 type EventCallback = (...args: any[]) => void;

@@ -4,6 +4,7 @@
 import {
     type Act,
     AnalysisManager,
+    type CloseDocumentOptions,
     DOCUMENT_FORMAT_VERSION,
     type DocumentFormatError,
     DocumentMigrations,
@@ -27,6 +28,8 @@ import {
     ProjectSettings,
     PubSub,
     type Result,
+    repositoryErrorMessage,
+    type SaveConflict,
     type SaveKind,
     type SaveOutcome,
     type Serialized,
@@ -170,9 +173,9 @@ export class Document extends Observable implements IDocument {
         return active?.document === this ? active : this.application.views.find((x) => x.document === this);
     }
 
-    async close(): Promise<boolean> {
+    async close(options: CloseDocumentOptions = {}): Promise<boolean> {
         if (this.closing) return true;
-        if (this.isDirty && !(await this.saveBeforeClosing())) return false;
+        if (!options.discardChanges && this.isDirty && !(await this.saveBeforeClosing())) return false;
 
         this.closing = true;
         // Deregistered first: a view closing sees its document is no longer open and does not
@@ -197,10 +200,12 @@ export class Document extends Observable implements IDocument {
         if (choice === "discard") return true;
         const saved = await this.save();
         if (saved.isOk && saved.value.status === "saved") return true;
-        const [message, ...args] = saved.isOk
-            ? (["error.repository.conflict"] as [I18nKeys])
-            : repositoryErrorMessage(saved.error);
-        PubSub.default.pub("showToast", message, ...args);
+        if (saved.isOk && saved.value.status === "conflict") {
+            // The conflict dialog decides; the document stays open unless it closes it.
+            await reportSaveConflict(this.application, this, saved.value);
+            return false;
+        }
+        PubSub.default.pub("showToast", ...repositoryErrorMessage(saved.error));
         return false;
     }
 
@@ -281,18 +286,16 @@ export class Document extends Observable implements IDocument {
     }
 }
 
-/** The toast (key and arguments) telling the user why a repository operation failed. */
-export function repositoryErrorMessage(error: DocumentRepositoryError): [I18nKeys, ...unknown[]] {
-    switch (error.kind) {
-        case "offline":
-            return ["error.repository.offline"];
-        case "unauthorized":
-            return ["error.repository.unauthorized"];
-        case "notFound":
-            return ["error.repository.notFound"];
-        case "quota":
-            return ["error.repository.quota"];
-        case "failed":
-            return ["error.repository.failed:{0}", error.message];
+/** Hands a save conflict to the cloud's dialog when there is one, toasts it otherwise. */
+export async function reportSaveConflict(
+    app: IApplication,
+    document: IDocument,
+    conflict: SaveConflict,
+): Promise<void> {
+    const handler = app.repositories.conflictHandler;
+    if (handler) {
+        await handler(document, conflict);
+    } else {
+        PubSub.default.pub("showToast", "error.repository.conflict");
     }
 }
