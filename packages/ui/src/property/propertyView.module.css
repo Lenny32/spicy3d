@@ -10,6 +10,10 @@
     flex: 0;
 }
 
+.root[data-empty] .panel {
+    display: none;
+}
+
 .panel {
     flex: 1;
     padding: 10px;
