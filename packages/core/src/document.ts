@@ -3,6 +3,7 @@
 
 import type { AnalysisManager } from "./analysis";
 import type { IApplication } from "./application";
+import type { DocumentFormatError } from "./documentFormat";
 import type {
     DocumentRepositoryError,
     History,
@@ -70,4 +71,10 @@ export interface IDocument extends IPropertyChanged, IDisposable {
      */
     close(options?: CloseDocumentOptions): Promise<boolean>;
     serialize(): Serialized;
+    /**
+     * Replaces the content with another version of this document (`data`, any supported format:
+     * migrated first) in place, as one undoable step named `name` — views, cameras and unchanged
+     * nodes stay. Applying a merge result, or a newer version from another device.
+     */
+    replaceContent(data: Serialized, name: string): Result<void, DocumentFormatError>;
 }

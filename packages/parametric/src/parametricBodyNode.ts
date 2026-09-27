@@ -15,6 +15,7 @@ import {
     type IShape,
     isPropertyChanged,
     NodeChildList,
+    type NodeRebuildStatus,
     type NodeRecord,
     ParameterShapeNode,
     PubSub,
@@ -271,6 +272,19 @@ export class ParametricBodyNode
             ancestor = ancestor.parent;
         }
         return false;
+    }
+
+    /** The merge's validation pass (`IRebuildStatusSource`): the body's shape and each feature's error. */
+    rebuildStatus(): NodeRebuildStatus {
+        const shape = this.shape;
+        return {
+            error: shape.isOk ? undefined : String(shape.error),
+            features: this.features.map((feature) => ({
+                id: feature.id,
+                label: feature.name || `${feature.type} ${feature.id}`,
+                error: this._featureErrors.get(feature.id),
+            })),
+        };
     }
 
     // ------------------------------------------------------------------ Feature list editing

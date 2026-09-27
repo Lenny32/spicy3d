@@ -4,6 +4,7 @@
 import {
     type Act,
     AnalysisManager,
+    type DocumentFormatError,
     type DocumentRepositoryError,
     History,
     type IApplication,
@@ -20,6 +21,7 @@ import {
     ProjectSettings,
     type PropertyChangedHandler,
     Result,
+    replaceDocumentContent,
     type SaveOutcome,
     type Serialized,
     VariableTable,
@@ -85,6 +87,10 @@ export class TestDocument implements IDocument {
             [InternalClassName]: "TestDocument",
             properties: {},
         };
+    }
+
+    replaceContent(data: Serialized, name: string): Result<void, DocumentFormatError> {
+        return replaceDocumentContent(this, data, name);
     }
 
     constructor(overrides?: Partial<Pick<TestDocument, "visual" | "application" | "selection" | "picker">>) {

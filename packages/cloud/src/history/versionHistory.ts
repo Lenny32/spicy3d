@@ -2,10 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    compareDocuments,
     DOCUMENT_FILE_EXTENSION,
     DOCUMENT_FORMAT_VERSION,
     type DocumentChange,
-    diffDocuments,
     download,
     encodeDocumentFile,
     formatDateTime,
@@ -464,7 +464,7 @@ export class VersionHistory {
     }
 
     private diff(before: Serialized, after: Serialized): Result<DocumentChange[], HistoryFailure> {
-        const changes = diffDocuments(before, after);
+        const changes = compareDocuments(before, after);
         return changes.isOk ? Result.ok(changes.value) : Result.err(failure("cloud.history.compareFailed"));
     }
 }

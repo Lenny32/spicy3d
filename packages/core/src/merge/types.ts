@@ -120,6 +120,13 @@ export interface Change {
     readonly args: readonly unknown[];
 }
 
+/** The three versions a merge ran on, migrated to this build's format (what a re-merge with choices starts from). */
+export interface MergeInputs {
+    readonly base: Serialized;
+    readonly ours: Serialized;
+    readonly theirs: Serialized;
+}
+
 export interface MergeResult {
     /**
      * The merged document, valid and loadable even while conflicts remain: every conflicting
@@ -131,6 +138,8 @@ export interface MergeResult {
     readonly conflicts: readonly MergeConflict[];
     /** What the merge changed relative to `ours` — the "View changes" list of a clean merge. */
     readonly changes: readonly Change[];
+    /** The inputs, migrated: `resolveMerge` / `applyResolutions` re-merge from them with the user's choices. */
+    readonly inputs: MergeInputs;
 }
 
 // ------------------------------------------------------------------ Paths

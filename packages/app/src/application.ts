@@ -21,6 +21,7 @@ import {
     isDocumentFileName,
     Logger,
     Material,
+    MergeEvaluators,
     Observable,
     ObservableCollection,
     PLUGIN_FILE_EXTENSION,
@@ -33,6 +34,7 @@ import {
 } from "@spicy3d/core";
 import { Document } from "./document";
 import { type DocumentFileEntry, openDocumentFile } from "./documentFiles";
+import { HeadlessDocumentEvaluator } from "./mergeEvaluator";
 import { PluginManager } from "./pluginManager";
 import { LocalDocumentRepository } from "./repositories";
 import { importFiles } from "./utils";
@@ -80,6 +82,8 @@ export class Application extends Observable implements IApplication {
         super();
 
         setCurrentApplication(this);
+        // the merge's validation pass rebuilds versions in headless documents of this application
+        MergeEvaluators.register(new HeadlessDocumentEvaluator(this));
         this.visualFactory = option.visualFactory;
         this.shapeProvider = option.shapeProvider;
         this.services = option.services;

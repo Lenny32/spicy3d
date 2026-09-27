@@ -787,16 +787,16 @@ describe("copies and compare", () => {
 
         const previous = await history.compareVersions(v1, v2);
         expect(previous.isOk && previous.value.map((c) => [c.kind, c.target])).toEqual([
-            ["modified", "box"],
-            ["added", "sketch"],
+            ["modified", "node/box/prop/dx"],
+            ["added", "node/sketch"],
         ]);
 
         open.data = documentData([node("box", "Bolt", { dx: 15 }), node("sketch", "Sketch 1")]);
         const current = await history.compareWithCurrent(v1, v2);
         expect(current.isOk && current.value.map((c) => [c.kind, c.target])).toEqual([
-            ["renamed", "box"],
-            ["modified", "box"],
-            ["added", "sketch"],
+            ["renamed", "node/box/prop/name"],
+            ["modified", "node/box/prop/dx"],
+            ["added", "node/sketch"],
         ]);
     });
 });

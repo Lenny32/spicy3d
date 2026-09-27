@@ -23,11 +23,13 @@ import {
     type IVisual,
     Logger,
     ModelManager,
+    NullVisual,
     Observable,
     ObservableCollection,
     ProjectSettings,
     PubSub,
     Result,
+    replaceDocumentContent,
     repositoryErrorMessage,
     type SaveConflict,
     type SaveKind,
@@ -80,11 +82,15 @@ export class Document extends Observable implements IDocument {
         return this.getPrivateValue("isDirty", false);
     }
 
+    /** A document nobody sees (the merge's validation pass): no visual, not among the open documents. */
+    readonly headless: boolean;
+
     constructor(
         readonly application: IApplication,
         name: string,
         readonly id: string = Id.generate(),
         source: DocumentSource = {},
+        options: { headless?: boolean } = {},
     ) {
         super();
         this.setPrivateValue("name", name);
@@ -98,14 +104,24 @@ export class Document extends Observable implements IDocument {
         this.settings = new ProjectSettings(this);
         this.selection = new SelectionManager(this);
         this.picker = new Picker(this);
-        this.visual = application.visualFactory.create(this);
+        this.headless = options.headless === true;
+        this.visual = this.headless ? new NullVisual(this) : application.visualFactory.create(this);
         this.analyses = new AnalysisManager(this);
         registerBasicInspectAnalyses(this.analyses);
         registerAdvancedInspectAnalyses(this.analyses);
         registerPrerequisiteInspectAnalyses(this.analyses);
 
+        if (this.headless) return;
         application.documents.add(this);
         PubSub.default.pub("documentOpened", this);
+    }
+
+    replaceContent(data: Serialized, name: string): Result<void, DocumentFormatError> {
+        const replaced = replaceDocumentContent(this, data, name);
+        if (replaced.isOk && typeof data["moduleVersions"] === "object" && data["moduleVersions"] !== null) {
+            this.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
+        }
+        return replaced;
     }
 
     serialize(): Serialized {
@@ -304,9 +320,30 @@ export class Document extends Observable implements IDocument {
             Document.reportFormatError(migrated.error);
             return undefined;
         }
-        const data = migrated.value;
+        return Document.build(app, migrated.value, source, false);
+    }
 
-        const document = new Document(app, data["name"], data["id"], source);
+    /**
+     * Loads a serialized document that nobody sees — without a visual, not among the application's
+     * documents, nothing reported (the merge's validation pass rebuilds versions this way). The
+     * caller disposes it.
+     */
+    static async loadHeadless(
+        app: IApplication,
+        stored: Serialized,
+    ): Promise<Result<Document, DocumentFormatError>> {
+        const migrated = DocumentMigrations.migrate(stored);
+        if (!migrated.isOk) return Result.err(migrated.error);
+        return Result.ok(await Document.build(app, migrated.value, {}, true));
+    }
+
+    private static async build(
+        app: IApplication,
+        data: Serialized,
+        source: DocumentSource,
+        headless: boolean,
+    ): Promise<Document> {
+        const document = new Document(app, data["name"], data["id"], source, { headless });
         document.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
         document.history.disabled = true;
         // Before the models: a body's feature chain resolves its parameters against
