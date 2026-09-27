@@ -32,12 +32,33 @@ Client side of remote MCP. The modelling engine keeps running **only in the user
 
 ## Acceptance criteria
 
-- [ ] Claude Code connected to `/mcp` with a token can list tools, edit the open document and receive screenshots — no local bridge running.
-- [ ] Opening the tab after the client connected works; reloading the tab mid-session recovers.
-- [ ] Pairing prompt appears once per MCP session; Deny makes calls fail with a clear error.
-- [ ] Disconnect agent ends the binding immediately.
-- [ ] Stdio-only client works through `spicy3d-mcp-bridge --server`.
-- [ ] Local-bridge mode still works.
+- [x] Claude Code connected to `/mcp` with a token can list tools, edit the open document and receive screenshots — no local bridge running.
+- [x] Opening the tab after the client connected works; reloading the tab mid-session recovers.
+- [x] Pairing prompt appears once per MCP session; Deny makes calls fail with a clear error.
+- [x] Disconnect agent ends the binding immediately.
+- [x] Stdio-only client works through `spicy3d-mcp-bridge --server`.
+- [x] Local-bridge mode still works.
+
+Implementation notes (CLOUD-14 branch): `packages/ai/src/mcp/` — SDK-free `remote.ts` /
+`remoteState.ts` (link, state, client configs), `pairing.ts` (prompt + `PairingGate`),
+`agentBadge.ts` (title bar), the panel's *Through the server* mode; lazy `remoteSession.ts` +
+`pageTransport.ts` (the SRV-09 page protocol; a plain WebSocket because the relay accepts no `mcp`
+subprotocol, which the SDK's client transport asks for) and `tabInfo.ts`. `packages/cloud/src/mcp/`
+(`startCloudMcp`, called by `useCloud`) hands the link over while signed in with `features.mcp`; a
+token created with an `mcp:*` scope shows the three configs filled in. Pairing asks on the first
+request of a session that is not initialize/ping/a listing (so `tools/list` works before the user
+answers), remembered per session id in the tab's `sessionStorage` (a reload does not ask again);
+Deny answers with JSON-RPC `-32005`. Screenshots stay lossless PNG by default; `format`/`maxSize`/
+`quality` are new arguments, and an image over the relay's `maxMessageBytes` is re-encoded (JPEG,
+then smaller). `spicy3d-mcp-bridge --server` (`remote.mjs`, no dependencies, token in
+`SPICY3D_TOKEN`). Live, against a local SpicySrv (PostgreSQL in Docker, the real app in headless
+Chromium behind a same-origin proxy, the SDK client over Streamable HTTP): every box above — and
+Claude Code itself (`claude -p` with the generated `type: http` config) created a box, received the
+screenshot and read the document back after one Allow; sign-out closes the tab's socket (1008) and
+the client falls back to `spicy3d_connect`. Not done: labeled "Agent: …" transactions and `kind: mcp`
+saves (no tool saves yet); the badge lives in the title bar, which the home screen covers; with
+several sessions on one tab, the SDK server keeps the client capabilities of the last `initialize`
+(only `ask_user`'s elicitation depends on them).
 
 ## Dependencies and complexity
 
