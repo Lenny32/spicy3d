@@ -15,7 +15,7 @@ import {
 } from "@spicy3d/core";
 import { createMockApplication } from "@spicy3d/core/test-utils";
 import { Document } from "../src/document";
-import { openDocumentFile, saveDocumentFile } from "../src/documentFiles";
+import { autosaveToOriginFile, fileAutosave, openDocumentFile, saveDocumentFile } from "../src/documentFiles";
 
 interface FakeHandle {
     handle: FileSystemFileHandle;
@@ -197,5 +197,82 @@ describe("document files", () => {
 
         expect(saved.isOk).toBe(false);
         expect(saved.error).toBe("permission denied");
+    });
+    describe("autosave to the origin file", () => {
+        /** A handle of the file at `path` (another handle object for the same path = the same file). */
+        function permissionHandle(path: string, permission: PermissionState) {
+            const fake = fakeHandle(path);
+            const requests: string[] = [];
+            Object.assign(fake.handle, {
+                path,
+                queryPermission: async () => "prompt",
+                requestPermission: async ({ mode }: { mode: string }) => {
+                    requests.push(mode);
+                    return permission;
+                },
+                isSameEntry: async (other: FileSystemFileHandle) =>
+                    (other as { path?: string }).path === path,
+            });
+            return { ...fake, requests };
+        }
+
+        async function openWith(handle: FileSystemFileHandle) {
+            const file = new File([await encodeDocumentFile(makeDocument().serialize())], handle.name);
+            const opened = await openDocumentFile(app, { file, handle });
+            Transaction.execute(opened!, "rename", () => {
+                opened!.modelManager.rootNode.name = `edited ${Math.random()}`;
+            });
+            return opened!;
+        }
+
+        test("off by default: autosave writes nothing to the file", async () => {
+            const source = permissionHandle("opened.spicy", "granted");
+            const opened = await openWith(source.handle);
+
+            expect(fileAutosave.state(opened)).toBe("off");
+            expect((await autosaveToOriginFile(opened)).isOk).toBe(false);
+            expect(source.written).toHaveLength(0);
+            expect(opened.isDirty).toBe(true);
+        });
+
+        test("turned on (with write access asked for), autosave writes back and the document is saved", async () => {
+            const source = permissionHandle("opened.spicy", "granted");
+            const opened = await openWith(source.handle);
+
+            expect(await fileAutosave.set(opened, true)).toBe(true);
+            expect(source.requests).toEqual(["readwrite"]);
+            expect(fileAutosave.state(opened)).toBe("on");
+
+            expect((await autosaveToOriginFile(opened)).isOk).toBe(true);
+            expect(source.written).toHaveLength(1);
+            expect(opened.isDirty).toBe(false);
+            await fileAutosave.set(opened, false);
+        });
+
+        test("write access refused: stays off", async () => {
+            const source = permissionHandle("opened.spicy", "denied");
+            const opened = await openWith(source.handle);
+
+            expect(await fileAutosave.set(opened, true)).toBe(false);
+            expect(fileAutosave.state(opened)).toBe("off");
+        });
+
+        test("remembered for the session: the same file opened again keeps it on", async () => {
+            const first = permissionHandle("opened.spicy", "granted");
+            const opened = await openWith(first.handle);
+            await fileAutosave.set(opened, true);
+
+            const again = permissionHandle("opened.spicy", "granted");
+            const reopened = await openWith(again.handle);
+            expect(fileAutosave.state(reopened)).toBe("on");
+
+            const other = permissionHandle("other.spicy", "granted");
+            expect(fileAutosave.state(await openWith(other.handle))).toBe("off");
+            await fileAutosave.set(opened, false);
+        });
+
+        test("a document not opened from a writable .spicy file has no such option", () => {
+            expect(fileAutosave.state(makeDocument())).toBe("unavailable");
+        });
     });
 });

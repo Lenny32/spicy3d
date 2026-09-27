@@ -7,9 +7,11 @@ import {
     decodeDocumentFile,
     download,
     encodeDocumentFile,
+    type FileAutosaveState,
     I18n,
     type IApplication,
     type IDocument,
+    type IFileAutosave,
     LEGACY_DOCUMENT_FILE_EXTENSIONS,
     Logger,
     PubSub,
@@ -31,6 +33,12 @@ interface FilePickerWindow {
         types: FilePickerType[];
         suggestedName: string;
     }) => Promise<FileSystemFileHandle>;
+}
+
+/** The permission part of the File System Access API (Chromium-only). */
+interface PermissionHandle {
+    queryPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
+    requestPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
 }
 
 /** A document file picked or dropped, with its handle when the browser can write it back. */
@@ -104,8 +112,94 @@ export async function openDocumentFile(
     if (document && handle && isSpicyHandle(handle)) {
         fileHandles.set(document, handle);
         originFiles.set(document, handle);
+        if (await isAutosavedFile(handle)) fileAutosaveOn.add(document);
     }
     return document;
+}
+
+/** Documents whose autosave writes back to their origin file (the user turned it on). */
+const fileAutosaveOn = new WeakSet<IDocument>();
+/** The files autosave was turned on for in this tab, so reopening one keeps the choice. */
+const autosavedFiles: FileSystemFileHandle[] = [];
+
+async function isAutosavedFile(handle: FileSystemFileHandle): Promise<boolean> {
+    for (const known of autosavedFiles) {
+        try {
+            if (known === handle || (await known.isSameEntry(handle))) return true;
+        } catch {
+            // A file that went away: not the same one.
+        }
+    }
+    return false;
+}
+
+async function forgetAutosavedFile(handle: FileSystemFileHandle) {
+    for (let i = autosavedFiles.length - 1; i >= 0; i--) {
+        const known = autosavedFiles[i];
+        const same = known === handle || (await known.isSameEntry(handle).catch(() => false));
+        if (same) autosavedFiles.splice(i, 1);
+    }
+}
+
+/**
+ * Write access to `handle` for writes without a click (autosave). Asked for while the user turns
+ * the option on (the prompt needs that click); without the permission API, assumed granted.
+ */
+async function requestWriteAccess(handle: FileSystemFileHandle): Promise<boolean> {
+    const permissions = handle as unknown as PermissionHandle;
+    try {
+        if ((await permissions.queryPermission?.({ mode: "readwrite" })) === "granted") return true;
+        if (!permissions.requestPermission) return true;
+        return (await permissions.requestPermission({ mode: "readwrite" })) === "granted";
+    } catch (error) {
+        Logger.warn(`document file: no write access to ${handle.name}`, error);
+        return false;
+    }
+}
+
+/**
+ * The per-file opt-in of autosave: off for every opened file until the user turns it on, then
+ * remembered for that file for the rest of the session (this tab).
+ */
+export const fileAutosave: IFileAutosave = {
+    state(document: IDocument): FileAutosaveState {
+        if (!originFiles.has(document)) return "unavailable";
+        return fileAutosaveOn.has(document) ? "on" : "off";
+    },
+    async set(document: IDocument, enabled: boolean): Promise<boolean> {
+        const handle = originFiles.get(document);
+        if (!handle) return false;
+        if (!enabled) {
+            fileAutosaveOn.delete(document);
+            await forgetAutosavedFile(handle);
+            return false;
+        }
+        if (!(await requestWriteAccess(handle))) return false;
+        fileAutosaveOn.add(document);
+        if (!(await isAutosavedFile(handle))) autosavedFiles.push(handle);
+        return true;
+    },
+};
+
+/**
+ * Autosave of a document opened from a `.spicy` file with the opt-in on: writes it back to that
+ * file (which counts as a save). `err("unavailable")` when it has no such file or the opt-in is off.
+ */
+export async function autosaveToOriginFile(document: IDocument): Promise<Result<void>> {
+    const handle = originFiles.get(document);
+    if (!handle || !fileAutosaveOn.has(document)) return Result.err("unavailable");
+    const position = document.history.position();
+    try {
+        const blob = await encodeDocumentFile(document.serialize());
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        document.markSaved(position);
+        return Result.ok(undefined);
+    } catch (error) {
+        Logger.warn(`document file: cannot autosave to ${handle.name}`, error);
+        return Result.err((error as Error).message);
+    }
 }
 
 /**
