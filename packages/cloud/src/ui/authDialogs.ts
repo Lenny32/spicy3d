@@ -34,9 +34,11 @@ export interface AccountUiContext {
 function welcome(ctx: AccountUiContext) {
     const user = ctx.account.user;
     if (!user) return;
-    PubSub.default.pub("showToast", "account.welcome{0}", user.displayName);
+    // One toast: a second one would replace the first at once.
     if (!user.emailVerified && ctx.features.emailVerification) {
-        PubSub.default.pub("showToast", "account.unverifiedNotice");
+        PubSub.default.pub("showToast", "account.welcomeUnverified{0}", user.displayName);
+    } else {
+        PubSub.default.pub("showToast", "account.welcome{0}", user.displayName);
     }
 }
 

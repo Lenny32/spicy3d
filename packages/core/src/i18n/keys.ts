@@ -464,7 +464,7 @@ export const I18N_KEYS = [
     "account.signIn",
     "account.signInHint",
     "account.welcome{0}",
-    "account.unverifiedNotice",
+    "account.welcomeUnverified{0}",
     "account.verificationSent{0}",
     "account.menu.title",
     "account.menu.settings",

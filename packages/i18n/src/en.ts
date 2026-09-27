@@ -472,7 +472,8 @@ export default {
         "account.signIn": "Sign in",
         "account.signInHint": "Sign in to save to the cloud",
         "account.welcome{0}": "Welcome, {0}",
-        "account.unverifiedNotice": "Verify your email address to use cloud storage — check your inbox",
+        "account.welcomeUnverified{0}":
+            "Welcome, {0}. Verify your email address to use cloud storage — check your inbox",
         "account.verificationSent{0}": "A new verification link was sent to {0}",
         "account.menu.title": "Account",
         "account.menu.settings": "Account settings",

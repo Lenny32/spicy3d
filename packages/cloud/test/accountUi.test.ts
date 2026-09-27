@@ -111,6 +111,21 @@ describe("sign in dialog", () => {
         expect(published).toContainEqual(["showToast", ["account.welcome{0}", USER.displayName]]);
     });
 
+    test("an unverified user gets one welcome toast that also asks to verify", async () => {
+        const unverified = { ...USER, emailVerified: false };
+        const server = new FakeServer().on("POST /api/auth/login", json(200, unverified));
+        const dialog = showSignIn(context(accountOn(server), { emailVerification: true })).dialog;
+
+        type(dialog, "email", USER.email);
+        type(dialog, "password", "secret-password");
+        submit(dialog);
+
+        await rs.waitFor(() => expect(dialog.isConnected).toBe(false));
+        expect(published.filter(([event]) => event === "showToast")).toEqual([
+            ["showToast", ["account.welcomeUnverified{0}", USER.displayName]],
+        ]);
+    });
+
     test("wrong credentials: the message stays in the dialog, the password is cleared", async () => {
         const server = new FakeServer().on("POST /api/auth/login", problem(401, "invalid_credentials"));
         const dialog = showSignIn(context(accountOn(server))).dialog;
