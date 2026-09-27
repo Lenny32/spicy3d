@@ -34,11 +34,13 @@ rs.mock("@spicy3d/three", () => ({
 }));
 
 const cloudMock = rs.hoisted(() => ({
-    discovery: { status: "dormant" } as { status: string; config?: unknown },
+    discovery: { status: "dormant" } as { status: string; config?: unknown; compatibility?: string },
     discoverCalls: [] as unknown[],
     startCalls: [] as unknown[][],
     accountUiCalls: [] as unknown[][],
     documentsCalls: [] as unknown[][],
+    /** `null`: the default answer (`{ connection }`); `undefined`: not started (incompatible). */
+    startResult: null as unknown,
     mainModuleLoaded: 0,
 }));
 
@@ -54,7 +56,7 @@ rs.mock("@spicy3d/cloud", () => {
     return {
         startCloud: (...args: unknown[]) => {
             cloudMock.startCalls.push(args);
-            return { connection: args[0] };
+            return cloudMock.startResult === null ? { connection: args[0] } : cloudMock.startResult;
         },
         startAccountUi: async (...args: unknown[]) => {
             cloudMock.accountUiCalls.push(args);
@@ -296,6 +298,30 @@ describe("AppBuilder", () => {
             expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
             expect(cloudMock.startCalls).toEqual([[discovery, { baseUrl: "https://spicy.test" }]]);
             expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, accountLink]]);
+        });
+
+        test("an account link with an incompatible server is logged, not dropped silently", async () => {
+            cloudMock.discovery = {
+                status: "incompatible",
+                compatibility: "serverNewer",
+                config: { version: "9", apiVersion: "9" },
+            };
+            const startCloud = cloudMock.startResult;
+            cloudMock.startResult = undefined;
+            const accountLink = { kind: "verifyEmail" as const, userId: "u", token: "t" };
+            const builder = new AppBuilder().useCloud({ accountLink });
+            const warn = rs.spyOn(Logger, "warn").mockImplementation(() => {});
+            try {
+                await (builder as any).runStarted(fakeApp);
+
+                expect(cloudMock.accountUiCalls).toEqual([]);
+                expect(warn).toHaveBeenCalledWith(
+                    "[cloud] opened with an account link, but the server is incompatible",
+                );
+            } finally {
+                warn.mockRestore();
+                cloudMock.startResult = startCloud;
+            }
         });
 
         test("a failing step is logged, never thrown into startup", async () => {

@@ -157,7 +157,12 @@ export class AppBuilder {
             );
             const cloud = await import("@spicy3d/cloud");
             const started = cloud.startCloud(discovery, connection);
-            if (!started) return;
+            if (!started) {
+                // An incompatible server: the banner says so; the link can't be used either.
+                if (accountLink)
+                    Logger.warn("[cloud] opened with an account link, but the server is incompatible");
+                return;
+            }
             await cloud.startAccountUi(started, accountLink);
             cloud.startCloudDocuments(started, app);
         });
