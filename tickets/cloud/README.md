@@ -41,7 +41,7 @@ Client-side (this repository) tickets for the Spicy3D cloud: optional accounts, 
 | 14 | [Remote MCP — page link](done/14-remote-mcp-page-link.md) | ai, mcp-bridge | M-H | 5, SRV-09 |
 | 15 | [Cloud-aware MCP tools](15-cloud-mcp-tools.md) | ai | M | 6, 14 |
 | 16 | [Deployment readiness (LAN now, public later)](done/16-deployment-readiness.md) | web, ai, builder | M | 1, 4 |
-| 17 | [Client security](17-client-security.md) | web, core, ai | M | 5, 14 |
+| 17 | [Client security](done/17-client-security.md) | web, core, ai | M | 5, 14 |
 
 ## Suggested sequence
 
