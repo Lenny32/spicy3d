@@ -5,6 +5,7 @@ import { rs } from "@rstest/core";
 import {
     AutosaveHolds,
     type DocumentSource,
+    EditSessions,
     type IDocument,
     type INode,
     Logger,
@@ -228,6 +229,10 @@ describe("the conflict panel", () => {
 
         expect(setSelectedNodes).toHaveBeenCalledWith([node], false);
         expect(rowOf(panel, "node/n1/prop/name").hasAttribute("data-selected")).toBe(true);
+
+        setSelectedNodes.mockClear();
+        panel.querySelector<HTMLElement>('[data-group="n1"] h3 button')!.click();
+        expect(setSelectedNodes).toHaveBeenCalledWith([node], false);
     });
 
     test("the live preview is a separate read-only document following the choices; mine is untouched", async () => {
@@ -398,6 +403,122 @@ describe("the conflict panel", () => {
     });
 });
 
+describe("resolving safely (review fixes)", () => {
+    test("resolve waits for a re-merge already running: the resolved conflict never comes back", async () => {
+        const a = await device();
+        const { doc } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
+        const panel = openPanel(a, doc);
+        choose(panel, W, "ours");
+        // The next head fetch (the re-merge of a newer version) is slow: it answers after a resolve
+        // that did not wait for it would be done.
+        const fetchHead = a.repository.fetchHead.bind(a.repository);
+        let fetches = 0;
+        rs.spyOn(a.repository, "fetchHead").mockImplementation(async (id: string) => {
+            fetches++;
+            if (fetches === 1) await new Promise((resolve) => setTimeout(resolve, 300));
+            return fetchHead(id);
+        });
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "30", d: "1" }), "Tablet");
+        await until(() => fetches > 0, "the re-merge started");
+
+        const resolved = await a.engine.resolve("doc-1", [{ path: W, choice: "ours" }]);
+        await a.engine.settle();
+
+        expect(resolved.isOk).toBe(true);
+        expect(a.engine.syncConflictOf("doc-1")).toBeUndefined();
+        expect(a.repository.stateOf("doc-1")).not.toBe("conflict");
+        expect(a.toasted("cloud.sync.conflict{0}")).toHaveLength(1);
+        a.documents.closeConflicts();
+        await until(() => a.repository.stateOf("doc-1") === "saved", "pushed");
+        expect(headValues()).toEqual({ w: "20", d: "1" });
+    });
+
+    test("resolve pushes only the merge expected: another head or merge comes back 'changed', labels updated", async () => {
+        const a = await device();
+        const { doc, other } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
+        const choices = [{ path: W, choice: "theirs" as const }];
+
+        const stale = await a.engine.resolve("doc-1", choices, { headVersionId: "an-older-head" });
+        expect(!stale.isOk && stale.error.kind).toBe("changed");
+        expect(a.engine.syncConflictOf("doc-1")?.theirs.versionId).toBe(other.id);
+        const different = await a.engine.resolve("doc-1", choices, { headVersionId: other.id, merged: "{}" });
+        expect(!different.isOk && different.error.kind).toBe("changed");
+        expect(a.repository.stateOf("doc-1")).toBe("conflict");
+        expect(head().id).toBe(other.id);
+        expect(doc.values).toEqual({ w: "20" });
+    });
+
+    test("Finish refuses when an edit dropped a choice: the note shows, nothing pushed; again, it pushes", async () => {
+        const a = await device();
+        const { doc, other } = await conflictOn(
+            a,
+            { w: "10", h: "5" },
+            { w: "20", h: "6" },
+            { w: "30", h: "7" },
+        );
+        const panel = openPanel(a, doc);
+        choose(panel, W, "ours");
+        choose(panel, H, "ours");
+        // Edited here to the other side's value: no conflict on w any more, the choice is dropped.
+        doc.edit("w", "30");
+
+        await panel.finish();
+
+        expect(panel.querySelector("[role=status]")?.textContent).toBe("cloud.merge.changed");
+        expect(panel.querySelector("[data-notes]")?.textContent).toContain("cloud.merge.dropped");
+        expect(head().id).toBe(other.id);
+        await panel.finish();
+        await until(() => a.repository.stateOf("doc-1") === "saved", "pushed");
+        expect(headValues()).toEqual({ w: "30", h: "6" });
+    });
+
+    test("nothing is replaced under a running command; an open edit session is ended first", async () => {
+        const a = await device();
+        const { doc } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
+        const choices = [{ path: W, choice: "theirs" as const }];
+        (a.app as { executingCommand?: unknown }).executingCommand = {};
+        const busy = await a.engine.resolve("doc-1", choices);
+        expect(!busy.isOk && busy.error.kind).toBe("busy");
+        expect(doc.values).toEqual({ w: "20" });
+
+        (a.app as { executingCommand?: unknown }).executingCommand = undefined;
+        const end = rs.fn(() => release());
+        const release = EditSessions.begin(doc as unknown as IDocument, end);
+        expect(EditSessions.isActive(doc as unknown as IDocument)).toBe(true);
+        const resolved = await a.engine.resolve("doc-1", choices);
+        expect(resolved.isOk).toBe(true);
+        expect(end).toHaveBeenCalledTimes(1);
+        expect(EditSessions.isActive(doc as unknown as IDocument)).toBe(false);
+        expect(doc.values).toEqual({ w: "30" });
+    });
+
+    test("the panel stays while the conflict remains without a merge result, and keeps the last one", async () => {
+        const a = await device();
+        const { doc } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
+        const panel = openPanel(a, doc);
+        const conflict = a.engine.syncConflictOf("doc-1")!;
+        rs.spyOn(a.engine, "syncConflictOf").mockReturnValue({ ...conflict, result: undefined });
+
+        (a.engine as unknown as { emit(id: string): void }).emit("doc-1");
+
+        expect(a.documents.conflicts).toBe(panel);
+        expect(panel.resolution.rows.map((r) => r.conflict.path)).toEqual([W]);
+    });
+
+    test("a Finish that throws shows the error and leaves the panel usable", async () => {
+        const a = await device();
+        const { doc } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
+        const panel = openPanel(a, doc);
+        rs.spyOn(panel.resolution, "finish").mockRejectedValue(new Error("boom"));
+
+        await panel.finish();
+
+        expect(panel.querySelector("[role=status]")?.textContent).toBe("cloud.merge.failedboom");
+        const keep = rowOf(panel, W).querySelector<HTMLButtonElement>('[data-choice="ours"]')!;
+        expect(keep.disabled).toBe(false);
+    });
+});
+
 describe("a clean merge", () => {
     /** `doc-1` with a pending save here and a non-conflicting change on the tablet, merged cleanly. */
     async function cleanMerge(a: Device) {
@@ -467,6 +588,42 @@ describe("a clean merge", () => {
         await until(() => a.repository.stateOf("doc-1") === "saved", "merged again");
         expect(head().kind).toBe("merge");
         expect(headValues()).toEqual({ w: "99", h: "6" });
+        expect(doc.values).toEqual({ w: "99", h: "6" });
+    });
+
+    test("Undo merge re-checks right before replacing: a save written meanwhile wins, the record goes back", async () => {
+        const a = await device();
+        const { doc } = await cleanMerge(a);
+        const merge = head();
+        const put = a.store.put.bind(a.store);
+        let edited = false;
+        rs.spyOn(a.store, "put").mockImplementation(async (record) => {
+            await put(record);
+            if (!edited && record.baseVersion?.id !== merge.id) {
+                // The user edits while the undo writes the record.
+                edited = true;
+                doc.edit("w", "12");
+            }
+        });
+
+        const undone = await a.engine.undoMerge("doc-1");
+
+        expect(!undone.isOk && undone.error.kind).toBe("edited");
+        expect(edited).toBe(true);
+        expect(doc.values).toEqual({ w: "12", h: "6" });
+        expect(doc.replaced.at(-1)).not.toBe("undo merge");
+        expect((await a.store.get("doc-1"))?.baseVersion?.id).toBe(merge.id);
+        expect(a.repository.stateOf("doc-1")).not.toBe("conflict");
+    });
+
+    test("Undo merge is refused while a command runs", async () => {
+        const a = await device();
+        const { doc } = await cleanMerge(a);
+        (a.app as { executingCommand?: unknown }).executingCommand = {};
+
+        const undone = await a.engine.undoMerge("doc-1");
+
+        expect(!undone.isOk && undone.error.kind).toBe("busy");
         expect(doc.values).toEqual({ w: "99", h: "6" });
     });
 

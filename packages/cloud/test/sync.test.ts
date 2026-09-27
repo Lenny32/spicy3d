@@ -7,7 +7,7 @@ import { IndexedDbBlobCache, MemoryBlobCache } from "../src/documents/blobCache"
 import { keepMineChoice } from "../src/documents/cloudDocuments";
 import { EditLocks } from "../src/documents/editLocks";
 import { VersionHistory } from "../src/history/versionHistory";
-import { IndexedDbSyncStore, MemorySyncStore } from "../src/sync/syncStore";
+import { combineKinds, IndexedDbSyncStore, MemorySyncStore } from "../src/sync/syncStore";
 import { FakeDocumentServer } from "./_helpers/fakeDocumentServer";
 import { FakeIndexedDbFactory } from "./_helpers/fakeIndexedDb";
 import { FakeServer, json, problem, TestRequest, USER } from "./_helpers/fakeServer";
@@ -96,7 +96,12 @@ describe("local first", () => {
         await until(() => a.repository.stateOf("doc-1") === "offline", "offline");
         const pending = await a.store.get("doc-1");
         expect(pending?.localDirty).toBe(true);
-        expect(pending?.pendingKind).toBe(expected);
+        // A push attempt made for an earlier save (it failed: offline) keeps the later saves' kinds in
+        // `nextKind` until the next attempt folds them in — what that push will carry is both.
+        const effective = pending?.nextKind
+            ? combineKinds(pending.pendingKind, pending.nextKind)
+            : pending?.pendingKind;
+        expect(effective).toBe(expected);
         expect(pending?.baseVersion?.id).toBe(parent);
 
         a.network.down = false;

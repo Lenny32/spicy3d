@@ -7,6 +7,7 @@ import {
     type DocumentMeta,
     type DocumentRepositoryError,
     documentThumbnail,
+    EditSessions,
     I18n,
     type IApplication,
     type IDocument,
@@ -147,6 +148,14 @@ export interface SyncEngineOptions {
     toastActions?: SyncToastActions;
 }
 
+/** What the conflict panel validated and previewed (`resolve` refuses to push anything else). */
+export interface ExpectedMerge {
+    /** The head the merge was made against. */
+    headVersionId?: string;
+    /** `JSON.stringify` of the merged document. */
+    merged?: string;
+}
+
 /** A clean merge applied in place, kept for "Undo merge". */
 interface LastMerge extends AppliedMerge {
     /** The undo position right after the merge was applied: edited since = no undo. */
@@ -184,6 +193,10 @@ interface Entry {
     releaseConflictHold?: () => void;
     /** Resolution holds (CLOUD-13's panel): no pushes, no pulls applied. */
     holds: number;
+    /** Bumped whenever the conflict is entered, replaced or cleared: a re-merge begun before gives way. */
+    conflictGeneration: number;
+    /** `resolve` / `undoMerge` running: no re-merge meanwhile (it would bring the old conflict back). */
+    resolving: number;
     /** A push is in flight (saves made meanwhile are counted as the next push's). */
     pushing: boolean;
     /** This tab holds the document's edit lock for a closed document (its pending changes). */
@@ -437,6 +450,8 @@ export class SyncEngine implements IRepositorySync {
                 attempt: 0,
                 again: false,
                 holds: 0,
+                conflictGeneration: 0,
+                resolving: 0,
                 pushing: false,
                 backgroundLock: false,
                 savesInFlight: 0,
@@ -868,7 +883,7 @@ export class SyncEngine implements IRepositorySync {
         if (entry.state === "conflict") {
             // Waits for the user; a newer head re-merges, also while the conflict panel holds the
             // sync (nothing is pushed or applied: the panel reapplies its choices by path).
-            if (entry.pullRequested) await this.remerge(docId, entry, record);
+            if (entry.pullRequested && entry.resolving === 0) await this.remerge(docId, entry, record);
             return;
         }
         if (entry.holds > 0) return;
@@ -1661,6 +1676,7 @@ export class SyncEngine implements IRepositorySync {
         undone: boolean,
     ) {
         entry.lastMerge = undefined;
+        entry.conflictGeneration++;
         const conflict: Mutable<SyncConflict> = {
             docId,
             base: sideOf(record?.baseVersion),
@@ -1697,6 +1713,7 @@ export class SyncEngine implements IRepositorySync {
 
     private clearConflict(entry: Entry) {
         entry.conflict = undefined;
+        entry.conflictGeneration++;
         entry.releaseConflictHold?.();
         entry.releaseConflictHold = undefined;
     }
@@ -1704,13 +1721,17 @@ export class SyncEngine implements IRepositorySync {
     /** A newer head while in conflict: merged again, the conflict updated (choices are reapplied by path). */
     private async remerge(docId: string, entry: Entry, record: SyncRecord | undefined): Promise<void> {
         entry.pullRequested = false;
+        const generation = entry.conflictGeneration;
+        // Resolved, replaced or being resolved meanwhile: this re-merge is stale.
+        const stale = () =>
+            entry.state !== "conflict" || entry.conflictGeneration !== generation || entry.resolving > 0;
         const head = await this.repository.fetchHead(docId);
-        if (!head.isOk || !head.value.version) return;
+        if (stale() || !head.isOk || !head.value.version) return;
         const version = head.value.version;
         if (entry.conflict?.theirs.versionId === version.id) return;
         const document = this.openDocument(docId);
         const inputs = await this.mergeInputs(record, version, document === undefined);
-        if (!inputs.isOk || !inputs.value.base) return;
+        if (stale() || !inputs.isOk || !inputs.value.base) return;
         const ours = document ? document.serialize() : inputs.value.ours;
         if (!ours) return;
         const merged = mergeDocuments(inputs.value.base, ours, inputs.value.theirs);
@@ -1753,25 +1774,60 @@ export class SyncEngine implements IRepositorySync {
     async resolve(
         docId: string,
         choices: readonly MergeResolution[],
+        expected?: ExpectedMerge,
     ): Promise<
         Result<
             void,
             | { kind: "notInConflict" }
             | { kind: "unresolved"; result: MergeResult }
+            | { kind: "changed"; result: MergeResult }
+            | { kind: "busy" }
             | { kind: "failed"; message: string }
         >
     > {
         const entry = this.entries.get(docId);
-        const conflict = entry?.conflict;
-        if (!entry || !conflict?.result || !conflict.theirs.versionId)
+        if (!entry?.conflict?.result || !entry.conflict.theirs.versionId)
             return Result.err({ kind: "notInConflict" });
+        entry.resolving++;
+        try {
+            // A pass re-merging meanwhile finishes first (it would bring the conflict back after).
+            while (entry.running) await entry.running;
+            return await this.resolveNow(docId, entry, choices, expected);
+        } finally {
+            entry.resolving--;
+        }
+    }
+
+    private async resolveNow(
+        docId: string,
+        entry: Entry,
+        choices: readonly MergeResolution[],
+        expected: ExpectedMerge | undefined,
+    ): Promise<
+        Result<
+            void,
+            | { kind: "notInConflict" }
+            | { kind: "unresolved"; result: MergeResult }
+            | { kind: "changed"; result: MergeResult }
+            | { kind: "busy" }
+            | { kind: "failed"; message: string }
+        >
+    > {
+        const conflict = entry.conflict;
+        if (!conflict?.result || !conflict.theirs.versionId) return Result.err({ kind: "notInConflict" });
+        const document = this.openDocument(docId);
+        if (document) {
+            // Nothing is replaced under a running command; an edit session (the sketch editor)
+            // commits and closes first, so what it holds is merged too.
+            if (this.app.executingCommand) return Result.err({ kind: "busy" });
+            EditSessions.endAll(document);
+        }
         const record = await this.record(docId);
         const head = await this.repository.fetchHead(docId);
         if (!head.isOk || !head.value.version) {
             return Result.err({ kind: "failed", message: head.isOk ? "no head" : head.error.kind });
         }
         const version = head.value.version;
-        const document = this.openDocument(docId);
         const inputs = await this.mergeInputs(record, version, document === undefined);
         if (!inputs.isOk || !inputs.value.base) {
             return Result.err({ kind: "failed", message: inputs.isOk ? "no base" : inputs.error.kind });
@@ -1794,10 +1850,21 @@ export class SyncEngine implements IRepositorySync {
         const reapplied = reapplyResolutions(merged.value, choices);
         if (!reapplied.isOk) return Result.err({ kind: "failed", message: reapplied.error.kind });
         const resolved = Result.ok<MergeResult>(reapplied.value.result);
-        if (resolved.value.conflicts.length > 0) {
+        // What the user validated and previewed must be what is pushed: another head, a choice that
+        // no longer applies (accepted rebuild failures are not structural) or another merge = ask again.
+        const dropped = reapplied.value.dropped.filter((x) => !x.path.endsWith("/rebuild"));
+        const changed =
+            expected !== undefined &&
+            ((expected.headVersionId !== undefined && expected.headVersionId !== version.id) ||
+                dropped.length > 0 ||
+                (expected.merged !== undefined &&
+                    resolved.value.conflicts.length === 0 &&
+                    JSON.stringify(resolved.value.merged) !== expected.merged));
+        if (changed || resolved.value.conflicts.length > 0) {
             conflict.result = resolved.value;
+            conflict.theirs = sideOf(versionRef(version, []));
             this.emit(docId);
-            return Result.err({ kind: "unresolved", result: resolved.value });
+            return Result.err({ kind: changed ? "changed" : "unresolved", result: resolved.value });
         }
         let appliedAt: object | undefined;
         if (document) {
@@ -1906,19 +1973,35 @@ export class SyncEngine implements IRepositorySync {
      */
     async undoMerge(
         docId: string,
-    ): Promise<Result<void, { kind: "unavailable" } | { kind: "edited" } | DocumentRepositoryError>> {
+    ): Promise<
+        Result<
+            void,
+            { kind: "unavailable" } | { kind: "edited" } | { kind: "busy" } | DocumentRepositoryError
+        >
+    > {
         const entry = this.entries.get(docId);
         const document = this.openDocument(docId);
         const last = entry?.lastMerge;
         if (!entry || !last || !document) return Result.err({ kind: "unavailable" });
+        if (this.app.executingCommand) return Result.err({ kind: "busy" });
+        // An edit session (the sketch editor) commits and closes first: edits it held count as edits.
+        EditSessions.endAll(document);
         if (document.history.position() !== last.appliedAt) return Result.err({ kind: "edited" });
         const release = this.hold(docId);
+        entry.resolving++;
         try {
             // A push of the merge in flight lands (or not) first; the hold keeps the next one back.
             while (entry.running) await entry.running;
             await document.settled();
             if (entry.lastMerge !== last) return Result.err({ kind: "unavailable" });
             if (document.history.position() !== last.appliedAt) return Result.err({ kind: "edited" });
+            const saves = entry.saves;
+            /** Unchanged since the checks: no edit, no save written or running. */
+            const untouched = () =>
+                document.history.position() === last.appliedAt &&
+                entry.saves === saves &&
+                entry.savesInFlight === 0 &&
+                !this.app.executingCommand;
             let snapshot: LocalSnapshot | undefined;
             if (last.local === "pending") {
                 const prepared = await this.repository.prepare(
@@ -1936,9 +2019,12 @@ export class SyncEngine implements IRepositorySync {
                 }
                 snapshot = { ...rest, savedAt: this.now() };
             }
-            await this.withRecord(docId, async () => {
+            let previous: SyncRecord | undefined;
+            const written = await this.withRecord(docId, async () => {
                 const current = await this.record(docId);
-                if (!current) return;
+                if (!current) return true;
+                if (!untouched()) return false;
+                previous = structuredClone(current);
                 current.baseVersion = last.base;
                 current.mergeParent = undefined;
                 // A merge push that landed unanswered is "theirs" now, not this device's base.
@@ -1955,10 +2041,20 @@ export class SyncEngine implements IRepositorySync {
                 }
                 current.updatedAt = this.now();
                 await this.options.store.put(current);
+                return true;
             });
-            // Synchronous from here to the replacement: no save serializes in between.
+            if (!written) return Result.err({ kind: "edited" });
+            // Synchronous from the check to the replacement: no save serializes in between.
+            if (!untouched()) {
+                // Edited or saved meanwhile: the record goes back.
+                await this.restoreRecord(docId, previous, snapshot);
+                return Result.err({ kind: "edited" });
+            }
             const replaced = document.replaceContent(last.before, UNDO_MERGE_HISTORY_NAME);
-            if (!replaced.isOk) return Result.err({ kind: "failed", message: replaced.error.kind });
+            if (!replaced.isOk) {
+                await this.restoreRecord(docId, previous, snapshot);
+                return Result.err({ kind: "failed", message: replaced.error.kind });
+            }
             document.version = last.base?.id;
             // Saved as it was: the pending snapshot holds it; unsaved edits stay unsaved.
             if (snapshot) document.markSaved();
@@ -1987,8 +2083,36 @@ export class SyncEngine implements IRepositorySync {
             }
             return Result.ok(undefined);
         } finally {
+            entry.resolving--;
             release();
         }
+    }
+
+    /**
+     * An undone "Undo merge": the record's base and kind as they were. A save written meanwhile is
+     * kept (it holds the merge and the edits after it); only this undo's snapshot is taken back.
+     */
+    private async restoreRecord(docId: string, previous: SyncRecord | undefined, snapshot?: LocalSnapshot) {
+        if (!previous) return;
+        await this.withRecord(docId, async () => {
+            const current = await this.record(docId);
+            if (!current) return;
+            current.baseVersion = previous.baseVersion;
+            current.mergeParent = previous.mergeParent;
+            current.unconfirmed = previous.unconfirmed;
+            if (current.pendingKind)
+                current.pendingKind = combineKinds(previous.pendingKind, current.pendingKind);
+            current.pendingLabel = current.pendingLabel ?? previous.pendingLabel;
+            if (snapshot && current.localSnapshot?.manifestSha256 === snapshot.manifestSha256) {
+                current.localSnapshot = previous.localSnapshot;
+                current.localDirty = previous.localDirty;
+                current.pendingKind = previous.pendingKind;
+                current.pendingLabel = previous.pendingLabel;
+                current.pendingSince = previous.pendingSince;
+            }
+            current.updatedAt = this.now();
+            await this.options.store.put(current);
+        });
     }
 
     // ---- Triggers ----------------------------------------------------------------------------

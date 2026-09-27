@@ -469,7 +469,11 @@ export class CloudDocuments {
         if (!undone.isOk) {
             PubSub.default.pub(
                 "showToast",
-                undone.error.kind === "edited" ? "cloud.merge.undoEdited" : "cloud.merge.undoUnavailable",
+                undone.error.kind === "edited"
+                    ? "cloud.merge.undoEdited"
+                    : undone.error.kind === "busy"
+                      ? "cloud.merge.busy"
+                      : "cloud.merge.undoUnavailable",
             );
             return false;
         }

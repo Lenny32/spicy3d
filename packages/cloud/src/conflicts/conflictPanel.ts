@@ -1,7 +1,14 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type I18nKeys, type MergeConflict, type ResolutionChoice, type Result } from "@spicy3d/core";
+import {
+    I18n,
+    type I18nKeys,
+    type MergeConflict,
+    mergePath,
+    type ResolutionChoice,
+    Result,
+} from "@spicy3d/core";
 import { button, div, h2, h3, li, span, ul } from "@spicy3d/element";
 import type { ConflictResolution, ConflictRow, FinishError } from "./conflictResolution";
 import style from "./conflicts.module.css";
@@ -170,7 +177,7 @@ export class ConflictPanel extends HTMLElement {
                 className: style.groupButton,
                 textContent: title,
                 onclick: () => {
-                    if (nodeId !== undefined) this.resolution.reveal({ path: `node/${nodeId}` });
+                    if (nodeId !== undefined) this.resolution.reveal({ path: mergePath("node", nodeId) });
                 },
             });
             const element = div(
@@ -320,6 +327,11 @@ export class ConflictPanel extends HTMLElement {
             if (result && typeof result === "object" && "isOk" in result && !result.isOk) {
                 this.error = I18n.translate("cloud.merge.failed{0}", result.error.kind);
             }
+        } catch (error) {
+            this.error = I18n.translate(
+                "cloud.merge.failed{0}",
+                error instanceof Error ? error.message : String(error),
+            );
         } finally {
             this.busy = false;
             if (!this.resolution.isDisposed) this.render();
@@ -346,6 +358,11 @@ export class ConflictPanel extends HTMLElement {
         let finished: Result<void, FinishError>;
         try {
             finished = await this.resolution.finish();
+        } catch (error) {
+            finished = Result.err({
+                kind: "failed",
+                message: error instanceof Error ? error.message : String(error),
+            });
         } finally {
             this.busy = false;
         }
@@ -366,6 +383,8 @@ function finishMessage(error: FinishError): string {
             return I18n.translate("cloud.merge.acceptFailures{0}", error.count);
         case "changed":
             return I18n.translate("cloud.merge.changed");
+        case "busy":
+            return I18n.translate("cloud.merge.busy");
         case "failed":
             return I18n.translate("cloud.merge.failed{0}", error.message);
     }

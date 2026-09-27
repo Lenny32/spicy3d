@@ -3,6 +3,7 @@
 
 import {
     type DocumentSource,
+    EditSessions,
     I18n,
     type IApplication,
     type IDocument,
@@ -52,8 +53,10 @@ export type FinishError =
     | { kind: "unresolved"; count: number }
     /** Rebuild failures not accepted. */
     | { kind: "rebuild"; count: number }
-    /** The head moved meanwhile with new conflicts: the panel shows them. */
+    /** The head moved, or the merge changed, meanwhile: the panel shows it, to check and finish again. */
     | { kind: "changed" }
+    /** A command runs: nothing is replaced under it. */
+    | { kind: "busy" }
     | { kind: "failed"; message: string };
 
 export interface ConflictResolutionOptions {
@@ -103,6 +106,8 @@ export class ConflictResolution {
     private validatedFor?: string;
     private validationFailed = false;
     private validating?: Promise<void>;
+    /** The merge `validating` is for. */
+    private validatingKey?: string;
     private dropped: MergeResolution[] = [];
     private readonly notesList: string[] = [];
     private preview?: IDocument;
@@ -287,14 +292,16 @@ export class ConflictResolution {
     private readonly onEngineChanged = () => {
         if (this.disposed) return;
         const conflict = this.options.engine.syncConflictOf(this.docId);
-        if (!conflict?.result) {
+        if (!conflict) {
             this.resolvedElsewhere = true;
             this.changed();
             return;
         }
         const previousHead = this.conflict.theirs.versionId;
         this.conflict = conflict;
-        if (conflict.result === this.engineResult) {
+        // Still in conflict without a merge (a re-merge that could not load the base): the last
+        // merge stays on screen.
+        if (!conflict.result || conflict.result === this.engineResult) {
             this.changed();
             return;
         }
@@ -341,12 +348,18 @@ export class ConflictResolution {
 
     /** Rebuilds the merge with the current choices; its failures become rows to accept (or fix). */
     validate(): Promise<void> {
-        if (this.validating) return this.validating;
         const key = this.mergedKey();
-        const validating = this.runValidation(this.current, key).finally(() => {
-            if (this.validating === validating) this.validating = undefined;
-            this.changed();
-        });
+        if (this.validating && this.validatingKey === key) return this.validating;
+        // One for an older merge still running: this one follows it (its answer is for the old key).
+        const result = this.current;
+        const previous = this.validating ?? Promise.resolve();
+        this.validatingKey = key;
+        const validating = previous
+            .then(() => this.runValidation(result, key))
+            .finally(() => {
+                if (this.validating === validating) this.validating = undefined;
+                this.changed();
+            });
         this.validating = validating;
         this.changed();
         return validating;
@@ -394,21 +407,38 @@ export class ConflictResolution {
      * unanswered; a head that moved meanwhile with new conflicts shows them (`changed`).
      */
     async finish(): Promise<Result<void, FinishError>> {
+        const dropped = this.dropped.length;
         const remerged = this.remergeFromDocument();
         if (!remerged.isOk) return Result.err(remerged.error);
-        const structuralOpen = this.rows.filter((r) => !r.rebuild && r.choice === undefined).length;
-        if (structuralOpen > 0) return Result.err({ kind: "unresolved", count: structuralOpen });
+        // A choice no longer applies (edited meanwhile): the user sees the note first.
+        if (this.dropped.length > dropped) return Result.err({ kind: "changed" });
+        const structuralOpen = () => this.rows.filter((r) => !r.rebuild && r.choice === undefined).length;
+        if (structuralOpen() > 0) return Result.err({ kind: "unresolved", count: structuralOpen() });
+        const key = this.mergedKey();
         if (this.validation !== "done" && this.validation !== "failed") await this.validate();
         if (this.disposed) return Result.err({ kind: "failed", message: "closed" });
+        // A newer head, a choice or an edit while it rebuilt: that merge was not the one validated.
+        const validation = this.validation;
+        if (this.mergedKey() !== key || (validation !== "done" && validation !== "failed")) {
+            return Result.err({ kind: "changed" });
+        }
+        if (structuralOpen() > 0) return Result.err({ kind: "unresolved", count: structuralOpen() });
         const failures = this.rows.filter((r) => r.rebuild && r.choice === undefined).length;
         if (failures > 0) return Result.err({ kind: "rebuild", count: failures });
         const choices = [...this.choices].map(([path, choice]) => ({ path, choice }));
-        const resolved = await this.options.engine.resolve(this.docId, choices);
+        // The engine pushes exactly this merge, against this head — anything else comes back `changed`.
+        const resolved = await this.options.engine.resolve(this.docId, choices, {
+            headVersionId: this.conflict.theirs.versionId,
+            merged: key,
+        });
         if (resolved.isOk) {
             this.dispose();
             return Result.ok(undefined);
         }
-        if (resolved.error.kind === "unresolved") return Result.err({ kind: "changed" });
+        if (resolved.error.kind === "unresolved" || resolved.error.kind === "changed") {
+            return Result.err({ kind: "changed" });
+        }
+        if (resolved.error.kind === "busy") return Result.err({ kind: "busy" });
         if (resolved.error.kind === "notInConflict") {
             this.resolvedElsewhere = true;
             this.changed();
@@ -511,6 +541,8 @@ export class ConflictResolution {
             this.changed();
             return;
         }
+        // A sketch opened in the preview (a revealed entity) closes before its nodes are replaced.
+        EditSessions.endAll(preview);
         const replaced = preview.replaceContent(this.previewData(), PREVIEW_HISTORY_NAME);
         if (!replaced.isOk) Logger.warn(`[cloud] merge preview not updated: ${replaced.error.kind}`);
     }
