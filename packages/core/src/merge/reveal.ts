@@ -3,7 +3,7 @@
 
 import type { IDocument } from "../document";
 import type { INode } from "../model";
-import { requestFeatureFocus } from "../model/featureList";
+import { requestFeatureFocus, takeFeatureFocus } from "../model/featureList";
 import { parseMergePath } from "./types";
 
 // "Show me": what the conflict panel (CLOUD-13) does when a conflict or a change is selected — the
@@ -64,5 +64,8 @@ export function revealMergePath(document: IDocument, path: string): RevealedTarg
     for (const revealer of MergePathRevealers.all) {
         if (revealer.reveal(document, node, rest)) break;
     }
+    // The selection built (or told) the timeline synchronously: a request nobody took (not a
+    // feature list, the property panel not shown) must not open a feature some later time.
+    if (featureId !== undefined) takeFeatureFocus(node);
     return featureId === undefined ? { node } : { node, featureId };
 }

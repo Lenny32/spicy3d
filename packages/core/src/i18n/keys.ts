@@ -1205,6 +1205,7 @@ export const I18N_KEYS = [
     "cloud.merge.agent{0}",
     "cloud.merge.agentName",
     "cloud.merge.base{0}",
+    "cloud.merge.busy",
     "cloud.merge.changed",
     "cloud.merge.changesTitle{0}",
     "cloud.merge.choice.accept",

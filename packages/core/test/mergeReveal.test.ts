@@ -68,6 +68,14 @@ describe("revealMergePath", () => {
         expect(takeFeatureFocus(body)).toBeUndefined();
     });
 
+    test("a feature request no timeline took does not stay pending", () => {
+        const { document } = documentWith([body]);
+
+        revealMergePath(document, mergePath("node", "body-1", "feature", "f2", "rebuild"));
+
+        expect(takeFeatureFocus(body)).toBeUndefined();
+    });
+
     test("registered revealers go further with the rest of the path", () => {
         const { document } = documentWith([sketch]);
         const reveal = rs.fn((_document: IDocument, _node: INode, _segments: readonly string[]) => true);

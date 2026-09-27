@@ -1278,6 +1278,7 @@ export default {
         "cloud.merge.acceptFailures{0}": "Accept or fix the {0} failing feature(s) before finishing",
         "cloud.merge.agent{0}": "Agent (MCP) · {0}",
         "cloud.merge.agentName": "Agent (MCP)",
+        "cloud.merge.busy": "Finish what you are doing first (a command is running)",
         "cloud.merge.base{0}": "Before both changes: {0}",
         "cloud.merge.changed": "A newer version arrived meanwhile: check the conflicts again",
         "cloud.merge.changesTitle{0}": "Changes merged from {0}",

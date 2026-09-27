@@ -6,6 +6,7 @@ import {
     AutosaveHolds,
     type CameraType,
     documentLengthUnit,
+    EditSessions,
     formatLengthParameter,
     type I18nKeys,
     type IDisposable,
@@ -139,6 +140,8 @@ export class SketchEditor implements IDisposable {
     private static activeEditor?: SketchEditor;
     /** Ends the session's hold on autosave. */
     private releaseAutosave?: () => void;
+    /** Unregisters the session from `EditSessions`. */
+    private releaseSession?: () => void;
 
     // ------------------------------------------------------------------ Static entry points — at most one session is live
 
@@ -156,6 +159,8 @@ export class SketchEditor implements IDisposable {
             // The session rolls bodies back: an autosave now would save that state.
             releaseAutosave = AutosaveHolds.hold("sketch");
             editor.releaseAutosave = releaseAutosave;
+            // Content replaced under it (a merge resolved or undone) ends the session first.
+            editor.releaseSession = EditSessions.begin(node.document, () => editor.exit());
             SketchEditor.activeEditor = editor;
             node.document.application.mainWindow?.ribbon.openTab("ribbon.tab.sketch");
             PubSub.default.pub("pushShortcutContext", "sketch");
@@ -894,6 +899,8 @@ export class SketchEditor implements IDisposable {
         this.feedback?.dispose();
         if (this.disposed) return;
         this.disposed = true;
+        this.releaseSession?.();
+        this.releaseSession = undefined;
         this.cancelPick();
         this.document.visual.context.setNodeOnTop([this.node], false);
         this.node.setEditingSession(false);
