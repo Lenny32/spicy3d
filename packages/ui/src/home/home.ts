@@ -25,6 +25,7 @@ import {
     transferDocument,
 } from "@spicy3d/core";
 import { a, button, collection, div, img, input, label, span, svg } from "@spicy3d/element";
+import { AutosaveSelector } from "./autosaveSelector";
 import style from "./home.module.css";
 import { LanguageSelector } from "./languageSelector";
 import { Navigation3DSelector } from "./navigation3DSelector";
@@ -204,6 +205,14 @@ export class Home extends HTMLElement {
                     textContent: new Localize("common.3DNavigation"),
                 }),
                 div({ className: style.settingControl }, Navigation3DSelector({})),
+            ),
+            div(
+                { className: style.settingItem },
+                span({
+                    className: style.settingLabel,
+                    textContent: new Localize("autosave.setting"),
+                }),
+                div({ className: style.settingControl }, new AutosaveSelector()),
             ),
         );
     }
