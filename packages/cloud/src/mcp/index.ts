@@ -6,8 +6,11 @@ import type { CloudConnection } from "../cloud";
 import { showCreateToken } from "../ui/accountSettings";
 import { accountUiContext } from "../ui/index";
 
-/** A new token for an MCP client: reading the model and editing it. */
-const MCP_SCOPES = ["mcp:read", "mcp:write"];
+/**
+ * A new token for an MCP client: reading the model and editing it, plus the cloud library the
+ * server's own tools list (spicy3d_list_documents, spicy3d_document_history — CLOUD-15).
+ */
+export const MCP_SCOPES = ["mcp:read", "mcp:write", "documents:read"];
 
 /**
  * Remote MCP (CLOUD-14): while someone is signed in to a server with the relay

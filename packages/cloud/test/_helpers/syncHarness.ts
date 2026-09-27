@@ -11,6 +11,7 @@ import {
     PubSub,
     Result,
     type SaveKind,
+    type SaveOptions,
     type Serialized,
     UserActivity,
 } from "@spicy3d/core";
@@ -291,13 +292,13 @@ export class SyncDoc {
         this.notify();
     }
 
-    save(kind: SaveKind = "manual") {
-        const run = this.queue.then(() => this.saveNow(kind));
+    save(kind: SaveKind = "manual", options: SaveOptions = {}) {
+        const run = this.queue.then(() => this.saveNow(kind, options.label));
         this.queue = run.catch(() => undefined);
         return run;
     }
 
-    private async saveNow(kind: SaveKind) {
+    private async saveNow(kind: SaveKind, label?: string) {
         const position = this.position;
         const result = await this.repository.save({
             id: this.id,
@@ -305,6 +306,7 @@ export class SyncDoc {
             data: this.serialize(),
             kind,
             baseVersion: this.version,
+            ...(label && { label }),
         });
         if (result.isOk && result.value.status === "saved") {
             this.version = result.value.version ?? this.version;

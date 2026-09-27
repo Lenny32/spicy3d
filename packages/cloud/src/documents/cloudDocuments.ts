@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { setAgentCloudLink } from "@spicy3d/ai";
 import {
     type IApplication,
     type IDocument,
@@ -17,6 +18,7 @@ import type { CloudConnection } from "../cloud";
 import { VersionHistoryPanel } from "../history/historyPanel";
 import { previewOf } from "../history/previewRepository";
 import { VersionHistory } from "../history/versionHistory";
+import { CloudAgentDocuments } from "../mcp/agentDocuments";
 import { EventsChannel } from "../sync/events";
 import { SyncEngine, type SyncEngineOptions } from "../sync/syncEngine";
 import { defaultSyncStore, type ISyncStore } from "../sync/syncStore";
@@ -57,6 +59,8 @@ export class CloudDocuments {
     private repository?: CloudDocumentRepository;
     private engine?: SyncEngine;
     private historyPanel?: VersionHistoryPanel;
+    /** What the agent tools (MCP) use while signed in. */
+    private readonly agentLink = new CloudAgentDocuments(this);
     private readonly statusItem?: DocumentStatusItem;
     private readonly removeSignOutHandler: () => void;
 
@@ -150,6 +154,7 @@ export class CloudDocuments {
         this.app.repositories.cloud = repository;
         this.applyPreferred();
         for (const document of this.app.documents) this.onDocumentOpened(document);
+        setAgentCloudLink(this.agentLink);
     }
 
     private createEvents(): EventsChannel | undefined {
@@ -181,6 +186,7 @@ export class CloudDocuments {
         if (this.app.repositories.cloud === repository) this.app.repositories.cloud = undefined;
         this.app.repositories.conflictHandler = undefined;
         this.app.repositories.preferred = "local";
+        setAgentCloudLink(undefined);
     }
 
     /**
@@ -344,9 +350,15 @@ export class CloudDocuments {
         if (!repository) return undefined;
         const documentId = previewOf(document)?.documentId ?? document.id;
         if (!previewOf(document) && document.repository !== repository) return undefined;
+        return this.openHistoryOf(documentId, document.name);
+    };
+
+    /** The history panel of a cloud document, open or not (an agent previews a version, CLOUD-15). */
+    readonly openHistoryOf = (documentId: string, fallbackName: string): VersionHistoryPanel | undefined => {
+        const repository = this.repository;
+        if (!repository) return undefined;
         if (this.historyPanel?.history.documentId === documentId) return this.historyPanel;
         void this.closeHistory();
-        const fallbackName = document.name;
         const history = new VersionHistory({
             app: this.app,
             repository,
