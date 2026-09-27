@@ -18,9 +18,10 @@ import {
     Transaction,
     timelineEntryLabel,
 } from "@spicy3d/core";
-import { div, input, svg } from "@spicy3d/element";
+import { button, div, input, span, svg } from "@spicy3d/element";
 import { type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { showDialog } from "../dialog";
+import { FeatureEditor } from "../property/featureEditor";
 import inputStyle from "../property/input.module.css";
 import style from "./timelineBar.module.css";
 
@@ -33,6 +34,8 @@ const translate = (key: I18nKeys) => I18n.translate(key) ?? key;
  * feature also opens in the body's feature list) and highlights what the step made in the
  * viewport; double-click edits it; right-click offers edit (the step, and the nodes a feature
  * holds, e.g. an extrude's sketch), suppress, rename and delete, each change one undo step.
+ * Editing a feature opens its editor above the step (e.g. an extrude's depth and its sketch),
+ * and the step's result stays highlighted while it rebuilds.
  */
 export class TimelineBar extends HTMLElement {
     private readonly track = div({ className: style.track });
@@ -41,6 +44,10 @@ export class TimelineBar extends HTMLElement {
     private closeMenu: (() => void) | undefined;
     /** Takes the clicked step's viewport highlight off again. */
     private clearHighlight: (() => void) | undefined;
+    /** The clicked step: marked in the strip while its result is highlighted. */
+    private activeKey: string | undefined;
+    /** The feature whose editor is open above the strip. */
+    private editor: { readonly key: string; readonly panel: HTMLElement } | undefined;
     private renderQueued = false;
 
     constructor(readonly app: IApplication) {
@@ -64,6 +71,7 @@ export class TimelineBar extends HTMLElement {
         PubSub.default.remove("documentClosed", this.handleDocumentClosed);
         this.setDocument(undefined);
         this.closeMenu?.();
+        this.closeEditor();
     }
 
     private readonly handleActiveViewChanged = (view: IView | undefined) => {
@@ -76,6 +84,7 @@ export class TimelineBar extends HTMLElement {
 
     private setDocument(document: IDocument | undefined) {
         if (document === this.document) return;
+        this.closeEditor();
         this.unhighlight();
         this.document?.history.onChanged.remove(this.scheduleRender);
         this.document?.selection.onNodeChanged.remove(this.unhighlight);
@@ -110,6 +119,7 @@ export class TimelineBar extends HTMLElement {
         const items = entries.map((entry) => this.entryItem(entry));
         this.track.replaceChildren(...items);
         this.keys = new Set(entries.map((x) => x.key));
+        this.refreshEditor(entries);
         if (previous.size === 0) return;
         const added = items.findLast((_item, i) => !previous.has(entries[i].key));
         added?.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -122,6 +132,7 @@ export class TimelineBar extends HTMLElement {
             feature?.suppressed ? style.suppressed : "",
             feature?.error !== undefined ? style.error : "",
             feature?.warning !== undefined ? style.warning : "",
+            entry.key === this.activeKey ? style.active : "",
         ];
         const item = div(
             {
@@ -161,20 +172,39 @@ export class TimelineBar extends HTMLElement {
     private select(entry: TimelineEntry) {
         const document = this.document;
         if (document === undefined) return;
+        if (this.editor !== undefined && this.editor.key !== entry.key) this.closeEditor();
         revealTimelineEntry(document, entry);
         // After the selection, whose change takes the previous highlight off.
         this.unhighlight();
+        this.highlight(entry);
+    }
+
+    private highlight(entry: TimelineEntry) {
+        const document = this.document;
+        if (document === undefined) return;
         this.clearHighlight = highlightTimelineEntry(document, entry);
+        this.setActive(entry.key);
         document.visual.update();
     }
 
     private readonly unhighlight = () => {
+        this.setActive(undefined);
         const clear = this.clearHighlight;
         if (clear === undefined) return;
         this.clearHighlight = undefined;
         clear();
         this.document?.visual.update();
     };
+
+    private setActive(key: string | undefined) {
+        this.activeKey = key;
+        for (const item of this.track.children) {
+            (item as HTMLElement).classList.toggle(
+                style.active,
+                (item as HTMLElement).dataset["key"] === key,
+            );
+        }
+    }
 
     /**
      * Opens the step for editing: a feature in the body's feature list, with its parameters; a
@@ -184,6 +214,94 @@ export class TimelineBar extends HTMLElement {
     private edit(entry: TimelineEntry) {
         this.select(entry);
         if (entry.kind === "node") this.open(entry.node);
+        else this.openEditor(entry);
+    }
+
+    // --- feature editor ---
+
+    /** Opens the feature's editor above its step: its parameters and the nodes it holds. */
+    private openEditor(entry: Extract<TimelineEntry, { kind: "feature" }>) {
+        const document = this.document;
+        if (document === undefined) return;
+        this.closeEditor();
+        const panel = div({ className: style.editor });
+        // Captured: the editor's boxes keep their keys from the app's shortcuts.
+        panel.addEventListener(
+            "keydown",
+            (e) => {
+                if (e.key !== "Escape") return;
+                e.stopPropagation();
+                this.closeEditor();
+            },
+            true,
+        );
+        this.editor = { key: entry.key, panel };
+        this.fillEditor(document, entry);
+        this.append(panel);
+        panel.querySelector("input")?.focus();
+    }
+
+    private fillEditor(document: IDocument, entry: Extract<TimelineEntry, { kind: "feature" }>) {
+        const panel = this.editor?.panel;
+        if (panel === undefined) return;
+        const header = div(
+            { className: style.editorHeader },
+            svg({ className: style.icon, icon: entry.icon }),
+            span({ className: style.editorTitle, textContent: timelineEntryLabel(entry, translate) }),
+            span({ className: style.editorBody, textContent: entry.node.name }),
+            button(
+                {
+                    className: style.editorClose,
+                    title: I18n.translate("common.close") ?? "",
+                    onclick: () => this.closeEditor(),
+                },
+                svg({ className: style.icon, icon: "icon-times" }),
+            ),
+        );
+        panel.replaceChildren(
+            header,
+            new FeatureEditor(document, entry.node, entry.feature, () => this.closeEditor()),
+        );
+        this.placeEditor(entry.key);
+    }
+
+    /** Above its step, kept inside the bar. */
+    private placeEditor(key: string) {
+        const panel = this.editor?.panel;
+        const item = [...this.track.children].find((x) => (x as HTMLElement).dataset["key"] === key);
+        if (panel === undefined || item === undefined) return;
+        const bar = this.getBoundingClientRect();
+        const left = item.getBoundingClientRect().left - bar.left;
+        const width = panel.offsetWidth;
+        panel.style.left = `${Math.max(4, Math.min(left, bar.width - width - 4))}px`;
+    }
+
+    /**
+     * After a change (an edit in the editor, an undo): the open editor shows the feature as it
+     * is now, and its rebuilt result is highlighted again. A feature that is gone closes it.
+     */
+    private refreshEditor(entries: TimelineEntry[]) {
+        const editor = this.editor;
+        const document = this.document;
+        if (editor === undefined || document === undefined) return;
+        const entry = entries.find((x) => x.key === editor.key);
+        if (entry?.kind !== "feature") {
+            this.closeEditor();
+            return;
+        }
+        const focused = [...editor.panel.querySelectorAll("input")].indexOf(
+            globalThis.document.activeElement as HTMLInputElement,
+        );
+        this.fillEditor(document, entry);
+        if (focused >= 0) editor.panel.querySelectorAll("input")[focused]?.focus();
+        this.highlight(entry);
+    }
+
+    private closeEditor() {
+        const editor = this.editor;
+        if (editor === undefined) return;
+        this.editor = undefined;
+        editor.panel.remove();
     }
 
     private open(node: INode) {

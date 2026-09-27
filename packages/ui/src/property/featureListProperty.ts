@@ -2,46 +2,26 @@
 // See LICENSE file in the project root for full license information.
 
 import {
-    Binding,
-    documentLengthUnit,
     type FeatureItem,
-    type FeatureParameter,
-    type FeatureReference,
-    formatLengthParameter,
     I18n,
-    type I18nKeys,
     type IDocument,
     type IFeatureListNode,
     type INode,
-    LENGTH_UNITS,
     Localize,
-    lengthParameterFromInput,
     onFeatureFocusRequested,
-    PubSub,
     Transaction,
     takeFeatureFocus,
-    type UnitSpec,
-    unitSpecEquals,
 } from "@spicy3d/core";
 import { div, input, span, svg } from "@spicy3d/element";
 import { type ContextMenuAnchor, type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { showDialog } from "../dialog";
-import commonStyle from "./common.module.css";
+import { FeatureEditor } from "./featureEditor";
 import style from "./featureListProperty.module.css";
 import inputStyle from "./input.module.css";
 
 interface DropTarget {
     readonly id: string;
     readonly before: boolean;
-}
-
-/** The i18n label of a unit the panel can name; undefined for derived ones (area, ...). */
-function unitSpecLabelKey(unit: UnitSpec | undefined): I18nKeys | undefined {
-    if (unit === undefined) return undefined;
-    if (unit.length === 1 && unit.angle === 0) return "variable.type.length";
-    if (unit.length === 0 && unit.angle === 1) return "variable.type.angle";
-    if (unit.length === 0 && unit.angle === 0) return "variable.type.unitless";
-    return undefined;
 }
 
 /**
@@ -160,114 +140,7 @@ export class FeatureListProperty extends HTMLElement {
     }
 
     private featureBody(item: FeatureItem) {
-        // An error outranks a warning for the message slot (they never co-occur:
-        // warnings are computed only after a fully successful chain).
-        const message =
-            item.error !== undefined
-                ? div({ className: style.errorText, textContent: item.error })
-                : item.warning !== undefined
-                  ? div({ className: style.warningText, textContent: item.warning })
-                  : undefined;
-        return div(
-            { className: style.body },
-            ...(message === undefined ? [] : [message]),
-            ...(item.references ?? []).map((ref) => this.referenceRow(item, ref)),
-            ...item.parameters.map((param) => this.parameterRow(item, param)),
-        );
-    }
-
-    /**
-     * A node this feature holds (e.g. its sketch). The name is the door: click
-     * selects the node, double-click opens it (the node decides what opening means —
-     * for a sketch, entering its editing session).
-     */
-    private referenceRow(item: FeatureItem, ref: FeatureReference) {
-        return div(
-            { className: style.param },
-            span({ className: commonStyle.propertyName, textContent: new Localize(ref.display) }),
-            span({
-                className: style.reference,
-                textContent: new Binding(ref.node, "name"),
-                onclick: () => this.document.selection.setSelectedNodes([ref.node], false),
-                ondblclick: () => this.node.activateReference?.(item.id, ref.key),
-            }),
-        );
-    }
-
-    private parameterRow(item: FeatureItem, param: FeatureParameter) {
-        return div(
-            { className: style.param },
-            span({ className: commonStyle.propertyName, textContent: new Localize(param.display) }),
-            typeof param.value === "boolean"
-                ? input({
-                      type: "checkbox",
-                      checked: param.value,
-                      onclick: (e) =>
-                          this.applyChecked(item, param.key, (e.target as HTMLInputElement).checked),
-                  })
-                : this.textParamInput(item, param.key, param.value, param.unit),
-        );
-    }
-
-    private textParamInput(item: FeatureItem, key: string, value: number | string, unit?: UnitSpec) {
-        const expected = unitSpecLabelKey(unit);
-        const isLength = unit !== undefined && unitSpecEquals(unit, LENGTH_UNITS);
-        let focusedText = "";
-        const box = input({
-            className: inputStyle.box,
-            value: this.formatParameterValue(value, isLength),
-            // What the slot measures — the value may be an expression, and the rebuild
-            // rejects one of the wrong unit, so say up front what fits.
-            title: expected === undefined ? "" : (I18n.translate(expected) ?? ""),
-            // Reveal the raw value for editing; blur without a change
-            // restores the trimmed display.
-            onfocus: (e) => {
-                const box = e.target as HTMLInputElement;
-                box.value = this.editableParameterValue(value, isLength);
-                focusedText = box.value;
-                box.select();
-            },
-            onkeydown: (e) => this.handleKeyDown(e, item, key, isLength, () => focusedText),
-            onblur: (e) => {
-                const box = e.target as HTMLInputElement;
-                this.applyParameter(box, item, key, isLength, focusedText);
-                // A applied change re-renders the list, detaching this box.
-                if (box.isConnected) box.value = this.formatParameterValue(value, isLength);
-            },
-        });
-        if (!isLength) return box;
-        return div(
-            { className: style.lengthInput },
-            box,
-            span({ className: inputStyle.unit, textContent: documentLengthUnit(this.document) }),
-        );
-    }
-
-    private readonly handleKeyDown = (
-        e: KeyboardEvent,
-        item: FeatureItem,
-        key: string,
-        isLength: boolean,
-        focusedText: () => string,
-    ) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-            this.applyParameter(e.target as HTMLInputElement, item, key, isLength, focusedText());
-        }
-    };
-
-    /**
-     * Numbers display trimmed to 4 fraction digits (a length in the project unit, at the
-     * precision that unit needs); expression strings stay as-is.
-     */
-    private formatParameterValue(value: number | string, isLength: boolean): string {
-        if (isLength) return formatLengthParameter(value, documentLengthUnit(this.document));
-        return typeof value === "number" ? String(Number(value.toFixed(4))) : value;
-    }
-
-    /** What the focused box holds: the full value, a length in the project unit. */
-    private editableParameterValue(value: number | string, isLength: boolean): string {
-        return isLength ? formatLengthParameter(value, documentLengthUnit(this.document)) : String(value);
+        return new FeatureEditor(this.document, this.node, item);
     }
 
     // --- menu ---
@@ -380,52 +253,6 @@ export class FeatureListProperty extends HTMLElement {
     }
 
     // --- feature actions ---
-
-    private applyChecked(item: FeatureItem, key: string, checked: boolean) {
-        Transaction.execute(this.document, "edit feature", () => {
-            this.node.setFeatureParameter(item.id, key, checked);
-            this.document.visual.update();
-        });
-    }
-
-    private applyParameter(
-        box: HTMLInputElement,
-        item: FeatureItem,
-        key: string,
-        isLength: boolean,
-        focusedText: string,
-    ) {
-        const current = item.parameters.find((x) => x.key === key)?.value;
-        const text = box.value.trim();
-        if (text === "") {
-            PubSub.default.pub("showToast", "error.default:{0}", "invalid input");
-            box.value =
-                current === undefined
-                    ? ""
-                    : this.editableParameterValue(current as number | string, isLength);
-            return;
-        }
-        // Untouched: a length shown in another unit is rounded, and writing it back would drift.
-        if (text === focusedText.trim() || (!isLength && text === String(current))) return;
-        // A non-numeric value is kept as an expression string; a failure to resolve
-        // it surfaces as a feature error on the row.
-        const value = isLength
-            ? lengthParameterFromInput(
-                  text,
-                  documentLengthUnit(this.document),
-                  this.document.variables.evaluate().scope,
-              )
-            : this.parseNumberOrExpression(text);
-        Transaction.execute(this.document, "edit feature", () => {
-            this.node.setFeatureParameter(item.id, key, value);
-            this.document.visual.update();
-        });
-    }
-
-    private parseNumberOrExpression(text: string): number | string {
-        const asNumber = Number(text);
-        return Number.isFinite(asNumber) ? asNumber : text;
-    }
 
     /**
      * Features after this one may be built on its faces and edges, so deleting it can break them:

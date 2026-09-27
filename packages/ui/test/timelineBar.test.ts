@@ -16,6 +16,7 @@ import {
     PubSub,
     ShapeTypes,
     Signal,
+    Transaction,
     VisualStates,
 } from "@spicy3d/core";
 import {
@@ -43,6 +44,7 @@ rs.mock("../src/dialog", () => ({ showDialog: showDialogMock }));
 
 import { closeContextMenu } from "../src/contextMenu";
 import menuStyle from "../src/contextMenu.module.css";
+import featureStyle from "../src/property/featureListProperty.module.css";
 import { TimelineBar } from "../src/timeline";
 import style from "../src/timeline/timelineBar.module.css";
 
@@ -53,7 +55,9 @@ function iconNode(name: string, icon: string): INode {
 function bodyNode(name: string, features: FeatureItem[], faces: Record<string, number[]> = {}) {
     return Object.assign(iconNode(name, "icon-body"), {
         featureItems: () => features,
-        setFeatureParameter: () => {},
+        setFeatureParameter: rs.fn(
+            (_featureId: string, _key: string, _value: number | string | boolean) => {},
+        ),
         setFeatureSuppressed: rs.fn((_featureId: string, _suppressed: boolean) => {}),
         moveFeature: () => {},
         renameFeature: rs.fn((_featureId: string, _name: string) => {}),
@@ -87,8 +91,8 @@ function testDocument() {
         highlighter: mock.highlighter,
         context: { getVisual: (node: INode) => visuals.get(node) },
     });
-    const visualOf = (node: INode) => {
-        const visual = { node } as unknown as IVisualObject;
+    const visualOf = (node: INode, visible = true) => {
+        const visual = { node, visible } as unknown as IVisualObject;
         visuals.set(node, visual);
         return visual;
     };
@@ -109,6 +113,12 @@ function show(document: TestDocument) {
 function entries(bar: TimelineBar): HTMLElement[] {
     return [...bar.querySelectorAll<HTMLElement>(`.${style.entry}`)];
 }
+
+function featureEditor(bar: TimelineBar): HTMLElement | null {
+    return bar.querySelector<HTMLElement>(`.${style.editor}`);
+}
+
+const depth = { key: "depth", display: "option.command.depth" as I18nKeys, value: 10 };
 
 /** A committed change: what makes the bar re-read the document. */
 async function commit(document: TestDocument) {
@@ -371,9 +381,9 @@ describe("TimelineBar", () => {
             expect(body.reselectShapes).toHaveBeenCalledWith("f1");
         });
 
-        test("editing a feature opens it in the body's feature list", () => {
+        test("editing a feature opens its editor above the step and in the body's feature list", () => {
             const { document, bar, setSelectedNodes } = setup();
-            const body = bodyNode("Body 1", [extrude("f1")]);
+            const body = bodyNode("Body 1", [extrude("f1", { parameters: [depth] })]);
             document.modelManager.rootNode.add(body);
             show(document);
             const focused: string[] = [];
@@ -386,6 +396,105 @@ describe("TimelineBar", () => {
 
             expect(focused).toEqual(["f1"]);
             expect(setSelectedNodes).toHaveBeenCalledWith([body], false);
+            const editor = featureEditor(bar);
+            expect(editor).not.toBeNull();
+            expect(editor?.textContent).toContain(t("command.feature.fuse"));
+            expect(editor?.textContent).toContain("Body 1");
+            expect(editor?.querySelector("input")?.value).toBe("10");
+        });
+
+        test("double-click on a feature opens its editor", () => {
+            const { document, bar } = setup();
+            document.modelManager.rootNode.add(bodyNode("Body 1", [extrude("f1", { parameters: [depth] })]));
+            show(document);
+
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+
+            expect(featureEditor(bar)).not.toBeNull();
+        });
+
+        test("a parameter changed in the editor is one undo step; the editor and highlight follow", async () => {
+            const { document, bar, highlighter, visualOf } = setup();
+            const body = bodyNode("Body 1", [extrude("f1", { parameters: [depth] })], { f1: [3] });
+            // As the real body: the change is recorded into the transaction.
+            body.setFeatureParameter.mockImplementation(() =>
+                Transaction.add(document, {
+                    name: "depth",
+                    undo: () => {},
+                    redo: () => {},
+                    dispose: () => {},
+                }),
+            );
+            visualOf(body);
+            document.modelManager.rootNode.add(body);
+            show(document);
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            const box = featureEditor(bar)?.querySelector("input");
+            expect(box).not.toBeNull();
+            expect(highlighter.addCalls).toHaveLength(1);
+
+            const before = document.history.undoCount();
+            box?.focus();
+            (box as HTMLInputElement).value = "15";
+            box?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            await Promise.resolve();
+
+            expect(body.setFeatureParameter).toHaveBeenCalledWith("f1", "depth", 15);
+            expect(document.history.undoCount()).toBe(before + 1);
+            // Rebuilt: a fresh editor, and the feature's faces highlighted again.
+            expect(featureEditor(bar)?.querySelector("input")).not.toBe(box);
+            expect(highlighter.removeCalls).toHaveLength(1);
+            expect(highlighter.addCalls).toHaveLength(2);
+            expect(entries(bar)[0].classList.contains(style.active)).toBe(true);
+        });
+
+        test("the editor closes with its button, on Escape, on another step and on a document switch", () => {
+            const { document, bar } = setup();
+            const body = bodyNode("Body 1", [extrude("f1", { parameters: [depth] }), extrude("f2")]);
+            document.modelManager.rootNode.add(body);
+            show(document);
+            const open = () => {
+                entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+                expect(featureEditor(bar)).not.toBeNull();
+            };
+
+            open();
+            featureEditor(bar)?.querySelector<HTMLElement>(`.${style.editorClose}`)?.click();
+            expect(featureEditor(bar)).toBeNull();
+
+            open();
+            featureEditor(bar)
+                ?.querySelector("input")
+                ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            expect(featureEditor(bar)).toBeNull();
+
+            open();
+            entries(bar)[1].click();
+            expect(featureEditor(bar)).toBeNull();
+
+            open();
+            show(testDocument().document);
+            expect(featureEditor(bar)).toBeNull();
+        });
+
+        test("the editor opens the sketch a feature holds and gives way to its session", () => {
+            const { document, bar } = setup();
+            const sketch = iconNode("Sketch 1", "icon-sketch");
+            const body = bodyNode("Body 1", [
+                extrude("f1", {
+                    references: [{ key: "sketchId", display: "body.sketch" as I18nKeys, node: sketch }],
+                }),
+            ]);
+            document.modelManager.rootNode.add(body);
+            show(document);
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            const button = featureEditor(bar)?.querySelector(`.${featureStyle.referenceEdit}`);
+            expect(button).not.toBeNull();
+
+            button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+            expect(body.activateReference).toHaveBeenCalledWith("f1", "sketchId");
+            expect(featureEditor(bar)).toBeNull();
         });
 
         test("suppressing a feature is one undo step", () => {
@@ -448,7 +557,28 @@ describe("TimelineBar", () => {
 
             entries(bar)[0].click();
 
-            expect(highlighter.addCalls).toEqual([faceHighlight(visual, ShapeTypes.shape, [])]);
+            expect(highlighter.addCalls).toEqual([
+                {
+                    ...faceHighlight(visual, ShapeTypes.shape, []),
+                    state: VisualStates.faceHighlight | VisualStates.edgeHighlight,
+                },
+            ]);
+        });
+
+        test("a hidden node (a consumed sketch) is shown while highlighted, then hidden again", () => {
+            const { document, bar, visualOf } = setup();
+            const sketch = iconNode("Sketch 1", "icon-sketch");
+            sketch.visible = false;
+            const visual = visualOf(sketch, false);
+            document.modelManager.rootNode.add(sketch);
+            show(document);
+
+            entries(bar)[0].click();
+            expect(visual.visible).toBe(true);
+            expect(sketch.visible).toBe(false);
+
+            document.selection.setSelectedNodes([], false);
+            expect(visual.visible).toBe(false);
         });
 
         test("a feature that created no face highlights nothing", () => {

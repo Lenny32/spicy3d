@@ -4,7 +4,7 @@
 import type { IDocument } from "../document";
 import type { I18nKeys } from "../i18n";
 import { ShapeTypes } from "../shape/shapeType";
-import { VisualStates } from "../visual/visualShape";
+import { VisualStates, VisualStateUtils } from "../visual/visualShape";
 import {
     type FeatureItem,
     type IFeatureListNode,
@@ -95,19 +95,27 @@ export function revealTimelineEntry(document: IDocument, entry: TimelineEntry): 
 
 /**
  * Highlights the entry's result in the viewport, so it is easy to find: the faces a feature
- * created (`featureFaces`), or a node's whole shape. Returns the function taking it off again.
+ * created (`featureFaces`), or a node's whole shape. A hidden node (a sketch an extrude consumed)
+ * is shown meanwhile, without changing its own visibility. Returns the function taking it off.
  */
 export function highlightTimelineEntry(document: IDocument, entry: TimelineEntry): () => void {
     const visual = document.visual.context.getVisual(entry.node);
     if (visual === undefined) return () => {};
     const highlighter = document.visual.highlighter;
-    const state = VisualStates.faceHighlight;
-    if (entry.kind === "node") {
-        highlighter.addState(visual, state, ShapeTypes.shape);
-        return () => highlighter.removeState(visual, state, ShapeTypes.shape);
-    }
-    const faces = entry.node.featureFaces?.(entry.feature.id) ?? [];
-    if (faces.length === 0) return () => {};
-    highlighter.addState(visual, state, ShapeTypes.face, ...faces);
-    return () => highlighter.removeState(visual, state, ShapeTypes.face, ...faces);
+    // A whole node lights up its edges too: a sketch lying on a face shows by its outline.
+    const state =
+        entry.kind === "node"
+            ? VisualStateUtils.addState(VisualStates.faceHighlight, VisualStates.edgeHighlight)
+            : VisualStates.faceHighlight;
+    const faces = entry.kind === "node" ? [] : (entry.node.featureFaces?.(entry.feature.id) ?? []);
+    if (entry.kind === "feature" && faces.length === 0) return () => {};
+    const shown = !visual.visible;
+    if (shown) visual.visible = true;
+    const type = entry.kind === "node" ? ShapeTypes.shape : ShapeTypes.face;
+    highlighter.addState(visual, state, type, ...faces);
+    return () => {
+        highlighter.removeState(visual, state, type, ...faces);
+        // Hidden again unless the node was shown in the meantime (e.g. its editing session).
+        if (shown) visual.visible = entry.node.visible && entry.node.parentVisible;
+    };
 }
