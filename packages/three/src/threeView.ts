@@ -97,6 +97,17 @@ function keepsSubShape(shapeType: ShapeType, subType: ShapeType): boolean {
     return true;
 }
 
+/** The size scaled down (never up) so its longest side is at most `maxSize`. */
+function fitSize(width: number, height: number, maxSize: number | undefined) {
+    const longest = Math.max(width, height);
+    const scale = maxSize !== undefined && longest > maxSize ? maxSize / longest : 1;
+    return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+function fitsWithin(canvas: HTMLCanvasElement, maxSize: number | undefined): boolean {
+    return maxSize === undefined || Math.max(canvas.width, canvas.height) <= maxSize;
+}
+
 export class ThreeView extends Observable implements IView {
     private _dom?: HTMLElement;
     private _needsUpdate: boolean = false;
@@ -291,9 +302,47 @@ export class ThreeView extends Observable implements IView {
         return element;
     }
 
-    toImage(): string {
+    toImage(maxSize?: number): string {
         this._renderer.render(this._scene, this.camera);
-        return this.renderer.domElement.toDataURL();
+        const source = this.renderer.domElement;
+        // Scaled down before encoding: a full-size PNG of a HiDPI viewport takes seconds to encode.
+        const canvas = fitsWithin(source, maxSize) ? undefined : this.copyRendered(maxSize);
+        return (canvas ?? source).toDataURL();
+    }
+
+    snapshot(maxSize?: number): HTMLCanvasElement | undefined {
+        this._renderer.render(this._scene, this.camera);
+        return this.copyRendered(maxSize, this.backgroundColor());
+    }
+
+    /**
+     * The frame just rendered, copied into a 2D canvas. Read in the same task as the render, so the
+     * WebGL drawing buffer (not preserved between frames) still holds it.
+     */
+    private copyRendered(maxSize: number | undefined, background?: string): HTMLCanvasElement | undefined {
+        const source = this.renderer.domElement;
+        const { width, height } = fitSize(source.width, source.height, maxSize);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) return undefined;
+        if (background) {
+            context.fillStyle = background;
+            context.fillRect(0, 0, width, height);
+        }
+        context.imageSmoothingQuality = "high";
+        context.drawImage(source, 0, 0, width, height);
+        return canvas;
+    }
+
+    /** What the user sees behind the model: the first opaque background up the viewport's DOM. */
+    private backgroundColor(): string {
+        for (let element: Element | null = this._dom ?? null; element; element = element.parentElement) {
+            const color = getComputedStyle(element).backgroundColor;
+            if (color && color !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(color)) return color;
+        }
+        return "#ffffff";
     }
 
     get workplane(): Plane {

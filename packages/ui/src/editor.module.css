@@ -30,11 +30,19 @@
         }
     }
 
+    /* The viewport above the timeline bar. */
+    & .viewportColumn {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        width: 0;
+    }
+
     & .viewportContainer {
         position: relative;
         background-color: var(--viewport-background-color);
         flex: 1 1 auto;
-        width: 0;
+        height: 0;
 
         .viewport {
             height: 100%;
@@ -115,9 +123,10 @@
         min-height: 0;
         position: relative;
 
-        & .viewportContainer {
-            height: auto;
+        & .viewportColumn {
+            flex: 1 1 auto;
             width: 100%;
+            min-height: 0;
         }
 
         & .sidebar {

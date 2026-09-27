@@ -4,7 +4,14 @@
 import { I18n, type IDocument, Material, Transaction, type XYZLike } from "@spicy3d/core";
 import type { Tool, ToolResult } from "../llm/types";
 import { getDocument } from "./documentContext";
-import { encodeImage, IMAGE_FORMATS, type ImageEncodeOptions, type ImageFormat } from "./imageEncoding";
+import {
+    DEFAULT_MAX_SIZE,
+    encodeImage,
+    encodeSnapshot,
+    IMAGE_FORMATS,
+    type ImageEncodeOptions,
+    type ImageFormat,
+} from "./imageEncoding";
 
 const Z_UP: XYZLike = { x: 0, y: 0, z: 1 };
 
@@ -74,15 +81,18 @@ export function buildViewTools(): Tool[] {
 /**
  * The viewport image as a tool result: the JSON payload plus the screenshot itself, so the model
  * sees the result and the picture in one step. Shared with `click_view`, whose whole point after a
- * select is to show the highlight. Re-encoded only when asked, or when it exceeds the relay's
- * budget (`setImageByteBudget`).
+ * select is to show the highlight. Scaled to `DEFAULT_MAX_SIZE` unless asked otherwise, and encoded
+ * off the main thread; smaller again when it exceeds the relay's budget (`setImageByteBudget`).
  */
 export async function imageResult(
-    view: { toImage(): string },
+    view: { toImage(): string; snapshot?(maxSize?: number): HTMLCanvasElement | undefined },
     payload: Record<string, unknown>,
     options: ImageEncodeOptions = {},
 ): Promise<ToolResult> {
-    const encoded = await encodeImage(view.toImage(), options);
+    const snapshot = view.snapshot?.(options.maxSize ?? DEFAULT_MAX_SIZE);
+    const encoded = snapshot
+        ? await encodeSnapshot(snapshot, options)
+        : await encodeImage(view.toImage(), options);
     if (!encoded.isOk) return { content: JSON.stringify({ error: encoded.error }) };
     const image = encoded.value;
     return {
@@ -120,7 +130,7 @@ function captureScreenshotTool(): Tool {
     return {
         name: "capture_screenshot",
         description:
-            "Capture the current viewport as an image so you can see the model's current state. Lossless PNG at the viewport's size by default; pass format jpeg/webp and/or maxSize to get a smaller image.",
+            "Capture the current viewport as an image so you can see the model's current state. Lossless PNG, longest side 1568 px (never enlarged), by default; pass format jpeg/webp and/or maxSize to get a smaller image.",
         parameters: {
             type: "object",
             properties: {
@@ -133,7 +143,8 @@ function captureScreenshotTool(): Tool {
                     type: "integer",
                     minimum: 64,
                     maximum: 4096,
-                    description: "Longest side in pixels; the image is scaled down to fit (never up)",
+                    description:
+                        "Longest side in pixels (default 1568); the image is scaled down to fit (never up)",
                 },
                 quality: {
                     type: "number",

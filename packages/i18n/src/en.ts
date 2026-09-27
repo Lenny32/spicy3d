@@ -975,6 +975,8 @@ export default {
         "snap.vertex": "Construction point",
         "statusBar.snap": "Snap",
         "statusBar.tracking": "Tracking",
+        "timeline.feature{0}{1}": "{0} ({1})",
+        "timeline.title": "Timeline",
         "toast.command.{0}excuting": "Command {0} is runing",
         "toast.converter.error": "Converter error",
         "toast.converter.invalidColor": "The color is invalid",

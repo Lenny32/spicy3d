@@ -22,6 +22,7 @@ import { showVariablesPanel } from "./property/variables";
 import { RibbonUI } from "./ribbon";
 import { CommandContext } from "./ribbon/commandContext";
 import { Statusbar } from "./statusbar";
+import { TimelineBar } from "./timeline";
 import { LayoutViewport } from "./viewport";
 
 export class Editor extends HTMLElement {
@@ -69,7 +70,7 @@ export class Editor extends HTMLElement {
         this._contentEl = div(
             { className: style.content },
             this._sidebarEl,
-            this._viewportContainer,
+            div({ className: style.viewportColumn }, this._viewportContainer, new TimelineBar(this.app)),
             sidePanels,
         );
         this.append(

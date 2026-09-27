@@ -2,7 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    DEFAULT_MAX_SIZE,
     encodeImage,
+    encodeSnapshot,
     imageBudgetFor,
     imageByteBudget,
     parseDataUrl,
@@ -34,13 +36,14 @@ function stubCanvas() {
             width: 0,
             height: 0,
             getContext: () => ({ drawImage: () => {} }),
-            toDataURL: (type: string, quality?: number) => {
+            toBlob: (callback: (blob: Blob | null) => void, type: string, quality?: number) => {
                 encoded.push({ type, quality, width: canvas.width, height: canvas.height });
-                // 1 base64 character per 25 pixels, half that when lossy.
+                // 1 byte per 25 pixels, half that when lossy (base64 makes it a third larger).
                 const size = (canvas.width * canvas.height) / (type === "image/png" ? 25 : 50);
-                return `data:${type};base64,${"A".repeat(Math.round(size))}`;
+                queueMicrotask(() => callback(new Blob(["A".repeat(Math.round(size))], { type })));
             },
         };
+        Object.setPrototypeOf(canvas, HTMLCanvasElement.prototype);
         return canvas;
     }) as typeof document.createElement);
     return { encoded, restore: () => spy.mockRestore() };
@@ -131,7 +134,8 @@ describe("encodeImage", () => {
 
             expect(image.isOk).toBe(true);
             expect(image.value.data.length).toBeLessThanOrEqual(20_000);
-            expect(canvas.encoded.map((e) => e.type)).toEqual(["image/png", "image/jpeg", "image/jpeg"]);
+            // The original PNG is known not to fit: no second PNG encode of it.
+            expect(canvas.encoded.map((e) => e.type)).toEqual(["image/jpeg", "image/jpeg"]);
             expect(canvas.encoded[0]).toMatchObject({ width: 2000, height: 1000 });
             expect(canvas.encoded.at(-1)?.width).toBeLessThan(2000);
         } finally {
@@ -160,7 +164,85 @@ describe("encodeImage", () => {
     });
 });
 
+/** A canvas from the stub, as `IView.snapshot` would hand it over. */
+function snapshotCanvas(width: number, height: number): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+}
+
+describe("encodeSnapshot", () => {
+    test("encodes the snapshot as it is, once, in PNG by default", async () => {
+        const canvas = stubCanvas();
+        try {
+            const image = await encodeSnapshot(snapshotCanvas(1000, 500));
+
+            expect(image.value.mediaType).toBe("image/png");
+            expect(canvas.encoded).toEqual([{ type: "image/png", quality: 0.85, width: 1000, height: 500 }]);
+        } finally {
+            canvas.restore();
+        }
+    });
+
+    test("over the budget: lossy, then shrunk by the ratio it missed by, in a few encodes", async () => {
+        const canvas = stubCanvas();
+        try {
+            const image = await withImageByteBudget(20_000, () => encodeSnapshot(snapshotCanvas(2000, 1000)));
+
+            expect(image.isOk).toBe(true);
+            expect(image.value.data.length).toBeLessThanOrEqual(20_000);
+            expect(canvas.encoded.map((e) => e.type)).toEqual(["image/png", "image/jpeg", "image/jpeg"]);
+            expect(canvas.encoded.at(-1)?.width).toBeLessThan(2000);
+        } finally {
+            canvas.restore();
+        }
+    });
+
+    test("a snapshot that cannot be made to fit is an error", async () => {
+        const canvas = stubCanvas();
+        try {
+            const image = await withImageByteBudget(5, () => encodeSnapshot(snapshotCanvas(2000, 1000)));
+
+            expect(image.isOk).toBe(false);
+            expect(image.error).toContain("message limit");
+            expect(canvas.encoded.length).toBeLessThanOrEqual(4);
+        } finally {
+            canvas.restore();
+        }
+    });
+});
+
 describe("imageResult", () => {
+    test("takes a snapshot at the default size instead of the full-size image", async () => {
+        const canvas = stubCanvas();
+        try {
+            const snapshot = rs.fn((_maxSize?: number) => snapshotCanvas(800, 400));
+            const toImage = rs.fn(() => PNG);
+
+            const result = await imageResult({ toImage, snapshot }, { ok: true });
+
+            expect(snapshot).toHaveBeenCalledWith(DEFAULT_MAX_SIZE);
+            expect(toImage).not.toHaveBeenCalled();
+            expect(result.images?.[0]?.mediaType).toBe("image/png");
+        } finally {
+            canvas.restore();
+        }
+    });
+
+    test("an explicit maxSize is the snapshot's size", async () => {
+        const canvas = stubCanvas();
+        try {
+            const snapshot = rs.fn((_maxSize?: number) => snapshotCanvas(300, 150));
+            await imageResult({ toImage: () => PNG, snapshot }, { ok: true }, { maxSize: 300 });
+            expect(snapshot).toHaveBeenCalledWith(300);
+        } finally {
+            canvas.restore();
+        }
+    });
+});
+
+describe("imageResult without a snapshot", () => {
     afterEach(() => {
         rs.unstubAllGlobals();
     });

@@ -27,6 +27,7 @@ export function createMockView(overrides?: Partial<IView>): IView {
         update: () => {},
         up: () => XYZ.unitZ,
         toImage: () => "",
+        snapshot: () => undefined,
         direction: () => XYZ.unitY.reverse(),
         rayAt: (mx: number, my: number) =>
             new Ray({

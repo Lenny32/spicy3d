@@ -15,6 +15,7 @@ import {
     type StoredDocumentInfo,
 } from "./foundation";
 import type { Serialized } from "./serialize";
+import { DOCUMENT_THUMBNAIL_MAX_SIZE } from "./visual/view";
 
 /** What to do when the target already has a document with the id being moved. */
 export type ExistingDocumentChoice = "replace" | "keepBoth" | "cancel";
@@ -44,7 +45,7 @@ export function documentThumbnail(app: IApplication, document: IDocument): strin
         app.activeView?.document === document
             ? app.activeView
             : app.views.find((x) => x.document === document);
-    return view?.toImage();
+    return view?.toImage(DOCUMENT_THUMBNAIL_MAX_SIZE);
 }
 
 async function existingIn(
