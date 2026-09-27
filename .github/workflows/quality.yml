@@ -56,6 +56,9 @@ jobs:
 
             - run: npx tsc --noEmit -p tsconfig.json
 
+            # The typed API client must match the committed server spec (packages/cloud/openapi.json).
+            - run: npm run cloud:api:check
+
     semgrep:
         name: Semgrep (SAST)
         runs-on: ubuntu-latest

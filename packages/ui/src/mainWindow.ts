@@ -13,6 +13,7 @@ import {
     RibbonTab,
     type RibbonTabProfile,
 } from "@spicy3d/core";
+import { Banner } from "./banner";
 import { showDialog } from "./dialog";
 import { Editor } from "./editor";
 import { showFloatPanel } from "./floatPanel";
@@ -92,6 +93,8 @@ export class MainWindow extends HTMLElement implements IWindow {
         PubSub.default.sub("showAnalysisPanel", showAnalysisPanel);
         PubSub.default.sub("showFloatPanel", showFloatPanel);
         PubSub.default.sub("showPermanent", Permanent.show);
+        PubSub.default.sub("showBanner", Banner.show);
+        PubSub.default.sub("hideBanner", Banner.hide);
         PubSub.default.sub("activeViewChanged", (view) => displayHome(app, view === undefined));
         PubSub.default.sub("displayHome", (show) => displayHome(app, show));
 

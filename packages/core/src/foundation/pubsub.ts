@@ -7,7 +7,7 @@ import type { IDocument } from "../document";
 import type { I18nKeys } from "../i18n";
 import type { Material } from "../material";
 import type { INode } from "../model";
-import type { DialogButton, FloatPanelOptions } from "../ui";
+import type { BannerOptions, DialogButton, FloatPanelOptions } from "../ui";
 import type { CursorType, IView } from "../visual";
 import type { AsyncController } from "./asyncController";
 import type { IDisposable } from "./disposable";
@@ -29,6 +29,7 @@ export interface PubSubEventMap {
     editMaterial: (document: IDocument, material: Material, callback: (material: Material) => void) => void;
     editVariables: (document: IDocument, onApplied: () => void) => void;
     executeCommand: (commandName: CommandKeys) => void;
+    hideBanner: (id: string) => void;
     modelUpdate: (model: INode) => void;
     nodeDoubleClicked: (node: INode) => void;
     openCommandContext: (command: ICommand) => void;
@@ -38,6 +39,8 @@ export interface PubSubEventMap {
     pushShortcutContext: (context: ShortcutContext) => void;
     showDialog: (title: I18nKeys, content: HTMLElement, buttons?: DialogButton[] | (() => void)) => void;
     showAnalysisPanel: (node: AnalysisNode) => void;
+    /** Pins a non-blocking message to the top of the window (replacing one with the same id). */
+    showBanner: (banner: BannerOptions) => void;
     showFloatPanel: (options: FloatPanelOptions) => void;
     showFloatTip: (dom: HTMLElement | { level: MessageType; msg: string }) => void;
     showInput: (text: string, handler: (text: string) => Result<string, I18nKeys>) => void;

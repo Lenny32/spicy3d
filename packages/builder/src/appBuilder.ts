@@ -24,13 +24,24 @@ import {
     type RibbonProfileExtra,
 } from "./ribbon";
 
+/** See `useCloud`. */
+export interface UseCloudOptions {
+    /** Where the server's `/api` lives; defaults to the folder the app is served from (same origin). */
+    baseUrl?: string;
+}
+
 export class AppBuilder {
     protected readonly _inits: (() => Promise<void>)[] = [];
+    /** Run once the application and its window exist, without delaying startup. */
+    protected readonly _started: ((app: IApplication) => Promise<void>)[] = [];
     protected readonly _ribbonExtras: RibbonProfileExtra[] = [];
     protected _storage?: IStorage;
     protected _visualFactory?: IVisualFactory;
     protected _shapeProvider?: IShapeProvider;
     protected _window?: IWindow;
+
+    /** Settles once every post-startup step (e.g. cloud discovery) has run; failures are only logged. */
+    started: Promise<void> = Promise.resolve();
 
     constructor() {
         this.initI18n();
@@ -123,6 +134,26 @@ export class AppBuilder {
         return this;
     }
 
+    /**
+     * Connects to a Spicy3D server when one answers `GET /api/config`; otherwise (static hosting,
+     * no server) the cloud stays dormant and shows no UI. Runs after startup, and loads the API
+     * client only once a server is found.
+     */
+    useCloud(options: UseCloudOptions = {}): this {
+        this._started.push(async () => {
+            const { discoverCloud } = await import("@spicy3d/cloud/src/config");
+            const discovery = await discoverCloud(options);
+            if (discovery.status === "dormant") return;
+
+            Logger.info(
+                `initializing cloud (server ${discovery.config.version}, API ${discovery.config.apiVersion})`,
+            );
+            const cloud = await import("@spicy3d/cloud");
+            cloud.startCloud(discovery, options);
+        });
+        return this;
+    }
+
     async getRibbonTabs() {
         return mergeRibbonProfiles(DefaultRibbon, this._ribbonExtras);
     }
@@ -136,10 +167,19 @@ export class AppBuilder {
         const app = this.createApp();
         await this._window?.init(app);
         await this.loadDefaultPlugins(app);
+        this.started = this.runStarted(app);
 
         Logger.info("Application build completed");
 
         return app;
+    }
+
+    protected async runStarted(app: IApplication) {
+        await Promise.all(
+            this._started.map((step) =>
+                step(app).catch((error) => Logger.warn(`startup step failed: ${error}`)),
+            ),
+        );
     }
 
     protected async loadDefaultPlugins(app: IApplication) {

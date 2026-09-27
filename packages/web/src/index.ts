@@ -38,6 +38,7 @@ new AppBuilder()
     .useParametric()
     .useThree()
     .useUI()
+    .useCloud()
     .build()
     .then(handleApplicaionBuilt)
     .catch((err) => {

@@ -9,6 +9,8 @@
         "build:wasm": "cd cpp && cmake --preset release && cmake --build --preset release",
         "build:types": "node scripts/generate_types.mjs",
         "check": "biome check --write",
+        "cloud:api": "node scripts/generate-cloud-api.mjs",
+        "cloud:api:check": "node scripts/generate-cloud-api.mjs --check",
         "dev": "node scripts/pack-mcp-bridge.mjs && rspack dev",
         "format": "biome check --write . && npx clang-format --style=Webkit --sort-includes -i ./cpp/src/**",
         "generate:capabilities": "node scripts/generate-shape-capabilities.mjs",
@@ -45,6 +47,7 @@
         "clang-format": "^1.8.0",
         "happy-dom": "^20.9.0",
         "lint-staged": "^17.0.5",
+        "openapi-typescript": "^7.13.0",
         "simple-git-hooks": "2.13.1",
         "ts-checker-rspack-plugin": "^1.3.0",
         "typescript": "^6.0.3",
@@ -53,5 +56,10 @@
     "dependencies": {
         "@types/jszip": "^3.4.0",
         "jszip": "^3.10.1"
+    },
+    "overrides": {
+        "openapi-typescript": {
+            "typescript": "$typescript"
+        }
     }
 }

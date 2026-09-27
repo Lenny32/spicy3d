@@ -28,10 +28,10 @@ The server is a separate C# repository (SpicySrv). Keep client and server in syn
 
 ## Acceptance criteria
 
-- [ ] Generated client compiles from the committed spec; regenerating from a newer spec is one command.
-- [ ] Without a server, no failing network requests and no cloud UI.
-- [ ] Problem+json errors map to typed `Result` errors with i18n messages.
-- [ ] API-version mismatch shows the reload banner.
+- [x] Generated client compiles from the committed spec; regenerating from a newer spec is one command.
+- [x] Without a server, no failing network requests and no cloud UI.
+- [x] Problem+json errors map to typed `Result` errors with i18n messages.
+- [x] API-version mismatch shows the reload banner.
 
 ## Dependencies and complexity
 

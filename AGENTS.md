@@ -23,6 +23,7 @@ web ──> builder ──> app ──> core
                   ──> i18n / three / wasm ──> core
                   ──> ui ──> core + element
                   ──> parametric ──> core
+                  ──> cloud ──> core            (lazy, via useCloud)
 ```
 
 - **`core`** — Everything abstract: shape interfaces, math, document model, reactive data (`Observable`, `Binding`, `PubSub`), `Result<T,E>`, undo, commands, serialization, plugins, services, UI abstractions
@@ -33,6 +34,7 @@ web ──> builder ──> app ──> core
 - **`ui`** — App chrome: main window, ribbon, property panels, project tree, dialogs, toast, status bar
 - **`app`** — `Application`, body nodes (`bodys/`), command implementations, `CommandService`, `HotkeyService`
 - **`builder`** — `AppBuilder` fluent chain (`.useIndexedDB().useWasmOcc().useParametric().useThree().useUI().build()`), default ribbon layout; `mergeRibbonProfiles` merges module contributions (`SketchRibbonProfiles` from `@spicy3d/parametric`, `ParametricRibbonProfiles`) into `DefaultRibbon`
+- **`cloud`** — Client of the SpicySrv HTTP API: `openapi.json` (the server's spec, committed) → `src/api/schema.generated.ts` (`openapi-typescript`; `npm run cloud:api [-- <path-or-url>]` regenerates, `cloud:api:check` / `generatedApi.test.ts` fail when stale — never edit it by hand); `CloudClient` (`openapi-fetch`; `call()` → `Result<CloudReply, CloudError>`, `X-Spicy3D-Request: 1` on unsafe methods, `ifMatch()`, `newIdempotencyKey()`), problem codes → i18n in `problem.ts`, `discoverCloud()` in `config.ts` (dependency-free; anything but a Spicy3D config → dormant; `public/api/config` is the no-server placeholder) and the `apiVersion` range → reload banner (`showBanner`)
 - **`i18n`** / **`storage`** / **`web`** — Locale data (en) / IndexedDB persistence / entry point (loading screen, `?plugin=`/`?url=`/`?model=`/`?mcp=` params)
 
 Import via workspace names (`import { ... } from "@spicy3d/core"`); one root `tsconfig.json` covers all packages.
