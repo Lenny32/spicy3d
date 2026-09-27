@@ -2,7 +2,6 @@
 // See LICENSE file in the project root for full license information.
 
 import {
-    AutosaveHolds,
     AutosaveSettings,
     AutosaveStatus,
     type IApplication,
@@ -13,6 +12,7 @@ import {
     PubSub,
     type Result,
     type SaveKind,
+    UserActivity,
 } from "@spicy3d/core";
 import { autosaveToOriginFile, fileAutosave } from "../documentFiles";
 
@@ -25,8 +25,10 @@ export interface AutosaveServiceOptions {
     writeFile?: (document: IDocument) => Promise<Result<void>>;
     /** How often a deferred autosave checks whether the user is done, in ms (default 1000). */
     idleCheckMs?: number;
-    /** Whether a modal dialog is open (default: any open `<dialog>`). */
+    /** Whether a modal dialog is open (default: any open `<dialog>`); ignored with `activity`. */
     isDialogOpen?: () => boolean;
+    /** What tells whether the user is busy (default: the shared {@link UserActivity.current}). */
+    activity?: UserActivity;
     now?: () => number;
 }
 
@@ -47,8 +49,6 @@ interface Watched {
 
 const MINUTE = 60_000;
 
-const anyDialogOpen = () => globalThis.document?.querySelector("dialog[open]") != null;
-
 /**
  * Saves dirty documents on their own, `AutosaveSettings.intervalMinutes` after they became dirty
  * (or after the last autosave), never while the user is in the middle of something — a command, a
@@ -60,7 +60,8 @@ const anyDialogOpen = () => globalThis.document?.querySelector("dialog[open]") !
  * turned that on for it (and not saved at all otherwise: the file is where it lives). Read-only
  * documents (edited in another tab) are skipped. An autosave that meets a conflict shows it in the
  * status but opens no dialog, and waits until the document's version changes (the user resolved it).
- * Offline, the next interval tries again (CLOUD-10 will write to the offline cache instead).
+ * A cloud document's save lands on this device first (CLOUD-10's sync pushes it when it can), so
+ * an autosave offline succeeds like any other.
  */
 export class AutosaveService implements IService {
     private app?: IApplication;
@@ -69,19 +70,23 @@ export class AutosaveService implements IService {
     private readonly status: AutosaveStatus;
     private readonly files: IFileAutosave;
     private readonly writeFile: (document: IDocument) => Promise<Result<void>>;
-    private readonly isDialogOpen: () => boolean;
+    private readonly activity: UserActivity;
     private readonly now: () => number;
     private readonly idleCheckMs: number;
     private idlePoll?: ReturnType<typeof setInterval>;
-    private pointerDown = false;
-    private removeHoldListener?: () => void;
+    private stopActivity?: () => void;
+    private removeIdleListener?: () => void;
 
     constructor(options: AutosaveServiceOptions = {}) {
         this.settings = options.settings ?? AutosaveSettings.current;
         this.status = options.status ?? AutosaveStatus.current;
         this.files = options.files ?? fileAutosave;
         this.writeFile = options.writeFile ?? autosaveToOriginFile;
-        this.isDialogOpen = options.isDialogOpen ?? anyDialogOpen;
+        this.activity =
+            options.activity ??
+            (options.isDialogOpen
+                ? new UserActivity({ isDialogOpen: options.isDialogOpen })
+                : UserActivity.current);
         this.now = options.now ?? (() => Date.now());
         this.idleCheckMs = options.idleCheckMs ?? 1000;
     }
@@ -98,12 +103,8 @@ export class AutosaveService implements IService {
         PubSub.default.sub("documentRepositoryChanged", this.onRepositoryChanged);
         this.settings.onPropertyChanged(this.onSettingsChanged);
         this.app?.onPropertyChanged(this.onAppChanged);
-        this.removeHoldListener = AutosaveHolds.onReleased(this.resumeIfIdle);
-        globalThis.addEventListener?.("pointerdown", this.onPointerDown, true);
-        globalThis.addEventListener?.("pointerup", this.onPointerUp, true);
-        globalThis.addEventListener?.("pointercancel", this.onPointerUp, true);
-        globalThis.addEventListener?.("blur", this.onPointerUp);
-        globalThis.document?.addEventListener("visibilitychange", this.onVisibilityChange);
+        this.stopActivity = this.activity.start();
+        this.removeIdleListener = this.activity.onMaybeIdle(this.resumeIfIdle);
         for (const document of this.app?.documents ?? []) this.watch(document);
         Logger.info(`${AutosaveService.name} started`);
     }
@@ -115,12 +116,8 @@ export class AutosaveService implements IService {
         PubSub.default.remove("documentRepositoryChanged", this.onRepositoryChanged);
         this.settings.removePropertyChanged(this.onSettingsChanged);
         this.app?.removePropertyChanged(this.onAppChanged);
-        this.removeHoldListener?.();
-        globalThis.removeEventListener?.("pointerdown", this.onPointerDown, true);
-        globalThis.removeEventListener?.("pointerup", this.onPointerUp, true);
-        globalThis.removeEventListener?.("pointercancel", this.onPointerUp, true);
-        globalThis.removeEventListener?.("blur", this.onPointerUp);
-        globalThis.document?.removeEventListener("visibilitychange", this.onVisibilityChange);
+        this.removeIdleListener?.();
+        this.stopActivity?.();
         for (const document of [...this.watched.keys()]) this.unwatch(document);
         this.stopIdlePoll();
         if (this.status.fileAutosave === this.files) this.status.fileAutosave = undefined;
@@ -128,12 +125,7 @@ export class AutosaveService implements IService {
 
     /** Whether the user is in the middle of something an autosave must not interrupt. */
     isBusy(): boolean {
-        return (
-            this.app?.executingCommand !== undefined ||
-            AutosaveHolds.isHeld ||
-            this.pointerDown ||
-            this.isDialogOpen()
-        );
+        return this.activity.isBusy(this.app);
     }
 
     private readonly watch = (document: IDocument) => {
@@ -195,20 +187,6 @@ export class AutosaveService implements IService {
 
     private readonly onAppChanged = (property: keyof IApplication) => {
         if (property === "executingCommand") this.resumeIfIdle();
-    };
-
-    private readonly onPointerDown = () => {
-        this.pointerDown = true;
-    };
-
-    /** Also on blur: a release outside the window (alt-tab mid-drag) never reaches it. */
-    private readonly onPointerUp = () => {
-        this.pointerDown = false;
-        this.resumeIfIdle();
-    };
-
-    private readonly onVisibilityChange = () => {
-        if (globalThis.document?.visibilityState === "hidden") this.onPointerUp();
     };
 
     /** (Re)arms the document's timer for `since + interval`; off (0) or clean: no timer. */

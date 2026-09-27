@@ -40,4 +40,5 @@ export * from "./snapType";
 export * from "./step";
 export * from "./ui";
 export * from "./units";
+export * from "./userActivity";
 export * from "./visual";
