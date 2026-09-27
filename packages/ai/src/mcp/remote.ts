@@ -32,11 +32,15 @@ export function setRemoteMcpLink(link: RemoteMcpLink | undefined): void {
     if (previous === link) return;
     remoteMcpState.update({ link });
     if (link) ensureAgentBadge();
+    // Signed out, or straight to another user: no Allow of the previous link outlives it (CLOUD-17).
+    // Forgotten now and again once the old session is closed (its gate could still save a decision).
+    if (previous) forgetPairingDecisions();
     if (!link) {
         if (previous) {
-            // Signed out (or another user): no Allow of the previous session outlives it (CLOUD-17).
-            forgetPairingDecisions();
-            void loadController().then((c) => c.disconnectMcpRemote("unavailable"));
+            void loadController().then((c) => {
+                c.disconnectMcpRemote("unavailable");
+                forgetPairingDecisions();
+            });
         }
         return;
     }

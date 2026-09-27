@@ -5,6 +5,7 @@
 // dynamic import() only — settings.ts, state.ts and the panel are the eager, SDK-free half.
 
 import { Logger, redactUrl } from "@spicy3d/core";
+import { forgetPairingDecisions } from "./pairing";
 import { RemoteMcpSession } from "./remoteSession";
 import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import { McpSession } from "./session";
@@ -58,7 +59,10 @@ let remote: RemoteMcpSession | undefined;
  */
 export function connectMcpRemote(link: RemoteMcpLink): void {
     if (remote?.link === link && !remote.stopped) return;
-    remote?.close();
+    const previous = remote;
+    previous?.close();
+    // Another link (another user): the closed session's decisions must not carry over (CLOUD-17).
+    if (previous && previous.link !== link) forgetPairingDecisions();
     remote = new RemoteMcpSession(link, { state: remoteMcpState }).start();
 }
 
