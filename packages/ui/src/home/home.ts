@@ -240,7 +240,7 @@ export class Home extends HTMLElement {
             ),
             a(
                 {
-                    className: style.socialItem,
+                    className: style.basedOn,
                     href: "https://github.com/xiangechen/chili3d",
                     target: "_blank",
                     rel: "noopener noreferrer",

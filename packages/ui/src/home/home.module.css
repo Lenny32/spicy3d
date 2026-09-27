@@ -174,11 +174,30 @@
 
     & .socialPanel {
         display: flex;
-        gap: 10px;
+        flex-direction: column;
+        gap: 6px;
         margin-top: 12px;
 
+        & .basedOn {
+            align-self: center;
+            font-size: 11px;
+            color: var(--foreground-muted-color);
+            text-decoration: none;
+            cursor: pointer;
+
+            &:hover {
+                color: var(--foreground-color);
+                text-decoration: underline;
+            }
+
+            &:focus-visible {
+                outline: 2px solid var(--primary-color);
+                outline-offset: 2px;
+            }
+        }
+
         & .socialItem {
-            flex: 1;
+            flex: none;
             display: flex;
             align-items: center;
             justify-content: center;

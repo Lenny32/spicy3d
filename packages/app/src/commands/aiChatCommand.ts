@@ -5,7 +5,7 @@ import { command, type IApplication, type ICommand, PubSub } from "@spicy3d/core
 
 @command({
     key: "ai.toggleChat",
-    icon: "icon-spicy",
+    icon: "icon-mcp",
 })
 export class ToggleChatCommand implements ICommand {
     async execute(_application: IApplication): Promise<void> {

@@ -55,7 +55,7 @@ export class McpPanel extends HTMLElement {
             { className: style.header },
             div(
                 { className: style.title },
-                svg({ className: style.titleIcon, icon: "icon-spicy" }),
+                svg({ className: style.titleIcon, icon: "icon-mcp" }),
                 span({ textContent: new Localize("mcp.title") }),
             ),
             this.headerButtons,

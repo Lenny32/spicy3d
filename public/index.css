@@ -11,3 +11,8 @@ body {
     color: var(--foreground-color);
     background-color: var(--background-color);
 }
+
+/* The MCP icon is a black bitmap (public/icons/mcp.png): flip it to white on the dark theme. */
+:root[theme="dark"] use[*|href="#icon-mcp"] {
+    filter: invert(1);
+}
