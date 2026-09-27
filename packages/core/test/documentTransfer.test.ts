@@ -4,10 +4,13 @@
 import { describe, expect, test } from "@rstest/core";
 import {
     type DocumentMeta,
+    type ExistingDocument,
     type IDocument,
     type IDocumentRepository,
+    PubSub,
     Result,
     type SaveKind,
+    type SaveRequest,
     type Serialized,
     saveDocumentCopy,
     transferDocument,
@@ -68,8 +71,124 @@ describe("transferDocument", () => {
 
         await transferDocument(app, meta, cloud, { keepSource: true });
 
-        expect(cloud.documents.has("a")).toBe(true);
+        // The copy gets a new id, so the two never overwrite each other later.
+        expect(cloud.documents.has("a")).toBe(false);
+        const [copy] = [...cloud.documents.values()];
+        expect(copy.data).toMatchObject({ id: copy.id, name: "Bracket" });
         expect(local.documents.has("a")).toBe(true);
+    });
+
+    describe("the target has a document with the same id", () => {
+        async function withExisting() {
+            const context = setup();
+            const meta = await store(context.cloud, "a");
+            await context.local.save({
+                id: "a",
+                name: "Kept copy",
+                data: data("a", "Kept copy"),
+                kind: "manual",
+            });
+            return { ...context, meta };
+        }
+
+        test("without a resolver both are kept: nothing is overwritten", async () => {
+            const { app, local, cloud, meta } = await withExisting();
+
+            const moved = await transferDocument(app, meta, local, { keepSource: false });
+
+            expect(moved.value?.status).toBe("saved");
+            expect(local.documents.get("a")?.name).toBe("Kept copy");
+            expect([...local.documents.values()].map((x) => x.name).sort()).toEqual(["Bracket", "Kept copy"]);
+            expect(cloud.documents.has("a")).toBe(false);
+        });
+
+        test.each([
+            ["replace", "Bracket", false],
+            ["cancel", "Kept copy", true],
+        ] as const)("%s", async (choice, localName, stillInCloud) => {
+            const { app, local, cloud, meta } = await withExisting();
+            const asked: ExistingDocument[] = [];
+
+            const moved = await transferDocument(app, meta, local, {
+                keepSource: false,
+                resolveExisting: async (existing) => {
+                    asked.push(existing);
+                    return choice;
+                },
+            });
+
+            expect(asked).toEqual([{ name: "Kept copy", canReplace: true }]);
+            expect(moved.value?.status).toBe(choice === "cancel" ? "cancelled" : "saved");
+            expect(local.documents.get("a")?.name).toBe(localName);
+            expect(local.documents.size).toBe(1);
+            expect(cloud.documents.has("a")).toBe(stillInCloud);
+        });
+
+        test("an open document with the id, even in another repository, can't be replaced", async () => {
+            const { app, local, meta } = await withExisting();
+            app.documents.add(openDocument("a", local) as unknown as IDocument);
+            const asked: ExistingDocument[] = [];
+
+            await transferDocument(app, meta, local, {
+                keepSource: false,
+                resolveExisting: async (existing) => {
+                    asked.push(existing);
+                    return "replace";
+                },
+            });
+
+            expect(asked[0].canReplace).toBe(false);
+            expect(local.documents.get("a")?.name).toBe("Kept copy");
+            expect(local.documents.size).toBe(2);
+        });
+
+        test("a replaced cloud document gets a new version on top of its head, restored from the trash", async () => {
+            const { app, local } = setup();
+            const meta = await store(local, "a");
+            const saves: SaveRequest[] = [];
+            const restored: string[] = [];
+            const cloud: IDocumentRepository = {
+                kind: "cloud",
+                list: async () => Result.ok({ items: [] }),
+                load: async () => Result.err({ kind: "notFound", id: "a" }),
+                delete: async () => Result.ok(undefined),
+                stat: async () => Result.ok({ name: "Old", version: "head-1", trashed: true }),
+                restore: async (id) => {
+                    restored.push(id);
+                    return Result.ok(undefined);
+                },
+                save: async (request) => {
+                    saves.push(request);
+                    return Result.ok({ status: "saved", updatedAt: 1, version: "head-2" });
+                },
+            };
+
+            await transferDocument(app, meta, cloud, {
+                keepSource: false,
+                resolveExisting: async () => "replace",
+            });
+
+            expect(restored).toEqual(["a"]);
+            expect(saves.map((x) => [x.id, x.baseVersion])).toEqual([["a", "head-1"]]);
+        });
+    });
+
+    test("an open document that moves announces its new repository (edit locks follow)", async () => {
+        const { app, local, cloud } = setup();
+        const meta = await store(local, "a");
+        const doc = openDocument("a", local);
+        app.documents.add(doc as unknown as IDocument);
+        const changes: [unknown, unknown][] = [];
+        const listener = (document: IDocument, previous: IDocumentRepository) =>
+            changes.push([document, previous]);
+        PubSub.default.sub("documentRepositoryChanged", listener);
+        try {
+            await transferDocument(app, meta, cloud, { keepSource: false });
+        } finally {
+            PubSub.default.remove("documentRepositoryChanged", listener);
+        }
+
+        expect(changes).toEqual([[doc, local]]);
     });
 
     test("moves back from the cloud to this device", async () => {

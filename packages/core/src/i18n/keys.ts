@@ -1066,6 +1066,13 @@ export const I18N_KEYS = [
     "home.trash.restore",
     "home.trash.retention{0}",
     "prompt.trashDocument{0}{1}",
+    "cloud.document.existsTitle",
+    "cloud.document.exists{0}",
+    "cloud.document.keepBoth",
+    "cloud.document.replace",
+    "cloud.signedOut.discard",
+    "cloud.signedOut.title",
+    "cloud.signedOut.unsaved{0}",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

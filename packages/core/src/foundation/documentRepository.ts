@@ -123,6 +123,20 @@ export interface IDocumentRepository {
      * downloads it on demand); `undefined` when it has none.
      */
     thumbnailUrl?(meta: DocumentMeta): Promise<string | undefined>;
+    /**
+     * Whether a document with this id is stored (without loading it); `undefined` when not. The
+     * cloud also counts a document in the trash. Without it, callers fall back to `load`.
+     */
+    stat?(id: string): Promise<Result<StoredDocumentInfo | undefined, DocumentRepositoryError>>;
+}
+
+/** See `IDocumentRepository.stat`. */
+export interface StoredDocumentInfo {
+    name?: string;
+    /** Cloud: the head version, to save a replacement on top of. */
+    version?: string;
+    /** Cloud: in the trash (restore it before saving). */
+    trashed?: boolean;
 }
 
 /**

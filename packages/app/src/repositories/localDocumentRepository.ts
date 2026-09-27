@@ -15,6 +15,7 @@ import {
     type SaveOutcome,
     type SaveRequest,
     type Serialized,
+    type StoredDocumentInfo,
 } from "@spicy3d/core";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -69,6 +70,17 @@ export class LocalDocumentRepository implements IDocumentRepository {
             };
             await this.storage.put(Constants.DBName, Constants.RecentTable, request.id, recent);
             return Result.ok({ status: "saved", updatedAt });
+        });
+    }
+
+    async stat(id: string): Promise<Result<StoredDocumentInfo | undefined, DocumentRepositoryError>> {
+        return this.attempt(async () => {
+            const recent = (await this.storage.get(Constants.DBName, Constants.RecentTable, id)) as
+                | RecentDocumentDTO
+                | undefined;
+            if (recent) return Result.ok({ name: recent.name });
+            const data = await this.storage.get(Constants.DBName, Constants.DocumentTable, id);
+            return Result.ok(data === undefined ? undefined : { name: (data as Serialized)["name"] });
         });
     }
 

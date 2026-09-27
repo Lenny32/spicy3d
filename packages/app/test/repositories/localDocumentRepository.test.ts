@@ -171,4 +171,11 @@ describe("LocalDocumentRepository", () => {
             expect(result.error).toEqual(expected);
         }
     });
+
+    test("stat tells whether an id is stored, without loading it", async () => {
+        await save("a", "Bracket");
+
+        expect((await repository.stat("a")).value).toEqual({ name: "Bracket" });
+        expect((await repository.stat("missing")).value).toBeUndefined();
+    });
 });

@@ -2,11 +2,14 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DialogButton,
     DOCUMENT_FILE_EXTENSION,
     type DocumentMeta,
     type DocumentPage,
     type DocumentRepositoryError,
     download,
+    type ExistingDocument,
+    type ExistingDocumentChoice,
     encodeDocumentFile,
     formatDateTime,
     I18n,
@@ -461,9 +464,14 @@ export class Home extends HTMLElement {
         keepSource: boolean,
         success: I18nKeys,
     ): Promise<void> {
-        const result = await transferDocument(this.app, item, target, { keepSource });
+        const result = await transferDocument(this.app, item, target, {
+            keepSource,
+            resolveExisting: askAboutExisting,
+        });
         if (!result.isOk) {
             PubSub.default.pub("showToast", ...repositoryErrorMessage(result.error));
+        } else if (result.value.status === "cancelled") {
+            // Nothing moved.
         } else if (result.value.status === "conflict") {
             PubSub.default.pub("showToast", "cloud.document.alreadyInCloud");
         } else {
@@ -558,7 +566,10 @@ export class Home extends HTMLElement {
     private async upload(items: DocumentMeta[], cloud: IDocumentRepository, keepSource: boolean) {
         let uploaded = 0;
         for (const item of items) {
-            const result = await transferDocument(this.app, item, cloud, { keepSource });
+            const result = await transferDocument(this.app, item, cloud, {
+                keepSource,
+                resolveExisting: askAboutExisting,
+            });
             if (result.isOk && result.value.status === "saved") uploaded++;
             else Logger.warn(`home: upload of ${item.id} failed (${JSON.stringify(result)})`);
         }
@@ -581,6 +592,27 @@ export class Home extends HTMLElement {
             );
         }
     }
+}
+
+/**
+ * The target already has a document with the moved id (a copy kept earlier, or one in the trash):
+ * replace it, keep both (the moved one gets a new id), or cancel.
+ */
+export function askAboutExisting({ name, canReplace }: ExistingDocument): Promise<ExistingDocumentChoice> {
+    return new Promise((resolve) => {
+        const buttons: DialogButton[] = [
+            { content: "cloud.document.keepBoth", onclick: () => resolve("keepBoth") },
+            { content: "common.cancel", onclick: () => resolve("cancel") },
+        ];
+        if (canReplace)
+            buttons.unshift({ content: "cloud.document.replace", onclick: () => resolve("replace") });
+        PubSub.default.pub(
+            "showDialog",
+            "cloud.document.existsTitle",
+            div({ textContent: I18n.translate("cloud.document.exists{0}", name) }),
+            buttons,
+        );
+    });
 }
 
 /** Stops listing if a repository keeps returning pages. */

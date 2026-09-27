@@ -1123,5 +1123,14 @@ export default {
         "home.trash.restore": "Restore",
         "home.trash.retention{0}": "Deleted documents can be restored for {0} days.",
         "prompt.trashDocument{0}{1}": "Move “{0}” to the trash? It can be restored for {1} days.",
+        "cloud.document.existsTitle": "The document is already there",
+        "cloud.document.exists{0}":
+            "There is already a document with this id there: “{0}” (possibly a copy kept earlier, or in the trash). Replace it, or keep both?",
+        "cloud.document.keepBoth": "Keep both",
+        "cloud.document.replace": "Replace it",
+        "cloud.signedOut.discard": "Discard changes",
+        "cloud.signedOut.title": "Signed out",
+        "cloud.signedOut.unsaved{0}":
+            "“{0}” is a cloud document of the account that signed out, and it has unsaved changes. It will close: keep the changes as a copy on this device, or download them as a .spicy file first.",
     },
 } satisfies Locale;

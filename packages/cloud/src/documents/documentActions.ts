@@ -5,6 +5,8 @@ import {
     DOCUMENT_FILE_EXTENSION,
     type DocumentRepositoryError,
     download,
+    type ExistingDocument,
+    type ExistingDocumentChoice,
     encodeDocumentFile,
     I18n,
     type I18nKeys,
@@ -14,13 +16,13 @@ import {
     PubSub,
     type Result,
     repositoryErrorMessage,
-    type SaveOutcome,
     saveDocumentCopy,
+    type TransferOutcome,
     transferDocument,
 } from "@spicy3d/core";
 import { div } from "@spicy3d/element";
 import style from "../ui/account.module.css";
-import { Modal } from "../ui/modal";
+import { Modal, type ModalAction } from "../ui/modal";
 
 /** "Download .spicy": the document as it is in this tab, unsaved changes included. */
 export async function downloadDocument(document: IDocument): Promise<void> {
@@ -56,12 +58,52 @@ export function askKeepLocalCopy(name: string): Promise<SaveToCloudChoice> {
     });
 }
 
+/**
+ * The target already has a document with this id (a copy kept earlier, or one in the trash):
+ * replace it (a new version on top, nothing lost in the cloud's history), keep both, or cancel.
+ */
+export function askAboutExisting({ name, canReplace }: ExistingDocument): Promise<ExistingDocumentChoice> {
+    return new Promise((resolve) => {
+        const actions: ModalAction[] = [
+            { label: "common.cancel" },
+            {
+                label: "cloud.document.keepBoth",
+                kind: "primary",
+                submit: true,
+                run: () => void resolve("keepBoth"),
+            },
+        ];
+        if (canReplace) {
+            actions.splice(1, 0, {
+                label: "cloud.document.replace",
+                kind: "danger",
+                run: () => void resolve("replace"),
+            });
+        }
+        new Modal({
+            title: "cloud.document.existsTitle",
+            content: [
+                div({
+                    className: style.muted,
+                    textContent: I18n.translate("cloud.document.exists{0}", name),
+                }),
+            ],
+            onCancel: () => resolve("cancel"),
+            actions,
+        }).open();
+    });
+}
+
 /** Toasts the outcome of a save; `true` when saved. */
-export function reportSave(result: Result<SaveOutcome, DocumentRepositoryError>, success: I18nKeys): boolean {
+export function reportSave(
+    result: Result<TransferOutcome, DocumentRepositoryError>,
+    success: I18nKeys,
+): boolean {
     if (!result.isOk) {
         PubSub.default.pub("showToast", ...repositoryErrorMessage(result.error));
         return false;
     }
+    if (result.value.status === "cancelled") return false;
     if (result.value.status === "conflict") {
         // Only a create answers this: the id is taken (possibly by a document in the trash).
         PubSub.default.pub("showToast", "cloud.document.alreadyInCloud");
@@ -83,7 +125,7 @@ export async function saveOpenDocumentToCloud(
         app,
         { id: document.id, name: document.name, updatedAt: Date.now(), location: "local" },
         cloud,
-        { keepSource: choice === "copy" },
+        { keepSource: choice === "copy", resolveExisting: askAboutExisting },
     );
     return reportSave(result, "cloud.document.savedToCloud");
 }
@@ -97,4 +139,64 @@ export async function saveCopyOnThisDevice(app: IApplication, document: IDocumen
     }
     PubSub.default.pub("showToast", "cloud.document.copySaved");
     return true;
+}
+
+/**
+ * Signing out closes the open cloud documents. One with unsaved changes first offers them as a
+ * copy on this device (also what Escape does) or a `.spicy` download; only an explicit "discard"
+ * drops them. Resolves once the choice is done.
+ */
+export function keepChangesAfterSignOut(app: IApplication, document: IDocument): Promise<void> {
+    return new Promise((resolve) => {
+        let cancelled = false;
+        const keepOnDevice = async () => {
+            const copy = await saveDocumentCopy(app, document, app.repositories.local);
+            if (!copy.isOk) {
+                modal.showError(I18n.translate(...repositoryErrorMessage(copy.error)));
+                return false;
+            }
+            PubSub.default.pub("showToast", "cloud.document.copySaved");
+            return undefined;
+        };
+        const modal = new Modal({
+            title: "cloud.signedOut.title",
+            content: [
+                div({
+                    className: style.muted,
+                    textContent: I18n.translate("cloud.signedOut.unsaved{0}", document.name),
+                }),
+            ],
+            // Escape keeps the changes too: on this device, or as a download if that fails.
+            onCancel: () => {
+                cancelled = true;
+                void keepOnDevice().then(async (kept) => {
+                    if (kept === false) await downloadDocument(document);
+                    resolve();
+                });
+            },
+            actions: [
+                { label: "cloud.signedOut.discard", kind: "danger", run: () => undefined },
+                {
+                    label: "cloud.document.download",
+                    run: async () => {
+                        await downloadDocument(document);
+                        return false;
+                    },
+                },
+                {
+                    label: "cloud.document.saveCopyOnDevice",
+                    kind: "primary",
+                    submit: true,
+                    run: keepOnDevice,
+                },
+            ],
+        });
+        // `cancel()` closes before calling `onCancel`: decide once both had their say.
+        modal.onClosed(() =>
+            queueMicrotask(() => {
+                if (!cancelled) resolve();
+            }),
+        );
+        modal.open();
+    });
 }

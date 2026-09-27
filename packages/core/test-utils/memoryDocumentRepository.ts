@@ -12,6 +12,7 @@ import {
     Result,
     type SaveOutcome,
     type SaveRequest,
+    type StoredDocumentInfo,
 } from "../src";
 
 /** An in-memory `IDocumentRepository` that records every save, for tests. */
@@ -50,6 +51,12 @@ export class MemoryDocumentRepository implements IDocumentRepository {
         this.saves.push(request);
         this.documents.set(request.id, request);
         return Result.ok({ status: "saved", updatedAt: this.saves.length });
+    }
+
+    async stat(id: string): Promise<Result<StoredDocumentInfo | undefined, DocumentRepositoryError>> {
+        if (this.failWith) return Result.err(this.failWith);
+        const stored = this.documents.get(id);
+        return Result.ok(stored ? { name: stored.name } : undefined);
     }
 
     async delete(id: string): Promise<Result<void, DocumentRepositoryError>> {

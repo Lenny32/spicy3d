@@ -227,8 +227,26 @@ describe("home with the cloud", () => {
             "cloud.document.saveToCloud",
         ).click();
         await lastDialogButtons()[2].find((b) => b.content === "cloud.document.keepLocalCopy")!.onclick!();
-        expect(cloud.documents.has("l2")).toBe(true);
+        // A copy gets its own id: the two never overwrite each other.
+        const copies = [...cloud.documents.values()].filter((x) => x.name === "Plate");
+        expect(copies).toHaveLength(1);
+        expect(copies[0].id).not.toBe("l2");
         expect(local.documents.has("l2")).toBe(true);
+    });
+
+    test("move to this device asks before touching a local document with the same id", async () => {
+        await add(local, "c1", "Gear (kept copy)");
+        await render();
+
+        buttonIn(cards("cloud")[0], "home.action.moveToDevice").click();
+        await rs.waitFor(() => expect(lastDialogButtons()[0]).toBe("cloud.document.existsTitle"));
+        const choices = lastDialogButtons()[2].map((b) => b.content);
+        expect(choices).toEqual(["cloud.document.replace", "cloud.document.keepBoth", "common.cancel"]);
+        lastDialogButtons()[2].find((b) => b.content === "cloud.document.keepBoth")!.onclick!();
+
+        await rs.waitFor(() => expect(cloud.documents.has("c1")).toBe(false));
+        expect(local.documents.get("c1")?.name).toBe("Gear (kept copy)");
+        expect([...local.documents.values()].filter((x) => x.name === "Gear")).toHaveLength(1);
     });
 
     test("move to this device brings a cloud document back", async () => {
@@ -259,8 +277,9 @@ describe("home with the cloud", () => {
         expect(permanent).toBeDefined();
         await (permanent![1][0] as () => Promise<void>)();
 
-        expect(cloud.documents.has("l1")).toBe(true);
-        expect(cloud.documents.has("l2")).toBe(false);
+        const uploaded = [...cloud.documents.values()].map((x) => x.name);
+        expect(uploaded).toContain("Bracket");
+        expect(uploaded).not.toContain("Plate");
         // Copied: the local documents stay unless asked otherwise.
         expect(local.documents.has("l1")).toBe(true);
         expect(published).toContainEqual(["showToast", ["home.import.done{0}{1}", 1, 1]]);
