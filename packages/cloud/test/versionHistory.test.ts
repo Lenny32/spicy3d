@@ -7,11 +7,13 @@ import {
     type CloseDocumentOptions,
     type DocumentSource,
     decodeDocumentFile,
+    formatDateTime,
     type IApplication,
     type IDocument,
     type IDocumentRepository,
     type IView,
     PubSub,
+    parseUtc,
     repositoryErrorMessage,
     type SaveKind,
     type Serialized,
@@ -484,7 +486,9 @@ describe("preview", () => {
         expect(loaded).toHaveLength(1);
         const { data, source } = loaded[0];
         expect(data["id"]).not.toBe("doc-1");
-        expect(data["name"]).toMatch(/^cloud\.history\.versionNameBracket\d/);
+        expect(data["name"]).toBe(
+            `cloud.history.versionNameBracket${formatDateTime(parseUtc(v1.createdAt))}`,
+        );
         expect((data["models"] as { nodes: { id: string }[] }).nodes.map((n) => n.id)).toEqual([
             "root",
             "box",
@@ -753,7 +757,7 @@ describe("copies and compare", () => {
         const id = saved.isOk ? saved.value : "";
         expect(id).not.toBe("doc-1");
         const copy = docs.documents.get(id)!;
-        expect(copy.name).toMatch(/^cloud\.history\.versionNameBracket\d/);
+        expect(copy.name).toBe(`cloud.history.versionNameBracket${formatDateTime(parseUtc(v1.createdAt))}`);
         expect(copy.versions).toHaveLength(1);
         expect(copy.versions[0].parentIds).toEqual([]);
         expect(docs.documents.get("doc-1")!.versions).toHaveLength(2);
