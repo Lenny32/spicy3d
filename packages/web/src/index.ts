@@ -36,6 +36,7 @@ async function handleApplicaionBuilt(app: IApplication) {
 
 // prettier-ignore
 new AppBuilder()
+    .useDeploymentConfig()
     .useIndexedDB()
     .useWasmOcc()
     .useParametric()

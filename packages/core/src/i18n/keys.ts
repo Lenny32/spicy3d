@@ -40,6 +40,7 @@ export const I18N_KEYS = [
     "ai.untitled",
     "ai.workedFor",
     "ai.working",
+    "app.insecureContext",
     "arc.angle",
     "arc.start",
     "axis.x",

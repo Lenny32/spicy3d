@@ -49,6 +49,8 @@ export default {
         "ai.untitled": "New conversation",
         "ai.workedFor": "Worked for {0}",
         "ai.working": "Working…",
+        "app.insecureContext":
+            "This page is served over plain HTTP, so the browser disables secure features: accounts and cloud documents, copy to clipboard, saving back to files. Open it over HTTPS (ask your administrator).",
         "arc.angle": "Angle",
         "arc.start": "Start",
         "axis.x": "X Axis",

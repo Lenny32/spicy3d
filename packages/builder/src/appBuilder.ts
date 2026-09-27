@@ -12,6 +12,8 @@ import type { AccountLink } from "@spicy3d/cloud/src/links";
 import {
     Config,
     Constants,
+    DeploymentConfig,
+    type DeploymentConfigLoadOptions,
     I18n,
     type IApplication,
     type IDataExchange,
@@ -30,6 +32,7 @@ import {
     ParametricRibbonProfiles,
     type RibbonProfileExtra,
 } from "./ribbon";
+import { warnIfInsecureContext } from "./secureContext";
 
 /** See `useCloud`. */
 export interface UseCloudOptions {
@@ -81,6 +84,18 @@ export class AppBuilder {
                 I18n.addLanguage((i18n as { [key: string]: Locale })[key]);
             }
         });
+    }
+
+    /**
+     * Reads `deployment.json` from the app's folder (see core `DeploymentConfig`) before the rest
+     * starts, so the UI offers the deployment's endpoints and download locations from the start.
+     */
+    useDeploymentConfig(options: DeploymentConfigLoadOptions = {}): this {
+        this._inits.push(async () => {
+            Logger.info("reading deployment.json");
+            await DeploymentConfig.load(options);
+        });
+        return this;
     }
 
     useIndexedDB() {
@@ -189,6 +204,8 @@ export class AppBuilder {
 
         const app = this.createApp();
         await this._window?.init(app);
+        // Plain HTTP on a LAN address: say why accounts, clipboard etc. are missing.
+        if (this._window) warnIfInsecureContext();
         await this.loadDefaultPlugins(app);
         this.started = this.runStarted(app);
 
