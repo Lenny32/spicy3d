@@ -5,8 +5,12 @@ import {
     type Act,
     AnalysisManager,
     Constants,
+    DOCUMENT_FORMAT_VERSION,
+    type DocumentFormatError,
+    DocumentMigrations,
     History,
     I18n,
+    type I18nKeys,
     type IApplication,
     type IDocument,
     Id,
@@ -43,8 +47,11 @@ export class Document extends Observable implements IDocument {
     readonly variables: IVariableTable;
     readonly settings: ProjectSettings;
     userData: Record<string, unknown> = {};
-
-    static readonly version = __DOCUMENT_VERSION__;
+    /**
+     * Versions the loaded file recorded for modules this build does not register (a plugin that
+     * is not loaded), written back unchanged so their payloads keep the version they were saved at.
+     */
+    private foreignModuleVersions: Record<string, number> = {};
 
     get name(): string {
         return this.getPrivateValue("name");
@@ -81,7 +88,8 @@ export class Document extends Observable implements IDocument {
     serialize(): Serialized {
         const serialized = {
             [InternalClassName]: "Document",
-            version: __DOCUMENT_VERSION__,
+            formatVersion: DOCUMENT_FORMAT_VERSION,
+            moduleVersions: { ...this.foreignModuleVersions, ...DocumentMigrations.moduleVersions() },
             id: this.id,
             name: this.name,
             models: this.modelManager.serialize(),
@@ -152,14 +160,21 @@ export class Document extends Observable implements IDocument {
         return document;
     }
 
-    static async load(app: IApplication, data: Serialized): Promise<IDocument | undefined> {
-        if ((data as any).version !== __DOCUMENT_VERSION__) {
-            alert(
-                "The file version has been upgraded, no compatibility treatment was done in the development phase",
-            );
+    /**
+     * Opens a serialized document, first migrating it up to this build's format. A file that is
+     * not a Spicy3D document, or that a newer build saved, is reported with a toast and left
+     * untouched — `data` itself is never modified.
+     */
+    static async load(app: IApplication, stored: Serialized): Promise<IDocument | undefined> {
+        const migrated = DocumentMigrations.migrate(stored);
+        if (!migrated.isOk) {
+            Document.reportFormatError(migrated.error);
             return undefined;
         }
+        const data = migrated.value;
+
         const document = new Document(app, data["name"], data["id"]);
+        document.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
         document.history.disabled = true;
         // Before the models: a body's feature chain resolves its parameters against
         // the table, and deserializing a body rebuilds it.
@@ -175,5 +190,23 @@ export class Document extends Observable implements IDocument {
         document.analyses.attachModel();
         document.history.disabled = false;
         return document;
+    }
+
+    private static foreignVersionsOf(moduleVersions: Record<string, number>): Record<string, number> {
+        const registered = DocumentMigrations.moduleVersions();
+        return Object.fromEntries(
+            Object.entries(moduleVersions).filter(([module]) => !(module in registered)),
+        );
+    }
+
+    private static reportFormatError(error: DocumentFormatError) {
+        Logger.warn(`document: cannot open (${JSON.stringify(error)})`);
+        const [key, ...args]: [I18nKeys, ...unknown[]] =
+            error.kind === "notSpicy3D"
+                ? ["error.document.notSpicy3D"]
+                : error.kind === "newerFormat"
+                  ? ["error.document.newerFormat"]
+                  : ["error.document.migrationFailed:{0}", `${error.module}@${error.from}: ${error.message}`];
+        PubSub.default.pub("showToast", key, ...args);
     }
 }

@@ -26,11 +26,11 @@ Spicy3D starts at document format `1`, but cloud documents keep every version fo
 
 ## Acceptance criteria
 
-- [ ] Format `1` documents round-trip; a synthetic `v0 → v1` test migration proves the chain runs.
-- [ ] Newer-format and non-Spicy3D files show a clear error and are not modified.
-- [ ] Unregistered node classes survive load/save.
-- [ ] Migrations run in Node without DOM/WASM.
-- [ ] Registry test: chain has no gaps for any module.
+- [x] Format `1` documents round-trip; a synthetic `v0 → v1` test migration proves the chain runs.
+- [x] Newer-format and non-Spicy3D files show a clear error and are not modified.
+- [x] Unregistered node classes survive load/save.
+- [x] Migrations run in Node without DOM/WASM.
+- [x] Registry test: chain has no gaps for any module.
 
 ## Dependencies and complexity
 

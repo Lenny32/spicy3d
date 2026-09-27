@@ -14,6 +14,13 @@ export type PropertyInfo = {
 
 export const InternalClassName = "__cla$$__";
 
+/**
+ * An object that stands in for data whose class this build does not know (e.g. a node from a
+ * plugin that is not loaded) returns its serialized form under this key, verbatim — class name
+ * included — so saving writes it back unchanged.
+ */
+export const RawSerialized = Symbol("RawSerialized");
+
 export type SerializedData = { [x: string]: any };
 
 export type Serialized = { [InternalClassName]: string } & SerializedData;
@@ -181,7 +188,14 @@ export class Serializer {
         return false;
     }
 
+    static isRegistered(className: string): boolean {
+        return reflectMap.has(className);
+    }
+
     static serializeObject(target: object): Serialized {
+        const raw = (target as { [RawSerialized]?: Serialized })[RawSerialized];
+        if (raw !== undefined) return raw;
+
         const className = target.constructor.name;
         if (!reflectMap.has(className)) {
             console.log(target);

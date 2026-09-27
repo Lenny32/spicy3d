@@ -3,13 +3,19 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import {
+    DOCUMENT_FORMAT_VERSION,
+    DocumentMigrations,
     History,
     type IApplication,
     InternalClassName,
     ModelManager,
+    migrateDocument,
     ObservableCollection,
+    PubSub,
+    type Serialized,
+    UnknownNode,
 } from "@spicy3d/core";
-import { createMockApplication } from "@spicy3d/core/test-utils";
+import { createMockApplication, loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import { Document } from "../src/document";
 
 describe("Document", () => {
@@ -242,6 +248,103 @@ describe("Document", () => {
                 expect(loaded.history.disabled).toBe(false);
             } finally {
                 loaded.dispose();
+            }
+        });
+    });
+
+    describe("document format", () => {
+        let pub: ReturnType<typeof rs.spyOn>;
+        const toasts = () =>
+            pub.mock.calls.filter(([event]) => event === "showToast").map(([, ...args]) => args);
+
+        beforeEach(() => {
+            pub = rs.spyOn(PubSub.default, "pub");
+        });
+
+        afterEach(() => {
+            pub.mockRestore();
+        });
+
+        test("a saved document records the format and module versions", () => {
+            const serialized = document.serialize();
+
+            expect(serialized["formatVersion"]).toBe(DOCUMENT_FORMAT_VERSION);
+            expect(serialized["moduleVersions"]).toEqual(DocumentMigrations.moduleVersions());
+            expect(serialized["version"]).toBeUndefined();
+        });
+
+        test.each(
+            loadDocumentFixtures().map((x) => [x.name, x] as const),
+        )("fixture %s loads and saves back unchanged", async (_name, fixture) => {
+            const loaded = await Document.load(mockApp, fixture.data);
+
+            try {
+                expect(loaded).not.toBeUndefined();
+                expect(toasts()).toEqual([]);
+                // Nodes of classes this test does not register (bodies, sketches) are kept raw.
+                expect(loaded!.serialize()).toEqual(migrateDocument(fixture.data).value);
+            } finally {
+                loaded?.dispose();
+            }
+        });
+
+        test.each([
+            [
+                "a newer format",
+                { formatVersion: DOCUMENT_FORMAT_VERSION + 1, moduleVersions: {} },
+                "error.document.newerFormat",
+            ],
+            ["a Chili3D file", { version: "0.6" }, "error.document.notSpicy3D"],
+        ])("%s shows an error and leaves the data untouched", async (_name, versions, key) => {
+            const { formatVersion: _f, moduleVersions: _m, ...base } = document.serialize();
+            const data = { ...base, ...versions } as Serialized;
+            const before = structuredClone(data);
+            const count = mockApp.documents.size;
+
+            const loaded = await Document.load(mockApp, data);
+
+            expect(loaded).toBeUndefined();
+            expect(toasts()).toEqual([[key]]);
+            expect(data).toEqual(before);
+            expect(mockApp.documents.size).toBe(count);
+        });
+
+        test("nodes of an unregistered class survive load and save", async () => {
+            const serialized = document.serialize();
+            const rootId = serialized["models"].nodes[0].id;
+            const pluginNode = {
+                __cla$$__: "PluginGearNode",
+                id: "gear",
+                name: "Gear",
+                visible: true,
+                teeth: 24,
+                parentId: rootId,
+            };
+            serialized["models"].nodes.push(pluginNode);
+
+            const loaded = await Document.load(mockApp, serialized);
+
+            try {
+                expect(loaded!.modelManager.findNode((n) => n.id === "gear")).toBeInstanceOf(UnknownNode);
+                expect(loaded!.serialize()["models"].nodes).toContainEqual(pluginNode);
+            } finally {
+                loaded?.dispose();
+            }
+        });
+
+        test("module versions of plugins that are not loaded are saved back", async () => {
+            const serialized = document.serialize();
+            serialized["moduleVersions"] = { ...serialized["moduleVersions"], myPlugin: 4 };
+
+            const loaded = await Document.load(mockApp, serialized);
+
+            try {
+                expect(loaded!.serialize()["moduleVersions"]).toEqual({
+                    ...DocumentMigrations.moduleVersions(),
+                    myPlugin: 4,
+                });
+            } finally {
+                loaded?.dispose();
             }
         });
     });

@@ -4,7 +4,7 @@
 import type { IDocument } from "../document";
 import { HistoryObservable, type IDisposable, Id, type IPropertyChanged } from "../foundation";
 import { property } from "../property";
-import { type Serialized, Serializer, serialize } from "../serialize";
+import { InternalClassName, type Serialized, Serializer, serialize } from "../serialize";
 
 export interface INode extends IPropertyChanged, IDisposable {
     readonly id: string;
@@ -327,10 +327,22 @@ export class NodeUtils {
         return nodes;
     }
 
-    public static async deserializeNode(document: IDocument, nodes: Serialized[]) {
+    /**
+     * Rebuilds a tree written by `serializeNode`. A node whose class this build does not register
+     * (a plugin that is not loaded) goes to `unknown`, which keeps it raw so saving does not drop
+     * it; without one, such a node throws as before.
+     */
+    public static async deserializeNode(
+        document: IDocument,
+        nodes: Serialized[],
+        unknown?: (document: IDocument, data: Serialized) => INode,
+    ) {
         const nodeMap: Map<string, INodeLinkedList> = new Map();
         nodes.forEach((n) => {
-            const node = Serializer.deserializeObject(document, n);
+            const node =
+                unknown !== undefined && !Serializer.isRegistered(n[InternalClassName])
+                    ? unknown(document, n)
+                    : Serializer.deserializeObject(document, n);
             if (NodeUtils.isLinkedListNode(node)) {
                 nodeMap.set(n["id"], node);
             }

@@ -14,6 +14,7 @@ import { type Material, PhongMaterial } from "./material";
 import type { Component } from "./model/component";
 import { FolderNode } from "./model/folderNode";
 import { type INode, type INodeLinkedList, NodeUtils } from "./model/node";
+import { UnknownNode } from "./model/unknownNode";
 import { type Serialized, Serializer } from "./serialize";
 
 export type OnNodeChanged = (records: NodeRecord[]) => void;
@@ -131,7 +132,11 @@ export class ModelManager extends Observable {
         // _rootNode is still the old root.
         this._deserializing = true;
         try {
-            const rootNode = await NodeUtils.deserializeNode(this.document, data.nodes);
+            const rootNode = await NodeUtils.deserializeNode(
+                this.document,
+                data.nodes,
+                (document, node) => new UnknownNode(document, node),
+            );
             this.rootNode = rootNode!;
             this.ensureMaterials();
         } finally {
