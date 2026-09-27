@@ -165,6 +165,29 @@ describe("SketchEditor session statics", () => {
         }
     });
 
+    test("an enter that fails after the session started releases its autosave hold", () => {
+        const { app, doc, restoreFactory } = setup();
+        (app as { mainWindow: unknown }).mainWindow = {
+            ribbon: {
+                openTab: () => {
+                    throw new Error("no ribbon");
+                },
+                closeTab: () => {},
+            },
+        };
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+
+            expect(() => SketchEditor.enter(node)).toThrow("no ribbon");
+
+            expect(AutosaveHolds.isHeld).toBe(false);
+        } finally {
+            (app as { mainWindow: unknown }).mainWindow = undefined;
+            SketchEditor.exit();
+            restoreFactory();
+        }
+    });
+
     test("entering a second sketch exits the first one", () => {
         const { doc, restoreFactory } = setup();
         try {

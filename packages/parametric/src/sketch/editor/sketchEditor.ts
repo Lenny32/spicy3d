@@ -150,18 +150,21 @@ export class SketchEditor implements IDisposable {
         SketchEditor.exit();
         // Profile faces are normally shown for picking; hide them while editing.
         node.setShowProfileFaces(false);
+        let releaseAutosave: (() => void) | undefined;
         try {
             const editor = new SketchEditor(node.document, node);
             // The session rolls bodies back: an autosave now would save that state.
-            editor.releaseAutosave = AutosaveHolds.hold("sketch");
+            releaseAutosave = AutosaveHolds.hold("sketch");
+            editor.releaseAutosave = releaseAutosave;
             SketchEditor.activeEditor = editor;
             node.document.application.mainWindow?.ribbon.openTab("ribbon.tab.sketch");
             PubSub.default.pub("pushShortcutContext", "sketch");
             return editor;
         } catch (error) {
             // The constructor already undid its own session state; this is the flag
-            // enter() itself set.
+            // enter() itself set — and the hold, which must never outlive a failed enter.
             node.setShowProfileFaces(true);
+            releaseAutosave?.();
             throw error;
         }
     }
