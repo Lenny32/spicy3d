@@ -161,6 +161,21 @@ describe("remote client configs", () => {
         });
     });
 
+    test("the stdio fallback over npx uses the site's bundled tarball, allowed as a remote package", () => {
+        const settings = { ...defaultSettings(), runner: "node" as const, bridgeCommand: "" };
+        const server = JSON.parse(remoteStdioConfig(ENDPOINT, settings, "https://spicy.lan/", "tok"))
+            .mcpServers.spicy3d;
+        expect(server.command).toBe("npx");
+        expect(server.args).toEqual([
+            "-y",
+            "--allow-remote=all",
+            `--package=https://spicy.lan/downloads/mcp-bridge/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz`,
+            "spicy3d-mcp-bridge",
+            "--server",
+            "https://spicy.lan",
+        ]);
+    });
+
     test("the file configs default to a <token> placeholder", () => {
         const configs = remoteClientConfigs(ENDPOINT, undefined, defaultSettings(), "https://spicy.lan/");
         expect(configs.map((c) => c.kind)).toEqual(["claudeCode", "http", "stdio"]);
