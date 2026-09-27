@@ -282,6 +282,18 @@
     user-select: all;
 }
 
+.mcpConfig {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--input-background-color);
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
 .dangerZone {
     border-top: 1px solid var(--border-color);
     padding-top: 12px;

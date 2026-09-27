@@ -42,6 +42,7 @@ function settings(patch: Partial<McpSettings> = {}): McpSettings {
         executablePath: "",
         bridgeCommand: "npx -y @spicy3d/mcp-bridge",
         autoConnect: false,
+        remoteEnabled: true,
         ...patch,
     };
 }
@@ -156,6 +157,7 @@ describe("mcp settings", () => {
             executablePath: "",
             bridgeCommand: "",
             autoConnect: false,
+            remoteEnabled: true,
         });
     });
 

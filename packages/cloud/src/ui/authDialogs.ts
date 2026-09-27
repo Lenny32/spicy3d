@@ -29,6 +29,8 @@ export type FeatureFlags = ApiSchema<"FeatureFlags">;
 export interface AccountUiContext {
     account: Account;
     features: FeatureFlags;
+    /** The relay's MCP endpoint when the server has it on: a new token then shows client configs. */
+    mcpEndpoint?: string;
 }
 
 function welcome(ctx: AccountUiContext) {

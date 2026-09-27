@@ -17,6 +17,7 @@ import type { Tool, ToolResult } from "../llm/types";
 import { SKILLS } from "../skills";
 import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
+import { withImageByteBudget } from "../tools/imageEncoding";
 import { documentSnapshot } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
@@ -32,6 +33,10 @@ export interface McpServerOptions {
     instructions?: string;
     /** Reported once per finished call, for the status badge. */
     onToolCall?: (name: string, isError: boolean) => void;
+    /** Defaults to one queue shared by every server of this page (bridge, relay, reconnects). */
+    queue?: SerialQueue;
+    /** The largest base64 image a call's result may carry (the relay's message limit); none by default. */
+    imageByteBudget?: () => number | undefined;
 }
 
 /**
@@ -48,6 +53,9 @@ export class SerialQueue {
         return next;
     }
 }
+
+/** The page's tool calls run one at a time, whichever connection they come from. */
+const PAGE_QUEUE = new SerialQueue();
 
 /**
  * The tools' error convention (`{"error": …}` as the whole payload, see agent.ts `invokeTool`)
@@ -125,7 +133,7 @@ function readResource(uri: string, instructions: string): { mimeType: string; te
 export function createMcpServer(options: McpServerOptions = {}): Server {
     const instructions = options.instructions ?? buildMcpInstructions();
     const baseTools = [...(options.tools ?? buildTools()), usageGuideTool(instructions)];
-    const queue = new SerialQueue();
+    const queue = options.queue ?? PAGE_QUEUE;
     const server = new Server(
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
         {
@@ -160,7 +168,10 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             if (extra.signal.aborted) throw new McpError(ErrorCode.RequestTimeout, "cancelled");
             let result: CallToolResult;
             try {
-                result = toCallToolResult(await tool.handler(args ?? {}, extra.signal));
+                const budget = options.imageByteBudget?.();
+                result = toCallToolResult(
+                    await withImageByteBudget(budget, () => tool.handler(args ?? {}, extra.signal)),
+                );
             } catch (err) {
                 result = toCallToolResult(JSON.stringify({ error: (err as Error).message }));
             }

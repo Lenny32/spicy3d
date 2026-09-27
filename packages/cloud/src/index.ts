@@ -10,6 +10,7 @@ export * from "./conflicts";
 export * from "./documents";
 export * from "./history";
 export * from "./links";
+export * from "./mcp";
 export * from "./problem";
 export * from "./settings";
 export * from "./sync";

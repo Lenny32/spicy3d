@@ -66,7 +66,7 @@ function top(): HTMLDialogElement {
 /** In tests, translations are their keys: buttons and texts are found by key. */
 function buttonOf(root: ParentNode, key: string): HTMLButtonElement {
     const found = Array.from(root.querySelectorAll("button")).find((b) => b.textContent === key);
-    expect(found).toBeDefined();
+    expect(found).toBeInstanceOf(HTMLButtonElement);
     return found!;
 }
 
@@ -545,7 +545,7 @@ describe("account settings", () => {
         const box = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
             (b) => b.parentElement?.textContent?.includes("account.settings.keepOfflineCopies"),
         );
-        expect(box).toBeDefined();
+        expect(box).toBeInstanceOf(HTMLInputElement);
         expect(box!.checked).toBe(false);
 
         box!.checked = true;
@@ -584,7 +584,7 @@ describe("account settings", () => {
         const box = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
             (b) => b.parentElement?.textContent?.includes("account.settings.newDocumentsInCloud"),
         );
-        expect(box).toBeDefined();
+        expect(box).toBeInstanceOf(HTMLInputElement);
         expect(box!.checked).toBe(true);
         box!.checked = false;
         box!.dispatchEvent(new Event("change"));
@@ -642,6 +642,47 @@ describe("account settings", () => {
         });
         expect(created).toHaveBeenCalledTimes(1);
         expect(dialog.textContent).toContain("account.token.createdOnce");
+        // No relay endpoint in this context: no MCP configs.
+        expect(dialog.querySelector("[data-mcp-config]")).toBeNull();
+    });
+
+    test("an MCP token created with the relay on shows the client configs filled in", async () => {
+        const server = new FakeServer();
+        const account = await signedInAccount(server);
+        server.on(
+            "POST /api/me/tokens",
+            json(201, {
+                token: "spicy_pat_s3cret",
+                id: "t1",
+                name: "Laptop",
+                prefix: "spicy_pat_s3",
+                scopes: ["mcp:read", "mcp:write"],
+                createdAt: "2026-09-27T10:00:00Z",
+                expiresAt: null,
+            }),
+        );
+        const ctx = { ...context(account), mcpEndpoint: "https://spicy.lan/mcp" };
+        const dialog = showCreateToken(ctx, () => {}, { scopes: ["mcp:read", "mcp:write"] }).dialog;
+
+        type(dialog, "name", "Laptop");
+        type(dialog, "currentPassword", "pw");
+        submit(dialog);
+
+        await rs.waitFor(() => expect(dialog.querySelector("[data-mcp-config]")).not.toBeNull());
+        expect(server.requests[0].body).toMatchObject({ scopes: ["mcp:read", "mcp:write"] });
+        const configs = Array.from(dialog.querySelectorAll<HTMLElement>("[data-mcp-config]"));
+        expect(configs.map((c) => c.dataset["mcpConfig"])).toEqual(["claudeCode", "http", "stdio"]);
+        // The command reads the token from the environment: it never enters the shell history.
+        expect(configs[0].textContent).toBe(
+            'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer $SPICY3D_TOKEN"',
+        );
+        expect(dialog.textContent).toContain("mcp.remote.shellHistoryHint");
+        expect(JSON.parse(configs[1].textContent ?? "").mcpServers.spicy3d.headers).toEqual({
+            Authorization: "Bearer spicy_pat_s3cret",
+        });
+        expect(JSON.parse(configs[2].textContent ?? "").mcpServers.spicy3d.env).toEqual({
+            SPICY3D_TOKEN: "spicy_pat_s3cret",
+        });
     });
 
     test("delete account: the typed email must match; then the account is deleted and signed out", async () => {

@@ -4,6 +4,7 @@
     "description": "Typed client of the Spicy3D server API (generated from its OpenAPI document)",
     "main": "src/index.ts",
     "devDependencies": {
+        "@spicy3d/ai": "*",
         "@spicy3d/core": "*",
         "@spicy3d/element": "*"
     },

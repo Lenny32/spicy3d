@@ -85,6 +85,11 @@ export interface McpSettings {
      */
     bridgeCommand: string;
     autoConnect: boolean;
+    /**
+     * Remote MCP (CLOUD-14): while signed in to a server with the relay, this tab is reachable by
+     * the user's own MCP clients through it (each new session still asks for confirmation).
+     */
+    remoteEnabled: boolean;
 }
 
 const STORAGE_KEY = "mcp.settings";
@@ -105,6 +110,7 @@ export function defaultSettings(): McpSettings {
         executablePath: "",
         bridgeCommand: "",
         autoConnect: false,
+        remoteEnabled: true,
     };
 }
 
@@ -129,6 +135,7 @@ export function loadMcpSettings(): McpSettings {
         executablePath: saved?.executablePath ?? "",
         bridgeCommand: saved?.bridgeCommand === LEGACY_DEFAULT_COMMAND ? "" : (saved?.bridgeCommand ?? ""),
         autoConnect: saved?.autoConnect ?? defaults.autoConnect,
+        remoteEnabled: saved?.remoteEnabled ?? defaults.remoteEnabled,
     };
     if (settings.requireToken && !settings.token) settings.token = generateToken();
     if (!saved) saveMcpSettings(settings);

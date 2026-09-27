@@ -8,6 +8,7 @@ import type { Tool } from "../src/llm/types";
 import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/server";
 import { SKILLS } from "../src/skills";
 import { buildAskUserTool } from "../src/tools/askUser";
+import { imageByteBudget } from "../src/tools/imageEncoding";
 
 function tool(name: string, handler: Tool["handler"]): Tool {
     return { name, description: `${name} tool.`, parameters: { type: "object", properties: {} }, handler };
@@ -186,5 +187,28 @@ describe("createMcpServer", () => {
         expect(read.contents[0]).toMatchObject({ mimeType: "text/markdown", text: skill.content });
         expect(guide.contents[0]).toMatchObject({ text: "be careful" });
         await expect(client.readResource({ uri: "spicy3d://nope" })).rejects.toThrow("unknown resource");
+    });
+});
+
+describe("image budget per server", () => {
+    async function budgetSeenBy(budget?: () => number | undefined) {
+        let seen: number | undefined = -1;
+        const probe = tool("probe", async () => {
+            seen = imageByteBudget();
+            return "{}";
+        });
+        const server = createMcpServer({ tools: [probe], instructions: "x", imageByteBudget: budget });
+        const client = new Client({ name: "test", version: "1" });
+        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+        await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+        await client.callTool({ name: "probe", arguments: {} });
+        await client.close();
+        return seen;
+    }
+
+    test("the relay's calls run under its budget, the local bridge's under none", async () => {
+        expect(await budgetSeenBy(() => 5000)).toBe(5000);
+        expect(await budgetSeenBy()).toBeUndefined();
+        expect(imageByteBudget()).toBeUndefined();
     });
 });

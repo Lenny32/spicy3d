@@ -3,7 +3,19 @@
 
 import { I18n, type I18nKeys, Localize } from "@spicy3d/core";
 import { a, button, div, input, label, span, svg } from "@spicy3d/element";
+import { describeAgent } from "./pairing";
 import style from "./panel.module.css";
+import {
+    disconnectRemoteAgent,
+    type RemoteMcpLink,
+    type RemoteMcpSnapshot,
+    type RemoteMcpStatus,
+    remoteClaudeCodeCommand,
+    remoteJsonConfig,
+    remoteMcpState,
+    remoteStdioConfig,
+    setRemoteMcpEnabled,
+} from "./remote";
 import {
     BRIDGE_PLATFORMS,
     type BridgePlatform,
@@ -32,6 +44,16 @@ const STATUS_KEYS: Record<McpConnectionStatus, I18nKeys> = {
     connected: "mcp.status.connected",
     offline: "mcp.status.offline",
 };
+
+const REMOTE_STATUS_KEYS: Record<RemoteMcpStatus, I18nKeys> = {
+    unavailable: "mcp.remote.status.unavailable",
+    idle: "mcp.remote.status.idle",
+    connecting: "mcp.remote.status.connecting",
+    connected: "mcp.remote.status.connected",
+    offline: "mcp.remote.status.offline",
+};
+
+type PanelMode = "remote" | "local";
 
 /** The SDK half, loaded on the first Connect (see mcp/index.ts). */
 const loadController = () => import("./index");
@@ -66,7 +88,22 @@ export class McpPanel extends HTMLElement {
         className: style.warning,
         textContent: new Localize("mcp.executableMissing"),
     });
+    /** Remote MCP through the server (CLOUD-14); built once a link is there. */
+    private readonly remoteRoot = div({ className: style.section });
+    private readonly localRoot: HTMLElement;
+    private readonly modeChoice: HTMLElement;
+    private readonly modeButtons = new Map<PanelMode, HTMLButtonElement>();
+    private mode?: PanelMode;
+    private remoteLink?: RemoteMcpLink;
+    private remoteView?: {
+        statusCard: HTMLElement;
+        statusText: HTMLElement;
+        agents: HTMLElement;
+        enabled: HTMLInputElement;
+        stdio: HTMLElement;
+    };
     private unsubscribe?: () => void;
+    private unsubscribeRemote?: () => void;
 
     constructor() {
         super();
@@ -114,23 +151,33 @@ export class McpPanel extends HTMLElement {
             textContent: new Localize("mcp.noTokenWarning"),
         });
 
+        this.localRoot = div(
+            { className: style.body },
+            this.statusCard,
+            div({ className: style.intro, textContent: new Localize("mcp.intro") }),
+            this.tokenSection(),
+            this.bridgeSection(),
+            this.registerSection(),
+            this.connectSection(),
+        );
+        this.localRoot.style.padding = "0";
+        this.modeChoice = div(
+            { className: style.modeChoice },
+            this.modeButton("remote", "mcp.mode.remote"),
+            this.modeButton("local", "mcp.mode.local"),
+        );
         this.append(
             this.header,
-            div(
-                { className: style.body },
-                this.statusCard,
-                div({ className: style.intro, textContent: new Localize("mcp.intro") }),
-                this.tokenSection(),
-                this.bridgeSection(),
-                this.registerSection(),
-                this.connectSection(),
-            ),
+            div({ className: style.body }, this.modeChoice, this.remoteRoot, this.localRoot),
         );
         this.render();
+        this.renderRemote(remoteMcpState.current);
+        if (!this.mode) this.setMode("local");
     }
 
     connectedCallback(): void {
         this.unsubscribe ??= mcpState.subscribe((state) => this.renderState(state));
+        this.unsubscribeRemote ??= remoteMcpState.subscribe((state) => this.renderRemote(state));
     }
 
     disconnectedCallback(): void {
@@ -138,6 +185,119 @@ export class McpPanel extends HTMLElement {
         // subscription is dropped here and taken again in connectedCallback.
         this.unsubscribe?.();
         this.unsubscribe = undefined;
+        this.unsubscribeRemote?.();
+        this.unsubscribeRemote = undefined;
+    }
+
+    private modeButton(mode: PanelMode, title: I18nKeys): HTMLButtonElement {
+        const b = button({
+            className: style.modeButton,
+            textContent: I18n.translate(title),
+            onclick: () => this.setMode(mode),
+        });
+        b.dataset["mode"] = mode;
+        this.modeButtons.set(mode, b);
+        return b;
+    }
+
+    private setMode(mode: PanelMode) {
+        this.mode = mode;
+        const remote = mode === "remote" && this.remoteLink !== undefined;
+        this.remoteRoot.style.display = remote ? "" : "none";
+        this.localRoot.style.display = remote ? "none" : "";
+        this.modeChoice.style.display = this.remoteLink ? "" : "none";
+        for (const [m, b] of this.modeButtons) b.setAttribute("aria-pressed", String(m === mode));
+    }
+
+    /** The server mode: status, the bound agents, the token and the client configs. */
+    private renderRemote(state: RemoteMcpSnapshot) {
+        if (state.link !== this.remoteLink) {
+            this.remoteLink = state.link;
+            this.remoteView = undefined;
+            this.remoteRoot.replaceChildren();
+            if (state.link) this.buildRemote(state.link);
+            // The server is the way in once it offers the relay; the bridge stays one click away.
+            this.setMode(state.link ? (this.mode ?? "remote") : "local");
+        }
+        const view = this.remoteView;
+        if (!view) return;
+        view.statusCard.dataset["status"] = state.status === "unavailable" ? "idle" : state.status;
+        view.statusText.textContent = I18n.translate(REMOTE_STATUS_KEYS[state.status]);
+        view.enabled.checked = state.status !== "idle";
+        view.agents.replaceChildren(
+            ...state.agents.map((agent) =>
+                div(
+                    { className: style.agentRow },
+                    span({
+                        textContent:
+                            agent.pairing === "deny"
+                                ? I18n.translate("mcp.agent.denied{0}", describeAgent(agent))
+                                : describeAgent(agent),
+                    }),
+                    this.textButton("mcp.agent.disconnect", () => disconnectRemoteAgent(agent.id)),
+                ),
+            ),
+        );
+    }
+
+    private buildRemote(link: RemoteMcpLink) {
+        const statusText = span({});
+        const statusCard = div(
+            { className: style.statusCard },
+            div({ className: style.statusLine }, span({ className: style.dot }), statusText),
+            div({
+                className: style.muted,
+                textContent: I18n.translate("mcp.remote.signedInAs{0}", link.userName),
+            }),
+        );
+        const agents = div({ className: style.agentList });
+        const enabled = input({
+            type: "checkbox",
+            checked: loadMcpSettings().remoteEnabled,
+            onchange: () => setRemoteMcpEnabled(enabled.checked),
+        });
+        statusCard.append(
+            label(
+                { className: style.checkbox },
+                enabled,
+                span({ textContent: new Localize("mcp.remote.enabled") }),
+            ),
+            agents,
+        );
+        const stdio = div({
+            className: style.code,
+            textContent: remoteStdioConfig(link.endpoint, this.settings, currentAppUrl()),
+        });
+        stdio.dataset["remote"] = "";
+        this.remoteRoot.append(
+            statusCard,
+            div({ className: style.intro, textContent: new Localize("mcp.remote.intro") }),
+            this.section(
+                "mcp.remote.step.token",
+                div({ className: style.muted, textContent: new Localize("mcp.remote.tokenHint") }),
+                div(
+                    { className: style.row },
+                    this.textButton("mcp.remote.createToken", () => link.createToken()),
+                ),
+            ),
+            this.section(
+                "mcp.remote.step.register",
+                div({ className: style.muted, textContent: new Localize("mcp.remote.registerHint") }),
+                this.remoteSnippet("mcp.remote.claudeCode", remoteClaudeCodeCommand(link.endpoint)),
+                div({ className: style.muted, textContent: new Localize("mcp.remote.shellHistoryHint") }),
+                this.remoteSnippet("mcp.remote.jsonConfig", remoteJsonConfig(link.endpoint)),
+                this.snippet("mcp.remote.stdioConfig", stdio),
+            ),
+            div({ className: style.muted, textContent: new Localize("mcp.remote.pairingHint") }),
+            div({ className: style.muted, textContent: new Localize("mcp.remote.tabInfoHint") }),
+        );
+        this.remoteView = { statusCard, statusText, agents, enabled, stdio };
+    }
+
+    private remoteSnippet(title: I18nKeys, text: string): HTMLElement {
+        const code = div({ className: style.code, textContent: text });
+        code.dataset["remote"] = "";
+        return this.snippet(title, code);
     }
 
     setFloating(floating: boolean) {
@@ -301,6 +461,14 @@ export class McpPanel extends HTMLElement {
         this.incompleteWarning.style.display = isCommandComplete(this.settings) ? "none" : "";
         this.claudeCodeSnippet.textContent = claudeCodeCommand(this.settings, appUrl);
         this.jsonSnippet.textContent = mcpJsonConfig(this.settings, appUrl);
+        // The stdio fallback starts the same bridge executable the local setup names.
+        if (this.remoteView && this.remoteLink) {
+            this.remoteView.stdio.textContent = remoteStdioConfig(
+                this.remoteLink.endpoint,
+                this.settings,
+                appUrl,
+            );
+        }
     }
 
     private renderState(state: McpStateSnapshot) {

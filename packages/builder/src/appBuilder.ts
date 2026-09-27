@@ -173,6 +173,7 @@ export class AppBuilder {
             cloud.startCloudSettings(started);
             await cloud.startAccountUi(started, accountLink);
             cloud.startCloudDocuments(started, app);
+            cloud.startCloudMcp(started);
         });
         return this;
     }

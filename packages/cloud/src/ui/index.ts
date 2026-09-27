@@ -21,8 +21,17 @@ const REFRESH_ON_FOCUS_MS = 60_000;
  * title bar, handles session expiry with the re-login dialog, and opens the dialog of an account
  * email link the app was opened with. Returns the teardown.
  */
+export function accountUiContext(connection: CloudConnection): AccountUiContext {
+    const { features, mcp } = connection.config;
+    return {
+        account: connection.account,
+        features,
+        mcpEndpoint: features.mcp && mcp ? mcp.endpoint : undefined,
+    };
+}
+
 export async function startAccountUi(connection: CloudConnection, link?: AccountLink): Promise<() => void> {
-    const ctx: AccountUiContext = { account: connection.account, features: connection.config.features };
+    const ctx = accountUiContext(connection);
     const result = await ctx.account.refresh();
     if (!result.isOk) Logger.warn(`[cloud] could not read the session: ${result.error.kind}`);
 

@@ -38,7 +38,7 @@ Client-side (this repository) tickets for the Spicy3D cloud: optional accounts, 
 | 11 | [Merge model design](done/11-merge-model-design.md) | design | H | 2 |
 | 12 | [Merge engine](done/12-merge-engine.md) | core, parametric | H | 11 |
 | 13 | [Conflict resolution UI](done/13-conflict-resolution-ui.md) | ui, cloud | H | 10, 12 |
-| 14 | [Remote MCP — page link](14-remote-mcp-page-link.md) | ai, mcp-bridge | M-H | 5, SRV-09 |
+| 14 | [Remote MCP — page link](done/14-remote-mcp-page-link.md) | ai, mcp-bridge | M-H | 5, SRV-09 |
 | 15 | [Cloud-aware MCP tools](15-cloud-mcp-tools.md) | ai | M | 6, 14 |
 | 16 | [Deployment readiness (LAN now, public later)](16-deployment-readiness.md) | web, ai, builder | M | 1, 4 |
 | 17 | [Client security](17-client-security.md) | web, core, ai | M | 5, 14 |

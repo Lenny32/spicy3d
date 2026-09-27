@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { remoteClientConfigs } from "@spicy3d/ai";
 import {
     download,
     formatDateTime,
@@ -458,9 +459,19 @@ function tokensSection(ctx: AccountUiContext) {
     );
 }
 
-export function showCreateToken(ctx: AccountUiContext, onCreated: () => void): Modal {
+export interface CreateTokenOptions {
+    /** Preselected scopes; default `mcp:read`. */
+    scopes?: string[];
+}
+
+export function showCreateToken(
+    ctx: AccountUiContext,
+    onCreated: () => void,
+    options: CreateTokenOptions = {},
+): Modal {
     const nameField = textField({ label: "account.token.name", name: "name", maxLength: 100 });
-    const scopes = TOKEN_SCOPES.map((s) => ({ ...s, box: checkbox(s.label, s.scope === "mcp:read") }));
+    const preselected = options.scopes ?? ["mcp:read"];
+    const scopes = TOKEN_SCOPES.map((s) => ({ ...s, box: checkbox(s.label, preselected.includes(s.scope)) }));
     const expiry = select(
         {},
         ...TOKEN_EXPIRIES.map((days) =>
@@ -534,7 +545,8 @@ export function showCreateToken(ctx: AccountUiContext, onCreated: () => void): M
                         });
                     }
                     onCreated();
-                    showSecret(modal, result.value.token);
+                    const forMcp = chosen.some((scope) => scope.startsWith("mcp:"));
+                    showSecret(modal, result.value.token, forMcp ? ctx.mcpEndpoint : undefined);
                     return false;
                 },
             },
@@ -543,8 +555,47 @@ export function showCreateToken(ctx: AccountUiContext, onCreated: () => void): M
     return modal.open();
 }
 
+const MCP_CONFIG_TITLES: Record<string, I18nKeys> = {
+    claudeCode: "mcp.remote.claudeCode",
+    http: "mcp.remote.jsonConfig",
+    stdio: "mcp.remote.stdioConfig",
+};
+
+async function copyText(text: string, status: HTMLElement) {
+    try {
+        await navigator.clipboard.writeText(text);
+        status.replaceChildren(paragraph("account.token.copied"));
+    } catch {
+        status.replaceChildren(paragraph("account.token.copyFailed"));
+    }
+}
+
+/** The MCP client configs filled in with the new token (CLOUD-14), each with its own Copy. */
+function mcpConfigs(endpoint: string, secret: string): HTMLElement {
+    return div(
+        { className: style.field },
+        paragraph("account.token.mcpConfigs"),
+        ...remoteClientConfigs(endpoint, secret).map((config) => {
+            const copied = span({});
+            const code = div({ className: style.mcpConfig, textContent: config.text });
+            code.dataset["mcpConfig"] = config.kind;
+            return div(
+                {},
+                div(
+                    { className: style.row },
+                    span({ textContent: I18n.translate(MCP_CONFIG_TITLES[config.kind]) }),
+                    smallButton("account.token.copy", () => copyText(config.text, copied)),
+                    copied,
+                ),
+                code,
+                ...(config.kind === "claudeCode" ? [paragraph("mcp.remote.shellHistoryHint")] : []),
+            );
+        }),
+    );
+}
+
 /** The one time the secret is visible: the server keeps only its hash. */
-function showSecret(modal: Modal, secret: string) {
+function showSecret(modal: Modal, secret: string, mcpEndpoint?: string) {
     const copied = div({});
     const secretEl = div({ className: style.secret, textContent: secret });
     secretEl.dataset["secret"] = "";
@@ -555,16 +606,10 @@ function showSecret(modal: Modal, secret: string) {
             secretEl,
             div(
                 { className: style.row },
-                smallButton("account.token.copy", async () => {
-                    try {
-                        await navigator.clipboard.writeText(secret);
-                        copied.replaceChildren(paragraph("account.token.copied"));
-                    } catch {
-                        copied.replaceChildren(paragraph("account.token.copyFailed"));
-                    }
-                }),
+                smallButton("account.token.copy", () => copyText(secret, copied)),
                 copied,
             ),
+            ...(mcpEndpoint ? [mcpConfigs(mcpEndpoint, secret)] : []),
         ],
         actions: [{ label: "common.close", submit: true }],
     });
