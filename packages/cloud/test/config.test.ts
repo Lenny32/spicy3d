@@ -156,7 +156,54 @@ describe("offline start", () => {
     });
 
     test.each([
-        ["no Spicy3D server answers", () => Response.json({ hello: "world" })],
+        ["a server error (a proxy's 502)", () => new Response("Bad Gateway", { status: 502 })],
+        ["a captive portal's page", () => new Response("<!doctype html><title>Sign in</title>")],
+    ])("%s: started offline from the cached config, which stays", async (_case, answer) => {
+        const storage = cache();
+        await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => Response.json(CONFIG),
+            offlineCache: storage,
+        });
+
+        const discovery = await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => answer(),
+            offlineCache: storage,
+        });
+
+        expect(discovery).toEqual({ status: "ready", config: CONFIG, offline: true });
+        expect(
+            await discoverCloud({ baseUrl: BASE, fetch: async () => offline(), offlineCache: storage }),
+        ).toEqual({
+            status: "ready",
+            config: CONFIG,
+            offline: true,
+        });
+    });
+
+    test("JSON that is no config (the app's placeholder): dormant now, the cached config kept", async () => {
+        const storage = cache();
+        await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => Response.json(CONFIG),
+            offlineCache: storage,
+        });
+
+        expect(
+            await discoverCloud({
+                baseUrl: BASE,
+                fetch: async () => Response.json({ hello: 1 }),
+                offlineCache: storage,
+            }),
+        ).toEqual({ status: "dormant" });
+        expect(
+            (await discoverCloud({ baseUrl: BASE, fetch: async () => offline(), offlineCache: storage }))
+                .status,
+        ).toBe("ready");
+    });
+
+    test.each([
         ["404", () => new Response("", { status: 404 })],
         ["an incompatible server", () => Response.json({ ...CONFIG, apiVersion: "2" })],
     ])("%s: the cached config is forgotten", async (_case, answer) => {
