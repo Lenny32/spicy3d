@@ -1144,5 +1144,10 @@ export default {
         "account.settings.autosaveHint":
             "How often changed documents are saved on their own. It applies on every device you sign in on.",
         "cloud.status.conflictHint": "A newer version was saved elsewhere: click to resolve",
+        "dateTime.today": "Today",
+        "dateTime.yesterday": "Yesterday",
+        "dateTime.last7Days": "Last 7 days",
+        "dateTime.unknown": "Unknown date",
+        "home.trash.deleted{0}": "Deleted {0}",
     },
 } satisfies Locale;

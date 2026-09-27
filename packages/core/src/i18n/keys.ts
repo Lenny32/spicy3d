@@ -1083,6 +1083,11 @@ export const I18N_KEYS = [
     "account.settings.autosave",
     "account.settings.autosaveHint",
     "cloud.status.conflictHint",
+    "dateTime.today",
+    "dateTime.yesterday",
+    "dateTime.last7Days",
+    "dateTime.unknown",
+    "home.trash.deleted{0}",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];
