@@ -193,7 +193,7 @@ describe("signing out with cloud documents open", () => {
         const found = Array.from(document.querySelectorAll("dialog button")).find(
             (b) => b.textContent === label,
         );
-        expect(found).toBeDefined();
+        expect(found?.textContent).toBe(label);
         return found as HTMLButtonElement;
     };
 
@@ -358,7 +358,7 @@ describe("title bar status", () => {
         const button = Array.from(item.querySelectorAll("button")).find(
             (b) => b.textContent === "cloud.status.editHere",
         );
-        expect(button).toBeDefined();
+        expect(button?.textContent).toBe("cloud.status.editHere");
         button!.click();
 
         expect(takeOver).toHaveBeenCalledWith(doc);
@@ -405,7 +405,7 @@ describe("title bar status", () => {
             kind: "manual",
         });
         const base = first.isOk && first.value.status === "saved" ? first.value.version : undefined;
-        expect(base).toBeDefined();
+        expect(base).toBe(docs.head("doc-1")?.id);
         await docs.saveElsewhere("doc-1");
         const item = new DocumentStatusItem({
             app,
@@ -493,7 +493,7 @@ describe("conflict dialog", () => {
         expect(dialog).not.toBeNull();
         const button = (label: string) => {
             const found = Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === label);
-            expect(found).toBeDefined();
+            expect(found?.textContent).toBe(label);
             return found!;
         };
         return { app, cloud, doc, dialog, closed, openDocumentSpy, button };
