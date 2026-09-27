@@ -53,20 +53,34 @@ reach its endpoint it says so and points at the settings.
 
 ## The web image (`spicy3d-web`)
 
-`Dockerfile` builds the app and serves it with `nginxinc/nginx-unprivileged`, as SpicySrv's
-compose expects its `web` service: HTTP on **port 8080**, a **non-root** user, nothing written
-outside `/tmp` (runs with a read-only root file system and no capabilities).
+`Dockerfile` serves the app with `nginxinc/nginx-unprivileged`, as SpicySrv's compose expects its
+`web` service: HTTP on **port 8080**, a **non-root** user, nothing written outside `/tmp` (runs with a
+read-only root file system and no capabilities). Two targets share that hardened runtime stage:
+
+- the default (`docker build .`, `docker compose build`) builds the app from source;
+- `prebuilt` packages an already built `dist/` (`--build-context dist=<folder>`): the deploy workflow
+  uses it to ship the exact files it tested and deployed to GitHub Pages.
 
 ```sh
 docker build -t spicy3d-web:0.0.1 .
+npm run build && docker build --target prebuilt --build-context dist=./dist -t spicy3d-web:0.0.1 .
 docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web:0.0.1   # alone: local-only
+docker compose pull && docker compose up    # compose.yml: the published image, same options
 ```
 
-The GitHub workflow **Web image** (manual) builds `spicy3d-web:<version>`, smoke-tests it running like
-that, and keeps it as a run artifact (`spicy3d-web-<version>.tar.gz` for `docker load`, plus the plain
-`dist/` tarball); with `publish = ghcr` (from `main` or a tag) a separate job pushes that image to
-`ghcr.io/<owner>/spicy3d-web:<version>`. The tag is the server's `SPICY_VERSION`. The base images are
-pinned by digest and kept current by Dependabot.
+The GitHub workflow **Deploy** (push to `main`, or manual with an optional image version, default
+`package.json`'s) builds and tests the app once, deploys that `dist/` to Pages and packages it with
+the `prebuilt` target. Job *Test Docker image* runs the image like SpicySrv's compose (read-only,
+no capabilities), checks it is not root, the account-link routes, the CSP header and that an invalid
+`SPICY3D_PLUGIN_ORIGINS` stops the container, runs `npm run smoke -- --url` against it, and keeps it
+as a run artifact (`spicy3d-web-<version>.tar.gz` for `docker load` on a server without registry
+access, plus the plain `dist/` tarball and `SHA256SUMS`). Then, from `main` or a tag only, job
+*Publish Docker image* (the only one allowed to write packages) pushes the same target for
+`linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repo>` (`ghcr.io/lenny32/spicy3d`) as `latest`
+and `<version>`. The version is the server's `SPICY_VERSION`; SpicySrv's compose runs it as
+`spicy3d-web:<version>` (`docker tag ghcr.io/lenny32/spicy3d:<version> spicy3d-web:<version>`, or
+`docker load` the artifact). The base images are pinned by digest (multi-arch indexes) and kept
+current by Dependabot.
 
 `docker/default.conf.template` (rendered at start into the `/tmp` tmpfs, so the root file system
 stays read-only):

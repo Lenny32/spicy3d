@@ -6,8 +6,9 @@ build
 types
 public/downloads
 .git
-.claude
 .github
+.claude
+.vscode
 screenshots
 tickets
 cpp/build

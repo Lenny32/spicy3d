@@ -57,7 +57,8 @@ npm run format  # Biome + clang-format
 
 The WebAssembly module is prebuilt and committed. To rebuild it from `cpp/`, run `npm run setup:wasm` once, then `npm run build:wasm`.
 
-With Docker, `docker compose up -d` builds the app and serves it on port 8080 (local documents only).
+With Docker, `docker compose up -d --build` builds the app and serves it on port 8080 (local documents only);
+`docker compose pull` takes the published image (`ghcr.io/lenny32/spicy3d`) instead.
 
 ### Development with a server
 
@@ -91,7 +92,8 @@ SPICY3D_API_URL=http://localhost:5080 npm run dev
 
 The same build runs on a LAN-only server and on a public host; per-deployment settings (MCP bridge downloads, the
 assistant's LLM endpoints) go in `deployment.json`. The Docker image (`spicy3d-web`, port 8080, non-root, read-only)
-is what SpicySrv's compose runs. See [docs/deployment.md](docs/deployment.md). Checks: `npm run check:urls` (no
+is what SpicySrv's compose runs; the Deploy workflow smoke-tests it and publishes it to `ghcr.io/lenny32/spicy3d`
+(`latest` and the app version, amd64 + arm64). See [docs/deployment.md](docs/deployment.md). Checks: `npm run check:urls` (no
 external URLs), `npm run smoke` (the build in headless Chromium with other origins blocked; needs
 `npx playwright install chromium-headless-shell` once).
 

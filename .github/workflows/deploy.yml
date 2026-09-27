@@ -1,10 +1,19 @@
 name: Deploy
 
-# Continuous delivery: builds the web application, deploys it to GitHub Pages and builds the MCP
-# bridge that matches it (package-mcp-bridge.yml).
+# Continuous delivery: builds the web application, deploys it to GitHub Pages, publishes it as a
+# Docker image and builds the MCP bridge that matches it (package-mcp-bridge.yml).
 #
 # - Push to main or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
-#   site; the bridge executables are built and verified (run artifact) but not published.
+#   site; the bridge executables are built and verified (run artifact) but not published. A manual
+#   run asks for the Docker image version (empty = package.json's version).
+# - Docker image: the same dist/ in the hardened nginx-unprivileged runtime (Dockerfile, target
+#   `prebuilt`: port 8080, non-root, read-only root file system, its own CSP). Job `image` runs it
+#   as SpicySrv's compose does (read-only, no capabilities), checks the headers and the
+#   SPICY3D_*_ORIGINS validation, smoke-tests it in headless Chromium and keeps it as a run
+#   artifact (`spicy3d-web-<version>.tar.gz` for `docker load`, plus the dist/ tarball). Then, from
+#   main or a tag only, job `docker` pushes it to ghcr.io/<owner>/<repo> as `latest` and
+#   `<image version>`, for linux/amd64 and linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs
+#   the package to be public (Packages > spicy3d > Package settings) or a `docker login ghcr.io`.
 # - Bridge releases are published by hand: Actions > Package MCP bridge > Run workflow, with
 #   publish = release. The site links the release of package.json's version.
 #
@@ -14,6 +23,11 @@ on:
     push:
         branches: ["main"]
     workflow_dispatch:
+        inputs:
+            version:
+                description: "Docker image version tag (e.g. 1.2.0); empty = package.json version"
+                required: false
+                type: string
 
 permissions:
     contents: read
@@ -29,17 +43,27 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             version: ${{ steps.version.outputs.version }}
+            image-version: ${{ steps.version.outputs.image-version }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             # A build-only bridge version: this workflow never publishes the executables.
+            # The image version: the manual run's input, else package.json's version.
             - id: version
+              env:
+                  INPUT_VERSION: ${{ inputs.version }}
               run: |
                   pkg=$(node -p "require('./package.json').version")
+                  image="${INPUT_VERSION:-$pkg}"
+                  if [[ ! "$image" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ || "$image" == "latest" ]]; then
+                      echo "::error::Invalid image version '$image' (a Docker tag other than 'latest')"
+                      exit 1
+                  fi
                   echo "version=$pkg-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg" >> "$GITHUB_STEP_SUMMARY"
+                  echo "image-version=$image" >> "$GITHUB_OUTPUT"
+                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg, image version $image" >> "$GITHUB_STEP_SUMMARY"
 
     web:
         name: Build web application
@@ -74,6 +98,139 @@ jobs:
             - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
               with:
                   path: dist
+
+            # The same files for the Docker image.
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: web-dist
+                  path: dist
+                  if-no-files-found: error
+                  retention-days: 1
+
+    # The image, tested before anything is published: the tested dist/ in the hardened runtime
+    # (Dockerfile, target `prebuilt`), run as SpicySrv's compose runs it, smoke-tested, and kept as run
+    # artifacts for an air-gapped server. No write permission here: this job runs npm ci.
+    image:
+        name: Test Docker image
+        needs: [prepare, web]
+        runs-on: ubuntu-latest
+        env:
+            IMAGE: spicy3d-web:${{ needs.prepare.outputs.image-version }}
+            VERSION: ${{ needs.prepare.outputs.image-version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: web-dist
+                  path: dist
+
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+            - name: Build image (linux/amd64)
+              uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+              with:
+                  context: .
+                  target: prebuilt
+                  build-contexts: dist=./dist
+                  platforms: linux/amd64
+                  load: true
+                  push: false
+                  tags: ${{ env.IMAGE }}
+
+            # Like SpicySrv's compose: read-only, only /tmp writable, no capabilities, not root.
+            - name: Run it as the server does
+              run: |
+                  docker run -d --name web --read-only --tmpfs /tmp --cap-drop ALL \
+                      --security-opt no-new-privileges:true -p 127.0.0.1:8080:8080 \
+                      -e SPICY3D_CONNECT_ORIGINS="https://llm.example.lan" "$IMAGE"
+                  for i in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8080/ && break; sleep 1; done
+                  test "$(docker exec web id -u)" != 0
+                  curl -fsS -o /dev/null "http://127.0.0.1:8080/verify-email?userId=x&token=y"
+                  curl -fsSI http://127.0.0.1:8080/ | tee headers.txt
+                  grep -i '^content-security-policy:.*connect-src [^;]*https://llm.example.lan' headers.txt
+                  grep -i '^x-content-type-options: nosniff' headers.txt
+                  # A value that is not a list of origins must stop the container.
+                  if docker run --rm --read-only --tmpfs /tmp -e SPICY3D_PLUGIN_ORIGINS="https://a.lan; script-src *" "$IMAGE"; then
+                      echo "::error::an invalid SPICY3D_PLUGIN_ORIGINS did not stop the container"
+                      exit 1
+                  fi
+
+            # No npm cache: a cache written by a branch build would be restored by default-branch runs.
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            - run: npm ci
+
+            - name: Smoke test the running image
+              run: |
+                  npx playwright install --with-deps --only-shell chromium
+                  npm run smoke -- --url http://localhost:8080/
+
+            - name: Export
+              run: |
+                  mkdir out
+                  docker save "$IMAGE" | gzip > "out/spicy3d-web-$VERSION.tar.gz"
+                  tar -czf "out/spicy3d-web-dist-$VERSION.tar.gz" -C dist .
+                  (cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+
+            # `spicy3d-web-<version>.tar.gz` for `docker load` on a server without registry access.
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: spicy3d-web-${{ needs.prepare.outputs.image-version }}
+                  path: out/
+                  if-no-files-found: error
+
+    # The only job that may write packages, and only from main or a tag: the same dist/, Dockerfile
+    # target and digest-pinned base as the tested image, for both platforms.
+    docker:
+        name: Publish Docker image
+        needs: [prepare, web, image]
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: web-dist
+                  path: dist
+
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+            - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            # Image names are lowercased by the action (ghcr.io/lenny32/spicy3d).
+            - id: meta
+              uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+              with:
+                  images: ghcr.io/${{ github.repository }}
+                  tags: |
+                      type=raw,value=latest
+                      type=raw,value=${{ needs.prepare.outputs.image-version }}
+
+            # The prebuilt target only copies files (no RUN), so arm64 needs no QEMU.
+            - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+              with:
+                  context: .
+                  target: prebuilt
+                  build-contexts: dist=./dist
+                  platforms: linux/amd64,linux/arm64
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
 
     mcp-bridge:
         name: MCP bridge
