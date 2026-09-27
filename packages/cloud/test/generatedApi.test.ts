@@ -33,7 +33,7 @@ describe("generated API types", () => {
             const stale = path.join(dir, "schema.generated.ts");
             writeFileSync(
                 stale,
-                readFileSync(generatedPath, "utf8").replace("apiVersion: string;", "apiVersion: number;"),
+                readFileSync(generatedPath, "utf8").replace("apiVersion: number;", "apiVersion: string;"),
             );
 
             const result = spawnSync("node", [script, "--check", "--out", stale], {
@@ -51,7 +51,7 @@ describe("generated API types", () => {
     test("integers the spec types as integer|string (SpicySrv#8) are numbers", () => {
         const generated = readFileSync(generatedPath, "utf8");
         expect(generated).toContain("maxUploadBytes: number;");
-        expect(generated).toContain("quotaBytes: number | null;");
+        expect(generated).toMatch(/quotaBytes: (number \| null|null \| number);/);
         expect(generated).not.toMatch(/: number \| string;/);
     });
 });

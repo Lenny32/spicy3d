@@ -134,7 +134,14 @@ describe("history rows", () => {
     });
 
     test("the retention policy reads int32 fields sent as strings", () => {
-        expect(retentionOf({ keepAllHours: "24", hourlyDays: 7, dailyDays: "30" })).toEqual({
+        expect(
+            retentionOf({
+                keepAllHours: "24",
+                hourlyDays: 7,
+                dailyDays: "30",
+                mergeParentDays: 7,
+            } as unknown as Parameters<typeof retentionOf>[0]),
+        ).toEqual({
             keepAllHours: 24,
             hourlyDays: 7,
             dailyDays: 30,

@@ -10,6 +10,7 @@
             "get": {
                 "tags": ["System"],
                 "summary": "Liveness and dependency status.",
+                "description": "Anonymous callers get only the overall `status`; administrators also get `version`, `checkedAt` and `checks`. Results are cached for 10 seconds.",
                 "operationId": "GetHealth",
                 "responses": {
                     "200": {
@@ -28,6 +29,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HealthResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -50,8 +61,99 @@
                                 }
                             }
                         }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 }
+            }
+        },
+        "/api/admin/audit": {
+            "get": {
+                "tags": ["Admin"],
+                "summary": "The admin audit log, newest first (keyset paging with before). Append-only: no endpoint changes it.",
+                "operationId": "AdminListAudit",
+                "parameters": [
+                    {
+                        "name": "before",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "userId",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "format": "int32",
+                            "default": 50
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AdminAuditList"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account isn't an administrator.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "session": []
+                    }
+                ]
             }
         },
         "/api/admin/system": {
@@ -66,6 +168,36 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/AdminSystemResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account isn't an administrator.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -108,7 +240,7 @@
                         "description": "Accepted"
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -133,6 +265,34 @@
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -177,7 +337,35 @@
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -197,6 +385,26 @@
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -229,6 +437,44 @@
                                 }
                             }
                         }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -236,14 +482,68 @@
         "/api/auth/resend-verification": {
             "post": {
                 "tags": ["Auth"],
-                "summary": "Send the verification email again to the signed-in user.",
+                "summary": "Send the verification email again. With an email in the body, anonymous: always 202 (doesn't reveal whether the account exists or is verified). Without, for the signed-in user: 202 sent, 204 already verified, 401 not signed in. 503 email_disabled when the server can't send email.",
                 "operationId": "ResendVerification",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResendVerificationRequest"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "202": {
                         "description": "Accepted"
                     },
                     "204": {
                         "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "503": {
                         "description": "Service Unavailable",
@@ -254,13 +554,18 @@
                                 }
                             }
                         }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
-                },
-                "security": [
-                    {
-                        "session": []
-                    }
-                ]
+                }
             }
         },
         "/api/auth/forgot-password": {
@@ -282,8 +587,46 @@
                     "202": {
                         "description": "Accepted"
                     },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -324,12 +667,50 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -366,8 +747,46 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "409": {
                         "description": "Conflict",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -397,6 +816,16 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -437,12 +866,42 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -474,8 +933,18 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -490,6 +959,34 @@
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -531,8 +1028,18 @@
                     "202": {
                         "description": "Accepted"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -561,8 +1068,36 @@
                             }
                         }
                     },
+                    "429": {
+                        "description": "too_many_requests: rate limited; retry after Retry-After seconds.",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -594,6 +1129,26 @@
                                 }
                             }
                         }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -618,6 +1173,26 @@
                                     "items": {
                                         "$ref": "#/components/schemas/SessionResponse"
                                     }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -650,8 +1225,38 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -687,8 +1292,18 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -699,6 +1314,24 @@
                     },
                     "429": {
                         "description": "Too Many Requests",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -718,7 +1351,7 @@
         "/api/me/export": {
             "get": {
                 "tags": ["Account"],
-                "summary": "Download all data of the account as a ZIP (streamed): account.json, and per document the latest version as a .spicy file, with history=true every kept version too. Once per hour.",
+                "summary": "Download all data of the account as a ZIP (streamed): account.json, and per document the latest version as a .spicy-cloud.json.gz file (a spicy3d.cloudVersion envelope, not a client .spicy document), with history=true every kept version too; each referenced blob once, as blobs/<sha256>. Once per hour.",
                 "operationId": "ExportAccount",
                 "parameters": [
                     {
@@ -733,10 +1366,54 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "headers": {
+                            "Content-Disposition": {
+                                "description": "attachment; filename=spicy3d-export-<yyyy-MM-ddTHHmmssZ>.zip; filename*=UTF-8''<same name>, with the UTC time of the export (e.g. spicy3d-export-2026-09-27T081500Z.zip).",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/zip": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "429": {
                         "description": "Too Many Requests",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -768,6 +1445,26 @@
                                     "items": {
                                         "$ref": "#/components/schemas/AccessTokenResponse"
                                     }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -804,8 +1501,18 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -836,6 +1543,24 @@
                     },
                     "429": {
                         "description": "Too Many Requests",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -872,8 +1597,38 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -893,15 +1648,43 @@
         "/api/me/settings": {
             "get": {
                 "tags": ["Settings"],
-                "summary": "The signed-in user's settings; defaults for everything never set. The ETag can be sent back as If-Match when saving.",
+                "summary": "The signed-in user's settings; defaults for everything never set, updatedAt null while the user never saved any. The ETag can be sent back as If-Match when saving.",
                 "operationId": "GetSettings",
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "Version of the stored settings (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/UserSettings"
+                                    "$ref": "#/components/schemas/UserSettingsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -915,7 +1698,7 @@
             },
             "put": {
                 "tags": ["Settings"],
-                "summary": "Replace the settings: absent keys take their defaults, unknown keys are rejected (400). With If-Match, 412 when they were changed on another device since; without it the last write wins. The user's other devices are notified (settings.updated).",
+                "summary": "Replace the whole settings document: absent keys revert to their defaults, so always send the full document; unknown keys are ignored and dropped (forward compatible), updatedAt in the body is ignored. With If-Match, 412 when they were changed on another device since; without it the last write wins. The user's other devices are notified (settings.updated).",
                 "operationId": "UpdateSettings",
                 "parameters": [
                     {
@@ -940,16 +1723,44 @@
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "Version of the stored settings (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/UserSettings"
+                                    "$ref": "#/components/schemas/UserSettingsResponse"
                                 }
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -977,6 +1788,16 @@
                                 }
                             }
                         }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -996,8 +1817,7 @@
                         "name": "offset",
                         "in": "query",
                         "schema": {
-                            "pattern": "^-?(?:0|[1-9]\\d*)$",
-                            "type": ["integer", "string"],
+                            "type": "integer",
                             "format": "int32",
                             "default": 0
                         }
@@ -1006,8 +1826,7 @@
                         "name": "limit",
                         "in": "query",
                         "schema": {
-                            "pattern": "^-?(?:0|[1-9]\\d*)$",
-                            "type": ["integer", "string"],
+                            "type": "integer",
                             "format": "int32",
                             "default": 50
                         }
@@ -1023,6 +1842,36 @@
                                 }
                             }
                         }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account isn't an administrator.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -1035,7 +1884,7 @@
         "/api/admin/users/{id}/disable": {
             "post": {
                 "tags": ["Admin"],
-                "summary": "Disable an account: it can't sign in, all its sessions end immediately and its access tokens are revoked.",
+                "summary": "Disable an account: it can't sign in, all its sessions end immediately and its access tokens are revoked. Confirmed with the administrator's current password.",
                 "operationId": "AdminDisableUser",
                 "parameters": [
                     {
@@ -1048,9 +1897,39 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AdminConfirmationRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -1064,6 +1943,16 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1100,8 +1989,38 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1121,7 +2040,7 @@
         "/api/admin/users/{id}/password-reset": {
             "post": {
                 "tags": ["Admin"],
-                "summary": "Create a password reset link to hand to the user (the recovery path when the server can't send email).",
+                "summary": "Create a password reset link to hand to the user (the recovery path when the server can't send email). Confirmed with the administrator's current password; not allowed for another administrator's account.",
                 "operationId": "AdminCreatePasswordResetLink",
                 "parameters": [
                     {
@@ -1134,6 +2053,16 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AdminConfirmationRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1145,8 +2074,38 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1166,7 +2125,7 @@
         "/api/admin/users/{id}": {
             "delete": {
                 "tags": ["Admin"],
-                "summary": "Permanently delete an account and all its data.",
+                "summary": "Permanently delete an account and all its data. Confirmed with the administrator's current password.",
                 "operationId": "AdminDeleteUser",
                 "parameters": [
                     {
@@ -1179,9 +2138,39 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AdminConfirmationRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -1195,6 +2184,16 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1247,8 +2246,7 @@
                         "in": "query",
                         "description": "Page size, 1-200 (default 50).",
                         "schema": {
-                            "pattern": "^-?(?:0|[1-9]\\d*)$",
-                            "type": ["integer", "string"],
+                            "type": "integer",
                             "format": "int32"
                         }
                     }
@@ -1264,12 +2262,42 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session) and no valid access token.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1311,10 +2339,44 @@
                 "responses": {
                     "201": {
                         "description": "Created",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "Idempotent-Replayed": {
+                                "description": "true when this replays the result of an earlier request with the same Idempotency-Key.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1335,6 +2397,16 @@
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1365,6 +2437,14 @@
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1373,8 +2453,38 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session) and no valid access token.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1420,10 +2530,38 @@
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1444,6 +2582,16 @@
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1473,8 +2621,38 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1509,6 +2687,14 @@
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1517,8 +2703,38 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1538,7 +2754,7 @@
         "/api/documents/{id}/versions": {
             "get": {
                 "tags": ["Documents"],
-                "summary": "Version history, newest first (keyset pagination), optionally of one kind.",
+                "summary": "Version history, newest first (keyset pagination), optionally filtered by kind (repeatable) or to kept versions (kept=true).",
                 "operationId": "ListVersions",
                 "parameters": [
                     {
@@ -1560,9 +2776,21 @@
                     {
                         "name": "kind",
                         "in": "query",
-                        "description": "Only versions of this kind: manual, auto, merge, restore or mcp.",
+                        "description": "Only versions of these kinds: manual, auto, merge, restore or mcp. Repeat for several (kind=manual&kind=merge); any of them matches.",
                         "schema": {
-                            "type": "string"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    {
+                        "name": "kept",
+                        "in": "query",
+                        "description": "true: only the versions the autosave retention never prunes by rule, i.e. every non-auto version plus labeled or pinned autosaves (the \"manual only\" history filter). Combines with kind (both must match).",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
                         }
                     },
                     {
@@ -1570,8 +2798,7 @@
                         "in": "query",
                         "description": "Page size, 1-200 (default 50).",
                         "schema": {
-                            "pattern": "^-?(?:0|[1-9]\\d*)$",
-                            "type": ["integer", "string"],
+                            "type": "integer",
                             "format": "int32"
                         }
                     }
@@ -1583,6 +2810,26 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/VersionList"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session) and no valid access token.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1606,6 +2853,16 @@
                                 }
                             }
                         }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -1619,7 +2876,7 @@
             },
             "post": {
                 "tags": ["Documents"],
-                "summary": "Save a new head version. Requires If-Match with the current head (409 version_conflict with the head otherwise); upload blobs first (422 blobs_missing). Optional Idempotency-Key header: a retry within 24 hours returns the original version.",
+                "summary": "Save a new head version. Requires If-Match with the current head (409 version_conflict with the head otherwise); upload blobs first (422 blobs_missing). Optional Idempotency-Key header: a retry within 24 hours returns the original version. The recorded parentIds start with the head (If-Match), whatever order they were sent in; to restore an older version, prefer POST /api/versions/{versionId}/restore.",
                 "operationId": "SaveVersion",
                 "parameters": [
                     {
@@ -1660,10 +2917,44 @@
                 "responses": {
                     "201": {
                         "description": "Created",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "Idempotent-Replayed": {
+                                "description": "true when this replays the result of an earlier request with the same Idempotency-Key.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/VersionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1707,6 +2998,16 @@
                                 }
                             }
                         }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -1734,10 +3035,53 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "The manifest's SHA-256 (quoted).",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session) and no valid access token.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1758,7 +3102,7 @@
             },
             "patch": {
                 "tags": ["Versions"],
-                "summary": "Set or clear the label, pin or unpin. Content is immutable.",
+                "summary": "Set or clear the label, pin or unpin. Content is immutable. Partial update: each field is optional; omitted or null keeps the current value, an empty label removes it.",
                 "operationId": "UpdateVersion",
                 "parameters": [
                     {
@@ -1792,6 +3136,26 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "content": {
@@ -1808,6 +3172,153 @@
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "session": []
+                    }
+                ]
+            }
+        },
+        "/api/versions/{versionId}/restore": {
+            "post": {
+                "tags": ["Versions"],
+                "summary": "Restore this version as the document's new head: the server saves a version of kind restore, parentIds [current head], with this version's manifest, blobs, thumbnail and formatVersion (the client sends no content). Requires If-Match with the current head (409 version_conflict with the head otherwise). Restoring a version saved in an older formatVersion makes the head that format again; this is intended, clients migrate older formats on load.",
+                "operationId": "RestoreVersion",
+                "parameters": [
+                    {
+                        "name": "versionId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "If-Match",
+                        "in": "header",
+                        "description": "The document's current head version id (its ETag).",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RestoreVersionRequest"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "headers": {
+                            "ETag": {
+                                "description": "The document's head version id (quoted); send it back as If-Match when saving.",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/VersionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "Precondition Required",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1846,12 +3357,42 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
                                 }
                             }
                         }
@@ -1867,7 +3408,7 @@
         "/api/blobs/{sha256}": {
             "put": {
                 "tags": ["Blobs"],
-                "summary": "Upload a blob (raw bytes, uncompressed; the URL is the SHA-256 of the content, lowercase hex). Streamed and verified; at most the server's upload limit (413) and within the caller's quota (507).",
+                "summary": "Upload a blob (raw bytes, uncompressed; the URL is the SHA-256 of the content, lowercase hex). The body is hashed as received: a Content-Encoding other than identity is rejected (415). Streamed and verified; at most the server's upload limit (413) and within the caller's quota (507).",
                 "operationId": "UploadBlob",
                 "parameters": [
                     {
@@ -1883,7 +3424,8 @@
                     "content": {
                         "application/octet-stream": {
                             "schema": {
-                                "$ref": "#/components/schemas/Stream"
+                                "type": "string",
+                                "format": "binary"
                             }
                         }
                     },
@@ -1893,8 +3435,38 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session).",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
                     "413": {
                         "description": "Payload Too Large",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1915,6 +3487,14 @@
                     },
                     "429": {
                         "description": "Too Many Requests",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying.",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1925,6 +3505,16 @@
                     },
                     "507": {
                         "description": "Insufficient Storage",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -1956,10 +3546,56 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "headers": {
+                            "ETag": {
+                                "description": "The content's SHA-256 (quoted).",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: not signed in (no or expired session) and no valid access token.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unexpected error (problem details).",
                         "content": {
                             "application/problem+json": {
                                 "schema": {
@@ -2012,14 +3648,92 @@
                         "format": "date-time"
                     },
                     "lastUsedAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "Last use (UTC, minute resolution); `null` if never used.",
                         "format": "date-time"
                     },
                     "expiresAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "Expiry (UTC); `null`: never expires. An expired token no longer works.",
                         "format": "date-time"
+                    }
+                }
+            },
+            "AdminAuditEntryResponse": {
+                "required": ["id", "at", "actorId", "action", "targetUserId", "ip", "sessionId", "details"],
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "Entry id, increasing with time.",
+                        "format": "int64"
+                    },
+                    "at": {
+                        "type": "string",
+                        "description": "When the action happened (UTC).",
+                        "format": "date-time"
+                    },
+                    "actorId": {
+                        "type": "string",
+                        "description": "The administrator (the id stays after that account is deleted).",
+                        "format": "uuid"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "`user.disabled`, `user.enabled`, `user.password_reset_link_created` or `user.deleted`."
+                    },
+                    "targetUserId": {
+                        "type": "string",
+                        "description": "The account acted on.",
+                        "format": "uuid"
+                    },
+                    "ip": {
+                        "type": ["null", "string"],
+                        "description": "The administrator's client IP address."
+                    },
+                    "sessionId": {
+                        "type": ["null", "string"],
+                        "description": "The administrator's session.",
+                        "format": "uuid"
+                    },
+                    "details": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "description": "Action-specific facts (e.g. `alreadyDisabled`, `expiresAt`); `null` when there are none.",
+                                "$ref": "#/components/schemas/JsonElement"
+                            }
+                        ]
+                    }
+                }
+            },
+            "AdminAuditList": {
+                "required": ["items", "nextBefore"],
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AdminAuditEntryResponse"
+                        },
+                        "description": "Newest first, at most `limit` (≤ 200)."
+                    },
+                    "nextBefore": {
+                        "type": ["null", "integer"],
+                        "description": "Pass as `before` for the next (older) page; `null` on the last page.",
+                        "format": "int64"
+                    }
+                }
+            },
+            "AdminConfirmationRequest": {
+                "required": ["currentPassword"],
+                "type": "object",
+                "properties": {
+                    "currentPassword": {
+                        "type": "string",
+                        "description": "The calling administrator's own password, to confirm (403 invalid_password or account_locked otherwise)."
                     }
                 }
             },
@@ -2045,8 +3759,7 @@
                 "type": "object",
                 "properties": {
                     "total": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Number of accounts.",
                         "format": "int32"
                     },
@@ -2101,59 +3814,59 @@
                         "format": "date-time"
                     },
                     "lastSeenAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "Last authenticated request (UTC); `null` if never signed in.",
                         "format": "date-time"
                     },
                     "disabledAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "When the account was disabled (UTC); `null` when enabled.",
                         "format": "date-time"
                     },
                     "lockedOutUntil": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "End of a sign-in lockout after failed attempts (UTC); `null` when not locked.",
                         "format": "date-time"
                     },
                     "storageUsed": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Bytes of cloud storage used (unique blobs, uncompressed; counts towards the quota).",
                         "format": "int64"
                     }
                 }
             },
             "AutosaveRetentionPolicy": {
-                "required": ["keepAllHours", "hourlyDays", "dailyDays"],
+                "required": ["keepAllHours", "hourlyDays", "dailyDays", "mergeParentDays"],
                 "type": "object",
                 "properties": {
                     "keepAllHours": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Every autosave younger than this is kept.",
                         "format": "int32"
                     },
                     "hourlyDays": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Up to this age, the last autosave of each UTC hour is kept.",
                         "format": "int32"
                     },
                     "dailyDays": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Up to this age, the last autosave of each UTC day is kept; older autosaves are deleted.",
+                        "format": "int32"
+                    },
+                    "mergeParentDays": {
+                        "type": "integer",
+                        "description": "An autosave that is a parent of a merge younger than this is kept, whatever its age (0: no such exception).",
                         "format": "int32"
                     }
                 },
-                "description": "Autosave pruning, relative to now (UTC buckets). Manual, merge, restore, MCP, labeled and pinned versions and the\nhead are kept forever."
+                "description": "Autosave pruning, relative to now (UTC buckets). Manual, merge, restore, MCP, labeled and pinned versions and the\nhead are kept forever (the versions `GET /api/documents/{id}/versions?kept=true` lists, plus the head)."
             },
             "AutosaveSettings": {
                 "type": "object",
                 "properties": {
                     "intervalMinutes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "format": "int32",
                         "default": 5
                     },
@@ -2161,8 +3874,7 @@
                         "type": "boolean",
                         "default": true
                     }
-                },
-                "additionalProperties": false
+                }
             },
             "BackupStatusResponse": {
                 "required": [
@@ -2181,7 +3893,7 @@
                         "description": "Whether this server reads a backup status (`Backup:StatusFile`)."
                     },
                     "lastSuccessAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "End of the last successful backup (UTC); `null` when none is recorded.",
                         "format": "date-time"
                     },
@@ -2190,14 +3902,12 @@
                         "description": "That backup's name in the backup target (argument of `deploy/restore.sh`)."
                     },
                     "sizeBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "description": "Its size: database dump plus blob snapshot.",
                         "format": "int64"
                     },
                     "durationSeconds": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "description": "How long it took.",
                         "format": "int64"
                     },
@@ -2206,8 +3916,7 @@
                         "description": "No successful backup within `MaxAgeHours`: show a warning."
                     },
                     "maxAgeHours": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Age after which a backup is stale.",
                         "format": "int32"
                     }
@@ -2281,8 +3990,9 @@
                         "description": "Server version, e.g. `0.0.1`."
                     },
                     "apiVersion": {
-                        "type": "string",
-                        "description": "Version of the HTTP contract."
+                        "type": "integer",
+                        "description": "Version of the HTTP contract, an integer bumped on breaking changes.",
+                        "format": "int32"
                     },
                     "publicUrl": {
                         "type": "string",
@@ -2338,7 +4048,7 @@
                 }
             },
             "CreateAccessTokenRequest": {
-                "required": ["name", "scopes", "expiresInDays", "currentPassword"],
+                "required": ["name", "scopes", "currentPassword"],
                 "type": "object",
                 "properties": {
                     "name": {
@@ -2353,8 +4063,7 @@
                         "description": "At least one of mcp:read (MCP read tools and screenshots), mcp:write (MCP editing tools), documents:read (cloud documents and history, read-only)."
                     },
                     "expiresInDays": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "description": "30, 90 or 365 days, or 0 for never; omitted: 90.",
                         "format": "int32"
                     },
@@ -2416,7 +4125,7 @@
                         "format": "date-time"
                     },
                     "expiresAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "Expiry (UTC); `null`: never expires.",
                         "format": "date-time"
                     }
@@ -2440,14 +4149,12 @@
                         "description": "`blobs` or `backups`."
                     },
                     "totalBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Size of the file system.",
                         "format": "int64"
                     },
                     "freeBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Space available to the server.",
                         "format": "int64"
                     },
@@ -2502,8 +4209,7 @@
                         "format": "uuid"
                     },
                     "sizeBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Size of the latest version.",
                         "format": "int64"
                     },
@@ -2522,7 +4228,7 @@
                         "format": "date-time"
                     },
                     "deletedAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "When moved to the trash (UTC).",
                         "format": "date-time"
                     },
@@ -2566,8 +4272,7 @@
                         "format": "uuid"
                     },
                     "sizeBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Size of the latest version (manifest and blobs, uncompressed).",
                         "format": "int64"
                     },
@@ -2586,7 +4291,7 @@
                         "format": "date-time"
                     },
                     "deletedAt": {
-                        "type": "string",
+                        "type": ["null", "string"],
                         "description": "When moved to the trash (UTC); `null` when not in the trash.",
                         "format": "date-time"
                     }
@@ -2624,7 +4329,7 @@
                 }
             },
             "HealthResponse": {
-                "required": ["status", "version", "checkedAt", "checks"],
+                "required": ["status"],
                 "type": "object",
                 "properties": {
                     "status": {
@@ -2632,20 +4337,20 @@
                         "$ref": "#/components/schemas/HealthState"
                     },
                     "version": {
-                        "type": "string",
-                        "description": "Server version."
+                        "type": ["null", "string"],
+                        "description": "Server version (administrators only)."
                     },
                     "checkedAt": {
-                        "type": "string",
-                        "description": "When the checks ran (UTC).",
+                        "type": ["null", "string"],
+                        "description": "When the checks ran (UTC; administrators only).",
                         "format": "date-time"
                     },
                     "checks": {
-                        "type": "object",
+                        "type": ["null", "object"],
                         "additionalProperties": {
                             "$ref": "#/components/schemas/HealthState"
                         },
-                        "description": "Status per dependency, e.g. `database`."
+                        "description": "Status per dependency, e.g. `database` (administrators only)."
                     }
                 }
             },
@@ -2653,6 +4358,7 @@
                 "enum": ["healthy", "degraded", "unhealthy"]
             },
             "HttpValidationProblemDetails": {
+                "required": ["code", "traceId"],
                 "type": "object",
                 "properties": {
                     "type": {
@@ -2662,8 +4368,7 @@
                         "type": ["null", "string"]
                     },
                     "status": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "format": "int32"
                     },
                     "detail": {
@@ -2677,12 +4382,124 @@
                         "additionalProperties": {
                             "type": "array",
                             "items": {
+                                "enum": [
+                                    "client_id_too_long",
+                                    "device_name_too_long",
+                                    "display_name_required",
+                                    "display_name_too_long",
+                                    "duplicate_email",
+                                    "email_required",
+                                    "email_too_long",
+                                    "head_not_parent",
+                                    "invalid_cursor",
+                                    "invalid_display_name",
+                                    "invalid_email",
+                                    "invalid_expiry",
+                                    "invalid_format_version",
+                                    "invalid_id",
+                                    "invalid_idempotency_key",
+                                    "invalid_interval",
+                                    "invalid_kind",
+                                    "invalid_label",
+                                    "invalid_name",
+                                    "invalid_parents",
+                                    "invalid_sha256",
+                                    "invalid_thumbnail",
+                                    "kind_required",
+                                    "label_too_long",
+                                    "manifest_too_large",
+                                    "merge_needs_two_parents",
+                                    "name_required",
+                                    "name_too_long",
+                                    "password_common",
+                                    "password_mismatch",
+                                    "password_requires_unique_chars",
+                                    "password_too_long",
+                                    "password_too_short",
+                                    "query_too_long",
+                                    "scopes_required",
+                                    "too_many_blobs",
+                                    "too_many_hashes",
+                                    "unknown_scope",
+                                    "version_required"
+                                ],
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "validation_failed only: field errors, from camelCase field names (dotted paths for nested fields, or the header name) to stable error codes."
+                    },
+                    "code": {
+                        "enum": [
+                            "account_disabled",
+                            "account_locked",
+                            "bad_request",
+                            "blobs_missing",
+                            "cannot_target_admin",
+                            "cannot_target_self",
+                            "conflict",
+                            "csrf_failed",
+                            "document_exists",
+                            "document_in_trash",
+                            "email_disabled",
+                            "email_taken",
+                            "forbidden",
+                            "hash_mismatch",
+                            "idempotency_key_reused",
+                            "internal_error",
+                            "invalid_credentials",
+                            "invalid_password",
+                            "invalid_token",
+                            "method_not_allowed",
+                            "not_found",
+                            "payload_too_large",
+                            "precondition_failed",
+                            "precondition_required",
+                            "quota_exceeded",
+                            "service_unavailable",
+                            "signup_disabled",
+                            "too_many_requests",
+                            "too_many_tokens",
+                            "unauthorized",
+                            "unsupported_content_encoding",
+                            "validation_failed",
+                            "version_conflict"
+                        ],
+                        "type": "string",
+                        "description": "Stable machine-readable error code; type is urn:spicy3d:problem:{code}."
+                    },
+                    "traceId": {
+                        "type": "string",
+                        "description": "Identifies the request in the server logs."
+                    },
+                    "headVersionId": {
+                        "type": "string",
+                        "description": "version_conflict and document_exists only: the document's current head version.",
+                        "format": "uuid"
+                    },
+                    "inTrash": {
+                        "type": "boolean",
+                        "description": "document_exists only: the existing document is in the trash (restore it, then save a version with If-Match = headVersionId)."
+                    },
+                    "headCreatedAt": {
+                        "type": "string",
+                        "description": "version_conflict only: when the head version was saved.",
+                        "format": "date-time"
+                    },
+                    "headDeviceName": {
+                        "type": ["null", "string"],
+                        "description": "version_conflict only: the device that saved the head version, if it sent one."
+                    },
+                    "missing": {
+                        "type": "array",
+                        "items": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                        },
+                        "description": "blobs_missing only: the SHA-256 of each referenced blob that isn't uploaded, sorted."
                     }
                 }
             },
+            "JsonElement": {},
             "LoginRequest": {
                 "required": ["email", "password"],
                 "type": "object",
@@ -2745,17 +4562,7 @@
                 }
             },
             "NewVersionRequest": {
-                "required": [
-                    "parentIds",
-                    "kind",
-                    "label",
-                    "manifestSha256",
-                    "blobs",
-                    "thumbnailSha256",
-                    "formatVersion",
-                    "deviceName",
-                    "clientId"
-                ],
+                "required": ["kind", "manifestSha256", "formatVersion"],
                 "type": "object",
                 "properties": {
                     "parentIds": {
@@ -2764,7 +4571,7 @@
                             "type": "string",
                             "format": "uuid"
                         },
-                        "description": "Parent versions: the current head, plus the client's own parent for a merge (dropped if it no longer exists, e.g. a pruned autosave). Empty for a document's first version."
+                        "description": "Parent versions: the current head, plus the client's own parent for a merge (dropped if it no longer exists, e.g. a pruned autosave). Empty for a document's first version. Recorded with the head first, whatever the order sent."
                     },
                     "kind": {
                         "oneOf": [
@@ -2797,8 +4604,7 @@
                         "description": "Optional thumbnail blob: PNG or WebP, at most 512×512 pixels and 256 KiB."
                     },
                     "formatVersion": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Client document format of the manifest (≥ 1).",
                         "format": "int32"
                     },
@@ -2828,6 +4634,7 @@
                 }
             },
             "ProblemDetails": {
+                "required": ["code", "traceId"],
                 "type": "object",
                 "properties": {
                     "type": {
@@ -2837,8 +4644,7 @@
                         "type": ["null", "string"]
                     },
                     "status": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "format": "int32"
                     },
                     "detail": {
@@ -2846,6 +4652,84 @@
                     },
                     "instance": {
                         "type": ["null", "string"]
+                    },
+                    "code": {
+                        "enum": [
+                            "account_disabled",
+                            "account_locked",
+                            "bad_request",
+                            "blobs_missing",
+                            "cannot_target_admin",
+                            "cannot_target_self",
+                            "conflict",
+                            "csrf_failed",
+                            "document_exists",
+                            "document_in_trash",
+                            "email_disabled",
+                            "email_taken",
+                            "forbidden",
+                            "hash_mismatch",
+                            "idempotency_key_reused",
+                            "internal_error",
+                            "invalid_credentials",
+                            "invalid_password",
+                            "invalid_token",
+                            "method_not_allowed",
+                            "not_found",
+                            "payload_too_large",
+                            "precondition_failed",
+                            "precondition_required",
+                            "quota_exceeded",
+                            "service_unavailable",
+                            "signup_disabled",
+                            "too_many_requests",
+                            "too_many_tokens",
+                            "unauthorized",
+                            "unsupported_content_encoding",
+                            "validation_failed",
+                            "version_conflict"
+                        ],
+                        "type": "string",
+                        "description": "Stable machine-readable error code; type is urn:spicy3d:problem:{code}."
+                    },
+                    "traceId": {
+                        "type": "string",
+                        "description": "Identifies the request in the server logs."
+                    },
+                    "headVersionId": {
+                        "type": "string",
+                        "description": "version_conflict and document_exists only: the document's current head version.",
+                        "format": "uuid"
+                    },
+                    "inTrash": {
+                        "type": "boolean",
+                        "description": "document_exists only: the existing document is in the trash (restore it, then save a version with If-Match = headVersionId)."
+                    },
+                    "headCreatedAt": {
+                        "type": "string",
+                        "description": "version_conflict only: when the head version was saved.",
+                        "format": "date-time"
+                    },
+                    "headDeviceName": {
+                        "type": ["null", "string"],
+                        "description": "version_conflict only: the device that saved the head version, if it sent one."
+                    },
+                    "missing": {
+                        "type": "array",
+                        "items": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                        },
+                        "description": "blobs_missing only: the SHA-256 of each referenced blob that isn't uploaded, sorted."
+                    }
+                }
+            },
+            "ResendVerificationRequest": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": ["null", "string"],
+                        "description": "The account's email, to resend without a session; omitted: the signed-in user."
                     }
                 }
             },
@@ -2867,6 +4751,24 @@
                         "description": "At least 10 characters, not a common password."
                     }
                 }
+            },
+            "RestoreVersionRequest": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": ["null", "string"],
+                        "description": "Optional label of the new restore version (≤ 200 characters)."
+                    },
+                    "deviceName": {
+                        "type": ["null", "string"],
+                        "description": "Name of the restoring device (≤ 100 characters), shown in the history."
+                    },
+                    "clientId": {
+                        "type": ["null", "string"],
+                        "description": "Id of the restoring client instance (≤ 100 characters), echoed in real-time events."
+                    }
+                },
+                "description": "Optional body of a restore; the content always comes from the restored version."
             },
             "SessionResponse": {
                 "required": [
@@ -2940,26 +4842,22 @@
                 "type": "object",
                 "properties": {
                     "maxUploadBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Largest blob upload (uncompressed).",
                         "format": "int64"
                     },
                     "maxManifestBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Largest manifest a version may reference.",
                         "format": "int64"
                     },
                     "quotaBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "description": "Storage per user; `null` when unlimited.",
                         "format": "int64"
                     },
                     "trashRetentionDays": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Days before documents in the trash are deleted permanently.",
                         "format": "int32"
                     },
@@ -2974,22 +4872,16 @@
                 "type": "object",
                 "properties": {
                     "usedBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Unique blobs referenced by the user's versions (trash included) or recently uploaded, uncompressed.",
                         "format": "int64"
                     },
                     "quotaBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["null", "integer", "string"],
+                        "type": ["null", "integer"],
                         "description": "The limit; `null` when unlimited.",
                         "format": "int64"
                     }
                 }
-            },
-            "Stream": {
-                "type": "string",
-                "format": "binary"
             },
             "UpdateDocumentRequest": {
                 "required": ["name"],
@@ -3002,7 +4894,6 @@
                 }
             },
             "UpdateMeRequest": {
-                "required": ["displayName"],
                 "type": "object",
                 "properties": {
                     "displayName": {
@@ -3012,18 +4903,18 @@
                 }
             },
             "UpdateVersionRequest": {
-                "required": ["label", "pinned"],
                 "type": "object",
                 "properties": {
                     "label": {
                         "type": ["null", "string"],
-                        "description": "New label; an empty string removes it; omitted or `null` keeps it."
+                        "description": "Optional. A non-empty string sets the label (trimmed, ≤ 200 characters); an empty or whitespace-only string removes it; omitted or `null` keeps the current label."
                     },
                     "pinned": {
                         "type": ["null", "boolean"],
-                        "description": "Pin (never pruned) or unpin; omitted or `null` keeps it."
+                        "description": "Optional. `true` pins (never pruned), `false` unpins; omitted or `null` keeps the current value."
                     }
-                }
+                },
+                "description": "Partial update: every field is optional and applied independently. An omitted field and an explicit `null`\nboth mean \"keep the current value\", so `{}` changes nothing."
             },
             "UserSettings": {
                 "type": "object",
@@ -3031,8 +4922,23 @@
                     "autosave": {
                         "$ref": "#/components/schemas/AutosaveSettings"
                     }
+                }
+            },
+            "UserSettingsResponse": {
+                "required": ["autosave", "updatedAt"],
+                "type": "object",
+                "properties": {
+                    "autosave": {
+                        "description": "Autosave of cloud documents (CLOUD-07).",
+                        "$ref": "#/components/schemas/AutosaveSettings"
+                    },
+                    "updatedAt": {
+                        "type": ["null", "string"],
+                        "description": "Last change (UTC); `null` while never saved (all defaults). Ignored in a PUT body.",
+                        "format": "date-time"
+                    }
                 },
-                "additionalProperties": false
+                "description": "The settings as returned by GET and PUT: the UserSettings document plus `updatedAt`."
             },
             "VerifyEmailRequest": {
                 "required": ["userId", "token"],
@@ -3102,7 +5008,7 @@
                             "type": "string",
                             "format": "uuid"
                         },
-                        "description": "Parents: none for the first version (or when older autosaves were pruned), usually two for a merge. Pruning autosaves re-parents their children onto their parents."
+                        "description": "Parents, in a guaranteed order: none for the first version (or when older autosaves were pruned); otherwise the first is the head the version was saved on (its direct predecessor: for a merge, \"theirs\", the line merged into), and a merge's second is the merged-from version (the saving device's own line, \"merged changes from device\"). Pruning autosaves re-parents their children onto their parents, replacing a deleted parent in place, so the order is kept (a merge whose parents collapse onto one version keeps one)."
                     },
                     "kind": {
                         "description": "Why it was saved.",
@@ -3130,9 +5036,8 @@
                         "description": "Saving client instance."
                     },
                     "formatVersion": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
-                        "description": "Client document format of the manifest.",
+                        "type": "integer",
+                        "description": "Client document format of the manifest. A restore keeps the restored version's format, so the head may go back to an older format; clients migrate on load.",
                         "format": "int32"
                     },
                     "manifestSha256": {
@@ -3144,8 +5049,7 @@
                         "description": "Thumbnail blob, if any."
                     },
                     "sizeBytes": {
-                        "pattern": "^-?(?:0|[1-9]\\d*)$",
-                        "type": ["integer", "string"],
+                        "type": "integer",
                         "description": "Manifest plus referenced blobs, uncompressed, each counted once.",
                         "format": "int64"
                     }

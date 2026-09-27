@@ -348,7 +348,7 @@ describe("account email links", () => {
 });
 
 describe("startAccountUi", () => {
-    const config = { version: "0.0.1", apiVersion: "1", features: FEATURES } as ConfigResponse;
+    const config = { version: "0.0.1", apiVersion: 1, features: FEATURES } as unknown as ConfigResponse;
 
     test("asks who is signed in, adds the account button, removes it on teardown", async () => {
         const server = new FakeServer().on("GET /api/me", problem(401, "unauthorized"));

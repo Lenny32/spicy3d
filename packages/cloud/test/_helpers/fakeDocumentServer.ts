@@ -215,14 +215,14 @@ export class FakeDocumentServer {
             documentId: document.id,
             parentIds: parents,
             kind: request.kind ?? "manual",
-            label: request.label,
+            label: request.label ?? null,
             pinned: false,
             createdAt: this.now(),
-            deviceName: request.deviceName,
-            clientId: request.clientId,
+            deviceName: request.deviceName ?? null,
+            clientId: request.clientId ?? null,
             formatVersion: request.formatVersion,
             manifestSha256: request.manifestSha256,
-            thumbnailSha256: request.thumbnailSha256,
+            thumbnailSha256: request.thumbnailSha256 ?? null,
             sizeBytes: refs.reduce((sum, sha) => sum + (this.blobs.get(sha)?.length ?? 0), 0),
         };
         document.versions.push(version);
@@ -391,14 +391,14 @@ export class FakeDocumentServer {
 
 /** The client's config with the storage limits the repository reads. */
 export const CONFIG: ApiSchema<"ConfigResponse"> = {
-    apiVersion: "1",
+    apiVersion: 1,
     eventsSocket: "/api/events",
     features: { signup: true, emailVerification: false, email: false, mcp: false },
     mcp: null,
     publicUrl: "https://spicy.test",
     serverTime: "2026-09-27T10:00:00Z",
     storage: {
-        autosaveRetention: { keepAllHours: 24, hourlyDays: 7, dailyDays: 30 },
+        autosaveRetention: { keepAllHours: 24, hourlyDays: 7, dailyDays: 30, mergeParentDays: 7 },
         maxManifestBytes: 16 * 1024 * 1024,
         maxUploadBytes: 100 * 1024 * 1024,
         quotaBytes: null,

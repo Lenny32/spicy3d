@@ -8,7 +8,7 @@ import type { ConfigResponse } from "../src/api";
 import { CloudClient } from "../src/client";
 import { API_VERSION_BANNER_ID, Cloud, startCloud } from "../src/cloud";
 
-const config = { version: "0.0.2", apiVersion: "1" } as ConfigResponse;
+const config = { version: "0.0.2", apiVersion: 1 } as unknown as ConfigResponse;
 
 let published: [string, unknown[]][];
 

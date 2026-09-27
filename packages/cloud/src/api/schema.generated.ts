@@ -5,6 +5,23 @@
 // Regenerate with `npm run cloud:api` (or `npm run cloud:api -- <path-or-url>` for a newer spec).
 
 export interface paths {
+    "/api/admin/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The admin audit log, newest first (keyset paging with before). Append-only: no endpoint changes it. */
+        get: operations["AdminListAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/system": {
         parameters: {
             query?: never;
@@ -49,7 +66,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Permanently delete an account and all its data. */
+        /** Permanently delete an account and all its data. Confirmed with the administrator's current password. */
         delete: operations["AdminDeleteUser"];
         options?: never;
         head?: never;
@@ -65,7 +82,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Disable an account: it can't sign in, all its sessions end immediately and its access tokens are revoked. */
+        /** Disable an account: it can't sign in, all its sessions end immediately and its access tokens are revoked. Confirmed with the administrator's current password. */
         post: operations["AdminDisableUser"];
         delete?: never;
         options?: never;
@@ -99,7 +116,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a password reset link to hand to the user (the recovery path when the server can't send email). */
+        /** Create a password reset link to hand to the user (the recovery path when the server can't send email). Confirmed with the administrator's current password; not allowed for another administrator's account. */
         post: operations["AdminCreatePasswordResetLink"];
         delete?: never;
         options?: never;
@@ -184,7 +201,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send the verification email again to the signed-in user. */
+        /** Send the verification email again. With an email in the body, anonymous: always 202 (doesn't reveal whether the account exists or is verified). Without, for the signed-in user: 202 sent, 204 already verified, 401 not signed in. 503 email_disabled when the server can't send email. */
         post: operations["ResendVerification"];
         delete?: never;
         options?: never;
@@ -252,7 +269,7 @@ export interface paths {
         };
         /** A blob referenced by one of the caller's versions. Immutable: cacheable forever; gzip-encoded when the client accepts it. */
         get: operations["GetBlob"];
-        /** Upload a blob (raw bytes, uncompressed; the URL is the SHA-256 of the content, lowercase hex). Streamed and verified; at most the server's upload limit (413) and within the caller's quota (507). */
+        /** Upload a blob (raw bytes, uncompressed; the URL is the SHA-256 of the content, lowercase hex). The body is hashed as received: a Content-Encoding other than identity is rejected (415). Streamed and verified; at most the server's upload limit (413) and within the caller's quota (507). */
         put: operations["UploadBlob"];
         post?: never;
         delete?: never;
@@ -356,10 +373,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Version history, newest first (keyset pagination), optionally of one kind. */
+        /** Version history, newest first (keyset pagination), optionally filtered by kind (repeatable) or to kept versions (kept=true). */
         get: operations["ListVersions"];
         put?: never;
-        /** Save a new head version. Requires If-Match with the current head (409 version_conflict with the head otherwise); upload blobs first (422 blobs_missing). Optional Idempotency-Key header: a retry within 24 hours returns the original version. */
+        /** Save a new head version. Requires If-Match with the current head (409 version_conflict with the head otherwise); upload blobs first (422 blobs_missing). Optional Idempotency-Key header: a retry within 24 hours returns the original version. The recorded parentIds start with the head (If-Match), whatever order they were sent in; to restore an older version, prefer POST /api/versions/{versionId}/restore. */
         post: operations["SaveVersion"];
         delete?: never;
         options?: never;
@@ -374,7 +391,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liveness and dependency status. */
+        /**
+         * Liveness and dependency status.
+         * @description Anonymous callers get only the overall `status`; administrators also get `version`, `checkedAt` and `checks`. Results are cached for 10 seconds.
+         */
         get: operations["GetHealth"];
         put?: never;
         post?: never;
@@ -460,7 +480,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download all data of the account as a ZIP (streamed): account.json, and per document the latest version as a .spicy file, with history=true every kept version too. Once per hour. */
+        /** Download all data of the account as a ZIP (streamed): account.json, and per document the latest version as a .spicy-cloud.json.gz file (a spicy3d.cloudVersion envelope, not a client .spicy document), with history=true every kept version too; each referenced blob once, as blobs/<sha256>. Once per hour. */
         get: operations["ExportAccount"];
         put?: never;
         post?: never;
@@ -511,9 +531,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The signed-in user's settings; defaults for everything never set. The ETag can be sent back as If-Match when saving. */
+        /** The signed-in user's settings; defaults for everything never set, updatedAt null while the user never saved any. The ETag can be sent back as If-Match when saving. */
         get: operations["GetSettings"];
-        /** Replace the settings: absent keys take their defaults, unknown keys are rejected (400). With If-Match, 412 when they were changed on another device since; without it the last write wins. The user's other devices are notified (settings.updated). */
+        /** Replace the whole settings document: absent keys revert to their defaults, so always send the full document; unknown keys are ignored and dropped (forward compatible), updatedAt in the body is ignored. With If-Match, 412 when they were changed on another device since; without it the last write wins. The user's other devices are notified (settings.updated). */
         put: operations["UpdateSettings"];
         post?: never;
         delete?: never;
@@ -588,8 +608,25 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Set or clear the label, pin or unpin. Content is immutable. */
+        /** Set or clear the label, pin or unpin. Content is immutable. Partial update: each field is optional; omitted or null keeps the current value, an empty label removes it. */
         patch: operations["UpdateVersion"];
+        trace?: never;
+    };
+    "/api/versions/{versionId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore this version as the document's new head: the server saves a version of kind restore, parentIds [current head], with this version's manifest, blobs, thumbnail and formatVersion (the client sends no content). Requires If-Match with the current head (409 version_conflict with the head otherwise). Restoring a version saved in an older formatVersion makes the head that format again; this is intended, clients migrate older formats on load. */
+        post: operations["RestoreVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -606,7 +643,7 @@ export interface components {
              * Format: date-time
              * @description Expiry (UTC); `null`: never expires. An expired token no longer works.
              */
-            expiresAt: string;
+            expiresAt: null | string;
             /**
              * Format: uuid
              * @description Token id.
@@ -616,13 +653,58 @@ export interface components {
              * Format: date-time
              * @description Last use (UTC, minute resolution); `null` if never used.
              */
-            lastUsedAt: string;
+            lastUsedAt: null | string;
             /** @description Label given when it was created. */
             name: string;
             /** @description The secret's first characters, to recognize it. */
             prefix: string;
             /** @description What the token may do. */
             scopes: string[];
+        };
+        AdminAuditEntryResponse: {
+            /** @description `user.disabled`, `user.enabled`, `user.password_reset_link_created` or `user.deleted`. */
+            action: string;
+            /**
+             * Format: uuid
+             * @description The administrator (the id stays after that account is deleted).
+             */
+            actorId: string;
+            /**
+             * Format: date-time
+             * @description When the action happened (UTC).
+             */
+            at: string;
+            details: null | components["schemas"]["JsonElement"];
+            /**
+             * Format: int64
+             * @description Entry id, increasing with time.
+             */
+            id: number;
+            /** @description The administrator's client IP address. */
+            ip: null | string;
+            /**
+             * Format: uuid
+             * @description The administrator's session.
+             */
+            sessionId: null | string;
+            /**
+             * Format: uuid
+             * @description The account acted on.
+             */
+            targetUserId: string;
+        };
+        AdminAuditList: {
+            /** @description Newest first, at most `limit` (≤ 200). */
+            items: components["schemas"]["AdminAuditEntryResponse"][];
+            /**
+             * Format: int64
+             * @description Pass as `before` for the next (older) page; `null` on the last page.
+             */
+            nextBefore: null | number;
+        };
+        AdminConfirmationRequest: {
+            /** @description The calling administrator's own password, to confirm (403 invalid_password or account_locked otherwise). */
+            currentPassword: string;
         };
         AdminSystemResponse: {
             /** @description Last successful backup. */
@@ -649,7 +731,7 @@ export interface components {
              * Format: date-time
              * @description When the account was disabled (UTC); `null` when enabled.
              */
-            disabledAt: string;
+            disabledAt: null | string;
             /** @description Display name. */
             displayName: string;
             /** @description Email address. */
@@ -667,12 +749,12 @@ export interface components {
              * Format: date-time
              * @description Last authenticated request (UTC); `null` if never signed in.
              */
-            lastSeenAt: string;
+            lastSeenAt: null | string;
             /**
              * Format: date-time
              * @description End of a sign-in lockout after failed attempts (UTC); `null` when not locked.
              */
-            lockedOutUntil: string;
+            lockedOutUntil: null | string;
             /**
              * Format: int64
              * @description Bytes of cloud storage used (unique blobs, uncompressed; counts towards the quota).
@@ -681,7 +763,7 @@ export interface components {
         };
         /**
          * @description Autosave pruning, relative to now (UTC buckets). Manual, merge, restore, MCP, labeled and pinned versions and the
-         *     head are kept forever.
+         *     head are kept forever (the versions `GET /api/documents/{id}/versions?kept=true` lists, plus the head).
          */
         AutosaveRetentionPolicy: {
             /**
@@ -699,6 +781,11 @@ export interface components {
              * @description Every autosave younger than this is kept.
              */
             keepAllHours: number;
+            /**
+             * Format: int32
+             * @description An autosave that is a parent of a merge younger than this is kept, whatever its age (0: no such exception).
+             */
+            mergeParentDays: number;
         };
         AutosaveSettings: {
             /** @default true */
@@ -716,12 +803,12 @@ export interface components {
              * Format: int64
              * @description How long it took.
              */
-            durationSeconds: number | null;
+            durationSeconds: null | number;
             /**
              * Format: date-time
              * @description End of the last successful backup (UTC); `null` when none is recorded.
              */
-            lastSuccessAt: string;
+            lastSuccessAt: null | string;
             /**
              * Format: int32
              * @description Age after which a backup is stale.
@@ -733,7 +820,7 @@ export interface components {
              * Format: int64
              * @description Its size: database dump plus blob snapshot.
              */
-            sizeBytes: number | null;
+            sizeBytes: null | number;
             /** @description No successful backup within `MaxAgeHours`: show a warning. */
             stale: boolean;
         };
@@ -754,8 +841,11 @@ export interface components {
             newPassword: string;
         };
         ConfigResponse: {
-            /** @description Version of the HTTP contract. */
-            apiVersion: string;
+            /**
+             * Format: int32
+             * @description Version of the HTTP contract, an integer bumped on breaking changes.
+             */
+            apiVersion: number;
             /** @description WebSocket of real-time events for the signed-in user (SRV-07). */
             eventsSocket: string;
             /** @description Enabled features. */
@@ -791,7 +881,7 @@ export interface components {
              * Format: int32
              * @description 30, 90 or 365 days, or 0 for never; omitted: 90.
              */
-            expiresInDays: number | null;
+            expiresInDays?: null | number;
             /** @description Label, e.g. "Claude Code on my laptop" (1-100 characters). */
             name: string;
             /** @description At least one of mcp:read (MCP read tools and screenshots), mcp:write (MCP editing tools), documents:read (cloud documents and history, read-only). */
@@ -807,7 +897,7 @@ export interface components {
              * Format: date-time
              * @description Expiry (UTC); `null`: never expires.
              */
-            expiresAt: string;
+            expiresAt: null | string;
             /**
              * Format: uuid
              * @description Token id.
@@ -865,7 +955,7 @@ export interface components {
              * Format: date-time
              * @description When moved to the trash (UTC).
              */
-            deletedAt: string;
+            deletedAt: null | string;
             head: null | components["schemas"]["VersionResponse"];
             /**
              * Format: uuid
@@ -899,7 +989,7 @@ export interface components {
              * Format: date-time
              * @description When moved to the trash (UTC); `null` when not in the trash.
              */
-            deletedAt: string;
+            deletedAt: null | string;
             /**
              * Format: uuid
              * @description Latest version.
@@ -938,31 +1028,129 @@ export interface components {
         HealthResponse: {
             /**
              * Format: date-time
-             * @description When the checks ran (UTC).
+             * @description When the checks ran (UTC; administrators only).
              */
-            checkedAt: string;
-            /** @description Status per dependency, e.g. `database`. */
-            checks: {
+            checkedAt?: null | string;
+            /** @description Status per dependency, e.g. `database` (administrators only). */
+            checks?: null | {
                 [key: string]: components["schemas"]["HealthState"];
             };
             /** @description Overall status. */
             status: components["schemas"]["HealthState"];
-            /** @description Server version. */
-            version: string;
+            /** @description Server version (administrators only). */
+            version?: null | string;
         };
         /** @enum {unknown} */
         HealthState: "healthy" | "degraded" | "unhealthy";
         HttpValidationProblemDetails: {
+            /**
+             * @description Stable machine-readable error code; type is urn:spicy3d:problem:{code}.
+             * @enum {string}
+             */
+            code:
+                | "account_disabled"
+                | "account_locked"
+                | "bad_request"
+                | "blobs_missing"
+                | "cannot_target_admin"
+                | "cannot_target_self"
+                | "conflict"
+                | "csrf_failed"
+                | "document_exists"
+                | "document_in_trash"
+                | "email_disabled"
+                | "email_taken"
+                | "forbidden"
+                | "hash_mismatch"
+                | "idempotency_key_reused"
+                | "internal_error"
+                | "invalid_credentials"
+                | "invalid_password"
+                | "invalid_token"
+                | "method_not_allowed"
+                | "not_found"
+                | "payload_too_large"
+                | "precondition_failed"
+                | "precondition_required"
+                | "quota_exceeded"
+                | "service_unavailable"
+                | "signup_disabled"
+                | "too_many_requests"
+                | "too_many_tokens"
+                | "unauthorized"
+                | "unsupported_content_encoding"
+                | "validation_failed"
+                | "version_conflict";
             detail?: null | string;
+            /** @description validation_failed only: field errors, from camelCase field names (dotted paths for nested fields, or the header name) to stable error codes. */
             errors?: {
-                [key: string]: string[];
+                [key: string]: (
+                    | "client_id_too_long"
+                    | "device_name_too_long"
+                    | "display_name_required"
+                    | "display_name_too_long"
+                    | "duplicate_email"
+                    | "email_required"
+                    | "email_too_long"
+                    | "head_not_parent"
+                    | "invalid_cursor"
+                    | "invalid_display_name"
+                    | "invalid_email"
+                    | "invalid_expiry"
+                    | "invalid_format_version"
+                    | "invalid_id"
+                    | "invalid_idempotency_key"
+                    | "invalid_interval"
+                    | "invalid_kind"
+                    | "invalid_label"
+                    | "invalid_name"
+                    | "invalid_parents"
+                    | "invalid_sha256"
+                    | "invalid_thumbnail"
+                    | "kind_required"
+                    | "label_too_long"
+                    | "manifest_too_large"
+                    | "merge_needs_two_parents"
+                    | "name_required"
+                    | "name_too_long"
+                    | "password_common"
+                    | "password_mismatch"
+                    | "password_requires_unique_chars"
+                    | "password_too_long"
+                    | "password_too_short"
+                    | "query_too_long"
+                    | "scopes_required"
+                    | "too_many_blobs"
+                    | "too_many_hashes"
+                    | "unknown_scope"
+                    | "version_required"
+                )[];
             };
+            /**
+             * Format: date-time
+             * @description version_conflict only: when the head version was saved.
+             */
+            headCreatedAt?: string;
+            /** @description version_conflict only: the device that saved the head version, if it sent one. */
+            headDeviceName?: null | string;
+            /**
+             * Format: uuid
+             * @description version_conflict and document_exists only: the document's current head version.
+             */
+            headVersionId?: string;
             instance?: null | string;
+            /** @description document_exists only: the existing document is in the trash (restore it, then save a version with If-Match = headVersionId). */
+            inTrash?: boolean;
+            /** @description blobs_missing only: the SHA-256 of each referenced blob that isn't uploaded, sorted. */
+            missing?: string[];
             /** Format: int32 */
-            status?: number | null;
+            status?: null | number;
             title?: null | string;
+            /** @description Identifies the request in the server logs. */
+            traceId: string;
             type?: null | string;
         };
+        JsonElement: unknown;
         LoginRequest: {
             email: string;
             password: string;
@@ -995,11 +1183,11 @@ export interface components {
         };
         NewVersionRequest: {
             /** @description SHA-256 of every blob the manifest references (≤ 10 000). All must be uploaded by the caller or referenced by their versions. */
-            blobs: null | string[];
+            blobs?: null | string[];
             /** @description Id of the saving client instance (≤ 100 characters), echoed in real-time events. */
-            clientId: null | string;
+            clientId?: null | string;
             /** @description Name of the saving device (≤ 100 characters), shown in the history. */
-            deviceName: null | string;
+            deviceName?: null | string;
             /**
              * Format: int32
              * @description Client document format of the manifest (≥ 1).
@@ -1007,13 +1195,13 @@ export interface components {
             formatVersion: number;
             kind: null | components["schemas"]["VersionKind"];
             /** @description Optional label (≤ 200 characters); labeled versions are never pruned. */
-            label: null | string;
+            label?: null | string;
             /** @description SHA-256 of the manifest blob (uploaded first); at most the server's manifest size limit. */
             manifestSha256: string;
-            /** @description Parent versions: the current head, plus the client's own parent for a merge (dropped if it no longer exists, e.g. a pruned autosave). Empty for a document's first version. */
-            parentIds: null | string[];
+            /** @description Parent versions: the current head, plus the client's own parent for a merge (dropped if it no longer exists, e.g. a pruned autosave). Empty for a document's first version. Recorded with the head first, whatever the order sent. */
+            parentIds?: null | string[];
             /** @description Optional thumbnail blob: PNG or WebP, at most 512×512 pixels and 256 KiB. */
-            thumbnailSha256: null | string;
+            thumbnailSha256?: null | string;
         };
         PasswordResetLinkResponse: {
             /**
@@ -1025,12 +1213,72 @@ export interface components {
             resetUrl: string;
         };
         ProblemDetails: {
+            /**
+             * @description Stable machine-readable error code; type is urn:spicy3d:problem:{code}.
+             * @enum {string}
+             */
+            code:
+                | "account_disabled"
+                | "account_locked"
+                | "bad_request"
+                | "blobs_missing"
+                | "cannot_target_admin"
+                | "cannot_target_self"
+                | "conflict"
+                | "csrf_failed"
+                | "document_exists"
+                | "document_in_trash"
+                | "email_disabled"
+                | "email_taken"
+                | "forbidden"
+                | "hash_mismatch"
+                | "idempotency_key_reused"
+                | "internal_error"
+                | "invalid_credentials"
+                | "invalid_password"
+                | "invalid_token"
+                | "method_not_allowed"
+                | "not_found"
+                | "payload_too_large"
+                | "precondition_failed"
+                | "precondition_required"
+                | "quota_exceeded"
+                | "service_unavailable"
+                | "signup_disabled"
+                | "too_many_requests"
+                | "too_many_tokens"
+                | "unauthorized"
+                | "unsupported_content_encoding"
+                | "validation_failed"
+                | "version_conflict";
             detail?: null | string;
+            /**
+             * Format: date-time
+             * @description version_conflict only: when the head version was saved.
+             */
+            headCreatedAt?: string;
+            /** @description version_conflict only: the device that saved the head version, if it sent one. */
+            headDeviceName?: null | string;
+            /**
+             * Format: uuid
+             * @description version_conflict and document_exists only: the document's current head version.
+             */
+            headVersionId?: string;
             instance?: null | string;
+            /** @description document_exists only: the existing document is in the trash (restore it, then save a version with If-Match = headVersionId). */
+            inTrash?: boolean;
+            /** @description blobs_missing only: the SHA-256 of each referenced blob that isn't uploaded, sorted. */
+            missing?: string[];
             /** Format: int32 */
-            status?: number | null;
+            status?: null | number;
             title?: null | string;
+            /** @description Identifies the request in the server logs. */
+            traceId: string;
             type?: null | string;
+        };
+        ResendVerificationRequest: {
+            /** @description The account's email, to resend without a session; omitted: the signed-in user. */
+            email?: null | string;
         };
         ResetPasswordRequest: {
             /** @description At least 10 characters, not a common password. */
@@ -1042,6 +1290,15 @@ export interface components {
              * @description From the reset link.
              */
             userId: string;
+        };
+        /** @description Optional body of a restore; the content always comes from the restored version. */
+        RestoreVersionRequest: {
+            /** @description Id of the restoring client instance (≤ 100 characters), echoed in real-time events. */
+            clientId?: null | string;
+            /** @description Name of the restoring device (≤ 100 characters), shown in the history. */
+            deviceName?: null | string;
+            /** @description Optional label of the new restore version (≤ 200 characters). */
+            label?: null | string;
         };
         SessionResponse: {
             /**
@@ -1093,7 +1350,7 @@ export interface components {
              * Format: int64
              * @description Storage per user; `null` when unlimited.
              */
-            quotaBytes: number | null;
+            quotaBytes: null | number;
             /**
              * Format: int32
              * @description Days before documents in the trash are deleted permanently.
@@ -1105,31 +1362,43 @@ export interface components {
              * Format: int64
              * @description The limit; `null` when unlimited.
              */
-            quotaBytes: number | null;
+            quotaBytes: null | number;
             /**
              * Format: int64
              * @description Unique blobs referenced by the user's versions (trash included) or recently uploaded, uncompressed.
              */
             usedBytes: number;
         };
-        /** Format: binary */
-        Stream: Blob;
         UpdateDocumentRequest: {
             /** @description New display name, 1–200 characters. */
             name: string;
         };
         UpdateMeRequest: {
             /** @description New display name; omitted or `null` keeps the current one. */
-            displayName: null | string;
+            displayName?: null | string;
         };
+        /**
+         * @description Partial update: every field is optional and applied independently. An omitted field and an explicit `null`
+         *     both mean "keep the current value", so `{}` changes nothing.
+         */
         UpdateVersionRequest: {
-            /** @description New label; an empty string removes it; omitted or `null` keeps it. */
-            label: null | string;
-            /** @description Pin (never pruned) or unpin; omitted or `null` keeps it. */
-            pinned: null | boolean;
+            /** @description Optional. A non-empty string sets the label (trimmed, ≤ 200 characters); an empty or whitespace-only string removes it; omitted or `null` keeps the current label. */
+            label?: null | string;
+            /** @description Optional. `true` pins (never pruned), `false` unpins; omitted or `null` keeps the current value. */
+            pinned?: null | boolean;
         };
         UserSettings: {
             autosave?: components["schemas"]["AutosaveSettings"];
+        };
+        /** @description The settings as returned by GET and PUT: the UserSettings document plus `updatedAt`. */
+        UserSettingsResponse: {
+            /** @description Autosave of cloud documents (CLOUD-07). */
+            autosave: components["schemas"]["AutosaveSettings"];
+            /**
+             * Format: date-time
+             * @description Last change (UTC); `null` while never saved (all defaults). Ignored in a PUT body.
+             */
+            updatedAt: null | string;
         };
         VerifyEmailRequest: {
             /** @description From the verification link. */
@@ -1162,7 +1431,7 @@ export interface components {
             documentId: string;
             /**
              * Format: int32
-             * @description Client document format of the manifest.
+             * @description Client document format of the manifest. A restore keeps the restored version's format, so the head may go back to an older format; clients migrate on load.
              */
             formatVersion: number;
             /**
@@ -1176,7 +1445,7 @@ export interface components {
             label: null | string;
             /** @description Manifest blob; the content is served by `GET /api/versions/{versionId}`. */
             manifestSha256: string;
-            /** @description Parents: none for the first version (or when older autosaves were pruned), usually two for a merge. Pruning autosaves re-parents their children onto their parents. */
+            /** @description Parents, in a guaranteed order: none for the first version (or when older autosaves were pruned); otherwise the first is the head the version was saved on (its direct predecessor: for a merge, "theirs", the line merged into), and a merge's second is the merged-from version (the saving device's own line, "merged changes from device"). Pruning autosaves re-parents their children onto their parents, replacing a deleted parent in place, so the order is kept (a merge whose parents collapse onto one version keeps one). */
             parentIds: string[];
             /** @description Pinned versions are never pruned. */
             pinned: boolean;
@@ -1197,6 +1466,57 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    AdminListAudit: {
+        parameters: {
+            query?: {
+                before?: number;
+                limit?: number;
+                userId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditList"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account isn't an administrator. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     AdminGetSystem: {
         parameters: {
             query?: never;
@@ -1213,6 +1533,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSystemResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account isn't an administrator. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1238,6 +1585,33 @@ export interface operations {
                     "application/json": components["schemas"]["AdminUserList"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account isn't an administrator. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     AdminDeleteUser: {
@@ -1249,7 +1623,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminConfirmationRequest"];
+            };
+        };
         responses: {
             /** @description No Content */
             204: {
@@ -1257,6 +1635,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Not Found */
             404: {
@@ -1269,6 +1665,15 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1287,7 +1692,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminConfirmationRequest"];
+            };
+        };
         responses: {
             /** @description No Content */
             204: {
@@ -1295,6 +1704,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Not Found */
             404: {
@@ -1307,6 +1734,15 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1334,8 +1770,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1354,7 +1817,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminConfirmationRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1365,8 +1832,35 @@ export interface operations {
                     "application/json": components["schemas"]["PasswordResetLinkResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. forbidden: the account isn't an administrator. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1405,8 +1899,37 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1436,8 +1959,37 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1478,8 +2030,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Forbidden */
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1505,6 +2077,24 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     ResendVerification: {
@@ -1514,7 +2104,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["ResendVerificationRequest"];
+            };
+        };
         responses: {
             /** @description Accepted */
             202: {
@@ -1530,8 +2124,46 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1570,6 +2202,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -1577,6 +2218,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1610,7 +2271,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Forbidden */
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1635,6 +2296,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1668,6 +2349,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     GetBlob: {
@@ -1684,12 +2394,43 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The content's SHA-256 (quoted). */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session) and no valid access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1710,7 +2451,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/octet-stream": components["schemas"]["Stream"];
+                "application/octet-stream": Blob;
             };
         };
         responses: {
@@ -1721,8 +2462,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Payload Too Large */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1742,6 +2510,8 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1750,6 +2520,15 @@ export interface operations {
             };
             /** @description Insufficient Storage */
             507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1781,6 +2560,24 @@ export interface operations {
                     "application/json": components["schemas"]["BlobCheckResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -1788,6 +2585,15 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1808,6 +2614,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigResponse"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1839,6 +2654,24 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentList"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session) and no valid access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -1846,6 +2679,15 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -1869,10 +2711,32 @@ export interface operations {
             /** @description Created */
             201: {
                 headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
+                    /** @description true when this replays the result of an earlier request with the same Idempotency-Key. */
+                    "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Conflict */
@@ -1893,6 +2757,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
                 };
             };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     GetDocument: {
@@ -1909,14 +2782,43 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session) and no valid access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1944,8 +2846,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1973,10 +2902,30 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Not Found */
@@ -1997,6 +2946,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
                 };
             };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     RestoreDocument: {
@@ -2013,14 +2971,43 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2035,8 +3022,10 @@ export interface operations {
             query?: {
                 /** @description nextCursor of the previous page. */
                 cursor?: string;
-                /** @description Only versions of this kind: manual, auto, merge, restore or mcp. */
-                kind?: string;
+                /** @description true: only the versions the autosave retention never prunes by rule, i.e. every non-auto version plus labeled or pinned autosaves (the "manual only" history filter). Combines with kind (both must match). */
+                kept?: boolean;
+                /** @description Only versions of these kinds: manual, auto, merge, restore or mcp. Repeat for several (kind=manual&kind=merge); any of them matches. */
+                kind?: string[];
                 /** @description Page size, 1-200 (default 50). */
                 limit?: number;
             };
@@ -2057,6 +3046,24 @@ export interface operations {
                     "application/json": components["schemas"]["VersionList"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session) and no valid access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2073,6 +3080,15 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2100,10 +3116,32 @@ export interface operations {
             /** @description Created */
             201: {
                 headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
+                    /** @description true when this replays the result of an earlier request with the same Idempotency-Key. */
+                    "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["VersionResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Not Found */
@@ -2142,6 +3180,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     GetHealth: {
@@ -2169,6 +3216,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2200,6 +3256,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     UpdateMe: {
@@ -2224,6 +3289,24 @@ export interface operations {
                     "application/json": components["schemas"]["MeResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2231,6 +3314,15 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2264,7 +3356,16 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Forbidden */
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2291,8 +3392,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
                 };
             };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2322,7 +3443,16 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Forbidden */
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2338,6 +3468,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description too_many_requests: rate limited; retry after Retry-After seconds. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2362,7 +3512,16 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Forbidden */
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2373,6 +3532,17 @@ export interface operations {
             };
             /** @description Too Many Requests */
             429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2397,12 +3567,36 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description attachment; filename=spicy3d-export-<yyyy-MM-ddTHHmmssZ>.zip; filename*=UTF-8''<same name>, with the UTC time of the export (e.g. spicy3d-export-2026-09-27T081500Z.zip). */
+                    "Content-Disposition"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/zip": Blob;
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Too Many Requests */
             429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2430,6 +3624,24 @@ export interface operations {
                     "application/json": components["schemas"]["SessionResponse"][];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     RevokeSession: {
@@ -2450,8 +3662,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2473,10 +3712,30 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description Version of the stored settings (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserSettings"];
+                    "application/json": components["schemas"]["UserSettingsResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2500,14 +3759,34 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description Version of the stored settings (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserSettings"];
+                    "application/json": components["schemas"]["UserSettingsResponse"];
                 };
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2533,6 +3812,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
                 };
             };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     GetStorage: {
@@ -2553,6 +3841,24 @@ export interface operations {
                     "application/json": components["schemas"]["StorageUsageResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     ListAccessTokens: {
@@ -2571,6 +3877,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessTokenResponse"][];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -2597,7 +3921,16 @@ export interface operations {
                     "application/json": components["schemas"]["CreatedAccessTokenResponse"];
                 };
             };
-            /** @description Forbidden */
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2627,6 +3960,17 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
@@ -2653,8 +3997,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2678,12 +4049,43 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The manifest's SHA-256 (quoted). */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session) and no valid access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. forbidden: the access token lacks the documents:read scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2717,6 +4119,24 @@ export interface operations {
                     "application/json": components["schemas"]["VersionResponse"];
                 };
             };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2733,6 +4153,109 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    RestoreVersion: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document's current head version id (its ETag). */
+                "If-Match"?: string;
+            };
+            path: {
+                versionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["RestoreVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    /** @description The document's head version id (quoted); send it back as If-Match when saving. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionResponse"];
+                };
+            };
+            /** @description unauthorized: not signed in (no or expired session). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description forbidden: the account's email address isn't verified yet. csrf_failed: the X-Spicy3D-Request: 1 header is missing, or the request is cross-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unexpected error (problem details). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
