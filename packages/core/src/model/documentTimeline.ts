@@ -3,6 +3,8 @@
 
 import type { IDocument } from "../document";
 import type { I18nKeys } from "../i18n";
+import { ShapeTypes } from "../shape/shapeType";
+import { VisualStates } from "../visual/visualShape";
 import {
     type FeatureItem,
     type IFeatureListNode,
@@ -89,4 +91,23 @@ export function revealTimelineEntry(document: IDocument, entry: TimelineEntry): 
     document.selection.setSelectedNodes([entry.node], false);
     // A request nobody took (the property panel not shown) must not open a feature later.
     if (featureId !== undefined) takeFeatureFocus(entry.node);
+}
+
+/**
+ * Highlights the entry's result in the viewport, so it is easy to find: the faces a feature
+ * created (`featureFaces`), or a node's whole shape. Returns the function taking it off again.
+ */
+export function highlightTimelineEntry(document: IDocument, entry: TimelineEntry): () => void {
+    const visual = document.visual.context.getVisual(entry.node);
+    if (visual === undefined) return () => {};
+    const highlighter = document.visual.highlighter;
+    const state = VisualStates.faceHighlight;
+    if (entry.kind === "node") {
+        highlighter.addState(visual, state, ShapeTypes.shape);
+        return () => highlighter.removeState(visual, state, ShapeTypes.shape);
+    }
+    const faces = entry.node.featureFaces?.(entry.feature.id) ?? [];
+    if (faces.length === 0) return () => {};
+    highlighter.addState(visual, state, ShapeTypes.face, ...faces);
+    return () => highlighter.removeState(visual, state, ShapeTypes.face, ...faces);
 }

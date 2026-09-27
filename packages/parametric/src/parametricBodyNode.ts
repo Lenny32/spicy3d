@@ -548,6 +548,18 @@ export class ParametricBodyNode
         return this._timeline.idIsShared("edge", id);
     }
 
+    /**
+     * `IFeatureListNode.featureFaces`: the faces the feature created, by comparing the tracked
+     * ids entering and leaving it (`BodyTimeline.facesCreatedAt`). A rollback preview shows a
+     * truncated chain, so nothing is traced meanwhile.
+     */
+    featureFaces(featureId: string): number[] {
+        if (this._rollbackIndex !== undefined) return [];
+        const index = this.features.findIndex((x) => x.id === featureId);
+        if (index < 0 || this.features[index].suppressed) return [];
+        return this._timeline.facesCreatedAt(index);
+    }
+
     get featureCount(): number {
         return this.features.length;
     }
