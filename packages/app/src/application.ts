@@ -239,7 +239,19 @@ export class Application extends Observable implements IApplication {
         );
     }
 
+    /**
+     * Opens a stored document; when it is already open (same id, same repository), shows that one
+     * instead of a second copy that would save over it.
+     */
     async openDocument(id: string, repository?: IDocumentRepository): Promise<IDocument | undefined> {
+        const source = repository ?? this.repositories.local;
+        const open = [...this.documents].find((x) => x.id === id && x.repository === source);
+        if (open) {
+            const view = this.views.find((x) => x.document === open);
+            if (view) this.activeView = view;
+            else await this.createActiveView(open);
+            return open;
+        }
         const document = await Document.open(this, id, repository);
         await this.createActiveView(document);
         return document;

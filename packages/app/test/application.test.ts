@@ -340,6 +340,27 @@ describe("Application", () => {
             expect(repository.saves.map((x) => x.id)).toEqual(["doc-456", "doc-456"]);
         });
 
+        test("a document already open (same id and repository) is shown again, not opened twice", async () => {
+            const repository = new MemoryDocumentRepository();
+            await repository.save({
+                id: "doc-twice",
+                name: "Twice",
+                data: makeSerializedDocData("Twice", "doc-twice"),
+                kind: "manual",
+            });
+            const first = await sharedApp.openDocument("doc-twice", repository);
+            const other = await sharedApp.newDocument("Other");
+            expect(sharedApp.activeView?.document).toBe(other);
+            const load = rs.spyOn(repository, "load");
+
+            const again = await sharedApp.openDocument("doc-twice", repository);
+
+            expect(again).toBe(first);
+            expect(load).not.toHaveBeenCalled();
+            expect([...sharedApp.documents].filter((x) => x.id === "doc-twice")).toHaveLength(1);
+            expect(sharedApp.activeView?.document).toBe(first);
+        });
+
         test("should set activeView after opening document", async () => {
             sharedApp.storage.get = async () => validData;
 
