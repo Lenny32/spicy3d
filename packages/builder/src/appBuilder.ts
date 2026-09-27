@@ -1,7 +1,13 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Application, CommandService, HotkeyService, ShowPropertyEventHandler } from "@spicy3d/app";
+import {
+    Application,
+    AutosaveService,
+    CommandService,
+    HotkeyService,
+    ShowPropertyEventHandler,
+} from "@spicy3d/app";
 import type { AccountLink } from "@spicy3d/cloud/src/links";
 import {
     Config,
@@ -163,6 +169,7 @@ export class AppBuilder {
                     Logger.warn("[cloud] opened with an account link, but the server is incompatible");
                 return;
             }
+            cloud.startCloudSettings(started);
             await cloud.startAccountUi(started, accountLink);
             cloud.startCloudDocuments(started, app);
         });
@@ -249,6 +256,6 @@ export class AppBuilder {
     }
 
     protected getServices(): IService[] {
-        return [new CommandService(), new HotkeyService()];
+        return [new CommandService(), new HotkeyService(), new AutosaveService()];
     }
 }

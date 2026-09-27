@@ -39,6 +39,7 @@ const cloudMock = rs.hoisted(() => ({
     startCalls: [] as unknown[][],
     accountUiCalls: [] as unknown[][],
     documentsCalls: [] as unknown[][],
+    settingsCalls: [] as unknown[][],
     /** `null`: the default answer (`{ connection }`); `undefined`: not started (incompatible). */
     startResult: null as unknown,
     mainModuleLoaded: 0,
@@ -63,6 +64,10 @@ rs.mock("@spicy3d/cloud", () => {
         },
         startCloudDocuments: (...args: unknown[]) => {
             cloudMock.documentsCalls.push(args);
+            return () => {};
+        },
+        startCloudSettings: (...args: unknown[]) => {
+            cloudMock.settingsCalls.push(args);
             return () => {};
         },
     };
@@ -126,11 +131,14 @@ describe("AppBuilder", () => {
     });
 
     describe("getServices", () => {
-        test("should return an array with CommandService and HotkeyService", () => {
+        test("should return the command, hotkey and autosave services", () => {
             const builder = new AppBuilder();
             const services = (builder as any).getServices();
-            expect(Array.isArray(services)).toBe(true);
-            expect(services.length).toBe(2);
+            expect(services.map((x: object) => x.constructor.name)).toEqual([
+                "CommandService",
+                "HotkeyService",
+                "AutosaveService",
+            ]);
         });
     });
 
@@ -247,6 +255,7 @@ describe("AppBuilder", () => {
             cloudMock.startCalls.length = 0;
             cloudMock.accountUiCalls.length = 0;
             cloudMock.documentsCalls.length = 0;
+            cloudMock.settingsCalls.length = 0;
         });
 
         test("adds a post-startup step, not a startup init", () => {
@@ -269,6 +278,7 @@ describe("AppBuilder", () => {
             expect(cloudMock.startCalls).toEqual([]);
             expect(cloudMock.accountUiCalls).toEqual([]);
             expect(cloudMock.documentsCalls).toEqual([]);
+            expect(cloudMock.settingsCalls).toEqual([]);
             // Runs before the "a server" case, which is the first to import the client module.
             expect(cloudMock.mainModuleLoaded).toBe(0);
         });
@@ -284,6 +294,7 @@ describe("AppBuilder", () => {
             expect(cloudMock.startCalls).toEqual([[discovery, {}]]);
             expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, undefined]]);
             expect(cloudMock.documentsCalls).toEqual([[{ connection: discovery }, fakeApp]]);
+            expect(cloudMock.settingsCalls).toEqual([[{ connection: discovery }]]);
             expect(cloudMock.mainModuleLoaded).toBe(1);
         });
 
