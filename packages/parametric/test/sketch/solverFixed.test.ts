@@ -8,6 +8,7 @@ import {
     axisLineRefs,
     ConstraintKind,
     type ExternalRefData,
+    FIRST_EXTERNAL_ENTITY_ID,
     originRef,
     SKETCH_ORIGIN_ID,
     SKETCH_X_AXIS_ID,
@@ -178,7 +179,7 @@ describe("fixed entities (datum and externals)", () => {
     });
 });
 
-describe("monotonic id counters", () => {
+describe("id allocation", () => {
     test("real entity ids are never reused after a delete", () => {
         const solver = new SketchSolver(Plane.XY);
         try {
@@ -225,52 +226,7 @@ describe("monotonic id counters", () => {
         }
     });
 
-    test("counters round-trip through toData/loadData", () => {
-        const solver = new SketchSolver(Plane.XY);
-        try {
-            solver.addLine(0, 0, 1, 1);
-            solver.addCircle(0, 0, 2);
-            solver.removeEntity(1);
-            solver.addExternalEntity({ ...EXT_LINE, entityId: solver.allocateExternalEntityId() });
-
-            const data = solver.toData();
-            expect(data.entityIdSeq).toBe(3);
-            expect(data.externalIdSeq).toBe(-101);
-
-            const restored = new SketchSolver(Plane.XY, data);
-            try {
-                expect(restored.addLine(5, 5, 6, 6)).toBe(3);
-                expect(restored.allocateExternalEntityId()).toBe(-101);
-                // and the restored state round-trips the bumped counters again
-                const again = restored.toData();
-                expect(again.entityIdSeq).toBe(4);
-                expect(again.externalIdSeq).toBe(-102);
-            } finally {
-                restored.dispose();
-            }
-        } finally {
-            solver.dispose();
-        }
-    });
-
-    test("legacy data without counters initializes from the current max+1 / min-1", () => {
-        const solver = new SketchSolver(Plane.XY, {
-            entities: [
-                { id: 5, type: "line", params: [0, 0, 1, 1] },
-                { id: 9, type: "circle", params: [0, 0, 2] },
-            ],
-            constraints: [],
-            externalRefs: [{ ...EXT_LINE }, { ...EXT_CIRCLE, entityId: -103, snapshot: [5, 5, 3] }],
-        });
-        try {
-            expect(solver.addLine(2, 2, 3, 3)).toBe(10);
-            expect(solver.allocateExternalEntityId()).toBe(-104);
-        } finally {
-            solver.dispose();
-        }
-    });
-
-    test("serialized counters win over the derived fallback", () => {
+    test("legacy counters round-trip verbatim and never steer allocation", () => {
         const solver = new SketchSolver(Plane.XY, {
             entities: [{ id: 5, type: "line", params: [0, 0, 1, 1] }],
             constraints: [],
@@ -279,41 +235,54 @@ describe("monotonic id counters", () => {
             externalIdSeq: -110,
         });
         try {
-            expect(solver.addLine(2, 2, 3, 3)).toBe(42);
-            expect(solver.allocateExternalEntityId()).toBe(-110);
+            const line = solver.addLine(2, 2, 3, 3);
+            const external = solver.allocateExternalEntityId();
+            expect(line).not.toBe(5);
+            expect(external).not.toBe(EXT_LINE.entityId);
+            expect(external).toBeLessThanOrEqual(FIRST_EXTERNAL_ENTITY_ID);
+            // the stored values are carried as loaded, not advanced
+            const data = solver.toData();
+            expect(data.entityIdSeq).toBe(42);
+            expect(data.externalIdSeq).toBe(-110);
         } finally {
             solver.dispose();
         }
     });
 
-    test("reset restores the counters from the data", () => {
-        const solver = new SketchSolver(Plane.XY);
+    test("reset takes the legacy counters of the new data", () => {
+        const solver = new SketchSolver(Plane.XY, {
+            entities: [],
+            constraints: [],
+            entityIdSeq: 3,
+        });
         try {
-            expect(solver.addLine(0, 0, 1, 1)).toBe(1);
             solver.reset({ entities: [], constraints: [], entityIdSeq: 7, externalIdSeq: -105 });
-            expect(solver.addLine(0, 0, 1, 1)).toBe(7);
-            expect(solver.allocateExternalEntityId()).toBe(-105);
-            expect(solver.toData().entityIdSeq).toBe(8);
+            expect(solver.toData().entityIdSeq).toBe(7);
+            expect(solver.toData().externalIdSeq).toBe(-105);
+            solver.reset({ entities: [], constraints: [] });
+            expect(solver.toData().entityIdSeq).toBeUndefined();
         } finally {
             solver.dispose();
         }
     });
 
-    test("a pre-counter document round-trips without counters until an allocation", () => {
+    test("a document without counters never gains them", () => {
         const legacy: SketchData = {
             entities: [{ id: 1, type: "line", params: [0, 0, 1, 1] }],
             constraints: [],
         };
         const solver = new SketchSolver(Plane.XY, legacy);
         try {
-            // byte-identical round-trip: a no-op session on a pre-counter document
-            // must not change dataJson, or every sketch exit records history
+            // byte-identical round-trip: a no-op session must not change dataJson, or
+            // every sketch exit records history
             expect(solver.toData()).toEqual(legacy);
 
             solver.addLine(1, 1, 2, 2);
+            solver.addExternalEntity({ ...EXT_LINE, entityId: solver.allocateExternalEntityId() });
             const after = solver.toData();
-            expect(after.entityIdSeq).toBe(3);
-            expect(after.externalIdSeq).toBe(-100);
+            expect(after.entities).toHaveLength(2);
+            expect(after.entityIdSeq).toBeUndefined();
+            expect(after.externalIdSeq).toBeUndefined();
         } finally {
             solver.dispose();
         }

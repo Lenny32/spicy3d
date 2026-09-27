@@ -2,13 +2,13 @@
 // See LICENSE file in the project root for full license information.
 
 import { Result } from "@spicy3d/core";
+import { defaultSketchIds, type SketchIdAllocator } from "./sketchIds";
 import {
     axisLineRefs,
     blockParamIndices,
     ConstraintKind,
     cloneSketchData,
     entityPointCount,
-    nextSketchId,
     type SketchClipboard,
     type SketchConstraintData,
     type SketchData,
@@ -81,13 +81,17 @@ export function copySketchSelection(data: SketchData, ids: readonly number[]): R
     });
 }
 
-/** Pure proposal, shared by previews and the solver's atomic commit path. */
+/**
+ * Pure proposal, shared by previews and the solver's atomic commit path. The copies' ids come from
+ * `allocator` (random by default, `sketchIds.ts`), so a preview and its commit may number them apart.
+ */
 export function transformSketchSelection(
     data: SketchData,
     ids: readonly number[],
     transform: SketchTransform,
     clipboard?: SketchClipboard,
     copy = false,
+    allocator: SketchIdAllocator = defaultSketchIds(),
 ): Result<{ data: SketchData; ids: number[] }> {
     if (
         transform.kind === "mirror" &&
@@ -107,8 +111,13 @@ export function transformSketchSelection(
         return Result.err("The mirror axis must be outside the selection");
     const duplicate = copy || clipboard !== undefined;
     const result = cloneSketchData(data);
-    let entityId = Math.max(data.entityIdSeq ?? 1, nextSketchId(data.entities));
-    const mapping = new Map(source.entities.map((e) => [e.id, duplicate ? entityId++ : e.id]));
+    const entityIds = new Set(data.entities.map((e) => e.id));
+    const newEntityId = () => {
+        const id = allocator.next("entity", (candidate) => entityIds.has(candidate));
+        entityIds.add(id);
+        return id;
+    };
+    const mapping = new Map(source.entities.map((e) => [e.id, duplicate ? newEntityId() : e.id]));
     const entities = source.entities.map((e) => ({
         ...transformEntity(e, transform),
         id: mapping.get(e.id)!,
@@ -141,21 +150,26 @@ export function transformSketchSelection(
         result.constraints = result.constraints.filter((c) => !c.refs.some((r) => selected.has(r.entityId)));
     }
     if (duplicate) result.entities.push(...entities);
-    let constraintId = nextSketchId(data.constraints);
-    result.constraints.push(...constraints.map((c) => ({ ...c, id: duplicate ? constraintId++ : c.id })));
+    const constraintIds = new Set(data.constraints.map((c) => c.id));
+    const newConstraintId = () => {
+        const id = allocator.next("constraint", (candidate) => constraintIds.has(candidate));
+        constraintIds.add(id);
+        return id;
+    };
+    result.constraints.push(...constraints.map((c) => ({ ...c, id: duplicate ? newConstraintId() : c.id })));
     if (copy && transform.kind === "mirror") {
         for (const e of source.entities) {
             for (let pointIndex = 0; pointIndex < entityPointCount(e.type); pointIndex++) {
                 const original = { entityId: e.id, pointIndex };
                 result.constraints.push({
-                    id: constraintId++,
+                    id: newConstraintId(),
                     kind: ConstraintKind.Symmetric,
                     refs: [original, remap(original), ...axisLineRefs(transform.axis.id)],
                 });
             }
             if (e.type === "circle")
                 result.constraints.push({
-                    id: constraintId++,
+                    id: newConstraintId(),
                     kind: ConstraintKind.EqualRadius,
                     refs: [
                         { entityId: e.id, pointIndex: 0 },
@@ -164,7 +178,6 @@ export function transformSketchSelection(
                 });
         }
     }
-    result.entityIdSeq = entityId;
     const retained = new Set(result.constraints.map((c) => c.id));
     if (result.anchors) result.anchors = result.anchors.filter((a) => retained.has(a.id));
     return Result.ok({ data: result, ids: entities.map((e) => e.id) });

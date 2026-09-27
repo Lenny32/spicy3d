@@ -13,6 +13,7 @@ import {
 import { editableCurve, type GeometryEdit } from "./geometryEditing";
 import type { SolverDiagnosis, SolverSystem } from "./planegcs";
 import { newSolverSystem } from "./planegcs";
+import { defaultSketchIds, type SketchIdAllocator } from "./sketchIds";
 import type { SketchClipboard } from "./sketchModel";
 import {
     blockParamIndices,
@@ -22,7 +23,6 @@ import {
     type ExternalRefData,
     isDatumEntityId,
     isExternalEntityId,
-    nextSketchId,
     pointRefKey,
     resolveDatumSource,
     SKETCH_ORIGIN_ID,
@@ -156,22 +156,23 @@ export class SketchSolver implements ExternalEntityHost {
     private readonly _datumErrors = new Map<number, string>();
 
     /**
-     * Monotonic id allocation, serialized as SketchData.entityIdSeq/externalIdSeq:
-     * freed ids are never reused, so a stale ProfileRef fingerprint (keyed on entity
-     * ids) can never match a geometrically different region. Real ids count up from
-     * 1, external ids count down from FIRST_EXTERNAL_ENTITY_ID (the registry's).
+     * `SketchData.entityIdSeq`/`externalIdSeq` as loaded, carried back verbatim by `toData` so a
+     * no-op session round-trips byte-identical (a changed dataJson would record a phantom history
+     * entry). Ids are no longer counted (`sketchIds.ts`: random, collision-checked, so a freed id
+     * is not reissued either), so the counters are never read nor advanced.
      */
-    private entityIdSeq = 1;
-    /**
-     * Counter emission gate: `toData` writes the counters only when the loaded data
-     * carried them or an allocation happened since — a no-op session on a
-     * pre-counter document must round-trip byte-identical, or every sketch exit
-     * would record a phantom history entry.
-     */
-    private idCountersPersisted = false;
-    private idAllocatedSinceLoad = false;
+    private legacyCounters: Pick<SketchData, "entityIdSeq" | "externalIdSeq"> = {};
 
-    constructor(plane: Plane, data?: SketchData, scope: Scope = EMPTY_SCOPE) {
+    /**
+     * @param ids how new entity, constraint and external ids are chosen — random by default;
+     * {@link sequentialSketchIds} only for a sketch created in this session (see `sketchIds.ts`).
+     */
+    constructor(
+        plane: Plane,
+        data?: SketchData,
+        scope: Scope = EMPTY_SCOPE,
+        private readonly ids: SketchIdAllocator = defaultSketchIds(),
+    ) {
         this.plane = plane;
         this._scope = scope;
         this.system = newSolverSystem();
@@ -291,7 +292,7 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     addConstraint(constraint: Omit<SketchConstraintData, "id">): number {
-        const id = nextSketchId([...this.constraints.values()]);
+        const id = this.ids.next("constraint", (candidate) => this.constraints.has(candidate));
         this.addConstraintWithId(id, constraint);
         return id;
     }
@@ -319,7 +320,7 @@ export class SketchSolver implements ExternalEntityHost {
         clipboard?: SketchClipboard,
         copy = false,
     ): Result<number[]> {
-        const proposal = transformSketchSelection(this.toData(), ids, transform, clipboard, copy);
+        const proposal = transformSketchSelection(this.toData(), ids, transform, clipboard, copy, this.ids);
         if (!proposal.isOk) return Result.err(proposal.error);
         this.reset(proposal.value.data);
         return Result.ok(proposal.value.ids);
@@ -523,7 +524,7 @@ export class SketchSolver implements ExternalEntityHost {
 
     /** Independent trial system retaining document expression scope. Caller owns disposal. */
     fork(): SketchSolver {
-        return new SketchSolver(this.plane, this.toData(), this._scope);
+        return new SketchSolver(this.plane, this.toData(), this._scope, this.ids);
     }
 
     /** Translate native tags, including helper equations, back to persistent constraint IDs. */
@@ -809,11 +810,11 @@ export class SketchSolver implements ExternalEntityHost {
         if (this.external.refPositions !== undefined) {
             result.refPositions = { ...this.external.refPositions };
         }
-        // monotonic id counters — carried so a freed id is never reused across
-        // sessions; emitted only once they mean something (see the field comment)
-        if (this.idCountersPersisted || this.idAllocatedSinceLoad) {
-            result.entityIdSeq = this.entityIdSeq;
-            result.externalIdSeq = this.external.idSeq;
+        // legacy id counters, carried verbatim (see the field comment)
+        if (this.legacyCounters.entityIdSeq !== undefined)
+            result.entityIdSeq = this.legacyCounters.entityIdSeq;
+        if (this.legacyCounters.externalIdSeq !== undefined) {
+            result.externalIdSeq = this.legacyCounters.externalIdSeq;
         }
         return result;
     }
@@ -873,7 +874,7 @@ export class SketchSolver implements ExternalEntityHost {
         this.constraints.clear();
         this.fixedEntities.clear();
         this.external.clear();
-        this.entityIdSeq = 1;
+        this.legacyCounters = {};
         this.draggedParamIds = [];
         this.seedDatum();
         this.loadData(data);
@@ -941,9 +942,9 @@ export class SketchSolver implements ExternalEntityHost {
         else this.fixedEntities.delete(id);
     }
 
-    /** `ExternalEntityHost`: the serialization gate — see `idAllocatedSinceLoad`. */
-    markIdAllocated(): void {
-        this.idAllocatedSinceLoad = true;
+    /** `ExternalEntityHost`: a new external entity id, unused by any entity of the sketch nor `reserved`. */
+    allocateEntityId(kind: "external", reserved: ReadonlySet<number>): number {
+        return this.ids.next(kind, (candidate) => this.entityTypes.has(candidate) || reserved.has(candidate));
     }
 
     addExternalEntity(ref: ExternalRefData): void {
@@ -1034,13 +1035,9 @@ export class SketchSolver implements ExternalEntityHost {
     private registerEntity(type: SketchEntityType, paramIds: number[], id?: number): number {
         let entityId: number;
         if (id === undefined) {
-            entityId = this.entityIdSeq++;
-            this.idAllocatedSinceLoad = true;
+            entityId = this.ids.next("entity", (candidate) => this.entityTypes.has(candidate));
         } else {
             entityId = id;
-            // explicit ids (loadData, external seeds) still advance the counter,
-            // so a later allocation never reissues them
-            this.entityIdSeq = Math.max(this.entityIdSeq, id + 1);
         }
         this.entityTypes.set(entityId, type);
         this.entityParams.set(entityId, paramIds);
@@ -1508,14 +1505,9 @@ export class SketchSolver implements ExternalEntityHost {
         for (const constraint of data.constraints) {
             this.addConstraintWithId(constraint.id, constraint);
         }
-        // id counters: trust the serialized ones; data written before counters
-        // initializes from the current max+1 / min-1 via the seeding above
-        if (data.entityIdSeq !== undefined) this.entityIdSeq = Math.max(this.entityIdSeq, data.entityIdSeq);
-        if (data.externalIdSeq !== undefined) {
-            this.external.idSeq = Math.min(this.external.idSeq, data.externalIdSeq);
-        }
-        this.idCountersPersisted = data.entityIdSeq !== undefined || data.externalIdSeq !== undefined;
-        this.idAllocatedSinceLoad = false;
+        this.legacyCounters = {};
+        if (data.entityIdSeq !== undefined) this.legacyCounters.entityIdSeq = data.entityIdSeq;
+        if (data.externalIdSeq !== undefined) this.legacyCounters.externalIdSeq = data.externalIdSeq;
         // normalize roles for documents written before role derivation (and for
         // hand-edited data): an unpinned ref any constraint references is a profile
         syncExternalRoles({ constraints: data.constraints, externalRefs: [...this.external.refs] });

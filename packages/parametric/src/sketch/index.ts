@@ -6,6 +6,7 @@ export * from "./editor/sketchEditor";
 export * from "./externalRef";
 export * from "./planegcs";
 export * from "./ribbon";
+export * from "./sketchIds";
 export * from "./sketchModel";
 export * from "./sketchNode";
 export * from "./solver";

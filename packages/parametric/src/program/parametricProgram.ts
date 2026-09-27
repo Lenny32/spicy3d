@@ -33,6 +33,7 @@ import type {
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
 import { captureFaceRef, type PlaneFaceRef, sketchPlaneOfFace } from "../sketch/planeRef";
+import { type SketchIdAllocator, sequentialSketchIds } from "../sketch/sketchIds";
 import { type ExternalRefData, emptySketchData, type SketchData } from "../sketch/sketchModel";
 import { SketchNode } from "../sketch/sketchNode";
 import {
@@ -377,12 +378,7 @@ function runSketchOp(state: State, op: SketchOp): void {
     );
     const data: SketchData = emptySketchData();
     if (refPositions !== undefined) data.refPositions = refPositions;
-    if (externalRefs !== undefined) {
-        data.externalRefs = externalRefs;
-        // the boundary refs were numbered down from the first external id before any
-        // solver existed — persist the counter, as the interactive create does
-        data.externalIdSeq = Math.min(...externalRefs.map((ref) => ref.entityId)) - 1;
-    }
+    if (externalRefs !== undefined) data.externalRefs = externalRefs;
 
     const sketch = new SketchNode({ document: state.document, plane, planeRef, constructionPlaneRef, data });
     state.document.modelManager.addNode(sketch);
@@ -394,7 +390,9 @@ function runSketchOp(state: State, op: SketchOp): void {
         { action: "add", entities: op.entities ?? [], constraints: op.constraints ?? [] },
         ...(op.actions ?? []),
     ];
-    state.out.results[op.id] = editSketch(state, sketch, actions);
+    // The sketch is created by this call, so no other version holds it: counting ids keep the
+    // documented "entity ids are the 1-based position in entities" (sketchIds.ts).
+    state.out.results[op.id] = editSketch(state, sketch, actions, sequentialSketchIds());
 }
 
 function runEditSketchOp(state: State, op: EditSketchOp): void {
@@ -406,14 +404,19 @@ function runEditSketchOp(state: State, op: EditSketchOp): void {
 }
 
 /** One solver session over the sketch; the solved data is stored only when every action succeeded. */
-function editSketch(state: State, sketch: SketchNode, actions: readonly SketchAction[]): SketchReport {
+function editSketch(
+    state: State,
+    sketch: SketchNode,
+    actions: readonly SketchAction[],
+    ids?: SketchIdAllocator,
+): SketchReport {
     let names = state.sketchNames.get(sketch.id);
     if (names === undefined) {
         names = { entities: new Map(), constraints: new Map() };
         state.sketchNames.set(sketch.id, names);
     }
     const scope = state.document.variables.evaluate().scope;
-    const session = new SketchSession(programHost(state), sketch, names, scope);
+    const session = new SketchSession(programHost(state), sketch, names, scope, ids);
     try {
         session.run(actions);
         const { data, report } = session.finish();

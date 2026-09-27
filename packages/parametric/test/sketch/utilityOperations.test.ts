@@ -218,10 +218,12 @@ test("reflection swaps arc endpoint roles and preserves its sweep", () => {
             true,
         ),
     );
-    expect(proposal.data.constraints[1].refs[1]).toEqual({ entityId: 4, pointIndex: 2 });
+    const [copy] = proposal.ids;
+    expect([arc.id, axis.id]).not.toContain(copy);
+    expect(proposal.data.constraints[1].refs[1]).toEqual({ entityId: copy, pointIndex: 2 });
 });
 
-test("clipboard is detached, keeps only internal constraints and pastes with monotonic IDs", () => {
+test("clipboard is detached, keeps only internal constraints and pastes with fresh IDs", () => {
     const clipboard = ok(copySketchSelection(data, [1, 2]));
     clipboard.entities[0].params[0] = 100;
     expect(data.entities[0].params[0]).toBe(1);
@@ -229,17 +231,22 @@ test("clipboard is detached, keeps only internal constraints and pastes with mon
     expect(ok(copySketchSelection(data, [2])).constraints.map((c) => c.id)).toEqual([4]);
     const pasted = ok(
         transformSketchSelection(
-            { entities: [], constraints: [], entityIdSeq: 50 },
+            { entities: [...data.entities], constraints: [...data.constraints], entityIdSeq: 50 },
             [],
             { kind: "move", delta: [10, 20] },
             clean,
         ),
     );
-    expect(pasted.ids).toEqual([50, 51]);
-    expect(pasted.data.entityIdSeq).toBe(52);
-    expect(pasted.data.constraints[0].refs.map((r) => r.entityId)).toEqual([50, 51]);
-    expect(pasted.data.constraints[2].datums).toEqual([11, 22]);
-    near(pasted.data.entities[0].params, [11, 22, 14, 22]);
+    const existing = data.entities.map((e) => e.id);
+    expect(pasted.ids).toHaveLength(2);
+    expect(new Set([...existing, ...pasted.ids]).size).toBe(existing.length + 2);
+    // the legacy counter is carried as it was, never advanced
+    expect(pasted.data.entityIdSeq).toBe(50);
+    const pastedConstraints = pasted.data.constraints.slice(data.constraints.length);
+    expect(pastedConstraints[0].refs.map((r) => r.entityId)).toEqual(pasted.ids);
+    expect(new Set(pasted.data.constraints.map((c) => c.id)).size).toBe(pasted.data.constraints.length);
+    expect(pastedConstraints[2].datums).toEqual([11, 22]);
+    near(pasted.data.entities[data.entities.length].params, [11, 22, 14, 22]);
 });
 
 test.each([
