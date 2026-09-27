@@ -23,9 +23,9 @@ The server stores and returns **only UTC** timestamps. The client formats them i
 
 ## Acceptance criteria
 
-- [ ] A server timestamp `2026-03-29T00:30:00Z` displays correctly in Europe/Paris and America/New_York (tests with fixed TZ).
-- [ ] All cloud timestamps in the UI go through the helpers (grep test / lint rule for direct `toLocaleString` on server values).
-- [ ] Local document dates unchanged.
+- [x] A server timestamp `2026-03-29T00:30:00Z` displays correctly in Europe/Paris and America/New_York (tests with fixed TZ).
+- [x] All cloud timestamps in the UI go through the helpers (grep test / lint rule for direct `toLocaleString` on server values).
+- [x] Local document dates unchanged.
 
 ## Dependencies and complexity
 
