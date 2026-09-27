@@ -26,7 +26,6 @@ const FORBIDDEN: [string, RegExp][] = [
 /** Known uses that aren't server timestamps: file → pattern → how many. Anything else fails. */
 const ALLOWED: Record<string, Record<string, number>> = {
     // Chat history and MCP call log: this device's own `Date.now()` times, never from the server.
-    "packages/ai/src/chatPanel.ts": { toLocaleDateString: 1, toLocaleTimeString: 1, "new Date(value)": 2 },
     "packages/ai/src/mcp/panel.ts": { toLocaleTimeString: 1, "new Date(value)": 1 },
     // `formatBytes`: a number, not a date.
     "packages/ui/src/home/home.ts": { toLocaleString: 1 },

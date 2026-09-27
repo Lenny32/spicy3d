@@ -34,7 +34,7 @@ in the bundle. What stays relaxed, and what would remove it:
 | `img-src data: blob:` | Icons, thumbnails, screenshots. | — |
 
 `connect-src` has **no `https:` wildcard**: a plugin or an injected script cannot post documents to
-an arbitrary host. The assistant's LLM endpoints, and hosts `?url=` opens files from, are added by
+an arbitrary host. Other origins the page must reach, such as hosts `?url=` opens files from, are added by
 the operator in `SPICY3D_CONNECT_ORIGINS` (https/wss origins, validated at container start like
 `SPICY3D_PLUGIN_ORIGINS`: the whole value may only hold origin characters and single spaces, since
 it goes into the header verbatim; `docs/deployment.md`, `dockerOrigins.test.ts`).
@@ -95,8 +95,6 @@ A `.spicyplugin` link is code, not a file: it goes through the plugin rules abov
   `spicy3d_list_documents` / `spicy3d_document_history` need it, but it also lets anyone holding the
   token download every one of the user's documents over the REST API. Leave it off unless the agent
   must find documents by itself.
-- The assistant's LLM API keys (`spicy3d.app.ai.config`) are the user's own, for endpoints they
-  chose, and stay on the device; they are not account data.
 
 ## Sign-out
 
@@ -114,7 +112,7 @@ Signing out (or an expired session given up, another user signing in, the accoun
 | memory | agent cloud tools (`spicy3d_open_document`, `spicy3d_save`, …) | An agent's pending open-document question, conflict UIs its saves opened | Tools unlisted (`tools/list_changed`), the question closed, the list forgotten. |
 | localStorage | `spicy3d.app.cloud.config` | The server's `/api/config` | Kept: not user data (it lets an offline start find the server). |
 | localStorage | `spicy3d.app.cloud.device` | Device name, keep-offline-copies, new-document location | Kept: settings of this browser. |
-| localStorage | `spicy3d.app.config`, `spicy3d.app.mcp.settings`, `spicy3d.app.ai.config`, `spicy3d.settings.autosave` | App preferences, the remote MCP switch, LLM keys | Kept: not tied to the account. |
+| localStorage | `spicy3d.app.config`, `spicy3d.app.mcp.settings`, `spicy3d.settings.autosave` | App preferences, the remote MCP switch | Kept: not tied to the account. |
 | IndexedDB | `spicy3d-db` | Device documents | Never touched. |
 
 ## MCP

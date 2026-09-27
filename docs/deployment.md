@@ -10,27 +10,14 @@ into the build (CLOUD-16):
   (`SPICY_PUBLIC_URL`).
 - **Per-deployment settings live in `deployment.json`**, next to `index.html`, read at every start
   (`public/deployment.json` = `{}` = the defaults). Replace the file, no rebuild.
-- **No request to another origin** unless the user asks for one (an LLM endpoint picked in the
-  assistant, a download link): `npm run check:urls` fails on a new external URL in the sources or
+- **No request to another origin** unless the user asks for one (a file or plugin URL, a download
+  link): `npm run check:urls` fails on a new external URL in the sources or
   the build, and `npm run smoke` runs the build in Chromium with every other origin blocked.
 
 ## `deployment.json`
 
 ```json
 {
-    "ai": {
-        "presets": [
-            {
-                "id": "company",
-                "label": "Company LLM",
-                "provider": "completions",
-                "baseURL": "https://llm.example.lan/v1",
-                "defaultModel": "qwen3"
-            }
-        ],
-        "defaultPreset": "company",
-        "hideBuiltInPresets": true
-    },
     "security": {
         "pluginOrigins": ["https://plugins.example.lan"],
         "fileOrigins": ["https://models.example.lan"]
@@ -40,14 +27,10 @@ into the build (CLOUD-16):
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `ai.presets` | none | Endpoints offered first in the assistant's settings: `id`, `label`, `provider` (`anthropic`, `completions`, `responses`), `baseURL`, `defaultModel`. Invalid entries are ignored. |
-| `ai.defaultPreset` | the first preset | The preset a first-time user starts from. |
-| `ai.hideBuiltInPresets` | `false` | Hide the public Anthropic/OpenAI presets (only with at least one valid preset of your own). |
 | `security.pluginOrigins` | none | Origins (`https://host[:port]`, `https://*.example.com`) whose plugins load without the trust prompt, signed in or not. The app's own origin always does. Also add them to `SPICY3D_PLUGIN_ORIGINS` (below). |
 | `security.fileOrigins` | none | Origins `?url=` / `?model=` may open files from without asking. Any other origin asks every time. Also add them to `SPICY3D_CONNECT_ORIGINS`. |
 
-A missing or invalid file changes nothing (a warning in the console). Once the assistant cannot
-reach its endpoint it says so and points at the settings.
+A missing or invalid file changes nothing (a warning in the console).
 
 ## The web image (`spicy3d-web`)
 
@@ -110,9 +93,7 @@ stays read-only):
   `script-src`, `connect-src` (manifest, CSS) and `img-src` (icons). Anything that is not an origin
   (`scheme://host[:port]`) stops the container at start (`docker/19-spicy3d-plugin-origins.sh`).
 - `SPICY3D_CONNECT_ORIGINS` (container environment, default empty): space-separated `https://` /
-  `wss://` origins the page may connect to besides its own: the assistant's LLM endpoints
-  (`https://api.anthropic.com https://api.openai.com` for the public presets, or the on-prem one
-  from `ai.presets`) and hosts `?url=` opens files from. Checked like `SPICY3D_PLUGIN_ORIGINS`.
+  `wss://` origins the page may connect to besides its own, e.g. hosts `?url=` opens files from. Checked like `SPICY3D_PLUGIN_ORIGINS`.
 - `absolute_redirect off`: a redirect (a folder without its trailing slash) keeps the address the
   browser used, not nginx's own port behind the proxy.
 
@@ -124,7 +105,7 @@ services:
   web:
     environment:
       SPICY3D_PLUGIN_ORIGINS: https://plugins.example.lan   # optional, see above
-      SPICY3D_CONNECT_ORIGINS: https://llm.example.lan      # optional: the assistant's endpoint
+      SPICY3D_CONNECT_ORIGINS: https://models.example.lan   # optional: `?url=` file hosts
     volumes:
       - ./web/deployment.json:/usr/share/nginx/html/deployment.json:ro
 ```
@@ -140,8 +121,6 @@ services:
 2. Move the images with `docker save` / `docker load` (SpicySrv `deploy/README.md`).
 3. MCP: nothing to install on the clients' side — they connect to the server's `/mcp` with a
    personal access token (the MCP panel shows the configs once signed in).
-4. Assistant: offer the on-prem endpoint and hide the public ones (`ai` above), and allow the page to
-   reach it (`SPICY3D_CONNECT_ORIGINS`).
 
 Check a deployment from a machine with Chromium (certificate errors of an internal CA are ignored):
 
@@ -153,8 +132,7 @@ npm run smoke -- --url https://spicy.lan/ --expect-server
 ## Public later
 
 The same image and `deployment.json` work on a public HTTPS host: set the server's
-`SPICY_PUBLIC_URL` and TLS (Let's Encrypt), nothing to rebuild. Without a `deployment.json` of your
-own the assistant offers the public LLM APIs.
+`SPICY_PUBLIC_URL` and TLS (Let's Encrypt), nothing to rebuild.
 
 ## Paths the app and SpicySrv share
 

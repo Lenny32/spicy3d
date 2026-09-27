@@ -1,7 +1,7 @@
 {
     "name": "@spicy3d/ai",
     "version": "0.0.1",
-    "description": "In-app AI chat assistant for Spicy3D (zero-relay, browser-direct)",
+    "description": "In-page MCP server for Spicy3D (reached through the SpicySrv relay)",
     "main": "src/index.ts",
     "devDependencies": {
         "@spicy3d/core": "*",
@@ -9,9 +9,6 @@
         "@spicy3d/parametric": "*"
     },
     "dependencies": {
-        "@anthropic-ai/sdk": "^0.124.0",
-        "@modelcontextprotocol/sdk": "1.30.0",
-        "marked": "^18.0.12",
-        "openai": "^7.10.0"
+        "@modelcontextprotocol/sdk": "1.30.0"
     }
 }

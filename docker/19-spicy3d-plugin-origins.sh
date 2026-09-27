@@ -24,7 +24,7 @@ check() { # <variable name> <scheme pattern> <value>
 }
 
 check SPICY3D_PLUGIN_ORIGINS 'https?' "${SPICY3D_PLUGIN_ORIGINS:-}"
-# What else the page may connect to (the assistant's LLM endpoints): https, or wss for a socket.
+# What else the page may connect to (e.g. `?url=` file hosts): https, or wss for a socket.
 check SPICY3D_CONNECT_ORIGINS '(https|wss)' "${SPICY3D_CONNECT_ORIGINS:-}"
 
 # The rendered configuration goes to the tmpfs; /etc/nginx/conf.d/default.conf includes it.

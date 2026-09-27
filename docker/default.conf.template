@@ -28,7 +28,7 @@ server {
     # - style-src 'unsafe-inline': elements get inline styles, plugins and the macro editor (ace) inject <style>;
     # - img-src data: blob: (icons, thumbnails, screenshots), worker-src blob:;
     # - connect-src: the server's /api, /ws and /mcp are 'self'; SPICY3D_CONNECT_ORIGINS (default empty) adds what
-    #   else the page may reach: the assistant's LLM endpoints, hosts `?url=` may open files from
+    #   else the page may reach, e.g. hosts `?url=` may open files from
     #   (docs/security.md). No `https:` wildcard: a plugin or an injected script cannot send documents to an
     #   arbitrary host.
     # Nothing inline: index.html has no inline script, iconfont.js is a file (its <style> injection is off).
