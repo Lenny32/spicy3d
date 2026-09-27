@@ -236,6 +236,10 @@ jobs:
         name: MCP bridge
         needs: prepare
         uses: ./.github/workflows/package-mcp-bridge.yml
+        # A called workflow cannot exceed its caller's permissions, and GitHub checks them statically:
+        # the release job asks for contents: write even though artifact-only never publishes.
+        permissions:
+            contents: write
         with:
             version: ${{ needs.prepare.outputs.version }}
             publish: artifact-only
