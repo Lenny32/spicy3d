@@ -22,8 +22,8 @@ export class Banner {
         );
         banner.dataset["bannerId"] = options.id;
         banner.setAttribute("role", "status");
-        if (options.action) {
-            const action = options.action;
+        const actions = [...(options.action ? [options.action] : []), ...(options.actions ?? [])];
+        for (const action of actions) {
             banner.append(
                 button({
                     className: style.action,

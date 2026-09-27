@@ -54,6 +54,25 @@ describe("Banner", () => {
         expect(banners()).toHaveLength(1);
     });
 
+    test("`actions` add further buttons after `action`, each running its own action", () => {
+        const first = rs.fn(() => {});
+        const second = rs.fn(() => {});
+        Banner.show({
+            id: "a",
+            level: "info",
+            message: "cloud.banner.appOutdated",
+            action: { label: "common.reload", run: first },
+            actions: [{ label: "common.close", run: second }],
+        });
+
+        const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".banner-action"));
+        expect(buttons.map((b) => b.textContent)).toEqual(["common.reload", "common.close"]);
+        buttons[1].click();
+
+        expect(second).toHaveBeenCalledTimes(1);
+        expect(first).not.toHaveBeenCalled();
+    });
+
     test("the close button removes the banner and its host", () => {
         Banner.show({ id: "a", level: "info", message: "cloud.banner.appOutdated" });
 
