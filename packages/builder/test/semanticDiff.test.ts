@@ -67,6 +67,21 @@ test("Compare lists semantic differences", () => {
     ]);
 });
 
+test("an entity whose geometry changed is counted by its type", () => {
+    const after = edited((doc) => {
+        const sketch = nodeOf(doc, "sketch-1");
+        const data = JSON.parse(sketch.dataJson);
+        data.entities[0].params = [0, 0, 45, 0];
+        sketch.dataJson = JSON.stringify(data);
+    });
+    expect(
+        lines(
+            edited(() => {}),
+            after,
+        ),
+    ).toEqual(["Sketch 1: 1 line changed"]);
+});
+
 test("features added, removed and reordered; a node renamed and moved", () => {
     const before = edited(() => {});
     const after = edited((doc) => {

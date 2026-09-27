@@ -5,7 +5,7 @@ import { type DocumentFormatError, DocumentMigrations } from "./documentFormat";
 import { Result } from "./foundation";
 import { I18n, type I18nKeys } from "./i18n";
 import { diffViews } from "./merge/diff";
-import { DocumentView, timelineProperty } from "./merge/documentView";
+import { DocumentView, payloadProperties, timelineProperty } from "./merge/documentView";
 import { isRecord } from "./merge/json";
 import { type MergeRuleRegistry, MergeRules } from "./merge/rules";
 import type { Change } from "./merge/types";
@@ -137,6 +137,21 @@ export function summarizeChanges(
         return featureId;
     };
 
+    /** An entity's type from the version that has it (a changed entity's change carries only its params). */
+    const entityType = (sketchId: string, entityId: string): string => {
+        for (const view of [views[1], views[0]]) {
+            const className = view.className(sketchId);
+            if (className === undefined) continue;
+            for (const property of payloadProperties(rules, className).keys()) {
+                const data = view.payload(sketchId, property).value;
+                const entities = isRecord(data) && Array.isArray(data["entities"]) ? data["entities"] : [];
+                const entity = entities.find((e) => isRecord(e) && String(e["id"]) === entityId);
+                if (isRecord(entity) && typeof entity["type"] === "string") return entity["type"];
+            }
+        }
+        return "entity";
+    };
+
     // What is inside an added / removed node is not listed on its own.
     const whole = new Map<string, "added" | "removed">();
     for (const change of changes) {
@@ -184,9 +199,7 @@ export function summarizeChanges(
                 sketchSummaries.set(nodeId, summary);
                 lines.push(summary.line);
             }
-            const item = (change.kind === "removed" ? change.before : change.after) ?? change.before;
-            const type =
-                segments[2] === "entity" && isRecord(item) ? String(item["type"] ?? "entity") : segments[2];
+            const type = segments[2] === "entity" ? entityType(nodeId, segments[3]) : segments[2];
             const sign = segments.length === 4 && change.kind !== "modified" ? change.kind : "modified";
             const key = `${sign}\u0000${type}\u0000${segments[3]}`;
             summary.counts.set(key, 1);
