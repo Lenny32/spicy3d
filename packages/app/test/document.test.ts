@@ -181,6 +181,61 @@ describe("Document", () => {
             expect(document.version).toBe("v2");
         });
 
+        test("saves run one at a time; requests made meanwhile share one follow-up on the new base", async () => {
+            document.version = "v1";
+            const release: (() => void)[] = [];
+            let version = 1;
+            repository.save = async (request) => {
+                repository.saves.push(request);
+                await new Promise<void>((resolve) => release.push(resolve));
+                version++;
+                return Result.ok({ status: "saved", updatedAt: version, version: `v${version}` });
+            };
+
+            const first = document.save("auto");
+            const second = document.save("auto");
+            const third = document.save("manual");
+            await Promise.resolve();
+            expect(repository.saves).toHaveLength(1);
+
+            release.shift()!();
+            await first;
+            await rs.waitFor(() => expect(repository.saves).toHaveLength(2));
+            release.shift()!();
+            const [a, b] = await Promise.all([second, third]);
+
+            expect(a).toBe(b);
+            expect(repository.saves.map((x) => [x.baseVersion, x.kind])).toEqual([
+                ["v1", "auto"],
+                ["v2", "manual"],
+            ]);
+            expect(document.version).toBe("v3");
+            await document.settled();
+        });
+
+        test("settled waits for the running and queued saves", async () => {
+            let finish!: () => void;
+            repository.save = async (request) => {
+                repository.saves.push(request);
+                await new Promise<void>((resolve) => {
+                    finish = resolve;
+                });
+                return Result.ok({ status: "saved", updatedAt: 1 });
+            };
+            void document.save();
+            let settled = false;
+            const waiting = document.settled().then(() => {
+                settled = true;
+            });
+            await Promise.resolve();
+            expect(settled).toBe(false);
+
+            finish();
+            await waiting;
+
+            expect(settled).toBe(true);
+        });
+
         test("a failed save is returned and does not throw", async () => {
             repository.failWith = { kind: "quota" };
 

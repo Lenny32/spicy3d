@@ -148,7 +148,47 @@ export class Document extends Observable implements IDocument {
         this.acts.clear();
     }
 
-    async save(kind: SaveKind = "manual"): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+    /**
+     * Saves one at a time: a save requested while one runs waits for it (its base version is the
+     * one that save produces, so the two never conflict with each other), and every request made
+     * meanwhile shares that single follow-up save — manual if any of them was.
+     */
+    save(kind: SaveKind = "manual"): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        if (this.followUp) {
+            if (kind === "manual") this.followUp.kind = "manual";
+            return this.followUp.promise;
+        }
+        if (!this.running) return this.startSave(kind);
+        const followUp = {
+            kind,
+            promise: undefined as unknown as Promise<Result<SaveOutcome, DocumentRepositoryError>>,
+        };
+        followUp.promise = this.running.then(() => {
+            this.followUp = undefined;
+            return this.startSave(followUp.kind);
+        });
+        this.followUp = followUp;
+        return followUp.promise;
+    }
+
+    /** Resolves once no save of this document is running or queued. */
+    async settled(): Promise<void> {
+        while (this.followUp || this.running) await (this.followUp?.promise ?? this.running);
+    }
+
+    private running?: Promise<unknown>;
+    private followUp?: { kind: SaveKind; promise: Promise<Result<SaveOutcome, DocumentRepositoryError>> };
+
+    private startSave(kind: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        const promise = this.saveNow(kind);
+        const running = promise.finally(() => {
+            if (this.running === running) this.running = undefined;
+        });
+        this.running = running;
+        return promise;
+    }
+
+    private async saveNow(kind: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         const position = this.history.position();
         const result = await this.repository.save({
             id: this.id,

@@ -66,6 +66,10 @@ export class TestDocument implements IDocument {
         return Promise.resolve(Result.ok({ status: "saved", updatedAt: 0 }));
     }
 
+    settled(): Promise<void> {
+        return Promise.resolve();
+    }
+
     importFiles(_files: File[] | FileList): Promise<void> {
         return Promise.resolve();
     }

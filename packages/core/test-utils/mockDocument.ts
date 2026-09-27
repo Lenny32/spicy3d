@@ -167,6 +167,7 @@ export function createMockDocument(overrides: MockDocumentOverrides = {}): IDocu
         isDirty: false,
         save: async () => Result.ok({ status: "saved", updatedAt: 0 }),
         close: async () => true,
+        settled: async () => {},
         serialize: () => ({}) as Serialized,
         removePropertyChanged: () => {},
         clearPropertyChanged: () => {},

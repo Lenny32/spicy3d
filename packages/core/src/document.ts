@@ -51,8 +51,13 @@ export interface IDocument extends IPropertyChanged, IDisposable {
     version?: string;
     /** Whether the undo position differs from the one of the last save (or of the opening). */
     readonly isDirty: boolean;
-    /** Saves through `repository`; a successful save makes the document clean. */
+    /**
+     * Saves through `repository`; a successful save makes the document clean. Saves run one at a
+     * time: one requested while another runs follows it (requests made meanwhile share it).
+     */
     save(kind?: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+    /** Resolves once no save of the document is running or queued. */
+    settled(): Promise<void>;
     /**
      * Asks to save unsaved changes, then closes the document and its views. Resolves `false`
      * when the user cancels or the save fails (the document stays open). `discardChanges` closes
