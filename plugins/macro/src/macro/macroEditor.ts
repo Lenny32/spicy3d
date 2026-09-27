@@ -1,8 +1,12 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-//@ts-expect-error
-import ace from "https://cdn.jsdelivr.net/npm/ace-builds@1.44.0/+esm";
+// Bundled, not from a CDN: the editor must work on a LAN without internet access and under the
+// server's `script-src 'self'` policy. The mode and themes register themselves on import.
+import ace from "ace-builds";
+import "ace-builds/src-noconflict/mode-javascript";
+import "ace-builds/src-noconflict/theme-dracula";
+import "ace-builds/src-noconflict/theme-xcode";
 import {
     Config,
     type DialogButton,
@@ -78,10 +82,11 @@ export class MacroEditor extends HTMLElement {
     }
 
     private embeddingEditor() {
-        ace.config.set("basePath", "https://cdn.jsdelivr.net/npm/ace-builds@1.44.0/src-min-noconflict");
         this.editor = ace.edit(this.codeTextarea!, {
             mode: "ace/mode/javascript",
             selectionStyle: "text",
+            // The syntax-check worker would be loaded from ace's basePath (a separate file).
+            useWorker: false,
         });
         this.editor?.setTheme(this.isDarkTheme() ? "ace/theme/dracula" : "ace/theme/xcode");
     }

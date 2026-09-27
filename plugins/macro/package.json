@@ -14,5 +14,8 @@
         "plugin",
         "macro"
     ],
-    "author": "Spicy3D Team"
+    "author": "Spicy3D Team",
+    "dependencies": {
+        "ace-builds": "^1.44.0"
+    }
 }
