@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type BannerOptions, PubSub } from "@spicy3d/core";
+import { type BannerOptions, ExternalContentPolicy, PubSub } from "@spicy3d/core";
 import { Account } from "../src/account/account";
 import type { ConfigResponse } from "../src/api";
 import { CloudClient } from "../src/client";
@@ -45,6 +45,30 @@ describe("startCloud", () => {
         expect(connection?.client.baseUrl).toBe("https://spicy.test");
         expect(Cloud.current.connection).toBe(connection);
         expect(published).toEqual([]);
+    });
+
+    test("ready: plugins from other origins count as signed in until the account is known signed out", async () => {
+        const connection = startCloud({ status: "ready", config }, { baseUrl: "https://spicy.test" });
+        const removeProbe = () => ExternalContentPolicy.setSessionProbe(() => false)();
+        try {
+            expect(connection?.account.status).toBe("unknown");
+            expect(ExternalContentPolicy.hasSession).toBe(true);
+            // 401 on /api/me: signed out.
+            const fetch = async () =>
+                new Response(JSON.stringify({ status: 401, code: "unauthorized" }), {
+                    status: 401,
+                    headers: { "Content-Type": "application/problem+json" },
+                });
+            rs.spyOn(connection!.client.api, "GET").mockImplementation((async () => ({
+                error: {},
+                response: await fetch(),
+            })) as never);
+            await connection!.account.refresh();
+            expect(connection!.account.status).toBe("signedOut");
+            expect(ExternalContentPolicy.hasSession).toBe(false);
+        } finally {
+            removeProbe();
+        }
     });
 
     test("ready: the connection's account is the app's account, not signed in yet", () => {

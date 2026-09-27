@@ -7,6 +7,7 @@
 
 import { Logger } from "@spicy3d/core";
 import { ensureAgentBadge } from "./agentBadge";
+import { forgetPairingDecisions } from "./pairing";
 import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import {
     isWindowsClient,
@@ -32,7 +33,11 @@ export function setRemoteMcpLink(link: RemoteMcpLink | undefined): void {
     remoteMcpState.update({ link });
     if (link) ensureAgentBadge();
     if (!link) {
-        if (previous) void loadController().then((c) => c.disconnectMcpRemote("unavailable"));
+        if (previous) {
+            // Signed out (or another user): no Allow of the previous session outlives it (CLOUD-17).
+            forgetPairingDecisions();
+            void loadController().then((c) => c.disconnectMcpRemote("unavailable"));
+        }
         return;
     }
     if (loadMcpSettings().remoteEnabled) connectRemote(link);

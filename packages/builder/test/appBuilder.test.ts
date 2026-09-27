@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type IApplication, type IWindow, Logger } from "@spicy3d/core";
+import { ExternalContentPolicy, type IApplication, type IWindow, Logger } from "@spicy3d/core";
 import { mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ThreeVisulFactory } from "@spicy3d/three";
 import { MainWindow } from "@spicy3d/ui";
@@ -281,6 +281,19 @@ describe("AppBuilder", () => {
             expect(cloudMock.settingsCalls).toEqual([]);
             // Runs before the "a server" case, which is the first to import the client module.
             expect(cloudMock.mainModuleLoaded).toBe(0);
+        });
+
+        test("until the server answers, a session may exist; no server: none (CLOUD-17)", async () => {
+            cloudMock.discovery = { status: "dormant" };
+            ExternalContentPolicy.setSessionProbe(() => false)(); // back to the default: no cloud
+            expect(ExternalContentPolicy.hasSession).toBe(false);
+            const builder = new AppBuilder().useCloud();
+            // `?plugin=` may run before the discovery: treated as signed in.
+            expect(ExternalContentPolicy.hasSession).toBe(true);
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(ExternalContentPolicy.hasSession).toBe(false);
         });
 
         test("a server: the cloud starts with the discovery and the options", async () => {

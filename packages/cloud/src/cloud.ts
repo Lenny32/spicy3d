@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Observable, PubSub } from "@spicy3d/core";
+import { ExternalContentPolicy, Observable, PubSub } from "@spicy3d/core";
 import { Account } from "./account/account";
 import type { ConfigResponse } from "./api";
 import { CloudClient, type CloudClientOptions } from "./client";
@@ -79,6 +79,8 @@ export function startCloud(
         case "ready": {
             const connection = new CloudConnection(discovery.config, new CloudClient(options));
             Cloud.current.connection = connection;
+            // Plugins loaded from other origins ask while a session may exist (CLOUD-17).
+            ExternalContentPolicy.setSessionProbe(() => connection.account.status !== "signedOut");
             return connection;
         }
     }

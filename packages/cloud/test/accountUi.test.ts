@@ -683,6 +683,17 @@ describe("account settings", () => {
         expect(JSON.parse(configs[2].textContent ?? "").mcpServers.spicy3d.env).toEqual({
             SPICY3D_TOKEN: "spicy_pat_s3cret",
         });
+        // Shown once, kept nowhere (CLOUD-17): no browser storage holds the secret.
+        const stored = (storage: Storage) =>
+            Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!) ?? "").join(
+                "\n",
+            );
+        expect(stored(localStorage)).not.toContain("spicy_pat_s3cret");
+        expect(stored(sessionStorage)).not.toContain("spicy_pat_s3cret");
+        // Closing the dialog removes it from the page.
+        dialog.close();
+        dialog.remove();
+        expect(document.body.textContent).not.toContain("spicy_pat_s3cret");
     });
 
     test("delete account: the typed email must match; then the account is deleted and signed out", async () => {

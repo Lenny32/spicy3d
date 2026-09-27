@@ -4,7 +4,7 @@
 // The lazily loaded half of MCP support: everything here pulls in the SDK. Import it with a
 // dynamic import() only — settings.ts, state.ts and the panel are the eager, SDK-free half.
 
-import { Logger } from "@spicy3d/core";
+import { Logger, redactUrl } from "@spicy3d/core";
 import { RemoteMcpSession } from "./remoteSession";
 import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import { McpSession } from "./session";
@@ -30,7 +30,9 @@ function displayUrl(url: URL): string {
 export function connectMcpBridge(rawUrl: string): boolean {
     const url = parseBridgeUrl(rawUrl);
     if (!url) {
-        Logger.warn(`[mcp] refusing bridge ${rawUrl}: only ws:// URLs on 127.0.0.1/localhost are accepted`);
+        Logger.warn(
+            `[mcp] refusing bridge ${redactUrl(rawUrl)}: only ws:// URLs on 127.0.0.1/localhost are accepted`,
+        );
         return false;
     }
     disconnectMcpBridge();

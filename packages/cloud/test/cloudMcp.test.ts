@@ -61,6 +61,29 @@ describe("startCloudMcp", () => {
         stop();
     });
 
+    test("signing out forgets the tab's pairing decisions (CLOUD-17)", async () => {
+        const server = new FakeServer();
+        server.on("GET /api/me", json(200, USER));
+        const connection = new CloudConnection(config(true), server.client());
+        await connection.account.refresh();
+        const stop = startCloudMcp(connection);
+        sessionStorage.setItem("spicy3d.mcp.tabInstance", "tab-1");
+        sessionStorage.setItem(
+            "spicy3d.mcp.pairing",
+            JSON.stringify({ instance: "tab-1", decisions: [["session-1", "allow"]], blockedTokens: [] }),
+        );
+
+        server.on("POST /api/auth/logout", json(204));
+        await connection.account.signOut();
+
+        expect(remoteMcpState.current.link).toBeUndefined();
+        expect(sessionStorage.getItem("spicy3d.mcp.pairing")).toBeNull();
+        // The tab keeps its identity; only the decisions go.
+        expect(sessionStorage.getItem("spicy3d.mcp.tabInstance")).toBe("tab-1");
+        stop();
+        sessionStorage.clear();
+    });
+
     test("the same user refreshing keeps the same link (no reconnect)", async () => {
         const server = new FakeServer();
         server.on("GET /api/me", json(200, USER));

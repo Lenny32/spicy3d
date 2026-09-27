@@ -4,7 +4,7 @@
 import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/websocket.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { Logger } from "@spicy3d/core";
+import { Logger, redactSecrets } from "@spicy3d/core";
 import { createMcpServer, type McpServerOptions } from "./server";
 import type { McpStatus } from "./state";
 
@@ -92,7 +92,9 @@ export class McpSession {
         try {
             await server.connect(transport);
         } catch (err) {
-            Logger.debug(`[mcp] bridge not reachable at ${this.url.host}: ${(err as Error)?.message ?? err}`);
+            Logger.debug(
+                `[mcp] bridge not reachable at ${this.url.host}: ${redactSecrets(String((err as Error)?.message ?? err))}`,
+            );
             this.retry(server);
             return;
         }

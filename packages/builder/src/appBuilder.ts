@@ -14,6 +14,7 @@ import {
     Constants,
     DeploymentConfig,
     type DeploymentConfigLoadOptions,
+    ExternalContentPolicy,
     I18n,
     type IApplication,
     type IDataExchange,
@@ -164,12 +165,16 @@ export class AppBuilder {
      * client and the account UI only once a server is found.
      */
     useCloud(options: UseCloudOptions = {}): this {
+        // Until the server answers, a session cookie may exist: plugins and links are treated as
+        // signed in (CLOUD-17). A compatible server replaces this with the account's status.
+        const noSessionKnown = ExternalContentPolicy.setSessionProbe(() => true);
         this._started.push(async (app) => {
             const { discoverCloud } = await import("@spicy3d/cloud/src/config");
             const { accountLink, ...connection } = options;
             // Offline, the config the server gave last time starts the cloud (cached documents, pending saves).
             const discovery = await discoverCloud({ ...connection, offlineCache: true });
             if (discovery.status === "dormant") {
+                noSessionKnown();
                 if (accountLink) Logger.warn("[cloud] opened with an account link, but no server answers");
                 return;
             }

@@ -111,6 +111,18 @@ export function claimTabInstance(
     });
 }
 
+/**
+ * Removes every remembered Allow / Deny of this tab (sign-out): sessions of the next sign-in ask
+ * again. The tab's instance id stays.
+ */
+export function forgetPairingDecisions(storage?: Pick<Storage, "removeItem">): void {
+    try {
+        (storage ?? globalThis.sessionStorage)?.removeItem(STORAGE_KEY);
+    } catch {
+        // Blocked storage held nothing.
+    }
+}
+
 let pageInstance: Promise<string> | undefined;
 
 /** The instance id of this page, claimed once (see {@link claimTabInstance}). */
