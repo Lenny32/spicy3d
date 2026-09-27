@@ -11,7 +11,7 @@ name: Deploy
 #   as SpicySrv's compose does (read-only, no capabilities), checks the headers and the
 #   SPICY3D_*_ORIGINS validation, smoke-tests it in headless Chromium and keeps it as a run
 #   artifact (`spicy3d-web-<version>.tar.gz` for `docker load`, plus the dist/ tarball). Then, from
-#   main or a tag only, job `docker` pushes it to ghcr.io/<owner>/<repo> as `latest` and
+#   main, develop or a tag only, job `docker` pushes it to ghcr.io/<owner>/<repo> as `latest` and
 #   `<image version>`, for linux/amd64 and linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs
 #   the package to be public (Packages > spicy3d > Package settings) or a `docker login ghcr.io`.
 # - Bridge releases are published by hand: Actions > Package MCP bridge > Run workflow, with
@@ -189,7 +189,7 @@ jobs:
     docker:
         name: Publish Docker image
         needs: [prepare, web, image]
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/')
         runs-on: ubuntu-latest
         permissions:
             contents: read
