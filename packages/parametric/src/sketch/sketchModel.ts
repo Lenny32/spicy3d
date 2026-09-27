@@ -174,7 +174,7 @@ export interface SketchDimensionAnchor {
  * entities as ordinary `{ entityId, pointIndex }` refs — no format change.
  */
 export interface ExternalRefData {
-    /** Reserved negative id, allocated from `FIRST_EXTERNAL_ENTITY_ID` downward. */
+    /** Reserved negative id (`<= FIRST_EXTERNAL_ENTITY_ID`), allocated by `sketchIds.ts`. */
     entityId: number;
     /** Source node (the part) the edge lives on. */
     nodeId: string;
@@ -218,18 +218,13 @@ export interface SketchData {
      */
     refPositions?: Record<string, number>;
     /**
-     * Next real entity id (monotonic, counts up from 1). Entity ids are the primary
-     * key of ProfileRef region identity, so a freed id is never reused — a stale
-     * fingerprint could otherwise match a geometrically different region. Absent in
-     * documents written before the counters; the solver then initializes it from the
-     * current max entity id + 1.
+     * Legacy: the next real entity id of the counter ids were once allocated from. Ids are
+     * now random and collision-checked (`sketchIds.ts`) so two devices never hand out the
+     * same one; a document that has the field keeps it verbatim (the solver never reads nor
+     * advances it), new sketches never write it. The merge takes the larger value.
      */
     entityIdSeq?: number;
-    /**
-     * Next external entity id (monotonic, counts down from FIRST_EXTERNAL_ENTITY_ID).
-     * Same no-reuse guarantee as `entityIdSeq`; absent in pre-counter documents,
-     * where the solver initializes it from the current min external id − 1.
-     */
+    /** Legacy, like `entityIdSeq`: the next external entity id of the old downward counter. */
     externalIdSeq?: number;
 }
 
@@ -268,15 +263,9 @@ export function syncExternalRoles(data: Pick<SketchData, "constraints" | "extern
     return changed;
 }
 
-export function nextSketchId(items: ReadonlyArray<{ id: number }>): number {
-    return items.reduce((max, item) => Math.max(max, item.id), 0) + 1;
-}
-
 /**
  * Reserved entity ids for the sketch datum: the origin point and the X/Y axis
- * lines. Real entity ids are allocated monotonically from 1 (`entityIdSeq` in the
- * solver, persisted as `SketchData.entityIdSeq`; `nextSketchId` serves constraint
- * ids only), so negatives never clash. Datum entities live only in the solver —
+ * lines. Real entity ids are positive (`sketchIds.ts`), so negatives never clash. Datum entities live only in the solver —
  * never serialized as entities, never rendered as sketch geometry — but
  * constraints may reference them and are serialized as ordinary
  * `SketchConstraintData`.
@@ -290,10 +279,10 @@ export function isDatumEntityId(id: number): boolean {
 }
 
 /**
- * Reserved entity ids for external references start at -100 and count down, so
- * they never collide with the datum ids (-1..-3) or real entity ids (1+). Ids are
- * allocated monotonically downward via `SketchData.externalIdSeq` and never
- * reused (a stale `ProfileRef` entity-id set must not hit a new, unrelated ref).
+ * Reserved entity ids for external references are -100 and below, so they never
+ * collide with the datum ids (-1..-3) or real entity ids (1+). They are allocated by
+ * `sketchIds.ts` (random, collision-checked — a freed id is not reissued either, so a
+ * stale `ProfileRef` entity-id set cannot hit a new, unrelated ref).
  * Like the datum, external entities live only in the solver (never serialized as
  * entities); their persistent state is `SketchData.externalRefs`.
  */

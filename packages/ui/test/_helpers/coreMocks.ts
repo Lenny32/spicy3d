@@ -169,3 +169,17 @@ export function unitExportsMock() {
         },
     };
 }
+
+/**
+ * The feature focus requests of core (`requestFeatureFocus` / `takeFeatureFocus` /
+ * `onFeatureFocusRequested`), looked up on the first call like {@link unitExportsMock}: core's
+ * own module, the one the real `@spicy3d/core` re-exports, so tests importing it share them.
+ */
+export function featureFocusExportsMock() {
+    const featureList = () => require("../../../core/src/model/featureList");
+    return {
+        requestFeatureFocus: (...args: unknown[]) => featureList().requestFeatureFocus(...args),
+        takeFeatureFocus: (...args: unknown[]) => featureList().takeFeatureFocus(...args),
+        onFeatureFocusRequested: (...args: unknown[]) => featureList().onFeatureFocusRequested(...args),
+    };
+}

@@ -1,9 +1,14 @@
 **/node_modules
+dist
+dist-bridge
+coverage
+build
+types
+public/downloads
 .git
 .github
 .claude
 .vscode
-dist
 screenshots
 tickets
 cpp/build

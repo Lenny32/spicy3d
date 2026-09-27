@@ -1,8 +1,15 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { describe, expect, test } from "@rstest/core";
-import { PubSub } from "@spicy3d/core";
+import { describe, expect, rs, test } from "@rstest/core";
+import {
+    type DocumentRepositoryError,
+    type IDocument,
+    PubSub,
+    Result,
+    type SaveConflict,
+    type SaveOutcome,
+} from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { SaveDocument } from "../../../src/commands/application/saveDocument";
 
@@ -73,7 +80,7 @@ describe("SaveDocument", () => {
 
         try {
             const doc = createMockDocument();
-            doc.save = async () => {};
+            doc.save = async () => Result.ok({ status: "saved", updatedAt: 0 });
             const app = createMockApplication();
             app.activeView = { document: doc } as any;
 
@@ -102,7 +109,7 @@ describe("SaveDocument", () => {
 
         try {
             const doc = createMockDocument();
-            doc.save = async () => {};
+            doc.save = async () => Result.ok({ status: "saved", updatedAt: 0 });
             const app = createMockApplication();
             app.activeView = { document: doc } as any;
 
@@ -120,7 +127,9 @@ describe("SaveDocument callback", () => {
     /**
      * Capture the showPermanent callback and set up document.save tracking.
      */
-    function setupCallbackTest() {
+    function setupCallbackTest(
+        outcome: Result<SaveOutcome, DocumentRepositoryError> = Result.ok({ status: "saved", updatedAt: 0 }),
+    ) {
         const state: {
             callback: (() => Promise<void>) | undefined;
             saveCalled: boolean;
@@ -147,6 +156,7 @@ describe("SaveDocument callback", () => {
         const doc = createMockDocument();
         doc.save = async () => {
             state.saveCalled = true;
+            return outcome;
         };
 
         const app = createMockApplication();
@@ -187,6 +197,40 @@ describe("SaveDocument callback", () => {
 
             expect(state.toastChannel).toBe("showToast");
             expect(state.toastMessage).toBe("toast.document.saved");
+        } finally {
+            restore();
+        }
+    });
+
+    test.each<[string, Result<SaveOutcome, DocumentRepositoryError>, string]>([
+        ["a repository failure", Result.err({ kind: "quota" }), "error.repository.quota"],
+        ["a version conflict", Result.ok({ status: "conflict" }), "error.repository.conflict"],
+    ])("should report %s instead of saved", async (_name, outcome, message) => {
+        const { state, app, restore } = setupCallbackTest(outcome);
+
+        try {
+            await new SaveDocument().execute(app);
+            expect(state.callback).not.toBeUndefined();
+            await state.callback!();
+
+            expect(state.toastMessage).toBe(message);
+        } finally {
+            restore();
+        }
+    });
+
+    test("a version conflict opens the conflict handler when there is one", async () => {
+        const conflict = { status: "conflict", headVersion: "h" } as const;
+        const { state, app, restore } = setupCallbackTest(Result.ok(conflict));
+        const handler = rs.fn(async (_doc: IDocument, _conflict: SaveConflict) => {});
+        app.repositories.conflictHandler = handler;
+
+        try {
+            await new SaveDocument().execute(app);
+            await state.callback!();
+
+            expect(handler).toHaveBeenCalledWith(app.activeView!.document, conflict);
+            expect(state.toastMessage).toBe("");
         } finally {
             restore();
         }

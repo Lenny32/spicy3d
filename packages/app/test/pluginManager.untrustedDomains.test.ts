@@ -2,7 +2,14 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { Config, type DialogButton, type IApplication, PubSub } from "@spicy3d/core";
+import {
+    Config,
+    DeploymentConfig,
+    type DialogButton,
+    ExternalContentPolicy,
+    type IApplication,
+    PubSub,
+} from "@spicy3d/core";
 import { PluginManager } from "../src/pluginManager";
 
 /**
@@ -63,6 +70,7 @@ describe("PluginManager untrusted domains (isolated)", () => {
         globalThis.fetch = originalFetch;
         Config.instance.trustedDomains = originalTrustedDomains;
         PubSub.default.removeAll("showDialog");
+        DeploymentConfig.reset();
     });
 
     test("declining a domain skips it on subsequent visits", async () => {
@@ -100,7 +108,8 @@ describe("PluginManager untrusted domains (isolated)", () => {
             // User trusts the domain
             clickButton(trust!);
 
-            expect(Config.instance.trustedDomains).toContain(host);
+            // The origin (scheme included), not the bare host.
+            expect(Config.instance.trustedDomains).toContain(`https://${host}`);
             expect(saveSpy).toHaveBeenCalledTimes(1);
             expect(loadRemoteSpy).toHaveBeenCalledWith(`https://${host}/plugin`);
 
@@ -129,5 +138,132 @@ describe("PluginManager untrusted domains (isolated)", () => {
         await second.loadFromUrl(`https://${host}/plugin`);
         expect(dialogArgs).toBeUndefined();
         expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    describe("while a cloud session may exist (CLOUD-17)", () => {
+        let removeProbe: () => void;
+        beforeEach(() => {
+            removeProbe = ExternalContentPolicy.setSessionProbe(() => true);
+        });
+        afterEach(() => removeProbe());
+
+        test("an origin trusted while signed out asks again, and the prompt warns about the account", async () => {
+            const host = "signed-in-remembered.example.com";
+            Config.instance.trustedDomains = [`https://${host}`, host];
+            const manager = createManager();
+            const loadRemoteSpy = rs.spyOn(manager as any, "loadFromRemoteFile").mockResolvedValue(undefined);
+            try {
+                await manager.loadFromUrl(`https://${host}/plugin/`);
+
+                expect(loadRemoteSpy).not.toHaveBeenCalled();
+                expect(dialogArgs).not.toBeUndefined();
+                const content = dialogArgs![1] as HTMLElement;
+                expect(content.textContent).toContain(`https://${host}`);
+                expect(content.querySelector('[data-warning="signedIn"]')).not.toBeNull();
+            } finally {
+                loadRemoteSpy.mockRestore();
+            }
+        });
+
+        test("Trust loads the plugin and lasts for this page only: nothing is saved", async () => {
+            const host = "signed-in-trust.example.com";
+            const manager = createManager();
+            const saveSpy = rs.spyOn(Config.instance, "saveToStorage").mockImplementation(() => {});
+            const loadRemoteSpy = rs.spyOn(manager as any, "loadFromRemoteFile").mockResolvedValue(undefined);
+            try {
+                await manager.loadFromUrl(`https://${host}/plugin/`);
+                clickButton(dialogButtons(dialogArgs)[1]);
+
+                expect(loadRemoteSpy).toHaveBeenCalledWith(`https://${host}/plugin/`);
+                expect(saveSpy).not.toHaveBeenCalled();
+                expect(Config.instance.trustedDomains).not.toContain(`https://${host}`);
+
+                // Same page: no second prompt.
+                dialogArgs = undefined;
+                await manager.loadFromUrl(`https://${host}/other/`);
+                expect(dialogArgs).toBeUndefined();
+                expect(loadRemoteSpy).toHaveBeenCalledTimes(2);
+            } finally {
+                saveSpy.mockRestore();
+                loadRemoteSpy.mockRestore();
+            }
+        });
+
+        test("an origin allowlisted by the deployment loads without a prompt", async () => {
+            DeploymentConfig.set({ security: { pluginOrigins: ["https://*.plugins.example.lan"] } });
+            const manager = createManager();
+            const loadRemoteSpy = rs.spyOn(manager as any, "loadFromRemoteFile").mockResolvedValue(undefined);
+            try {
+                await manager.loadFromUrl("https://cad.plugins.example.lan/macro/");
+
+                expect(dialogArgs).toBeUndefined();
+                expect(loadRemoteSpy).toHaveBeenCalledWith("https://cad.plugins.example.lan/macro/");
+            } finally {
+                loadRemoteSpy.mockRestore();
+            }
+        });
+    });
+
+    test("a plain-HTTP plugin origin is named with a warning", async () => {
+        const manager = createManager();
+        await manager.loadFromUrl("http://plain-http-isolated.example.com/plugin/");
+
+        const content = dialogArgs![1] as HTMLElement;
+        expect(content.textContent).toContain("http://plain-http-isolated.example.com");
+        expect(content.querySelector('[data-warning="plainHttp"]')).not.toBeNull();
+        expect(content.querySelector('[data-warning="signedIn"]')).toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        "/api/blobs/ab12?x=.spicyplugin",
+        "/api/blobs/ab12.spicyplugin",
+        "/models/x.spicyplugin",
+    ])("same origin but outside plugins/ (%s): asks like any other origin", async (path) => {
+        expect(location.origin).toMatch(/^https?:\/\//);
+        const manager = createManager();
+        const loadRemoteSpy = rs.spyOn(manager as any, "loadFromRemoteFile").mockResolvedValue(undefined);
+        try {
+            await manager.loadFromUrl(new URL(path, location.href).href);
+
+            expect(loadRemoteSpy).not.toHaveBeenCalled();
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(dialogButtons(dialogArgs).map((b) => b.content)).toEqual([
+                "common.dontTrust",
+                "common.trust",
+            ]);
+        } finally {
+            loadRemoteSpy.mockRestore();
+        }
+    });
+
+    test("a .spicyplugin is recognized by its path, not by a query ending in .spicyplugin", async () => {
+        const manager = createManager();
+        const fromFile = rs.spyOn(manager, "loadFromFile").mockResolvedValue(undefined);
+        const fromFolder = rs.spyOn(manager as any, "readManifestFromUrl").mockResolvedValue(undefined);
+        try {
+            await (manager as any).loadFromRemoteFile("https://p.example.com/plugins/x/?name=.spicyplugin");
+
+            expect(fromFile).not.toHaveBeenCalled();
+            expect(fromFolder).toHaveBeenCalledTimes(1);
+        } finally {
+            fromFile.mockRestore();
+            fromFolder.mockRestore();
+        }
+    });
+
+    test("a non-http plugin URL is refused without a prompt", async () => {
+        const manager = createManager();
+        const toasts: unknown[][] = [];
+        PubSub.default.sub("showToast", (...args: unknown[]) => toasts.push(args));
+        try {
+            await manager.loadFromUrl("javascript:alert(1)");
+        } finally {
+            PubSub.default.removeAll("showToast");
+        }
+
+        expect(dialogArgs).toBeUndefined();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(toasts[0]?.[0]).toBe("warning.plugin.refused{0}");
     });
 });

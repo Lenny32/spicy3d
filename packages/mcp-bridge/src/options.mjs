@@ -2,15 +2,21 @@
 // See LICENSE file in the project root for full license information.
 
 import { parseArgs } from "node:util";
+import { mcpEndpointFor } from "./remote.mjs";
 
 export const DEFAULT_APP_URL = "http://localhost:8080/";
 export const DEFAULT_PORT = 7777;
 
 export const USAGE = `Usage: spicy3d-mcp-bridge [options]
+       spicy3d-mcp-bridge --server <url>        (token in SPICY3D_TOKEN)
 
 MCP stdio server whose tools run in your Spicy3D browser tab. Your MCP client
 (Claude Code, Claude Desktop, Cursor, ...) starts it; the Spicy3D page connects
 to it from the MCP panel. Copy the ready-made command from that panel.
+
+With --server, the bridge instead relays to a Spicy3D server's MCP endpoint,
+for clients that can only start local programs: sign in to Spicy3D in your
+browser, and the server passes the calls to that tab. No local port is opened.
 
 Options:
   -u, --app-url <url>        Address of the Spicy3D page, e.g. https://cad.example.com/
@@ -20,9 +26,17 @@ Options:
       --no-token             Accept the page without a token. INSECURE: any program
                              on this machine can then drive the tab.    [env SPICY3D_BRIDGE_NO_TOKEN=1]
       --allow-origin <url>   Also accept pages from this origin (repeatable) [env SPICY3D_ALLOWED_ORIGINS, comma-separated]
+  -s, --server <url>         Relay to this Spicy3D server (e.g. https://spicy.lan) instead of
+                             waiting for a page; needs a personal access token.  [env SPICY3D_SERVER]
+                             The token comes from SPICY3D_TOKEN (Spicy3D: account settings > Access tokens).
+                             https only (http for localhost). A server with an internal CA
+                             needs NODE_EXTRA_CA_CERTS=<ca.pem>.
   -h, --help                 Show this help
   -v, --version              Show the version
 `;
+
+/** Flags that only make sense for the local WebSocket. */
+const LOCAL_ONLY = ["app-url", "port", "no-token", "allow-origin"];
 
 /**
  * Bridge options from argv and the environment; a flag wins over its variable. Throws with a
@@ -40,10 +54,42 @@ export function parseOptions(argv, env) {
             token: { type: "string", short: "t" },
             "no-token": { type: "boolean" },
             "allow-origin": { type: "string", multiple: true },
+            server: { type: "string", short: "s" },
             help: { type: "boolean", short: "h" },
             version: { type: "boolean", short: "v" },
         },
     });
+
+    const serverText = values.server ?? env["SPICY3D_SERVER"];
+    if (serverText !== undefined && serverText !== "") {
+        const conflicting = LOCAL_ONLY.filter((flag) => values[flag] !== undefined);
+        if (conflicting.length > 0) {
+            throw new Error(
+                `--server cannot be combined with ${conflicting.map((f) => `--${f}`).join(", ")}`,
+            );
+        }
+        if (values.token !== undefined) {
+            throw new Error(
+                "--server takes the access token from SPICY3D_TOKEN only, not --token (the process list would show it)",
+            );
+        }
+        const server = mcpEndpointFor(serverText);
+        const serverToken = (env["SPICY3D_TOKEN"] ?? "").trim();
+        if (!values.help && !values.version && !serverToken) {
+            throw new Error("--server needs a personal access token in SPICY3D_TOKEN");
+        }
+        return {
+            help: values.help === true,
+            version: values.version === true,
+            server,
+            serverToken,
+            appUrl: DEFAULT_APP_URL,
+            port: DEFAULT_PORT,
+            noToken: false,
+            token: "",
+            allowedOrigins: new Set(),
+        };
+    }
 
     const appUrlText = values["app-url"] ?? env["SPICY3D_APP_URL"] ?? DEFAULT_APP_URL;
     let appUrl;
@@ -85,6 +131,9 @@ export function parseOptions(argv, env) {
     return {
         help: values.help === true,
         version: values.version === true,
+        /** The server's `/mcp` endpoint in server mode; undefined for the local bridge. */
+        server: undefined,
+        serverToken: "",
         appUrl: appUrl.toString(),
         port,
         noToken,

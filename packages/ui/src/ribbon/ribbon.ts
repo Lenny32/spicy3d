@@ -18,6 +18,7 @@ import {
     type Ribbon,
     type RibbonGroup,
     type RibbonTab,
+    TitleBar,
 } from "@spicy3d/core";
 import { a, collection, createIcon, div, label, span, svg } from "@spicy3d/element";
 import style from "./ribbon.module.css";
@@ -181,6 +182,11 @@ export class RibbonUI extends HTMLElement {
     private rightPanel() {
         return div(
             { className: style.right },
+            collection({
+                className: style.titleBarItems,
+                sources: TitleBar.items,
+                template: (item: HTMLElement) => item,
+            }),
             a(
                 { href: "https://github.com/Lenny32/spicy3d", target: "_blank" },
                 svg({ title: "Github", className: style.icon, icon: "icon-github" }),

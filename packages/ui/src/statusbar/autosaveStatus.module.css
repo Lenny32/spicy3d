@@ -1,0 +1,29 @@
+.indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--statusbar-foreground-color);
+    white-space: nowrap;
+}
+
+.indicator:empty {
+    display: none;
+}
+
+.toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+
+    input {
+        margin: 0;
+    }
+}
+
+.time {
+    font-variant-numeric: tabular-nums;
+}

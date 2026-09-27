@@ -3,32 +3,33 @@
 
 import type { Tool } from "../llm/types";
 import { SKILLS } from "./registry";
+import type { Skill } from "./types";
 
 /**
  * Progressive disclosure: the system prompt lists skills by name and one-line
  * description; the model pulls the full document only when it needs it.
  */
-export function buildSkillTool(): Tool {
+export function buildSkillTool(skills: Skill[] = SKILLS): Tool {
     return {
         name: "load_skill",
-        description: `Load a reference document on demand. Available skills: ${SKILLS.map(
-            (s) => `${s.name} — ${s.description}`,
-        ).join("; ")}`,
+        description: `Load a reference document on demand. Available skills: ${skills
+            .map((s) => `${s.name} — ${s.description}`)
+            .join("; ")}`,
         parameters: {
             type: "object",
             properties: {
-                name: { type: "string", enum: SKILLS.map((s) => s.name) },
+                name: { type: "string", enum: skills.map((s) => s.name) },
             },
             required: ["name"],
         },
         handler: (args) => {
             const name = (args as { name?: unknown }).name;
-            const skill = SKILLS.find((s) => s.name === name);
+            const skill = skills.find((s) => s.name === name);
             if (!skill) {
                 return Promise.resolve(
                     JSON.stringify({
                         error: `unknown skill "${name}"`,
-                        available: SKILLS.map((s) => s.name),
+                        available: skills.map((s) => s.name),
                     }),
                 );
             }

@@ -1,0 +1,36 @@
+{
+    "description": "Folder C is kept by both devices, but each deleted the folder the other put it in (this one Q, the other P): C is never dropped — ours' parent P comes back with it, reported as a move.",
+    "conflicts": [
+        {
+            "kind": "move",
+            "path": "node/folder-c/parent",
+            "base": "folder-p",
+            "ours": "folder-p",
+            "theirs": "folder-q",
+            "messageKey": "merge.conflict.move{0}",
+            "args": ["Folder C"],
+            "choices": ["ours", "theirs"]
+        },
+        {
+            "kind": "delete-vs-modify",
+            "path": "node/folder-q",
+            "base": {
+                "id": "folder-q",
+                "name": "Folder Q",
+                "visible": true,
+                "__cla$$__": "FolderNode",
+                "parentId": "fJ8oZYZU28huXd6_BAPDu"
+            },
+            "theirs": {
+                "id": "folder-q",
+                "name": "Folder Q",
+                "visible": true,
+                "__cla$$__": "FolderNode",
+                "parentId": "fJ8oZYZU28huXd6_BAPDu"
+            },
+            "messageKey": "merge.conflict.deleteVsModify{0}",
+            "args": ["Folder Q"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

@@ -3,6 +3,7 @@
 
 import { rs } from "@rstest/core";
 import {
+    AutosaveHolds,
     type IApplication,
     type ICameraController,
     type IDocument,
@@ -142,6 +143,46 @@ describe("SketchEditor session statics", () => {
             expect(clearSelection).toHaveBeenCalledTimes(1);
             editor.exit();
         } finally {
+            SketchEditor.exit();
+            restoreFactory();
+        }
+    });
+
+    test("a session holds autosave (bodies are rolled back) until it ends", () => {
+        const { doc, restoreFactory } = setup();
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+            expect(AutosaveHolds.isHeld).toBe(false);
+
+            const editor = SketchEditor.enter(node);
+            expect(AutosaveHolds.isHeld).toBe(true);
+
+            editor.exit();
+            expect(AutosaveHolds.isHeld).toBe(false);
+        } finally {
+            SketchEditor.exit();
+            restoreFactory();
+        }
+    });
+
+    test("an enter that fails after the session started releases its autosave hold", () => {
+        const { app, doc, restoreFactory } = setup();
+        (app as { mainWindow: unknown }).mainWindow = {
+            ribbon: {
+                openTab: () => {
+                    throw new Error("no ribbon");
+                },
+                closeTab: () => {},
+            },
+        };
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+
+            expect(() => SketchEditor.enter(node)).toThrow("no ribbon");
+
+            expect(AutosaveHolds.isHeld).toBe(false);
+        } finally {
+            (app as { mainWindow: unknown }).mainWindow = undefined;
             SketchEditor.exit();
             restoreFactory();
         }

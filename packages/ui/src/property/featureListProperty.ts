@@ -16,8 +16,10 @@ import {
     LENGTH_UNITS,
     Localize,
     lengthParameterFromInput,
+    onFeatureFocusRequested,
     PubSub,
     Transaction,
+    takeFeatureFocus,
     type UnitSpec,
     unitSpecEquals,
 } from "@spicy3d/core";
@@ -53,23 +55,39 @@ export class FeatureListProperty extends HTMLElement {
     private menu: HTMLElement | undefined;
     private draggingId: string | undefined;
     private dropTarget: DropTarget | undefined;
+    private stopFocus?: () => void;
 
     constructor(
         readonly document: IDocument,
         readonly node: INode & IFeatureListNode,
     ) {
         super();
+        // Opened for one feature (the conflict panel's "open failing feature"): that row expanded.
+        const focused = takeFeatureFocus(node);
+        if (focused !== undefined) this.expanded.add(focused);
         this.renderItems();
     }
 
     connectedCallback(): void {
         this.node.onPropertyChanged(this.handleNodeChanged);
+        this.stopFocus = onFeatureFocusRequested(this.handleFocus);
     }
 
     disconnectedCallback(): void {
         this.node.removePropertyChanged(this.handleNodeChanged);
+        this.stopFocus?.();
+        this.stopFocus = undefined;
         this.closeMenu();
     }
+
+    /** A feature of this list asked to be opened while it is shown: expanded and scrolled to. */
+    private readonly handleFocus = (node: INode, featureId: string) => {
+        if (node !== this.node || takeFeatureFocus(node) === undefined) return;
+        this.expanded.add(featureId);
+        this.renderItems();
+        const row = [...this.children].find((x) => (x as HTMLElement).dataset["featureId"] === featureId);
+        row?.scrollIntoView?.({ block: "nearest" });
+    };
 
     private readonly handleNodeChanged = (property: string) => {
         if (property === "featuresJson") this.renderItems();
@@ -104,6 +122,7 @@ export class FeatureListProperty extends HTMLElement {
             this.featureHeader(item, expanded),
             ...(expanded ? [this.featureBody(item)] : []),
         );
+        row.dataset["featureId"] = item.id;
         this.addDropHandlers(row, item);
         return row;
     }

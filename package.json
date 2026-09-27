@@ -9,14 +9,20 @@
         "build:wasm": "cd cpp && cmake --preset release && cmake --build --preset release",
         "build:types": "node scripts/generate_types.mjs",
         "check": "biome check --write",
+        "check:urls": "node scripts/check-external-urls.mjs",
+        "cloud:api": "node scripts/generate-cloud-api.mjs",
+        "cloud:api:check": "node scripts/generate-cloud-api.mjs --check",
         "dev": "node scripts/pack-mcp-bridge.mjs && rspack dev",
         "format": "biome check --write . && npx clang-format --style=Webkit --sort-includes -i ./cpp/src/**",
         "generate:capabilities": "node scripts/generate-shape-capabilities.mjs",
         "mcp-bridge": "node packages/mcp-bridge/src/cli.mjs",
+        "merge:fixtures": "node scripts/update-merge-rules.mjs fixtures",
+        "merge:rules": "node scripts/update-merge-rules.mjs rules",
         "pack:mcp-bridge": "node scripts/pack-mcp-bridge.mjs",
         "preview": "rspack preview",
         "release": "node scripts/release.mjs",
         "setup:wasm": "node scripts/setup_wasm_deps.mjs",
+        "smoke": "node scripts/smoke-offline.mjs",
         "test": "rstest",
         "testc": "rstest --coverage"
     },
@@ -43,8 +49,11 @@
         "@rstest/core": "^0.10.0",
         "@rstest/coverage-istanbul": "^0.10.0",
         "clang-format": "^1.8.0",
+        "fast-check": "^4.10.2",
         "happy-dom": "^20.9.0",
         "lint-staged": "^17.0.5",
+        "openapi-typescript": "7.13.0",
+        "playwright": "^1.63.0",
         "simple-git-hooks": "2.13.1",
         "ts-checker-rspack-plugin": "^1.3.0",
         "typescript": "^6.0.3",
@@ -53,5 +62,10 @@
     "dependencies": {
         "@types/jszip": "^3.4.0",
         "jszip": "^3.10.1"
+    },
+    "overrides": {
+        "openapi-typescript": {
+            "typescript": "$typescript"
+        }
     }
 }

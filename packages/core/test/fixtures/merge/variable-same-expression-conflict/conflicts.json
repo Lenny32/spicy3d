@@ -1,0 +1,15 @@
+{
+    "description": "The same variable given two different values: a property conflict on the variable.",
+    "conflicts": [
+        {
+            "kind": "property",
+            "path": "variable/v1/expression",
+            "base": "40 mm",
+            "ours": "45 mm",
+            "theirs": "50 mm",
+            "messageKey": "merge.conflict.property{0}{1}",
+            "args": ["w", "expression"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

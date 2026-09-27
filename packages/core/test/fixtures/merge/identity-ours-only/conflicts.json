@@ -1,0 +1,4 @@
+{
+    "description": "Only this device changed things: merge(base, ours, base) = ours.",
+    "conflicts": []
+}

@@ -1,9 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ObjectStorage } from "@spicy3d/core";
+import { DeploymentConfig, ObjectStorage } from "@spicy3d/core";
 import { mockLocalStorage } from "@spicy3d/core/test-utils";
-import { loadConfig, saveConfig } from "../src/settings";
+import {
+    defaultPreset,
+    isUnreachableError,
+    loadConfig,
+    PROVIDER_PRESETS,
+    presetFor,
+    providerPresets,
+    saveConfig,
+} from "../src/settings";
 
 describe("ai settings", () => {
     beforeEach(() => {
@@ -43,5 +51,74 @@ describe("ai settings", () => {
 
     test("returns undefined when nothing is stored", () => {
         expect(loadConfig()).toBeUndefined();
+    });
+});
+
+describe("provider presets from deployment.json", () => {
+    const lan = {
+        id: "lan",
+        label: "Company LLM",
+        provider: "completions",
+        baseURL: "https://llm.lan/v1",
+        defaultModel: "qwen3",
+    };
+
+    afterEach(() => DeploymentConfig.reset());
+
+    test("without a deployment section the public APIs are offered, Anthropic first", () => {
+        expect(providerPresets()).toEqual(PROVIDER_PRESETS);
+        expect(defaultPreset().id).toBe("anthropic");
+    });
+
+    test("the deployment's presets come first, then the public APIs", () => {
+        DeploymentConfig.set({ ai: { presets: [lan] } });
+
+        expect(providerPresets().map((p) => p.id)).toEqual(["lan", "anthropic", "openai", "responses"]);
+        expect(defaultPreset().id).toBe("lan");
+    });
+
+    test("hideBuiltInPresets leaves only the deployment's; defaultPreset picks one", () => {
+        DeploymentConfig.set({
+            ai: { presets: [lan, { ...lan, id: "lan2" }], hideBuiltInPresets: true, defaultPreset: "lan2" },
+        });
+
+        expect(providerPresets().map((p) => p.id)).toEqual(["lan", "lan2"]);
+        expect(defaultPreset().id).toBe("lan2");
+    });
+
+    test("invalid entries are dropped, and hiding the public APIs needs a valid preset", () => {
+        DeploymentConfig.set({
+            ai: { presets: [{ ...lan, provider: "gemini" }, { id: "x" }, "lan"], hideBuiltInPresets: true },
+        });
+
+        expect(providerPresets()).toEqual(PROVIDER_PRESETS);
+    });
+
+    test("a saved config maps back to its preset by endpoint, then by provider", () => {
+        DeploymentConfig.set({ ai: { presets: [lan] } });
+
+        expect(presetFor({ provider: "completions", baseURL: "https://api.openai.com/v1/" })?.id).toBe(
+            "openai",
+        );
+        expect(presetFor({ provider: "completions", baseURL: "https://llm.lan/v1" })?.id).toBe("lan");
+        expect(presetFor({ provider: "completions", baseURL: "https://other/v1" })?.id).toBe("lan");
+    });
+});
+
+describe("isUnreachableError", () => {
+    class APIConnectionError extends Error {}
+    class APIConnectionTimeoutError extends APIConnectionError {}
+
+    test.each([
+        [new TypeError("Failed to fetch"), true],
+        [new TypeError("NetworkError when attempting to fetch resource."), true],
+        [new TypeError("Load failed"), true],
+        [new TypeError("Cannot read properties of undefined (reading 'delta')"), false],
+        [new APIConnectionError("Connection error."), true],
+        [new APIConnectionTimeoutError("Request timed out."), true],
+        [new Error("401 Unauthorized"), false],
+        ["Connection error.", false],
+    ])("%p → %p", (error, expected) => {
+        expect(isUnreachableError(error)).toBe(expected);
     });
 });

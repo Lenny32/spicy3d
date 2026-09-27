@@ -1,0 +1,4 @@
+{
+    "description": "This device put a sketch on the body's top face, anchored after f2 (position 2); the other inserted a feature before f2. Anchors merge as feature ids: the anchor follows f2 to position 3.",
+    "conflicts": []
+}

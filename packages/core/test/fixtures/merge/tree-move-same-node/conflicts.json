@@ -1,0 +1,15 @@
+{
+    "description": "The box moved into Folder A here and into Folder B there: a move conflict, ours held.",
+    "conflicts": [
+        {
+            "kind": "move",
+            "path": "node/seFZEYsHrtzwpOiyaxckw/parent",
+            "base": "fJ8oZYZU28huXd6_BAPDu",
+            "ours": "folder-a",
+            "theirs": "folder-b",
+            "messageKey": "merge.conflict.move{0}",
+            "args": ["body.box1"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

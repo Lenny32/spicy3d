@@ -1,0 +1,56 @@
+# The web app as static files, for nginxinc/nginx-unprivileged (non-root, pid and temp files in /tmp), on port 8080
+# as SpicySrv's compose expects it (its Caddy proxies everything but /api, /ws and /mcp here).
+#
+# A template: at start the image's entrypoint substitutes ${SPICY3D_PLUGIN_ORIGINS} and ${SPICY3D_CONNECT_ORIGINS}
+# (checked by docker/19-spicy3d-plugin-origins.sh) and writes the result to /tmp/conf.d/, so the root file system stays read-only.
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+    # Redirects (e.g. a folder without its trailing slash) keep the address the browser used: behind the proxy the
+    # host and port nginx sees are not the public ones.
+    absolute_redirect off;
+
+    # Revalidate everything (ETag): the bundle's file names carry no content hash, deployment.json may be replaced by
+    # the operator, and a new release must reach browsers at once (the app checks the server's API version).
+    add_header Cache-Control "no-cache" always;
+    # The app's own Content-Security-Policy: SpicySrv's Caddy sends its SPICY_WEB_CSP (and the headers below) only
+    # when the image sends none, and its default would stop the app at startup. What the app needs beyond it:
+    # - script-src 'unsafe-eval': the OCCT module's embind glue generates its invokers with `new Function` (until it
+    #   is built with -sDYNAMIC_EXECUTION=0); 'wasm-unsafe-eval' compiles the WebAssembly;
+    # - script-src blob:: `.spicyplugin` archives and plugins with an import map run from blob: URLs (plugins are
+    #   code the user chose to run; import maps are linked into the modules, as an inline one would need
+    #   'unsafe-inline');
+    # - SPICY3D_PLUGIN_ORIGINS (default empty): origins plugins may be loaded from besides this one (script, fetch
+    #   of manifest/CSS, icons), e.g. "https://plugins.example.lan";
+    # - style-src 'unsafe-inline': elements get inline styles, plugins and the macro editor (ace) inject <style>;
+    # - img-src data: blob: (icons, thumbnails, screenshots), worker-src blob:;
+    # - connect-src: the server's /api, /ws and /mcp are 'self'; ws://127.0.0.1 / localhost is the local MCP bridge
+    #   (the app refuses any other bridge address); SPICY3D_CONNECT_ORIGINS (default empty) adds what else the page
+    #   may reach: the assistant's LLM endpoints, hosts `?url=` may open files from (docs/security.md). No `https:`
+    #   wildcard: a plugin or an injected script cannot send documents to an arbitrary host.
+    # Nothing inline: index.html has no inline script, iconfont.js is a file (its <style> injection is off).
+    # docs/security.md lists why each relaxation stays and what removes it.
+    # scripts/smoke-offline.mjs serves the build with this very policy (it reads it from this file).
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: ${SPICY3D_PLUGIN_ORIGINS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${SPICY3D_PLUGIN_ORIGINS}; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* ${SPICY3D_CONNECT_ORIGINS} ${SPICY3D_PLUGIN_ORIGINS}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy same-origin always;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json application/wasm image/svg+xml;
+    gzip_min_length 1024;
+
+    # Account email links (SpicySrv `AccountLinks`) point at app routes (`/verify-email?…`, `/reset-password?…`,
+    # `/confirm-email-change?…`): they serve the app, which opens the matching dialog and puts its own path back in the
+    # address bar.
+    location ~ ^/(verify-email|reset-password|confirm-email-change)/?$ {
+        try_files /index.html =404;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

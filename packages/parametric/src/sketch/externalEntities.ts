@@ -54,8 +54,8 @@ export interface ExternalEntityHost {
     pinPoints(paramIds: readonly number[], values: readonly number[]): ExternalPins;
     /** A fresh solver param holding `value`, for a structural datum to pin against. */
     createDatumParam(value: number): number;
-    /** Records that an id was allocated since the last load — the serialization gate. */
-    markIdAllocated(): void;
+    /** A new external entity id (`sketchIds.ts`), unused by any entity of the sketch nor in `reserved`. */
+    allocateEntityId(kind: "external", reserved: ReadonlySet<number>): number;
 }
 
 /** The three entity tables as one view. */
@@ -83,13 +83,8 @@ export class ExternalEntityRegistry {
     private _refs: ExternalRefData[] = [];
     /** Timeline anchors carried through `toData` like `refs` (see `SketchData.refPositions`). */
     private _refPositions: Record<string, number> | undefined;
-    /**
-     * Monotonic id allocation, serialized as `SketchData.externalIdSeq`: freed ids are
-     * never reused, so a stale ProfileRef fingerprint (keyed on entity ids) can never
-     * match a geometrically different region. External ids count down from
-     * `FIRST_EXTERNAL_ENTITY_ID`.
-     */
-    private _idSeq = FIRST_EXTERNAL_ENTITY_ID;
+    /** External ids handed out by `allocateExternalEntityId` this session (seeded or not yet). */
+    private readonly allocated = new Set<number>();
     /** Constraint ids cascaded away by the latest `syncExternalRefs` (type-flip reseed or drop). */
     private _removedConstraintIds: number[] = [];
     /**
@@ -115,14 +110,6 @@ export class ExternalEntityRegistry {
         this._refPositions = value;
     }
 
-    get idSeq(): number {
-        return this._idSeq;
-    }
-
-    set idSeq(value: number) {
-        this._idSeq = value;
-    }
-
     get removedConstraintIds(): readonly number[] {
         return this._removedConstraintIds;
     }
@@ -132,7 +119,6 @@ export class ExternalEntityRegistry {
         this.pins.clear();
         this._refs = [];
         this._refPositions = undefined;
-        this._idSeq = FIRST_EXTERNAL_ENTITY_ID;
         this._removedConstraintIds = [];
     }
 
@@ -147,19 +133,19 @@ export class ExternalEntityRegistry {
             throw new Error(`External reference already seeded: ${ref.entityId}`);
         }
         this.seedExternalEntity(ref.entityId, ref.type, normalizeSnapshot(ref.type, ref.snapshot));
-        // the counter stays below every seeded id, even one allocated outside it
-        this._idSeq = Math.min(this._idSeq, ref.entityId - 1);
         this._refs.push(ref);
     }
 
     /**
-     * Allocates the next external entity id from the monotonic session counter
-     * (counts down from FIRST_EXTERNAL_ENTITY_ID, never reissuing a freed id).
-     * Command/editor-side allocation — the id is then seeded with addExternalEntity.
+     * Allocates a new external entity id (`sketchIds.ts`: random unless the solver was
+     * given a sequential allocator), never one already seeded or handed out this session —
+     * several can be allocated before they are seeded. Command/editor-side allocation —
+     * the id is then seeded with addExternalEntity.
      */
     allocateExternalEntityId(): number {
-        this.host.markIdAllocated();
-        return this._idSeq--;
+        const id = this.host.allocateEntityId("external", this.allocated);
+        this.allocated.add(id);
+        return id;
     }
 
     /**

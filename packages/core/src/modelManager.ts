@@ -4,6 +4,7 @@
 import type { IDocument } from "./document";
 import {
     type CollectionChangedArgs,
+    Logger,
     NodeLinkedListHistoryRecord,
     type NodeRecord,
     Observable,
@@ -15,7 +16,16 @@ import type { Component } from "./model/component";
 import { FolderNode } from "./model/folderNode";
 import { type INode, type INodeLinkedList, NodeUtils } from "./model/node";
 import { UnknownNode } from "./model/unknownNode";
-import { type Serialized, Serializer } from "./serialize";
+import { InternalClassName, type Serialized, Serializer } from "./serialize";
+
+/** JSON with object keys sorted: equal for equal records whatever their key order. */
+function canonicalJson(value: unknown): string {
+    return JSON.stringify(value, (_key, item) =>
+        item && typeof item === "object" && !Array.isArray(item)
+            ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+            : item,
+    );
+}
 
 export type OnNodeChanged = (records: NodeRecord[]) => void;
 
@@ -33,6 +43,8 @@ function materialIdsOf(materialId: string | string[] | undefined): readonly stri
 export class ModelManager extends Observable {
     private readonly _nodeChangedObservers = new Set<OnNodeChanged>();
     private _deserializing = false;
+    /** Records collected while {@link applyContent} runs, dispatched once when it is done. */
+    private _batch: NodeRecord[] | undefined;
 
     readonly components: ObservableCollection<Component> = new ObservableCollection();
     readonly materials: ObservableCollection<Material> = new ObservableCollection();
@@ -87,6 +99,10 @@ export class ModelManager extends Observable {
 
     notifyNodeChanged(records: NodeRecord[]) {
         if (this._deserializing) return;
+        if (this._batch !== undefined) {
+            this._batch.push(...records);
+            return;
+        }
         Transaction.add(this.document, new NodeLinkedListHistoryRecord(records));
         this._nodeChangedObservers.forEach((x) => {
             x(records);
@@ -143,6 +159,121 @@ export class ModelManager extends Observable {
             this._deserializing = false;
         }
         this.notifyNodeChanged([{ action: "add", node: this.rootNode }]);
+    }
+
+    /**
+     * Makes the model equal to `data` (the `models` of a serialized document), changing only what
+     * differs: a node whose serialized form (and parent) is unchanged stays the same object, in
+     * place or moved to its new position; the others are removed or created. Views and the camera
+     * are untouched. Observers hear one batched notification, once the tree is in its final state
+     * — a body referencing a replaced sketch re-evaluates against the new one, never a half-applied
+     * tree. The records join the open transaction like any edit.
+     */
+    applyContent(data: { components?: Serialized[]; nodes: Serialized[]; materials?: Serialized[] }): void {
+        this.applyRecords(this.materials, data.materials ?? []);
+        this.applyRecords(this.components, data.components ?? []);
+
+        const current = new Map<string, { node: INode; record: string }>();
+        const walk = (node: INode, parentId: string | undefined) => {
+            const record: Serialized = Serializer.serializeObject(node);
+            if (parentId !== undefined) (record as Record<string, unknown>)["parentId"] = parentId;
+            current.set(node.id, { node, record: canonicalJson(record) });
+            if (!NodeUtils.isLinkedListNode(node)) return;
+            for (let child = node.firstChild; child !== undefined; child = child.nextSibling)
+                walk(child, node.id);
+        };
+        walk(this.rootNode, undefined);
+
+        const target = data.nodes;
+        const rootId = this.rootNode.id;
+        const kept = new Set<string>([rootId]);
+        for (const record of target.slice(1)) {
+            const id = record["id"] as string;
+            const parentId = record["parentId"] as string | undefined;
+            const existing = current.get(id);
+            if (
+                existing &&
+                parentId !== undefined &&
+                kept.has(parentId) &&
+                existing.record === canonicalJson(record)
+            ) {
+                kept.add(id);
+            }
+        }
+        const targetRoot = target[0]?.["id"];
+        // the root is kept (views and the tree hold it); its own properties follow the record
+        const rootRecord = target[0] as Record<string, unknown> | undefined;
+        if (typeof rootRecord?.["name"] === "string" && this.rootNode.name !== rootRecord["name"]) {
+            this.rootNode.name = rootRecord["name"];
+        }
+        if (typeof rootRecord?.["visible"] === "boolean" && this.rootNode.visible !== rootRecord["visible"]) {
+            this.rootNode.visible = rootRecord["visible"];
+        }
+        const parentOf = (record: Serialized) => {
+            const parentId = record["parentId"] as string | undefined;
+            return parentId === targetRoot ? rootId : parentId;
+        };
+
+        this._batch = [];
+        try {
+            // Removed or replaced nodes first (their subtrees hold no kept node): ids never repeat.
+            for (const [id, { node }] of current) {
+                if (kept.has(id) || id === rootId) continue;
+                const parent = node.parent;
+                if (parent !== undefined && kept.has(parent.id)) parent.remove(node);
+            }
+            if (this._currentNode !== undefined && !kept.has(this._currentNode.id))
+                this.currentNode = undefined;
+            // Then every node in pre-order after the previous sibling it has in `data`.
+            const live = new Map<string, INode>([[rootId, this.rootNode]]);
+            for (const id of kept) live.set(id, current.get(id)!.node);
+            const lastChild = new Map<string, INode | undefined>();
+            for (const record of target.slice(1)) {
+                const id = record["id"] as string;
+                let parent = live.get(parentOf(record) ?? rootId) as INodeLinkedList | undefined;
+                if (parent === undefined || !NodeUtils.isLinkedListNode(parent)) {
+                    // a record out of pre-order, or under a node that holds no children: kept, at the root
+                    Logger.warn(
+                        `applyContent: ${id} has no usable parent ${String(record["parentId"])}, put at the root`,
+                    );
+                    parent = this.rootNode;
+                }
+                const previous = lastChild.get(parent.id);
+                let node = kept.has(id) ? live.get(id)! : undefined;
+                if (node !== undefined) {
+                    if (node.previousSibling !== previous) parent.move(node, parent, previous);
+                } else {
+                    node = Serializer.isRegistered(record[InternalClassName])
+                        ? (Serializer.deserializeObject(this.document, record) as INode)
+                        : new UnknownNode(this.document, record);
+                    parent.insertAfter(previous, node);
+                    live.set(id, node);
+                }
+                lastChild.set(parent.id, node);
+            }
+        } finally {
+            const records = this._batch;
+            this._batch = undefined;
+            if (records.length > 0) this.notifyNodeChanged(records);
+        }
+        this.ensureMaterials();
+    }
+
+    /** Materials / components by id: unchanged ones kept, the others removed or created. */
+    private applyRecords<T extends { id: string }>(
+        collection: ObservableCollection<T>,
+        records: Serialized[],
+    ) {
+        const wanted = new Map(records.map((record) => [record["id"] as string, canonicalJson(record)]));
+        const stale = collection.filter(
+            (item) => wanted.get(item.id) !== canonicalJson(Serializer.serializeObject(item as object)),
+        );
+        if (stale.length > 0) collection.remove(...stale);
+        const kept = new Set(collection.map((item) => item.id));
+        const added = records
+            .filter((record) => !kept.has(record["id"] as string))
+            .map((record) => Serializer.deserializeObject(this.document, record) as T);
+        if (added.length > 0) collection.push(...added);
     }
 
     /**

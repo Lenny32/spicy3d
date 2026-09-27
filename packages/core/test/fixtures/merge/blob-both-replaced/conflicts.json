@@ -1,0 +1,60 @@
+{
+    "description": "Both devices re-imported the mesh with different data: opaque geometry is never merged inside — a blob conflict, ours held.",
+    "conflicts": [
+        {
+            "kind": "blob",
+            "path": "node/mesh-1/prop/mesh",
+            "base": {
+                "meshType": "surface",
+                "position": {
+                    "buffer": [0, 0, 0, 1, 0, 0, 0, 1, 0],
+                    "__cla$$__": "Float32Array"
+                },
+                "index": {
+                    "buffer": [0, 1, 2],
+                    "__cla$$__": "Uint32Array"
+                },
+                "color": 4095,
+                "groups": [],
+                "semanticFaceGroupsJson": "[]",
+                "semanticTopologyHash": "",
+                "__cla$$__": "Mesh"
+            },
+            "ours": {
+                "meshType": "surface",
+                "position": {
+                    "buffer": [0, 0, 0, 2, 0, 0, 0, 2, 0],
+                    "__cla$$__": "Float32Array"
+                },
+                "index": {
+                    "buffer": [0, 1, 2],
+                    "__cla$$__": "Uint32Array"
+                },
+                "color": 4095,
+                "groups": [],
+                "semanticFaceGroupsJson": "[]",
+                "semanticTopologyHash": "",
+                "__cla$$__": "Mesh"
+            },
+            "theirs": {
+                "meshType": "surface",
+                "position": {
+                    "buffer": [0, 0, 0, 3, 0, 0, 0, 3, 0],
+                    "__cla$$__": "Float32Array"
+                },
+                "index": {
+                    "buffer": [0, 1, 2],
+                    "__cla$$__": "Uint32Array"
+                },
+                "color": 4095,
+                "groups": [],
+                "semanticFaceGroupsJson": "[]",
+                "semanticTopologyHash": "",
+                "__cla$$__": "Mesh"
+            },
+            "messageKey": "merge.conflict.blob{0}{1}",
+            "args": ["Scan", "mesh"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

@@ -55,20 +55,22 @@ export function analyzeConstraints(data: SketchData, unit: LengthUnit = "mm") {
             sized.add(root(c.refs[0].entityId));
     }
     const suggestions: DimensionSuggestion[] = [];
-    for (const e of data.entities) {
+    // labels number entities by their place in the sketch: stored ids are random 12–13 digit numbers
+    for (const [index, e] of data.entities.entries()) {
+        const ordinal = index + 1;
         if (e.construction || sized.has(root(e.id))) continue;
         if (e.type === "line") {
             const length = Math.hypot(e.params[2] - e.params[0], e.params[3] - e.params[1]);
             if (length > 1e-9)
                 suggestions.push({
-                    label: `Line #${e.id}: length ${formatLength(length, unit, { suffix: true })}`,
+                    label: `Line ${ordinal}: length ${formatLength(length, unit, { suffix: true })}`,
                     constraint: { kind: ConstraintKind.P2PDistance, refs: lineRefs(e.id), datum: length },
                 });
         } else if (e.type === "circle" || e.type === "arc") {
             const radius = entityRadius(e);
             if (radius > 1e-9)
                 suggestions.push({
-                    label: `${e.type === "circle" ? "Circle" : "Arc"} #${e.id}: radius ${formatLength(radius, unit, { suffix: true })}`,
+                    label: `${e.type === "circle" ? "Circle" : "Arc"} ${ordinal}: radius ${formatLength(radius, unit, { suffix: true })}`,
                     constraint: { kind: ConstraintKind.Radius, refs: [centerRef(e.id)], datum: radius },
                 });
         }

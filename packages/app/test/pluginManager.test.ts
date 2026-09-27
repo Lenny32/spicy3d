@@ -206,6 +206,55 @@ describe("PluginManager", () => {
             expect(loadMainSpy).toHaveBeenCalledWith("demo-plugin", "blob:code-url", expect.any(Function));
             loadMainSpy.mockRestore();
         });
+
+        test("applies the import map by linking the modules, without an inline import map (CSP)", async () => {
+            fakeFiles.current = {
+                "manifest.json": JSON.stringify(validManifest({ importmap: "importmap.json" })),
+                "importmap.json": JSON.stringify({ imports: { dep: "dep.js" } }),
+                "dep.js": "export const x = 1;",
+                "index.js": 'import { x } from "dep";\nexport default {};',
+            };
+            const blobs: Blob[] = [];
+            URL.createObjectURL = ((blob: Blob) => {
+                blobs.push(blob);
+                return `blob:${blobs.length}`;
+            }) as typeof URL.createObjectURL;
+            const { manager } = createManager();
+            const loadMainSpy = rs.spyOn(manager as any, "loadMainCode").mockResolvedValue(undefined);
+
+            await manager.loadFromFile(new File([], "plugin.zip"));
+
+            expect(document.querySelector('script[type="importmap"]')).toBeNull();
+            expect(loadMainSpy).toHaveBeenCalledWith("demo-plugin", "blob:2", expect.any(Function));
+            expect(await blobs[0].text()).toBe("export const x = 1;");
+            expect(await blobs[1].text()).toBe('import { x } from "blob:1";\nexport default {};');
+            expect(manager.shouldRevokes.get("demo-plugin")).toEqual(["blob:1"]);
+            loadMainSpy.mockRestore();
+        });
+
+        test("an import map with scopes still goes inline", async () => {
+            fakeFiles.current = {
+                "manifest.json": JSON.stringify(validManifest({ importmap: "importmap.json" })),
+                "importmap.json": JSON.stringify({ imports: { dep: "dep.js" }, scopes: {} }),
+                "dep.js": "export const x = 1;",
+                "index.js": 'import { x } from "dep";',
+            };
+            const { manager } = createManager();
+            const loadMainSpy = rs.spyOn(manager as any, "loadMainCode").mockResolvedValue(undefined);
+            try {
+                await manager.loadFromFile(new File([], "plugin.zip"));
+
+                const script = document.querySelector('script[type="importmap"]');
+                expect(script).not.toBeNull();
+                expect(JSON.parse(script!.textContent ?? "")).toEqual({
+                    imports: { dep: "blob:stub" },
+                    scopes: {},
+                });
+            } finally {
+                document.querySelector('script[type="importmap"]')?.remove();
+                loadMainSpy.mockRestore();
+            }
+        });
     });
 
     describe("loadFromUrl", () => {
@@ -238,11 +287,11 @@ describe("PluginManager", () => {
 
             const loadPluginSpy = rs.spyOn(manager as any, "loadPluginFromUrl").mockResolvedValue(undefined);
 
-            await manager.loadFromUrl("https://localhost/plugin/");
+            await manager.loadFromUrl("https://localhost/plugins/demo/");
 
             expect(loadPluginSpy).toHaveBeenCalledWith(
                 "demo-plugin",
-                "https://localhost/plugin/",
+                "https://localhost/plugins/demo/",
                 "index.js",
                 undefined,
             );
@@ -259,7 +308,7 @@ describe("PluginManager", () => {
 
             const loadPluginSpy = rs.spyOn(manager as any, "loadPluginFromUrl").mockResolvedValue(undefined);
 
-            await manager.loadFromUrl("https://localhost/plugin/");
+            await manager.loadFromUrl("https://localhost/plugins/demo/");
 
             expect(loadPluginSpy).not.toHaveBeenCalled();
             loadPluginSpy.mockRestore();
@@ -584,6 +633,38 @@ describe("PluginManager", () => {
             await (manager as any).loadFromRemoteFile("https://cdn.example.com/plugin.spicyplugin");
 
             expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch plugin"));
+        });
+
+        test("a served plugin's import map is linked into blob URLs, not injected inline", async () => {
+            const served: Record<string, string> = {
+                "https://cad.example.com/p/manifest.json": JSON.stringify(
+                    validManifest({ main: "dist/main.js", importmap: "importmap.json" }),
+                ),
+                "https://cad.example.com/p/dist/main.js": 'import { x } from "dep";\nimport "./chunk.js";',
+                "https://cad.example.com/p/importmap.json": JSON.stringify({
+                    imports: { dep: "lib/dep.js" },
+                }),
+                "https://cad.example.com/p/lib/dep.js": "export const x = 1;",
+            };
+            globalThis.fetch = rs.fn(async (url: string) =>
+                url in served ? new Response(served[url]) : new Response("not found", { status: 404 }),
+            ) as unknown as typeof fetch;
+            const blobs: Blob[] = [];
+            URL.createObjectURL = ((blob: Blob) => {
+                blobs.push(blob);
+                return `blob:${blobs.length}`;
+            }) as typeof URL.createObjectURL;
+            const { manager } = createManager();
+            const loadMainSpy = rs.spyOn(manager as any, "loadMainCode").mockResolvedValue(undefined);
+
+            await (manager as any).loadFromRemoteFile("https://cad.example.com/p");
+
+            expect(document.querySelector('script[type="importmap"]')).toBeNull();
+            expect(loadMainSpy).toHaveBeenCalledWith("demo-plugin", "blob:2", expect.any(Function));
+            expect(await blobs[1].text()).toBe(
+                'import { x } from "blob:1";\nimport "https://cad.example.com/p/dist/chunk.js";',
+            );
+            loadMainSpy.mockRestore();
         });
     });
 

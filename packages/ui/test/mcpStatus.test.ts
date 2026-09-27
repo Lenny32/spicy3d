@@ -11,7 +11,8 @@ rs.mock("../src/statusbar/mcpStatus.module.css", () => ({
 // Only the SDK-free state store is needed; the panel half of @spicy3d/ai stays out.
 const aiState = rs.hoisted(() => {
     const { McpState } = require("@spicy3d/ai/src/mcp/state");
-    return { mcpState: new McpState() };
+    const { RemoteMcpState } = require("@spicy3d/ai/src/mcp/remoteState");
+    return { mcpState: new McpState(), remoteMcpState: new RemoteMcpState() };
 });
 rs.mock("@spicy3d/ai", () => aiState);
 
@@ -22,6 +23,21 @@ describe("McpStatusIndicator", () => {
     afterEach(() => {
         document.body.innerHTML = "";
         aiState.mcpState.update({ status: "idle" });
+        aiState.remoteMcpState.update({ status: "unavailable" });
+    });
+
+    test("shows remote access through the server while the bridge is idle", () => {
+        const indicator = new McpStatusIndicator();
+        document.body.append(indicator);
+        aiState.remoteMcpState.update({ status: "connected" });
+        expect(indicator.dataset["status"]).toBe("connected");
+
+        aiState.mcpState.update({ status: "offline" });
+        expect(indicator.dataset["status"]).toBe("offline");
+
+        aiState.mcpState.update({ status: "idle" });
+        aiState.remoteMcpState.update({ status: "unavailable" });
+        expect(indicator.dataset["status"]).toBe("idle");
     });
 
     test.each([

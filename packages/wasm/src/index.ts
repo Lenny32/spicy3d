@@ -5,3 +5,4 @@ export * from "./converter";
 export * from "./factory";
 export * from "./shapeProvider";
 export * from "./wasm";
+import "./mergeRules";

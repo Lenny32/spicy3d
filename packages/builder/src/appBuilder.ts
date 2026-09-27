@@ -1,10 +1,20 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Application, CommandService, HotkeyService, ShowPropertyEventHandler } from "@spicy3d/app";
+import {
+    Application,
+    AutosaveService,
+    CommandService,
+    HotkeyService,
+    ShowPropertyEventHandler,
+} from "@spicy3d/app";
+import type { AccountLink } from "@spicy3d/cloud/src/links";
 import {
     Config,
     Constants,
+    DeploymentConfig,
+    type DeploymentConfigLoadOptions,
+    ExternalContentPolicy,
     I18n,
     type IApplication,
     type IDataExchange,
@@ -23,14 +33,28 @@ import {
     ParametricRibbonProfiles,
     type RibbonProfileExtra,
 } from "./ribbon";
+import { warnIfInsecureContext } from "./secureContext";
+
+/** See `useCloud`. */
+export interface UseCloudOptions {
+    /** Where the server's `/api` lives; defaults to the folder the app is served from (same origin). */
+    baseUrl?: string;
+    /** An account email link the app was opened with (verify email, reset password…); see `takeAccountLink`. */
+    accountLink?: AccountLink;
+}
 
 export class AppBuilder {
     protected readonly _inits: (() => Promise<void>)[] = [];
+    /** Run once the application and its window exist, without delaying startup. */
+    protected readonly _started: ((app: IApplication) => Promise<void>)[] = [];
     protected readonly _ribbonExtras: RibbonProfileExtra[] = [];
     protected _storage?: IStorage;
     protected _visualFactory?: IVisualFactory;
     protected _shapeProvider?: IShapeProvider;
     protected _window?: IWindow;
+
+    /** Settles once every post-startup step (e.g. cloud discovery) has run; failures are only logged. */
+    started: Promise<void> = Promise.resolve();
 
     constructor() {
         this.initI18n();
@@ -61,6 +85,18 @@ export class AppBuilder {
                 I18n.addLanguage((i18n as { [key: string]: Locale })[key]);
             }
         });
+    }
+
+    /**
+     * Reads `deployment.json` from the app's folder (see core `DeploymentConfig`) before the rest
+     * starts, so the UI offers the deployment's endpoints and download locations from the start.
+     */
+    useDeploymentConfig(options: DeploymentConfigLoadOptions = {}): this {
+        this._inits.push(async () => {
+            Logger.info("reading deployment.json");
+            await DeploymentConfig.load(options);
+        });
+        return this;
     }
 
     useIndexedDB() {
@@ -123,6 +159,45 @@ export class AppBuilder {
         return this;
     }
 
+    /**
+     * Connects to a Spicy3D server when one answers `GET /api/config`; otherwise (static hosting,
+     * no server) the cloud stays dormant and shows no UI. Runs after startup, and loads the API
+     * client and the account UI only once a server is found.
+     */
+    useCloud(options: UseCloudOptions = {}): this {
+        // Until the server answers, a session cookie may exist: plugins and links are treated as
+        // signed in (CLOUD-17). A compatible server replaces this with the account's status.
+        const noSessionKnown = ExternalContentPolicy.setSessionProbe(() => true);
+        this._started.push(async (app) => {
+            const { discoverCloud } = await import("@spicy3d/cloud/src/config");
+            const { accountLink, ...connection } = options;
+            // Offline, the config the server gave last time starts the cloud (cached documents, pending saves).
+            const discovery = await discoverCloud({ ...connection, offlineCache: true });
+            if (discovery.status === "dormant") {
+                noSessionKnown();
+                if (accountLink) Logger.warn("[cloud] opened with an account link, but no server answers");
+                return;
+            }
+
+            Logger.info(
+                `initializing cloud (server ${discovery.config.version}, API ${discovery.config.apiVersion})`,
+            );
+            const cloud = await import("@spicy3d/cloud");
+            const started = cloud.startCloud(discovery, connection);
+            if (!started) {
+                // An incompatible server: the banner says so; the link can't be used either.
+                if (accountLink)
+                    Logger.warn("[cloud] opened with an account link, but the server is incompatible");
+                return;
+            }
+            cloud.startCloudSettings(started);
+            await cloud.startAccountUi(started, accountLink);
+            cloud.startCloudDocuments(started, app);
+            cloud.startCloudMcp(started);
+        });
+        return this;
+    }
+
     async getRibbonTabs() {
         return mergeRibbonProfiles(DefaultRibbon, this._ribbonExtras);
     }
@@ -135,11 +210,22 @@ export class AppBuilder {
 
         const app = this.createApp();
         await this._window?.init(app);
+        // Plain HTTP on a LAN address: say why accounts, clipboard etc. are missing.
+        if (this._window) warnIfInsecureContext();
         await this.loadDefaultPlugins(app);
+        this.started = this.runStarted(app);
 
         Logger.info("Application build completed");
 
         return app;
+    }
+
+    protected async runStarted(app: IApplication) {
+        await Promise.all(
+            this._started.map((step) =>
+                step(app).catch((error) => Logger.warn(`startup step failed: ${error}`)),
+            ),
+        );
     }
 
     protected async loadDefaultPlugins(app: IApplication) {
@@ -194,6 +280,6 @@ export class AppBuilder {
     }
 
     protected getServices(): IService[] {
-        return [new CommandService(), new HotkeyService()];
+        return [new CommandService(), new HotkeyService(), new AutosaveService()];
     }
 }

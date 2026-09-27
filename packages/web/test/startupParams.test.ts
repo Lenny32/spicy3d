@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { parseStartupParams } from "../src/startupParams";
+import { dropSecretParams, parseStartupParams, takeAccountLink } from "../src/startupParams";
 
 describe("parseStartupParams", () => {
     test("should return empty plugins and undefined fileUrl when no params", () => {
@@ -63,5 +63,83 @@ describe("parseStartupParams", () => {
         const bridge = "ws://127.0.0.1:7777/?token=abc";
         const result = parseStartupParams(`?mcp=${encodeURIComponent(bridge)}`);
         expect(result.mcpUrl).toBe(bridge);
+    });
+});
+
+describe("takeAccountLink", () => {
+    function at(url: string) {
+        const parsed = new URL(url);
+        const replaced: string[] = [];
+        const history = {
+            state: { kept: true },
+            replaceState: (_state: unknown, _unused: string, target: string) => replaced.push(target),
+        } as unknown as History;
+        return { location: parsed as unknown as Location, history, replaced };
+    }
+
+    test("takes a reset link and puts the app's own path back in the address bar", () => {
+        const { location, history, replaced } = at("https://spicy.test/reset-password?userId=u1&token=a%2Bb");
+
+        expect(takeAccountLink(location, history)).toEqual({
+            kind: "resetPassword",
+            userId: "u1",
+            token: "a+b",
+        });
+        expect(replaced).toEqual(["/"]);
+    });
+
+    test("keeps a sub-folder deployment's path", () => {
+        const { location, history, replaced } = at(
+            "https://lan.test/spicy/confirm-email-change?userId=u1&email=new%40x.test&token=t",
+        );
+
+        expect(takeAccountLink(location, history)).toEqual({
+            kind: "confirmEmailChange",
+            userId: "u1",
+            email: "new@x.test",
+            token: "t",
+        });
+        expect(replaced).toEqual(["/spicy/"]);
+    });
+
+    test("any other page is left alone", () => {
+        const { location, history, replaced } = at("https://spicy.test/?plugin=a.js");
+
+        expect(takeAccountLink(location, history)).toBeUndefined();
+        expect(replaced).toEqual([]);
+    });
+});
+
+describe("dropSecretParams", () => {
+    function at(url: string) {
+        const parsed = new URL(url);
+        const replaced: string[] = [];
+        const history = {
+            state: { kept: true },
+            replaceState: (_state: unknown, _unused: string, target: string) => replaced.push(target),
+        } as unknown as History;
+        return { location: parsed as unknown as Location, history, replaced };
+    }
+
+    test("takes the bridge link and its pairing token out of the address bar, keeping the rest", () => {
+        const { location, history, replaced } = at(
+            "https://spicy.test/app/?plugin=plugins%2Fx%2F&mcp=ws%3A%2F%2F127.0.0.1%3A3777%2F%3Ftoken%3Dabc#view",
+        );
+
+        dropSecretParams(location, history);
+
+        expect(replaced).toEqual(["/app/?plugin=plugins%2Fx%2F#view"]);
+    });
+
+    test("only the bridge link: the query goes entirely", () => {
+        const { location, history, replaced } = at("https://spicy.test/?mcp=ws://127.0.0.1:3777/");
+        dropSecretParams(location, history);
+        expect(replaced).toEqual(["/"]);
+    });
+
+    test("nothing secret: the address bar is left alone", () => {
+        const { location, history, replaced } = at("https://spicy.test/?url=models%2Fa.step");
+        dropSecretParams(location, history);
+        expect(replaced).toEqual([]);
     });
 });

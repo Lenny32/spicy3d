@@ -12,6 +12,17 @@ const mcpBridgeDownloadUrl =
     process.env["SPICY3D_BRIDGE_DOWNLOAD_URL"] ??
     `https://github.com/Lenny32/spicy3d/releases/download/${packages.version}/`;
 
+// `SPICY3D_API_URL=http://localhost:5080 npm run dev`: the dev server proxies the SpicySrv paths to
+// that server, so the app and the API share one origin (the dev server's) like behind SpicySrv's
+// Caddy: the session cookie, the CSRF Origin check and email links all work. Start the server with
+// `Spicy__PublicUrl=http://localhost:8080` (README.md, Development with a server). Unset: no proxy,
+// `/api/config` is the placeholder in public/ and the app stays local-only.
+const apiUrl = process.env["SPICY3D_API_URL"]?.trim();
+/** SpicySrv's paths (its deploy/Caddyfile): `/api/*`, `/ws/*` and `/mcp`, `/mcp/*`. */
+const isServerPath = (pathname: string) =>
+    // Exactly `/ws` stays the dev server's own live-reload socket; the server's are `/ws/<name>`.
+    /^\/api(\/|$)/.test(pathname) || /^\/ws\/./.test(pathname) || /^\/mcp(\/|$)/.test(pathname);
+
 export default defineConfig({
     devtool: isProduction ? false : "source-map",
     entry: {
@@ -19,6 +30,28 @@ export default defineConfig({
     },
     experiments: {
         css: true,
+    },
+    devServer: {
+        // Account email links point at app routes (`/verify-email?…`, `/reset-password?…`,
+        // `/confirm-email-change?…`); like docker/default.conf.template, they serve the app.
+        historyApiFallback: {
+            rewrites: [
+                { from: /^\/(verify-email|reset-password|confirm-email-change)\/?$/, to: "/index.html" },
+            ],
+        },
+        ...(apiUrl && {
+            proxy: [
+                {
+                    pathFilter: isServerPath,
+                    target: apiUrl,
+                    // WebSockets too: /ws/events (sync), /ws/mcp-page (remote MCP).
+                    ws: true,
+                    // Host and Origin pass unchanged (the dev server's), as behind SpicySrv's Caddy: the
+                    // server compares Origin with Spicy__PublicUrl, and a Host rewritten to the target
+                    // (changeOrigin) would trip its host filtering for e.g. http://127.0.0.1:5080.
+                },
+            ],
+        }),
     },
     // The CLI turns lazy compilation on for dev by default; its empty trigger responses
     // log "XML Parsing Error: no root element found" in Firefox.
@@ -88,7 +121,9 @@ export default defineConfig({
                 {
                     from: resolve(configDir, "public"),
                     globOptions: {
-                        ignore: ["**/**/index.html"],
+                        // With a proxied server, the dev server's own output would answer
+                        // /api/config before the proxy does: leave the placeholder out.
+                        ignore: ["**/**/index.html", ...(apiUrl ? ["**/api/**"] : [])],
                     },
                 },
             ],

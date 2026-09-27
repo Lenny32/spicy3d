@@ -3,9 +3,14 @@
 
 import { bridgeUrlFor, loadMcpSettings } from "@spicy3d/ai";
 import { AppBuilder } from "@spicy3d/builder";
-import { type IApplication, Logger } from "@spicy3d/core";
+import { type IApplication, Logger, redactUrl } from "@spicy3d/core";
 import { Loading } from "./loading";
-import { parseStartupParams } from "./startupParams";
+import { dropSecretParams, parseStartupParams, takeAccountLink } from "./startupParams";
+
+// Before anything reads the URL: an account email link opens its dialog once the cloud is up.
+const accountLink = takeAccountLink(window.location, window.history);
+const startup = parseStartupParams(window.location.search);
+dropSecretParams(window.location, window.history);
 
 const loading = new Loading();
 document.body.appendChild(loading);
@@ -13,7 +18,7 @@ document.body.appendChild(loading);
 async function handleApplicaionBuilt(app: IApplication) {
     document.body.removeChild(loading);
 
-    const { plugins, fileUrl, mcpUrl } = parseStartupParams(window.location.search);
+    const { plugins, fileUrl, mcpUrl } = startup;
     const mcpSettings = loadMcpSettings();
     if (mcpUrl || mcpSettings.autoConnect) {
         // Loaded on demand: the MCP SDK is a sizeable chunk only bridge sessions need.
@@ -22,22 +27,24 @@ async function handleApplicaionBuilt(app: IApplication) {
             .catch((err) => Logger.error(`[mcp] failed to start: ${err}`));
     }
     for (const plugin of plugins) {
-        Logger.info(`loading plugin from: ${plugin}`);
+        Logger.info(`loading plugin from: ${redactUrl(plugin)}`);
         await app.pluginManager.loadFromUrl(plugin);
     }
     if (fileUrl) {
-        Logger.info(`loading file from: ${fileUrl}`);
+        Logger.info(`loading file from: ${redactUrl(fileUrl)}`);
         await app.loadFileFromUrl(fileUrl);
     }
 }
 
 // prettier-ignore
 new AppBuilder()
+    .useDeploymentConfig()
     .useIndexedDB()
     .useWasmOcc()
     .useParametric()
     .useThree()
     .useUI()
+    .useCloud({ accountLink })
     .build()
     .then(handleApplicaionBuilt)
     .catch((err) => {

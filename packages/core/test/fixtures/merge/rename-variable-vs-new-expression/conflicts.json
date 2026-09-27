@@ -1,0 +1,15 @@
+{
+    "description": "This device renamed variable w to width (and fixed h), the other set f1's depth to `w / 4`: both applied, the expression names a variable that no longer exists.",
+    "conflicts": [
+        {
+            "kind": "dangling-ref",
+            "path": "node/body-1/feature/f1/param/depth",
+            "base": 10,
+            "ours": 10,
+            "theirs": "w / 4",
+            "messageKey": "merge.conflict.danglingRef{0}{1}",
+            "args": ["extrude f1", "w"],
+            "choices": ["accept", "ours", "theirs"]
+        }
+    ]
+}

@@ -21,30 +21,41 @@ export interface McpStateSnapshot {
 
 const MAX_CALLS = 8;
 
-/** The live bridge session as the UI sees it; written by the controller, read by panel and badge. */
-export class McpState {
-    private snapshot: McpStateSnapshot = { status: "idle", calls: [] };
-    private readonly listeners = new Set<(state: McpStateSnapshot) => void>();
+/** A snapshot store: listeners get the whole state now and after every change. */
+export class SnapshotStore<T extends { calls: McpToolCallRecord[] }> {
+    private snapshot: T;
+    private readonly listeners = new Set<(state: T) => void>();
 
-    get current(): McpStateSnapshot {
+    constructor(initial: T) {
+        this.snapshot = initial;
+    }
+
+    get current(): T {
         return this.snapshot;
     }
 
     /** Calls `listener` now and on every change; returns the unsubscribe. */
-    subscribe(listener: (state: McpStateSnapshot) => void): () => void {
+    subscribe(listener: (state: T) => void): () => void {
         this.listeners.add(listener);
         listener(this.snapshot);
         return () => this.listeners.delete(listener);
     }
 
-    update(patch: Partial<McpStateSnapshot>): void {
+    update(patch: Partial<T>): void {
         this.snapshot = { ...this.snapshot, ...patch };
         for (const listener of this.listeners) listener(this.snapshot);
     }
 
     recordCall(name: string, isError: boolean): void {
         const calls = [{ name, isError, time: Date.now() }, ...this.snapshot.calls].slice(0, MAX_CALLS);
-        this.update({ calls });
+        this.update({ calls } as Partial<T>);
+    }
+}
+
+/** The live bridge session as the UI sees it; written by the controller, read by panel and badge. */
+export class McpState extends SnapshotStore<McpStateSnapshot> {
+    constructor() {
+        super({ status: "idle", calls: [] });
     }
 }
 

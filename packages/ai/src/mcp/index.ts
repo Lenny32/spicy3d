@@ -4,11 +4,15 @@
 // The lazily loaded half of MCP support: everything here pulls in the SDK. Import it with a
 // dynamic import() only — settings.ts, state.ts and the panel are the eager, SDK-free half.
 
-import { Logger } from "@spicy3d/core";
+import { Logger, redactUrl } from "@spicy3d/core";
+import { forgetPairingDecisions } from "./pairing";
+import { RemoteMcpSession } from "./remoteSession";
+import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import { McpSession } from "./session";
 import { parseBridgeUrl } from "./settings";
 import { mcpState } from "./state";
 
+export { RemoteMcpSession } from "./remoteSession";
 export { createMcpServer } from "./server";
 export { McpSession } from "./session";
 
@@ -27,7 +31,9 @@ function displayUrl(url: URL): string {
 export function connectMcpBridge(rawUrl: string): boolean {
     const url = parseBridgeUrl(rawUrl);
     if (!url) {
-        Logger.warn(`[mcp] refusing bridge ${rawUrl}: only ws:// URLs on 127.0.0.1/localhost are accepted`);
+        Logger.warn(
+            `[mcp] refusing bridge ${redactUrl(rawUrl)}: only ws:// URLs on 127.0.0.1/localhost are accepted`,
+        );
         return false;
     }
     disconnectMcpBridge();
@@ -43,4 +49,30 @@ export function disconnectMcpBridge(): void {
     session?.close();
     session = undefined;
     mcpState.update({ status: "idle", bridge: undefined });
+}
+
+let remote: RemoteMcpSession | undefined;
+
+/**
+ * Expose this tab to the user's MCP clients through the server's relay (`link.pageSocket`),
+ * replacing a remote session already running. Independent of the local bridge session.
+ */
+export function connectMcpRemote(link: RemoteMcpLink): void {
+    if (remote?.link === link && !remote.stopped) return;
+    const previous = remote;
+    previous?.close();
+    // Another link (another user): the closed session's decisions must not carry over (CLOUD-17).
+    if (previous && previous.link !== link) forgetPairingDecisions();
+    remote = new RemoteMcpSession(link, { state: remoteMcpState }).start();
+}
+
+/** Leave the relay; `status` says why (`idle`: turned off, `unavailable`: signed out). */
+export function disconnectMcpRemote(status: Extract<RemoteMcpStatus, "idle" | "unavailable">): void {
+    remote?.close();
+    remote = undefined;
+    remoteMcpState.update({ status, agents: [], tabId: undefined });
+}
+
+export function disconnectRemoteAgent(agentId: string): void {
+    remote?.disconnectAgent(agentId);
 }

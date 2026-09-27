@@ -3,9 +3,23 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { ICommand, IDocument, IView, IVisualFactory, Serialized } from "@spicy3d/core";
-import { DOCUMENT_FORMAT_VERSION, Logger, ObservableCollection, PubSub } from "@spicy3d/core";
-import { createMockView, createMockVisualWithDocument } from "@spicy3d/core/test-utils";
+import {
+    DeploymentConfig,
+    type DialogButton,
+    DOCUMENT_FORMAT_VERSION,
+    encodeDocumentFile,
+    Logger,
+    ObservableCollection,
+    PubSub,
+} from "@spicy3d/core";
+import {
+    createMockView,
+    createMockVisualWithDocument,
+    MemoryDocumentRepository,
+} from "@spicy3d/core/test-utils";
 import { Application } from "../src/application";
+import { saveDocumentFile } from "../src/documentFiles";
+import { LocalDocumentRepository } from "../src/repositories";
 
 // IMPORTANT: Application constructor calls setCurrentApplication(this), which
 // throws if called more than once per module. We can only create ONE Application
@@ -261,6 +275,24 @@ describe("Application", () => {
             expect(materialNames).toContain("DeepGray");
         });
 
+        test("saves to this device unless the cloud is preferred and signed in", async () => {
+            const cloud = new MemoryDocumentRepository("cloud");
+            try {
+                expect((await sharedApp.newDocument("Local")).repository).toBe(sharedApp.repositories.local);
+
+                sharedApp.repositories.preferred = "cloud";
+                expect((await sharedApp.newDocument("Not signed in")).repository).toBe(
+                    sharedApp.repositories.local,
+                );
+
+                sharedApp.repositories.cloud = cloud;
+                expect((await sharedApp.newDocument("Cloud")).repository).toBe(cloud);
+            } finally {
+                sharedApp.repositories.cloud = undefined;
+                sharedApp.repositories.preferred = "local";
+            }
+        });
+
         test("should set activeView to the created view", async () => {
             const doc = await sharedApp.newDocument("TestDoc4");
             expect(sharedApp.activeView).not.toBeNull();
@@ -287,6 +319,48 @@ describe("Application", () => {
             expect(doc).not.toBeNull();
             expect(doc!.name).toBe("SavedDoc");
             expect(doc!.id).toBe("doc-456");
+        });
+
+        test("a document opened from the local storage saves back there", async () => {
+            sharedApp.storage.get = async () => validData;
+
+            const doc = await sharedApp.openDocument("doc-456");
+
+            expect(sharedApp.repositories.local).toBeInstanceOf(LocalDocumentRepository);
+            expect(doc!.repository).toBe(sharedApp.repositories.local);
+            expect(doc!.isDirty).toBe(false);
+        });
+
+        test("a document remembers the repository it was opened from", async () => {
+            const repository = new MemoryDocumentRepository();
+            await repository.save({ id: "doc-456", name: "SavedDoc", data: validData, kind: "manual" });
+
+            const doc = await sharedApp.openDocument("doc-456", repository);
+
+            expect(doc!.repository).toBe(repository);
+            await doc!.save();
+            expect(repository.saves.map((x) => x.id)).toEqual(["doc-456", "doc-456"]);
+        });
+
+        test("a document already open (same id and repository) is shown again, not opened twice", async () => {
+            const repository = new MemoryDocumentRepository();
+            await repository.save({
+                id: "doc-twice",
+                name: "Twice",
+                data: makeSerializedDocData("Twice", "doc-twice"),
+                kind: "manual",
+            });
+            const first = await sharedApp.openDocument("doc-twice", repository);
+            const other = await sharedApp.newDocument("Other");
+            expect(sharedApp.activeView?.document).toBe(other);
+            const load = rs.spyOn(repository, "load");
+
+            const again = await sharedApp.openDocument("doc-twice", repository);
+
+            expect(again).toBe(first);
+            expect(load).not.toHaveBeenCalled();
+            expect([...sharedApp.documents].filter((x) => x.id === "doc-twice")).toHaveLength(1);
+            expect(sharedApp.activeView?.document).toBe(first);
         });
 
         test("should set activeView after opening document", async () => {
@@ -346,10 +420,14 @@ describe("Application", () => {
     // ==========================================================================
     describe("loadFileFromUrl", () => {
         let originalFetch: typeof fetch;
+        let originalImport: typeof sharedApp.dataExchange.import;
         let errorSpy: ReturnType<typeof rs.spyOn>;
 
         beforeEach(() => {
             originalFetch = globalThis.fetch;
+            originalImport = sharedApp.dataExchange.import;
+            // example.com is allowlisted by the deployment: opened without asking.
+            DeploymentConfig.set({ security: { fileOrigins: ["https://example.com"] } });
             if (!(Promise as any).try) {
                 (Promise as any).try = (fn: (...args: any[]) => any, ...args: any[]) =>
                     Promise.resolve().then(() => fn(...args));
@@ -359,7 +437,120 @@ describe("Application", () => {
 
         afterEach(() => {
             globalThis.fetch = originalFetch;
+            sharedApp.dataExchange.import = originalImport;
             errorSpy.mockRestore();
+            DeploymentConfig.reset();
+            PubSub.default.removeAll("showDialog");
+        });
+
+        function okFetch() {
+            const fetchSpy = rs.fn(async (_url: string, _init?: RequestInit) => ({
+                ok: true,
+                statusText: "OK",
+                blob: async () => new Blob(["x"]),
+            }));
+            globalThis.fetch = fetchSpy as unknown as typeof fetch;
+            return fetchSpy;
+        }
+
+        test("a file from another origin is fetched only after the user confirms the prompt naming it", async () => {
+            const fetchSpy = okFetch();
+            sharedApp.dataExchange.import = async () => {};
+            const dialogs: { content: HTMLElement; buttons: DialogButton[] }[] = [];
+            PubSub.default.sub("showDialog", (_title, content, buttons) => {
+                dialogs.push({ content, buttons: buttons as DialogButton[] });
+            });
+
+            const loading = sharedApp.loadFileFromUrl("https://evil.example.net/files/model.step?sig=secret");
+            await rs.waitFor(() => expect(dialogs).toHaveLength(1));
+            expect(fetchSpy).not.toHaveBeenCalled();
+            const origin = dialogs[0].content.querySelector("[data-origin]") as HTMLElement | null;
+            expect(origin).not.toBeNull();
+            expect(origin!.dataset["origin"]).toBe("https://evil.example.net");
+            // The query (a signature, a token) is not shown.
+            expect(dialogs[0].content.textContent).not.toContain("secret");
+            expect(dialogs[0].buttons.map((b) => b.content)).toEqual(["common.cancel", "warning.file.open"]);
+
+            await dialogs[0].buttons[1].onclick!();
+            await loading;
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            expect(fetchSpy.mock.calls[0][0]).toBe("https://evil.example.net/files/model.step?sig=secret");
+        });
+
+        test("cancelling the prompt fetches nothing", async () => {
+            const fetchSpy = okFetch();
+            let buttons: DialogButton[] = [];
+            PubSub.default.sub("showDialog", (_title, _content, b) => {
+                buttons = b as DialogButton[];
+            });
+
+            const loading = sharedApp.loadFileFromUrl("https://other.example.org/model.step");
+            await rs.waitFor(() => expect(buttons).toHaveLength(2));
+            await buttons[0].onclick!();
+            await loading;
+
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(sharedApp.documents.size).toBe(0);
+        });
+
+        test.each([
+            "https://example.com/x.spicyplugin",
+            "https://example.com/x.SpicyPlugin?download=1",
+            "https://example.com/x%2Espicyplugin",
+            // Same origin: still a plugin, not a file.
+            "/plugins/x.spicyplugin",
+        ])("%s is a plugin: it goes through the plugin rules, never the file prompt or import", async (url) => {
+            const fetchSpy = okFetch();
+            const importSpy = rs.fn(async (_document: IDocument, _files: File[] | FileList) => {});
+            sharedApp.dataExchange.import = importSpy;
+            const dialog = rs.fn();
+            PubSub.default.sub("showDialog", dialog);
+            const pluginSpy = rs
+                .spyOn(sharedApp.pluginManager, "loadFromUrl")
+                .mockImplementation(async (_url: string) => {});
+            try {
+                await sharedApp.loadFileFromUrl(url);
+
+                expect(pluginSpy).toHaveBeenCalledWith(url);
+                expect(fetchSpy).not.toHaveBeenCalled();
+                expect(dialog).not.toHaveBeenCalled();
+                expect(importSpy).not.toHaveBeenCalled();
+            } finally {
+                pluginSpy.mockRestore();
+            }
+        });
+
+        test("a .spicyplugin from a link on another origin ends in the plugin trust prompt", async () => {
+            const fetchSpy = okFetch();
+            const dialogs: string[] = [];
+            PubSub.default.sub("showDialog", (title) => dialogs.push(title));
+
+            await sharedApp.loadFileFromUrl("https://evil.example.net/x.spicyplugin");
+
+            expect(dialogs).toEqual(["common.warning"]);
+            expect(fetchSpy).not.toHaveBeenCalled();
+        });
+
+        test.each([
+            "javascript:alert(1)",
+            "data:text/plain,hello.step",
+            "file:///etc/passwd.step",
+            "https://user:pw@example.com/model.step",
+        ])("%s is refused without a prompt or a request", async (url) => {
+            const fetchSpy = okFetch();
+            const dialog = rs.fn();
+            PubSub.default.sub("showDialog", dialog);
+            const toasts: unknown[][] = [];
+            PubSub.default.sub("showToast", (...args: unknown[]) => toasts.push(args));
+            try {
+                await sharedApp.loadFileFromUrl(url);
+            } finally {
+                PubSub.default.removeAll("showToast");
+            }
+
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(dialog).not.toHaveBeenCalled();
+            expect(toasts[0]?.[0]).toBe("warning.file.refused{0}");
         });
 
         test("should fetch the URL, create a document and import the file", async () => {
@@ -431,6 +622,12 @@ describe("Application", () => {
             expect(result.opens[0]).toBe(cdFile);
             expect(result.imports).toHaveLength(0);
             expect(result.plugins).toHaveLength(0);
+        });
+
+        test("should group .spicy files as opens", () => {
+            const result = callGroupFiles([new File([""], "model.spicy"), new File([""], "B.SPICY")]);
+            expect(result.opens).toHaveLength(2);
+            expect(result.imports).toHaveLength(0);
         });
 
         test("should be case-insensitive for .cd extension", () => {
@@ -582,6 +779,73 @@ describe("Application", () => {
     });
 
     // ==========================================================================
+    // Dropping .spicy files
+    // ==========================================================================
+    describe("dropping a .spicy file", () => {
+        function dropEvent(dataTransfer: unknown) {
+            const event = new DragEvent("drop", { bubbles: true, cancelable: true });
+            Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+            return event;
+        }
+
+        function captureOpen() {
+            const callbacks: (() => Promise<void>)[] = [];
+            PubSub.default.sub("showPermanent", (callback: () => Promise<void>) => {
+                callbacks.push(callback);
+            });
+            return async () => {
+                for (const callback of callbacks) await callback();
+            };
+        }
+
+        test("opens the gzipped document", async () => {
+            const file = new File(
+                [await encodeDocumentFile(makeSerializedDocData("Dropped", "spicy-1"))],
+                "part.spicy",
+            );
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            const runOpen = captureOpen();
+
+            (sharedApp as any).handleDrop(dropEvent(dt));
+            await runOpen();
+
+            const doc = [...sharedApp.documents].find((d) => d.id === "spicy-1");
+            expect(doc?.name).toBe("Dropped");
+            expect(doc!.repository).toBe(sharedApp.repositories.local);
+        });
+
+        test("keeps the dropped file's handle so saving writes back to it", async () => {
+            const file = new File(
+                [await encodeDocumentFile(makeSerializedDocData("Handled", "spicy-2"))],
+                "part.spicy",
+            );
+            const written: Blob[] = [];
+            const handle = {
+                kind: "file",
+                name: "part.spicy",
+                createWritable: async () => ({
+                    write: async (blob: Blob) => {
+                        written.push(blob);
+                    },
+                    close: async () => {},
+                }),
+            } as unknown as FileSystemFileHandle;
+            const item = { kind: "file", getAsFile: () => file, getAsFileSystemHandle: async () => handle };
+            const runOpen = captureOpen();
+
+            (sharedApp as any).handleDrop(dropEvent({ files: [file], items: [item] }));
+            await runOpen();
+            const doc = [...sharedApp.documents].find((d) => d.id === "spicy-2");
+            expect(doc).not.toBeUndefined();
+            const saved = await saveDocumentFile(doc!);
+
+            expect(saved.unchecked()).toBe("written");
+            expect(written).toHaveLength(1);
+        });
+    });
+
+    // ==========================================================================
     // Drag event handlers
     // ==========================================================================
     describe("drag event handlers", () => {
@@ -668,8 +932,8 @@ describe("Application", () => {
     // beforeunload handler
     // ==========================================================================
     describe("handleWindowUnload", () => {
-        test("should prevent close when activeView is set", () => {
-            sharedApp.activeView = createMockView();
+        test("should prevent close while a document has unsaved changes", () => {
+            sharedApp.documents.add({ isDirty: true } as IDocument);
 
             const event = new Event("beforeunload") as BeforeUnloadEvent;
             let prevented = false;
@@ -679,14 +943,21 @@ describe("Application", () => {
 
             (sharedApp as any).handleWindowUnload(event);
             expect(prevented).toBe(true);
+            expect(event.returnValue).toBe("");
         });
 
-        test("should set returnValue when activeView is set", () => {
+        test("should not prevent close when every open document is saved", () => {
             sharedApp.activeView = createMockView();
+            sharedApp.documents.add({ isDirty: false } as IDocument);
+
             const event = new Event("beforeunload") as BeforeUnloadEvent;
+            let prevented = false;
+            event.preventDefault = () => {
+                prevented = true;
+            };
 
             (sharedApp as any).handleWindowUnload(event);
-            expect(event.returnValue).toBe("");
+            expect(prevented).toBe(false);
         });
 
         test("should not prevent close when activeView is undefined", () => {

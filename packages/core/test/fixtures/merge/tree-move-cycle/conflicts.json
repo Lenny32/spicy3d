@@ -1,0 +1,15 @@
+{
+    "description": "This device moved Folder A into Folder B, the other Folder B into Folder A: each fine alone, a cycle together — ours held, Folder B stays at the root.",
+    "conflicts": [
+        {
+            "kind": "cycle",
+            "path": "node/folder-b/parent",
+            "base": "fJ8oZYZU28huXd6_BAPDu",
+            "ours": "fJ8oZYZU28huXd6_BAPDu",
+            "theirs": "folder-a",
+            "messageKey": "merge.conflict.cycle{0}{1}",
+            "args": ["Folder B", "Folder A"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

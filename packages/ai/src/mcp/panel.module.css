@@ -290,3 +290,134 @@
 .downloadPrimary:hover {
     background: var(--hover-background-color);
 }
+
+.modeChoice {
+    display: flex;
+    gap: 4px;
+    padding: 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    align-self: flex-start;
+}
+
+.modeButton {
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    background: none;
+    color: var(--foreground-muted-color);
+    cursor: pointer;
+}
+
+.modeButton[aria-pressed="true"] {
+    background: var(--control-background-color);
+    color: var(--foreground-color);
+    font-weight: 600;
+}
+
+.agentList {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.agentList:empty {
+    display: none;
+}
+
+.agentRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pairingDialog {
+    max-width: 420px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--background-color);
+    color: var(--foreground-color);
+    font-size: 13px;
+}
+
+.pairingBody {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+}
+
+.pairingToken {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--control-background-color);
+}
+
+.pairingTokenName {
+    font-weight: 700;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.pairingActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.pairingActions .primaryButton {
+    align-self: auto;
+}
+
+.agentBadge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px 2px 8px;
+    border: 1px solid #2e9d4f;
+    border-radius: 999px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.agentName {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.agentBadge[hidden] {
+    display: none;
+}
+
+.agentBadge .dot {
+    background-color: #2e9d4f;
+}
+
+.agentBadge[data-denied] {
+    border-color: var(--border-color);
+}
+
+.agentBadge[data-denied] .dot {
+    background-color: #c94040;
+}
+
+.agentBadgeButton {
+    border: none;
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: var(--control-background-color);
+    color: var(--foreground-color);
+    cursor: pointer;
+}
+
+.agentBadgeButton:hover {
+    background: var(--hover-background-color);
+}

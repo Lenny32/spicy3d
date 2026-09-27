@@ -22,6 +22,7 @@ rs.mock("@spicy3d/core", () => {
         PubSubMock,
         I18nMock,
         unitExportsMock,
+        featureFocusExportsMock,
     } = rs.hoisted(() => require("./coreMocks"));
     return {
         ...actual,
@@ -34,6 +35,7 @@ rs.mock("@spicy3d/core", () => {
         PubSub: PubSubMock,
         I18n: I18nMock,
         isPropertyChanged: () => false,
+        ...featureFocusExportsMock(),
         XY: class {},
         XYZ: class {},
     };

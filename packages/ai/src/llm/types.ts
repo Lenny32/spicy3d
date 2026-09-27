@@ -9,7 +9,17 @@ export interface Tool {
     description: string;
     parameters: JsonSchema;
     /** `signal` aborts when the user cancels the chat; long-running handlers should respect it. */
-    handler: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<string | ToolResult>;
+    handler: (
+        args: Record<string, unknown>,
+        signal?: AbortSignal,
+        context?: ToolCallContext,
+    ) => Promise<string | ToolResult>;
+}
+
+/** Who is calling, when the front end knows (MCP: the session, so its open questions end with it). */
+export interface ToolCallContext {
+    /** Stable per MCP session: the relay's agent id, or the local bridge connection's. */
+    caller?: string;
 }
 
 export interface ToolCall {

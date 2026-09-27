@@ -22,6 +22,11 @@ rs.mock("../src/statusbar/mcpStatus", () => ({
     McpStatusIndicator: class {},
 }));
 
+// AutosaveIndicator reads the core autosave status; it has its own test file (autosaveStatus.test.ts).
+rs.mock("../src/statusbar/autosaveStatus", () => ({
+    AutosaveIndicator: class {},
+}));
+
 // Recorded collaborators for the core mock. Factories may only reference
 // rs.hoisted-created values.
 const pubSubRecorder = rs.hoisted(() => {

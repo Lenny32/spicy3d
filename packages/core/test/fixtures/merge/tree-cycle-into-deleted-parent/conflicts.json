@@ -1,0 +1,15 @@
+{
+    "description": "M into N here; N into M and N's folder P deleted there: a cycle whose reverted node has no parent left on any side — it goes to the root, with its subtree.",
+    "conflicts": [
+        {
+            "kind": "cycle",
+            "path": "node/folder-n/parent",
+            "base": "folder-p",
+            "ours": "folder-p",
+            "theirs": "folder-m",
+            "messageKey": "merge.conflict.cycle{0}{1}",
+            "args": ["Folder N", "Folder M"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

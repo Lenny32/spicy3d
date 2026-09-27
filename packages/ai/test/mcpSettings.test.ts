@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { DeploymentConfig } from "@spicy3d/core";
 import {
     BRIDGE_PLATFORMS,
     bridgeArgs,
@@ -42,6 +43,7 @@ function settings(patch: Partial<McpSettings> = {}): McpSettings {
         executablePath: "",
         bridgeCommand: "npx -y @spicy3d/mcp-bridge",
         autoConnect: false,
+        remoteEnabled: true,
         ...patch,
     };
 }
@@ -156,6 +158,7 @@ describe("mcp settings", () => {
             executablePath: "",
             bridgeCommand: "",
             autoConnect: false,
+            remoteEnabled: true,
         });
     });
 
@@ -163,7 +166,7 @@ describe("mcp settings", () => {
         const command = claudeCodeCommand(settings({ bridgeCommand: "" }), "https://cad.example.com/app/");
 
         expect(command).toBe(
-            `claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=abc123 -- npx -y --package=https://cad.example.com/app/mcp/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz spicy3d-mcp-bridge --app-url https://cad.example.com/app/`,
+            `claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=abc123 -- npx -y --allow-remote=all --package=https://cad.example.com/app/downloads/mcp-bridge/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz spicy3d-mcp-bridge --app-url https://cad.example.com/app/`,
         );
     });
 
@@ -175,7 +178,7 @@ describe("mcp settings", () => {
                 JSON.parse(mcpJsonConfig(settings({ bridgeCommand: "" }), APP)).mcpServers.spicy3d.command,
             ).toBe("cmd");
             expect(claudeCodeCommand(settings({ bridgeCommand: "" }), APP)).toContain(
-                "-- cmd /c npx -y --package=",
+                "-- cmd /c npx -y --allow-remote=all --package=",
             );
             expect(claudeCodeCommand(settings({ bridgeCommand: "node cli.mjs" }), APP)).toContain(
                 "-- node cli.mjs",
@@ -224,6 +227,45 @@ describe("mcp settings", () => {
         expect(urls).toHaveLength(5);
         for (const url of urls) expect(url.startsWith(__MCP_BRIDGE_DOWNLOAD_URL__)).toBe(true);
         expect(urls).toContain(`${__MCP_BRIDGE_DOWNLOAD_URL__}spicy3d-mcp-bridge-windows-x64.exe`);
+    });
+
+    describe("with a download folder in deployment.json", () => {
+        afterEach(() => DeploymentConfig.reset());
+
+        test.each([
+            ["a relative folder, resolved against the app", "downloads/mcp-bridge/"],
+            ["the same without its trailing slash", "downloads/mcp-bridge"],
+        ])("%s", (_case, downloadUrl) => {
+            DeploymentConfig.set({ mcpBridge: { downloadUrl } });
+            const app = new URL(".", document.baseURI).href;
+
+            expect(bridgeDownloadUrl(BRIDGE_PLATFORMS[0])).toBe(
+                `${app}downloads/mcp-bridge/${BRIDGE_PLATFORMS[0].file}`,
+            );
+        });
+
+        test("an absolute URL is used as is", () => {
+            DeploymentConfig.set({ mcpBridge: { downloadUrl: "https://files.lan/bridge/" } });
+
+            expect(bridgeDownloadUrl(BRIDGE_PLATFORMS[3])).toBe(
+                `https://files.lan/bridge/${BRIDGE_PLATFORMS[3].file}`,
+            );
+        });
+
+        test.each([
+            [""],
+            [42],
+            [null],
+            ["javascript:alert(1)//"],
+            ["data:text/html,x"],
+            ["ftp://files.lan/"],
+        ])("%p falls back to the build's release URL", (downloadUrl) => {
+            DeploymentConfig.set({ mcpBridge: { downloadUrl } });
+
+            expect(bridgeDownloadUrl(BRIDGE_PLATFORMS[0])).toBe(
+                `${__MCP_BRIDGE_DOWNLOAD_URL__}${BRIDGE_PLATFORMS[0].file}`,
+            );
+        });
     });
 
     test("the earlier npm default is read back as 'follow this site'", () => {

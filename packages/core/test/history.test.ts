@@ -80,6 +80,101 @@ describe("History", () => {
         expect(history.undoCount()).toBe(3);
     });
 
+    describe("position", () => {
+        const record = (obj: { val: number }, from: number) =>
+            new PropertyHistoryRecord(obj, "val", from, from + 1);
+
+        const failing = (fails: "undo" | "redo"): IHistoryRecord => ({
+            name: "failing",
+            undo: () => {
+                if (fails === "undo") throw new Error("boom");
+            },
+            redo: () => {
+                throw new Error("boom");
+            },
+            dispose: () => {},
+        });
+
+        test("an undo that throws still reports the moved position", () => {
+            const history = new History();
+            history.add(failing("undo"));
+            const before = history.position();
+            const changed = rs.fn();
+            history.onChanged.sub(changed);
+
+            expect(() => history.undo()).toThrow("boom");
+
+            expect(changed).toHaveBeenCalledTimes(1);
+            expect(history.position()).not.toBe(before);
+        });
+
+        test("a redo that throws still reports the change", () => {
+            const history = new History();
+            history.add(failing("redo"));
+            history.undo();
+            const changed = rs.fn();
+            history.onChanged.sub(changed);
+
+            expect(() => history.redo()).toThrow("boom");
+
+            expect(changed).toHaveBeenCalledTimes(1);
+            expect(history.redoCount()).toBe(0);
+        });
+
+        test("returns to the same token after undo and redo", () => {
+            const obj = { val: 0 };
+            const history = new History();
+            const empty = history.position();
+            history.add(record(obj, 0));
+            const afterFirst = history.position();
+
+            expect(afterFirst).not.toBe(empty);
+            history.undo();
+            expect(history.position()).toBe(empty);
+            history.redo();
+            expect(history.position()).toBe(afterFirst);
+        });
+
+        test("a new record after an undo is a new position", () => {
+            const obj = { val: 0 };
+            const history = new History();
+            history.add(record(obj, 0));
+            const saved = history.position();
+            history.undo();
+            history.add(record(obj, 0));
+
+            expect(history.position()).not.toBe(saved);
+        });
+
+        test("undoing everything left after the oldest record was dropped is not the original state", () => {
+            const obj = { val: 0 };
+            const history = new History();
+            history.undoLimits = 2;
+            const original = history.position();
+            for (let i = 0; i < 3; i++) history.add(record(obj, i));
+            history.undo();
+            history.undo();
+
+            expect(history.undoCount()).toBe(0);
+            expect(history.position()).not.toBe(original);
+        });
+
+        test("onChanged fires on add, undo and redo, not while disabled", () => {
+            const obj = { val: 0 };
+            const history = new History();
+            let count = 0;
+            history.onChanged.sub(() => count++);
+
+            history.add(record(obj, 0));
+            history.undo();
+            history.redo();
+            history.disabled = true;
+            history.add(record(obj, 1));
+
+            expect(count).toBe(3);
+        });
+    });
+
     test("should dispose all records and clear history", () => {
         const obj = { val: "a" };
         const history = new History();

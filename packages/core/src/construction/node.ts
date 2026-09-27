@@ -83,6 +83,12 @@ export class ConstructionNode extends GeometryNode {
         });
     }
 
+    /** The merge's validation pass (`IRebuildStatusSource`): whether the references resolve. */
+    rebuildStatus(): { error?: string } {
+        const geometry = this.geometry;
+        return geometry.isOk ? {} : { error: String(geometry.error) };
+    }
+
     get geometry(): Result<ConstructionGeometry> {
         if (this._evaluating) return Result.err("Cyclic construction reference");
         const inFeature = isConstructionFeatureActive(this.document);

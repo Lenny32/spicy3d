@@ -173,13 +173,18 @@ export class ThreeView extends Observable implements IView {
 
     close(): void {
         if (this._isClosed) return;
+        const application = this.document.application;
+        const otherView = application.views.find((x) => x !== this && x.document === this.document);
+        if (!otherView && application.documents.has(this.document)) {
+            // The last view of an open document: the document asks about unsaved changes (the
+            // user may cancel) and then closes its views, this one included.
+            void this.document.close();
+            return;
+        }
         this._isClosed = true;
-        this.document.application.views.remove(this);
-        const otherView = this.document.application.views.find((x) => x.document === this.document);
-        if (!otherView) {
-            this.document.close();
-        } else if (this.document.application.activeView === this) {
-            this.document.application.activeView = otherView;
+        application.views.remove(this);
+        if (otherView && application.activeView === this) {
+            application.activeView = otherView;
         }
         this.dispose();
         PubSub.default.pub("viewClosed", this);

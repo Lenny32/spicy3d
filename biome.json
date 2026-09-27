@@ -14,7 +14,8 @@
             "!!**/build",
             "!!**/coverage",
             "!!**/lib",
-            "!!**/iconfont.js"
+            "!!**/iconfont.js",
+            "!!.claude"
         ]
     },
     "css": {

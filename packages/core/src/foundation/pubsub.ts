@@ -7,10 +7,11 @@ import type { IDocument } from "../document";
 import type { I18nKeys } from "../i18n";
 import type { Material } from "../material";
 import type { INode } from "../model";
-import type { DialogButton, FloatPanelOptions } from "../ui";
+import type { BannerOptions, DialogButton, FloatPanelOptions } from "../ui";
 import type { CursorType, IView } from "../visual";
 import type { AsyncController } from "./asyncController";
 import type { IDisposable } from "./disposable";
+import type { IDocumentRepository, SaveKind } from "./documentRepository";
 import type { MessageType } from "./messageType";
 import type { Result } from "./result";
 
@@ -26,9 +27,14 @@ export interface PubSubEventMap {
     displayHome: (show: boolean) => void;
     documentClosed: (document: IDocument) => void;
     documentOpened: (document: IDocument) => void;
+    /** A document was saved (to its repository, or written back to its own file), as `kind`. */
+    documentSaved: (document: IDocument, kind: SaveKind) => void;
+    /** An open document now saves to another repository (moved to or from the cloud). */
+    documentRepositoryChanged: (document: IDocument, previous: IDocumentRepository) => void;
     editMaterial: (document: IDocument, material: Material, callback: (material: Material) => void) => void;
     editVariables: (document: IDocument, onApplied: () => void) => void;
     executeCommand: (commandName: CommandKeys) => void;
+    hideBanner: (id: string) => void;
     modelUpdate: (model: INode) => void;
     nodeDoubleClicked: (node: INode) => void;
     openCommandContext: (command: ICommand) => void;
@@ -38,6 +44,8 @@ export interface PubSubEventMap {
     pushShortcutContext: (context: ShortcutContext) => void;
     showDialog: (title: I18nKeys, content: HTMLElement, buttons?: DialogButton[] | (() => void)) => void;
     showAnalysisPanel: (node: AnalysisNode) => void;
+    /** Pins a non-blocking message to the top of the window (replacing one with the same id). */
+    showBanner: (banner: BannerOptions) => void;
     showFloatPanel: (options: FloatPanelOptions) => void;
     showFloatTip: (dom: HTMLElement | { level: MessageType; msg: string }) => void;
     showInput: (text: string, handler: (text: string) => Result<string, I18nKeys>) => void;
@@ -47,11 +55,25 @@ export interface PubSubEventMap {
     showProjectProperties(document: IDocument): void;
     showSelectionControl: (controller: AsyncController) => void;
     showToast: (message: I18nKeys, ...args: any[]) => void;
+    /**
+     * A toast with action buttons (e.g. "Undo"; several: "View changes" / "Undo merge"), shown a
+     * little longer than a plain toast.
+     */
+    showActionToast: (
+        message: I18nKeys,
+        action: ToastAction | readonly ToastAction[],
+        ...args: any[]
+    ) => void;
     statusBarTip: (tip: I18nKeys) => void;
     toggleChatPanel: () => void;
     viewClosed: (view: IView) => void;
     viewCursor: (cursor: CursorType) => void;
     visibleChanged: (model: INode) => void;
+}
+
+export interface ToastAction {
+    label: I18nKeys;
+    run: () => void;
 }
 
 type EventCallback = (...args: any[]) => void;

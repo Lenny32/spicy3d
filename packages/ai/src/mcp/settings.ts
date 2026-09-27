@@ -1,14 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ObjectStorage } from "@spicy3d/core";
+import { DeploymentConfig, ObjectStorage, resolveAppUrl } from "@spicy3d/core";
 
 // Nothing in this module may import the MCP SDK: the panel and the startup check load it eagerly,
 // and the SDK is a sizeable chunk that only a live bridge session needs.
 
 export const DEFAULT_BRIDGE_PORT = 7777;
-/** Where every deployment serves its own bridge package (see scripts/pack-mcp-bridge.mjs). */
-export const BRIDGE_TARBALL_PATH = `mcp/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz`;
+/**
+ * Where every deployment serves its own bridge package (see scripts/pack-mcp-bridge.mjs). Not under
+ * `mcp/`: behind SpicySrv's proxy `/mcp` and `/mcp/*` are the server's remote MCP endpoint.
+ */
+export const BRIDGE_TARBALL_PATH = `downloads/mcp-bridge/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz`;
 
 /** An earlier default, before the bridge was served by the site: treated as "use the default". */
 const LEGACY_DEFAULT_COMMAND = "npx -y @spicy3d/mcp-bridge";
@@ -18,7 +21,9 @@ const LEGACY_DEFAULT_COMMAND = "npx -y @spicy3d/mcp-bridge";
  * nobody needs the source, an npm account or a publication — and a fork's site serves its own.
  */
 export function defaultBridgeCommand(appUrl: string, windows = isWindowsClient()): string {
-    const npx = `npx -y --package=${new URL(BRIDGE_TARBALL_PATH, appUrl)} spicy3d-mcp-bridge`;
+    // npm 12 refuses packages from URLs unless allowed; older npm only warns about the flag. The
+    // package bundles its dependencies, so npx needs no registry (a LAN without internet works).
+    const npx = `npx -y --allow-remote=all --package=${new URL(BRIDGE_TARBALL_PATH, appUrl)} spicy3d-mcp-bridge`;
     // MCP clients on native Windows spawn without a shell, and npx is a .cmd script there.
     return windows ? `cmd /c ${npx}` : npx;
 }
@@ -46,8 +51,22 @@ export const BRIDGE_PLATFORMS: BridgePlatform[] = [
     { id: "linux-arm64", label: "Linux (arm64)", file: "spicy3d-mcp-bridge-linux-arm64" },
 ];
 
+/**
+ * The folder the executables are downloaded from: `deployment.json`'s `mcpBridge.downloadUrl`
+ * (e.g. `downloads/mcp-bridge/` on a LAN server without internet access), else the build's
+ * `SPICY3D_BRIDGE_DOWNLOAD_URL`; a relative one is resolved against the app's folder.
+ */
+export function bridgeDownloadBase(): string {
+    const configured = DeploymentConfig.section("mcpBridge")?.["downloadUrl"];
+    const base =
+        typeof configured === "string" && configured.trim() ? configured.trim() : __MCP_BRIDGE_DOWNLOAD_URL__;
+    const resolved = resolveAppUrl(base.endsWith("/") ? base : `${base}/`);
+    // Links only: no javascript:, data: or the like from a misconfigured file.
+    return resolved && /^https?:$/.test(new URL(resolved).protocol) ? resolved : __MCP_BRIDGE_DOWNLOAD_URL__;
+}
+
 export function bridgeDownloadUrl(platform: BridgePlatform): string {
-    return `${__MCP_BRIDGE_DOWNLOAD_URL__}${platform.file}`;
+    return `${bridgeDownloadBase()}${platform.file}`;
 }
 
 /**
@@ -85,6 +104,11 @@ export interface McpSettings {
      */
     bridgeCommand: string;
     autoConnect: boolean;
+    /**
+     * Remote MCP (CLOUD-14): while signed in to a server with the relay, this tab is reachable by
+     * the user's own MCP clients through it (each new session still asks for confirmation).
+     */
+    remoteEnabled: boolean;
 }
 
 const STORAGE_KEY = "mcp.settings";
@@ -105,6 +129,7 @@ export function defaultSettings(): McpSettings {
         executablePath: "",
         bridgeCommand: "",
         autoConnect: false,
+        remoteEnabled: true,
     };
 }
 
@@ -129,6 +154,7 @@ export function loadMcpSettings(): McpSettings {
         executablePath: saved?.executablePath ?? "",
         bridgeCommand: saved?.bridgeCommand === LEGACY_DEFAULT_COMMAND ? "" : (saved?.bridgeCommand ?? ""),
         autoConnect: saved?.autoConnect ?? defaults.autoConnect,
+        remoteEnabled: saved?.remoteEnabled ?? defaults.remoteEnabled,
     };
     if (settings.requireToken && !settings.token) settings.token = generateToken();
     if (!saved) saveMcpSettings(settings);

@@ -4,9 +4,12 @@
 import {
     type Act,
     AnalysisManager,
+    type DocumentFormatError,
+    type DocumentRepositoryError,
     History,
     type IApplication,
     type IDocument,
+    type IDocumentRepository,
     InternalClassName,
     type IPicker,
     type ISelection,
@@ -17,6 +20,9 @@ import {
     ObservableCollection,
     ProjectSettings,
     type PropertyChangedHandler,
+    Result,
+    replaceDocumentContent,
+    type SaveOutcome,
     type Serialized,
     VariableTable,
 } from "../src";
@@ -37,6 +43,9 @@ export class TestDocument implements IDocument {
     variables: IVariableTable;
     settings: ProjectSettings;
     acts: ObservableCollection<Act> = new ObservableCollection<Act>();
+    repository: IDocumentRepository = {} as IDocumentRepository;
+    version?: string;
+    isDirty = false;
 
     onPropertyChanged<K extends keyof this>(_handler: PropertyChangedHandler<this, K>): void {
         // no-op: TestDocument is not observable in tests
@@ -55,7 +64,13 @@ export class TestDocument implements IDocument {
         this.modelManager.dispose();
     }
 
-    save(): Promise<void> {
+    save(): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        return Promise.resolve(Result.ok({ status: "saved", updatedAt: 0 }));
+    }
+
+    markSaved(): void {}
+
+    settled(): Promise<void> {
         return Promise.resolve();
     }
 
@@ -63,8 +78,8 @@ export class TestDocument implements IDocument {
         return Promise.resolve();
     }
 
-    close(): Promise<void> {
-        return Promise.resolve();
+    close(): Promise<boolean> {
+        return Promise.resolve(true);
     }
 
     serialize(): Serialized {
@@ -74,6 +89,10 @@ export class TestDocument implements IDocument {
         };
     }
 
+    replaceContent(data: Serialized, name: string): Result<void, DocumentFormatError> {
+        return replaceDocumentContent(this, data, name);
+    }
+
     constructor(overrides?: Partial<Pick<TestDocument, "visual" | "application" | "selection" | "picker">>) {
         this.name = "test";
         this.id = "test";
@@ -81,7 +100,8 @@ export class TestDocument implements IDocument {
         this.history = new History();
         this.selection = overrides?.selection ?? ({} as ISelection);
         this.picker = overrides?.picker ?? ({} as IPicker);
-        this.application = overrides?.application ?? ({ views: [] } as unknown as IApplication);
+        this.application =
+            overrides?.application ?? ({ views: [], documents: new Set() } as unknown as IApplication);
         this.modelManager = new ModelManager(this);
         this.variables = new VariableTable(this);
         this.settings = new ProjectSettings(this);

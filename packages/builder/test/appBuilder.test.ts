@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import type { IApplication, IWindow } from "@spicy3d/core";
+import { ExternalContentPolicy, type IApplication, type IWindow, Logger } from "@spicy3d/core";
 import { mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ThreeVisulFactory } from "@spicy3d/three";
 import { MainWindow } from "@spicy3d/ui";
@@ -32,6 +32,46 @@ rs.mock("@spicy3d/three", () => ({
         constructor(readonly handler: unknown) {}
     },
 }));
+
+const cloudMock = rs.hoisted(() => ({
+    discovery: { status: "dormant" } as { status: string; config?: unknown; compatibility?: string },
+    discoverCalls: [] as unknown[],
+    startCalls: [] as unknown[][],
+    accountUiCalls: [] as unknown[][],
+    documentsCalls: [] as unknown[][],
+    settingsCalls: [] as unknown[][],
+    /** `null`: the default answer (`{ connection }`); `undefined`: not started (incompatible). */
+    startResult: null as unknown,
+    mainModuleLoaded: 0,
+}));
+
+rs.mock("@spicy3d/cloud/src/config", () => ({
+    discoverCloud: async (options: unknown) => {
+        cloudMock.discoverCalls.push(options);
+        return cloudMock.discovery;
+    },
+}));
+
+rs.mock("@spicy3d/cloud", () => {
+    cloudMock.mainModuleLoaded++;
+    return {
+        startCloud: (...args: unknown[]) => {
+            cloudMock.startCalls.push(args);
+            return cloudMock.startResult === null ? { connection: args[0] } : cloudMock.startResult;
+        },
+        startAccountUi: async (...args: unknown[]) => {
+            cloudMock.accountUiCalls.push(args);
+        },
+        startCloudDocuments: (...args: unknown[]) => {
+            cloudMock.documentsCalls.push(args);
+            return () => {};
+        },
+        startCloudSettings: (...args: unknown[]) => {
+            cloudMock.settingsCalls.push(args);
+            return () => {};
+        },
+    };
+});
 
 rs.mock("@spicy3d/ui", () => ({
     MainWindow: class MainWindow {
@@ -91,11 +131,14 @@ describe("AppBuilder", () => {
     });
 
     describe("getServices", () => {
-        test("should return an array with CommandService and HotkeyService", () => {
+        test("should return the command, hotkey and autosave services", () => {
             const builder = new AppBuilder();
             const services = (builder as any).getServices();
-            expect(Array.isArray(services)).toBe(true);
-            expect(services.length).toBe(2);
+            expect(services.map((x: object) => x.constructor.name)).toEqual([
+                "CommandService",
+                "HotkeyService",
+                "AutosaveService",
+            ]);
         });
     });
 
@@ -201,6 +244,123 @@ describe("AppBuilder", () => {
             expect((builder as any)._window).toBeInstanceOf(MainWindow);
 
             appDiv.remove();
+        });
+    });
+
+    describe("useCloud", () => {
+        const fakeApp = {} as IApplication;
+
+        beforeEach(() => {
+            cloudMock.discoverCalls.length = 0;
+            cloudMock.startCalls.length = 0;
+            cloudMock.accountUiCalls.length = 0;
+            cloudMock.documentsCalls.length = 0;
+            cloudMock.settingsCalls.length = 0;
+        });
+
+        test("adds a post-startup step, not a startup init", () => {
+            const builder = new AppBuilder();
+            const inits = (builder as any)._inits.length;
+
+            expect(builder.useCloud()).toBe(builder);
+
+            expect((builder as any)._inits.length).toBe(inits);
+            expect((builder as any)._started.length).toBe(1);
+        });
+
+        test("no server: discovery only, the cloud client is never loaded or started", async () => {
+            cloudMock.discovery = { status: "dormant" };
+            const builder = new AppBuilder().useCloud({ baseUrl: "https://spicy.test" });
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test", offlineCache: true }]);
+            expect(cloudMock.startCalls).toEqual([]);
+            expect(cloudMock.accountUiCalls).toEqual([]);
+            expect(cloudMock.documentsCalls).toEqual([]);
+            expect(cloudMock.settingsCalls).toEqual([]);
+            // Runs before the "a server" case, which is the first to import the client module.
+            expect(cloudMock.mainModuleLoaded).toBe(0);
+        });
+
+        test("until the server answers, a session may exist; no server: none (CLOUD-17)", async () => {
+            cloudMock.discovery = { status: "dormant" };
+            ExternalContentPolicy.setSessionProbe(() => false)(); // back to the default: no cloud
+            expect(ExternalContentPolicy.hasSession).toBe(false);
+            const builder = new AppBuilder().useCloud();
+            // `?plugin=` may run before the discovery: treated as signed in.
+            expect(ExternalContentPolicy.hasSession).toBe(true);
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(ExternalContentPolicy.hasSession).toBe(false);
+        });
+
+        test("a server: the cloud starts with the discovery and the options", async () => {
+            const discovery = { status: "ready", config: { version: "0.0.1", apiVersion: "1" } };
+            cloudMock.discovery = discovery;
+            const builder = new AppBuilder().useCloud();
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(cloudMock.discoverCalls).toEqual([{ offlineCache: true }]);
+            expect(cloudMock.startCalls).toEqual([[discovery, {}]]);
+            expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, undefined]]);
+            expect(cloudMock.documentsCalls).toEqual([[{ connection: discovery }, fakeApp]]);
+            expect(cloudMock.settingsCalls).toEqual([[{ connection: discovery }]]);
+            expect(cloudMock.mainModuleLoaded).toBe(1);
+        });
+
+        test("an account link goes to the account UI, not to discovery or the client", async () => {
+            const discovery = { status: "ready", config: { version: "0.0.1", apiVersion: "1" } };
+            cloudMock.discovery = discovery;
+            const accountLink = { kind: "verifyEmail" as const, userId: "u", token: "t" };
+            const builder = new AppBuilder().useCloud({ baseUrl: "https://spicy.test", accountLink });
+
+            await (builder as any).runStarted(fakeApp);
+
+            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test", offlineCache: true }]);
+            expect(cloudMock.startCalls).toEqual([[discovery, { baseUrl: "https://spicy.test" }]]);
+            expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, accountLink]]);
+        });
+
+        test("an account link with an incompatible server is logged, not dropped silently", async () => {
+            cloudMock.discovery = {
+                status: "incompatible",
+                compatibility: "serverNewer",
+                config: { version: "9", apiVersion: "9" },
+            };
+            const startCloud = cloudMock.startResult;
+            cloudMock.startResult = undefined;
+            const accountLink = { kind: "verifyEmail" as const, userId: "u", token: "t" };
+            const builder = new AppBuilder().useCloud({ accountLink });
+            const warn = rs.spyOn(Logger, "warn").mockImplementation(() => {});
+            try {
+                await (builder as any).runStarted(fakeApp);
+
+                expect(cloudMock.accountUiCalls).toEqual([]);
+                expect(warn).toHaveBeenCalledWith(
+                    "[cloud] opened with an account link, but the server is incompatible",
+                );
+            } finally {
+                warn.mockRestore();
+                cloudMock.startResult = startCloud;
+            }
+        });
+
+        test("a failing step is logged, never thrown into startup", async () => {
+            const builder = new AppBuilder();
+            (builder as any)._started.push(async () => {
+                throw new Error("boom");
+            });
+
+            const warn = rs.spyOn(Logger, "warn").mockImplementation(() => {});
+            try {
+                await expect((builder as any).runStarted(fakeApp)).resolves.toBeUndefined();
+                expect(warn).toHaveBeenCalledWith("startup step failed: Error: boom");
+            } finally {
+                warn.mockRestore();
+            }
         });
     });
 

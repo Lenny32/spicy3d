@@ -3,6 +3,7 @@
 
 import type { INode, INodeLinkedList } from "../model";
 import type { IDisposable } from "./disposable";
+import { Signal } from "./signal";
 
 export interface IHistoryRecord extends IDisposable {
     readonly name: string;
@@ -17,6 +18,15 @@ export class History implements IDisposable {
     disabled = false;
     undoLimits = 50;
 
+    /** Fires after every change of the undo position (a new record, an undo or a redo). */
+    readonly onChanged = new Signal<() => void>();
+
+    /**
+     * Stands for the empty undo stack. Replaced whenever the oldest record is dropped, so the
+     * state reached by undoing everything that is left is not taken for the original one.
+     */
+    #bottom: object = {};
+
     #isUndoing = false;
     get isUndoing() {
         return this.#isUndoing;
@@ -30,6 +40,15 @@ export class History implements IDisposable {
         this._redos.forEach((record) => record.dispose());
         this._undos.forEach((record) => record.dispose());
         this.clear();
+        this.onChanged.dispose();
+    }
+
+    /**
+     * An opaque token for the current undo position: two equal tokens mean the document is in
+     * the same state (e.g. the one it was saved in), whatever was undone and redone in between.
+     */
+    position(): object {
+        return this._undos.at(-1) ?? this.#bottom;
     }
 
     private clear(): void {
@@ -46,7 +65,9 @@ export class History implements IDisposable {
         if (this._undos.length > this.undoLimits) {
             const removed = this._undos.shift();
             removed?.dispose();
+            this.#bottom = {};
         }
+        this.onChanged.emit();
     }
 
     undoCount() {
@@ -63,9 +84,13 @@ export class History implements IDisposable {
             () => {
                 const record = this._undos.pop();
                 if (!record) return;
-
-                record.undo();
-                this._redos.push(record);
+                // The position moved with the pop: listeners (isDirty) hear it even if undo throws.
+                try {
+                    record.undo();
+                    this._redos.push(record);
+                } finally {
+                    this.onChanged.emit();
+                }
             },
             () => {
                 this.#isUndoing = false;
@@ -79,9 +104,12 @@ export class History implements IDisposable {
             () => {
                 const record = this._redos.pop();
                 if (!record) return;
-
-                record.redo();
-                this._undos.push(record);
+                try {
+                    record.redo();
+                    this._undos.push(record);
+                } finally {
+                    this.onChanged.emit();
+                }
             },
             () => {
                 this.#isRedoing = false;

@@ -56,6 +56,9 @@ jobs:
 
             - run: npx tsc --noEmit -p tsconfig.json
 
+            # The typed API client must match the committed server spec (packages/cloud/openapi.json).
+            - run: npm run cloud:api:check
+
     semgrep:
         name: Semgrep (SAST)
         runs-on: ubuntu-latest
@@ -146,6 +149,12 @@ jobs:
 
             - name: npm audit (runtime deps, high+)
               run: npm audit --omit=dev --audit-level=high
+
+            # The build tools too: they run in CI and on developers' machines with access to the source
+            # and, in the release workflows, to publishing credentials. A finding with no fix yet is
+            # documented in docs/security.md rather than silenced here.
+            - name: npm audit (all deps, high+)
+              run: npm audit --audit-level=high
 
             - name: Dependency review
               if: github.event_name == 'pull_request'

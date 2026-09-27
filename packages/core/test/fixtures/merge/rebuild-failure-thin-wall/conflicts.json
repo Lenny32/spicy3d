@@ -1,0 +1,12 @@
+{
+    "description": "A thinner wall here, a bigger fillet there: two valid parameter changes whose combination fails — merged structurally without conflict; the validation pass (kernel) reports the fillet as a rebuild-failure. Its args[1] is the kernel's error message, not stored here.",
+    "conflicts": [
+        {
+            "kind": "rebuild-failure",
+            "path": "node/body-1/feature/f2/rebuild",
+            "messageKey": "merge.conflict.rebuildFailure{0}{1}",
+            "args": ["fillet f2"],
+            "choices": ["accept"]
+        }
+    ]
+}

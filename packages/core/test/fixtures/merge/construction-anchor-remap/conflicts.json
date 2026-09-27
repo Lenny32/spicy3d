@@ -1,0 +1,4 @@
+{
+    "description": "This device added a datum plane on the body's top face captured after f2 (featureIndex 2); the other inserted a feature before f2. A ConstructionRef's featureIndex is a timeline position: it follows f2 to 3.",
+    "conflicts": []
+}

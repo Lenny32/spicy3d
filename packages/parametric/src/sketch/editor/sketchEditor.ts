@@ -3,8 +3,10 @@
 
 import {
     type AsyncController,
+    AutosaveHolds,
     type CameraType,
     documentLengthUnit,
+    EditSessions,
     formatLengthParameter,
     type I18nKeys,
     type IDisposable,
@@ -136,6 +138,10 @@ export class SketchEditor implements IDisposable {
      * (committing changes) with `exit` or Escape.
      */
     private static activeEditor?: SketchEditor;
+    /** Ends the session's hold on autosave. */
+    private releaseAutosave?: () => void;
+    /** Unregisters the session from `EditSessions`. */
+    private releaseSession?: () => void;
 
     // ------------------------------------------------------------------ Static entry points — at most one session is live
 
@@ -147,16 +153,23 @@ export class SketchEditor implements IDisposable {
         SketchEditor.exit();
         // Profile faces are normally shown for picking; hide them while editing.
         node.setShowProfileFaces(false);
+        let releaseAutosave: (() => void) | undefined;
         try {
             const editor = new SketchEditor(node.document, node);
+            // The session rolls bodies back: an autosave now would save that state.
+            releaseAutosave = AutosaveHolds.hold("sketch");
+            editor.releaseAutosave = releaseAutosave;
+            // Content replaced under it (a merge resolved or undone) ends the session first.
+            editor.releaseSession = EditSessions.begin(node.document, () => editor.exit());
             SketchEditor.activeEditor = editor;
             node.document.application.mainWindow?.ribbon.openTab("ribbon.tab.sketch");
             PubSub.default.pub("pushShortcutContext", "sketch");
             return editor;
         } catch (error) {
             // The constructor already undid its own session state; this is the flag
-            // enter() itself set.
+            // enter() itself set — and the hold, which must never outlive a failed enter.
             node.setShowProfileFaces(true);
+            releaseAutosave?.();
             throw error;
         }
     }
@@ -886,6 +899,8 @@ export class SketchEditor implements IDisposable {
         this.feedback?.dispose();
         if (this.disposed) return;
         this.disposed = true;
+        this.releaseSession?.();
+        this.releaseSession = undefined;
         this.cancelPick();
         this.document.visual.context.setNodeOnTop([this.node], false);
         this.node.setEditingSession(false);
@@ -893,7 +908,11 @@ export class SketchEditor implements IDisposable {
         try {
             this.restoreRolledBackBodies();
         } finally {
-            this.teardownSession();
+            try {
+                this.teardownSession();
+            } finally {
+                this.releaseAutosave?.();
+            }
         }
     }
 

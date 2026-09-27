@@ -7,6 +7,9 @@
  *
  * stdout carries MCP messages only (newline-delimited JSON-RPC); every log line goes to stderr.
  *
+ * Two modes: by default the page connects to a WebSocket on 127.0.0.1 (bridge.mjs); with
+ * `--server` the bridge relays to a Spicy3D server's `/mcp` endpoint instead (remote.mjs).
+ *
  * Options and environment variables: see USAGE in options.mjs (`spicy3d-mcp-bridge --help`).
  */
 
@@ -16,6 +19,7 @@ import { WebSocketServer } from "ws";
 import packageJson from "../package.json" with { type: "json" };
 import { BridgeCore, pairingUrl } from "./bridge.mjs";
 import { parseOptions, USAGE } from "./options.mjs";
+import { RemoteProxy } from "./remote.mjs";
 
 const HEARTBEAT_MS = 30_000;
 
@@ -38,94 +42,115 @@ if (options.version) {
     process.exit(0);
 }
 
-const { appUrl, port, noToken, allowedOrigins } = options;
-const token = noToken ? "" : options.token || randomBytes(16).toString("hex");
-
 const log = (/** @type {string} */ text) => process.stderr.write(`[spicy3d-bridge] ${text}\n`);
-const link = pairingUrl(appUrl, port, token);
+const send = (/** @type {object} */ message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
-const core = new BridgeCore({
-    pairingUrl: link,
-    version,
-    log,
-    sendToClient: (message) => process.stdout.write(`${JSON.stringify(message)}\n`),
-});
+/** @type {{ handleClientMessage(message: any): void, close(): Promise<void> }} */
+const mode = options.server ? startServerMode(options.server, options.serverToken) : startLocalMode();
 
-/** @param {string | undefined} candidate */
-function tokenMatches(candidate) {
-    if (!candidate) return false;
-    const a = Buffer.from(candidate);
-    const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b);
+/**
+ * @param {string} endpoint
+ * @param {string} token
+ */
+function startServerMode(endpoint, token) {
+    // No local WebSocket: every message goes to the server's /mcp with the access token.
+    const proxy = new RemoteProxy({ endpoint, token, sendToClient: send, log, version });
+    log(`relaying to ${endpoint}`);
+    return proxy;
 }
 
-const wss = new WebSocketServer({
-    host: "127.0.0.1",
-    port,
-    maxPayload: 64 * 1024 * 1024, // screenshots travel base64-encoded
-    handleProtocols: (protocols) => (protocols.has("mcp") ? "mcp" : false),
-    verifyClient: ({ origin, req }, done) => {
-        // The token is the real gate; the origin check keeps other sites in the same browser from
-        // even trying, since any page can open a WebSocket to 127.0.0.1.
-        if (!allowedOrigins.has(origin)) {
-            log(`refused connection from origin ${origin || "(none)"}`);
-            return done(false, 403, "origin not allowed");
-        }
-        if (noToken) return done(true);
-        const candidate = new URL(req.url ?? "/", "ws://127.0.0.1").searchParams.get("token") ?? undefined;
-        if (!tokenMatches(candidate)) {
-            log("refused connection with a wrong or missing token");
-            return done(false, 401, "bad token");
-        }
-        done(true);
-    },
-});
+/** The page connects to a WebSocket on 127.0.0.1, paired by the token. */
+function startLocalMode() {
+    const { appUrl, port, noToken, allowedOrigins } = options;
+    const token = noToken ? "" : options.token || randomBytes(16).toString("hex");
+    const link = pairingUrl(appUrl, port, token);
 
-wss.on("error", (err) => {
-    log(`cannot listen on 127.0.0.1:${port}: ${err.message}`);
-    process.exit(1);
-});
+    const core = new BridgeCore({ pairingUrl: link, version, log, sendToClient: send });
 
-wss.on("listening", () => {
-    log(`listening on ws://127.0.0.1:${port}`);
-    if (noToken)
-        log("WARNING: running without a pairing token; any program on this machine can drive the tab");
-    log(`accepting pages from: ${[...allowedOrigins].join(", ")}`);
-    log(`open Spicy3D with: ${link}`);
-});
+    /** @param {string | undefined} candidate */
+    function tokenMatches(candidate) {
+        if (!candidate) return false;
+        const a = Buffer.from(candidate);
+        const b = Buffer.from(token);
+        return a.length === b.length && timingSafeEqual(a, b);
+    }
 
-wss.on("connection", (socket) => {
-    /** @type {import("./bridge.mjs").TabPeer} */
-    const peer = {
-        send: (message) => socket.send(JSON.stringify(message)),
-        close: (code, reason) => socket.close(code, reason),
+    const wss = new WebSocketServer({
+        host: "127.0.0.1",
+        port,
+        maxPayload: 64 * 1024 * 1024, // screenshots travel base64-encoded
+        handleProtocols: (protocols) => (protocols.has("mcp") ? "mcp" : false),
+        verifyClient: ({ origin, req }, done) => {
+            // The token is the real gate; the origin check keeps other sites in the same browser from
+            // even trying, since any page can open a WebSocket to 127.0.0.1.
+            if (!allowedOrigins.has(origin)) {
+                log(`refused connection from origin ${origin || "(none)"}`);
+                return done(false, 403, "origin not allowed");
+            }
+            if (noToken) return done(true);
+            const candidate =
+                new URL(req.url ?? "/", "ws://127.0.0.1").searchParams.get("token") ?? undefined;
+            if (!tokenMatches(candidate)) {
+                log("refused connection with a wrong or missing token");
+                return done(false, 401, "bad token");
+            }
+            done(true);
+        },
+    });
+
+    wss.on("error", (err) => {
+        log(`cannot listen on 127.0.0.1:${port}: ${err.message}`);
+        process.exit(1);
+    });
+
+    wss.on("listening", () => {
+        log(`listening on ws://127.0.0.1:${port}`);
+        if (noToken)
+            log("WARNING: running without a pairing token; any program on this machine can drive the tab");
+        log(`accepting pages from: ${[...allowedOrigins].join(", ")}`);
+        log(`open Spicy3D with: ${link}`);
+    });
+
+    wss.on("connection", (socket) => {
+        /** @type {import("./bridge.mjs").TabPeer} */
+        const peer = {
+            send: (message) => socket.send(JSON.stringify(message)),
+            close: (code, reason) => socket.close(code, reason),
+        };
+        let alive = true;
+        socket.on("pong", () => {
+            alive = true;
+        });
+        const heartbeat = setInterval(() => {
+            if (!alive) return socket.terminate();
+            alive = false;
+            socket.ping();
+        }, HEARTBEAT_MS);
+
+        core.attachTab(peer);
+        socket.on("message", (data) => {
+            let message;
+            try {
+                message = JSON.parse(data.toString());
+            } catch {
+                log("dropped a malformed message from the tab");
+                return;
+            }
+            core.handleTabMessage(peer, message);
+        });
+        socket.on("close", () => {
+            clearInterval(heartbeat);
+            core.detachTab(peer);
+        });
+    });
+
+    return {
+        handleClientMessage: (/** @type {any} */ message) => core.handleClientMessage(message),
+        close: async () => {
+            wss.close();
+        },
     };
-    let alive = true;
-    socket.on("pong", () => {
-        alive = true;
-    });
-    const heartbeat = setInterval(() => {
-        if (!alive) return socket.terminate();
-        alive = false;
-        socket.ping();
-    }, HEARTBEAT_MS);
-
-    core.attachTab(peer);
-    socket.on("message", (data) => {
-        let message;
-        try {
-            message = JSON.parse(data.toString());
-        } catch {
-            log("dropped a malformed message from the tab");
-            return;
-        }
-        core.handleTabMessage(peer, message);
-    });
-    socket.on("close", () => {
-        clearInterval(heartbeat);
-        core.detachTab(peer);
-    });
-});
+}
 
 createInterface({ input: process.stdin }).on("line", (line) => {
     if (!line.trim()) return;
@@ -133,16 +158,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     try {
         message = JSON.parse(line);
     } catch {
-        process.stdout.write(
-            `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })}\n`,
-        );
+        send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
         return;
     }
-    core.handleClientMessage(message);
+    mode.handleClientMessage(message);
 });
 
-// The MCP client owns our lifetime: when it closes stdin, we are done.
-process.stdin.on("end", () => {
-    wss.close();
-    process.exit(0);
-});
+// The MCP client owns our lifetime: when it closes stdin or stops us, we are done — after ending
+// the server-side session (server mode; bounded by a timeout).
+let exiting = false;
+function shutdown() {
+    if (exiting) return;
+    exiting = true;
+    void mode.close().finally(() => process.exit(0));
+}
+process.stdin.on("end", shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

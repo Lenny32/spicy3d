@@ -9,8 +9,9 @@ import {
     type Material,
     PubSub,
     type Ribbon,
+    SidePanels,
 } from "@spicy3d/core";
-import { div } from "@spicy3d/element";
+import { collection, div } from "@spicy3d/element";
 import { CommandSearch } from "./commandSearch";
 import style from "./editor.module.css";
 import { FloatPanel } from "./floatPanel";
@@ -60,7 +61,17 @@ export class Editor extends HTMLElement {
                 onpointerdown: (e: PointerEvent) => this._startSidebarResize(e),
             }),
         );
-        this._contentEl = div({ className: style.content }, this._sidebarEl, this._viewportContainer);
+        const sidePanels = collection({
+            className: style.sidePanels,
+            sources: SidePanels.items,
+            template: (item: HTMLElement) => item,
+        });
+        this._contentEl = div(
+            { className: style.content },
+            this._sidebarEl,
+            this._viewportContainer,
+            sidePanels,
+        );
         this.append(
             div(
                 { className: style.root },

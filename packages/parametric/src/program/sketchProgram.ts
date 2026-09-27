@@ -19,6 +19,7 @@ import { addRectangle } from "../sketch/commands/sketchRectangle";
 import { applyDimensions, suggestDimensions } from "../sketch/editor/constraintAnalyzer";
 import { captureExternalRef, isEdgeCoplanarWithPlane } from "../sketch/externalRef";
 import { editableCurve, extendCurve, offsetCurve, splitCurve, trimCurve } from "../sketch/geometryEditing";
+import type { SketchIdAllocator } from "../sketch/sketchIds";
 import {
     ConstraintKind,
     datumPoint,
@@ -217,8 +218,9 @@ export class SketchSession {
         private readonly node: SketchNode,
         private readonly names: SketchNames,
         scope: Scope,
+        ids?: SketchIdAllocator,
     ) {
-        this.solver = new SketchSolver(node.plane, node.data, scope);
+        this.solver = new SketchSolver(node.plane, node.data, scope, ids);
         // the anchor of the face the sketch sits on outlives its boundary refs (as in the editor)
         this.solver.planeOwnerNodeId = node.planeRef?.nodeId;
         this.initialConstraintIds = new Set(this.solver.toData().constraints.map((c) => c.id));

@@ -18,13 +18,13 @@ export const pubSubRecorder = rs.hoisted(() => {
 
 rs.mock("@spicy3d/core", () => {
     const actual = rs.hoisted(() => require("@spicy3d/core"));
-    const { LocalizeMock, BindingMock, TransactionMock, unitExportsMock } = rs.hoisted(() =>
-        require("./coreMocks"),
-    );
+    const { LocalizeMock, BindingMock, TransactionMock, unitExportsMock, featureFocusExportsMock } =
+        rs.hoisted(() => require("./coreMocks"));
 
     return {
         ...actual,
         ...unitExportsMock(),
+        ...featureFocusExportsMock(),
         Localize: LocalizeMock,
         Binding: BindingMock,
         Transaction: TransactionMock,

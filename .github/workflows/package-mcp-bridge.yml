@@ -157,7 +157,8 @@ jobs:
             - name: Checksums
               run: |
                   count=0
-                  for f in release/spicy3d-mcp-bridge-*; do [[ "$f" == *.tgz ]] || count=$((count + 1)); done
+                  # Executables only: not the npm tarball, nor the LICENSE / THIRD-PARTY-NOTICES texts.
+                  for f in release/spicy3d-mcp-bridge-*; do [[ "$f" == *.tgz || "$f" == *.txt ]] || count=$((count + 1)); done
                   test "$count" -eq 5
                   cd release && sha256sum spicy3d-mcp-bridge-* > SHA256SUMS && cat SHA256SUMS
 

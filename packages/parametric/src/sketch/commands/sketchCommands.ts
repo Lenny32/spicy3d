@@ -100,6 +100,8 @@ export function captureFaceBoundaryRefs(
     const localEdges = localFace.findSubShapes(ShapeTypes.edge) as IEdge[];
     const ownerEdges = sourceBodyEdges(owner);
     const refs: ExternalRefData[] = [];
+    // Counted from FIRST_EXTERNAL_ENTITY_ID down: the refs seed a sketch being created, which no
+    // other version holds yet, so counting cannot collide across devices (sketchIds.ts).
     let nextId = FIRST_EXTERNAL_ENTITY_ID;
     for (const localEdge of localEdges) {
         const worldEdge = localEdge.transformedMul(transform) as IEdge;
@@ -215,18 +217,6 @@ function sketchDataFromPick(picked: PickedPlane): SketchData | undefined {
         ...emptySketchData(),
         externalRefs: picked.externalRefs,
         refPositions: picked.refPositions,
-        // captureBoundaryExternalRefs numbered the refs from
-        // FIRST_EXTERNAL_ENTITY_ID down before the solver existed —
-        // persist the counter so the no-reuse invariant is explicit
-        // instead of relying on the load-time Math.min recovery
-        // (undefined drops out of the serialized JSON). The next counter
-        // derives from the actual refs; it is never read on an empty list
-        // (captureBoundaryExternalRefs returns undefined for one), so the
-        // Math.min spread cannot see an empty array.
-        externalIdSeq:
-            picked.externalRefs === undefined
-                ? undefined
-                : Math.min(...picked.externalRefs.map((ref) => ref.entityId)) - 1,
     };
 }
 
