@@ -31,6 +31,10 @@ into the build (CLOUD-16):
         ],
         "defaultPreset": "company",
         "hideBuiltInPresets": true
+    },
+    "security": {
+        "pluginOrigins": ["https://plugins.example.lan"],
+        "fileOrigins": ["https://models.example.lan"]
     }
 }
 ```
@@ -41,6 +45,8 @@ into the build (CLOUD-16):
 | `ai.presets` | none | Endpoints offered first in the assistant's settings: `id`, `label`, `provider` (`anthropic`, `completions`, `responses`), `baseURL`, `defaultModel`. Invalid entries are ignored. |
 | `ai.defaultPreset` | the first preset | The preset a first-time user starts from. |
 | `ai.hideBuiltInPresets` | `false` | Hide the public Anthropic/OpenAI presets (only with at least one valid preset of your own). |
+| `security.pluginOrigins` | none | Origins (`https://host[:port]`, `https://*.example.com`) whose plugins load without the trust prompt, signed in or not. The app's own origin always does. Also add them to `SPICY3D_PLUGIN_ORIGINS` (below). |
+| `security.fileOrigins` | none | Origins `?url=` / `?model=` may open files from without asking. Any other origin asks every time. Also add them to `SPICY3D_CONNECT_ORIGINS`. |
 
 A missing or invalid file changes nothing (a warning in the console). Once the assistant cannot
 reach its endpoint it says so and points at the settings.
@@ -72,10 +78,12 @@ stays read-only):
 - **its own Content-Security-Policy**. SpicySrv's Caddy sets `SPICY_WEB_CSP` only when the image sends
   none, and that default (`script-src 'self' 'wasm-unsafe-eval'`) stops the app at startup: the OCCT
   module's embind glue needs `'unsafe-eval'` (`new Function`) until it is built with
-  `-sDYNAMIC_EXECUTION=0`; inline styles need `style-src 'unsafe-inline'`; the assistant's LLM
-  endpoints need `connect-src https:`, the local MCP bridge `ws://127.0.0.1:*`. The smoke test
-  serves the build with the policy read from this file, so it fails when the app outgrows it.
-  `SPICY_WEB_CSP` on the server therefore has no effect with this image.
+  `-sDYNAMIC_EXECUTION=0`; inline styles need `style-src 'unsafe-inline'`; the local MCP bridge
+  needs `connect-src ws://127.0.0.1:*`. There is no `https:` wildcard in `connect-src` (CLOUD-17):
+  other hosts the page must reach are listed in `SPICY3D_CONNECT_ORIGINS`. The smoke test serves
+  the build with the policy read from this file, so it fails when the app outgrows it.
+  `SPICY_WEB_CSP` on the server therefore has no effect with this image. Why each relaxation stays,
+  and what removes it: [`docs/security.md`](security.md).
 - **plugins** are code the user chose to run: `script-src blob:` lets `.spicyplugin` archives run
   (their modules are loaded from blob: URLs). A plugin's import map is not injected as an inline
   `<script type="importmap">` (that would need `'unsafe-inline'`, and a nonce or hash is impossible for
@@ -90,6 +98,10 @@ stays read-only):
   `SPICY3D_PLUGIN_ORIGINS="https://plugins.example.lan https://*.example.com"`. They are added to
   `script-src`, `connect-src` (manifest, CSS) and `img-src` (icons). Anything that is not an origin
   (`scheme://host[:port]`) stops the container at start (`docker/19-spicy3d-plugin-origins.sh`).
+- `SPICY3D_CONNECT_ORIGINS` (container environment, default empty): space-separated `https://` /
+  `wss://` origins the page may connect to besides its own: the assistant's LLM endpoints
+  (`https://api.anthropic.com https://api.openai.com` for the public presets, or the on-prem one
+  from `ai.presets`) and hosts `?url=` opens files from. Checked like `SPICY3D_PLUGIN_ORIGINS`.
 - `absolute_redirect off`: a redirect (a folder without its trailing slash) keeps the address the
   browser used, not nginx's own port behind the proxy.
 
@@ -101,6 +113,7 @@ services:
   web:
     environment:
       SPICY3D_PLUGIN_ORIGINS: https://plugins.example.lan   # optional, see above
+      SPICY3D_CONNECT_ORIGINS: https://llm.example.lan      # optional: the assistant's endpoint
     volumes:
       - ./web/deployment.json:/usr/share/nginx/html/deployment.json:ro
       - ./web/mcp-bridge:/usr/share/nginx/html/downloads/mcp-bridge/bin:ro   # the release's spicy3d-mcp-bridge-* files
@@ -121,7 +134,8 @@ services:
    tarball the app serves at `downloads/mcp-bridge/spicy3d-mcp-bridge-<version>.tgz`, which bundles
    its dependencies, so npx needs no npm registry (it needs Node.js 20+ on the machine;
    `--allow-remote=all` is required by npm 12 for a package from a URL).
-4. Assistant: offer the on-prem endpoint and hide the public ones (`ai` above).
+4. Assistant: offer the on-prem endpoint and hide the public ones (`ai` above), and allow the page to
+   reach it (`SPICY3D_CONNECT_ORIGINS`).
 
 Check a deployment from a machine with Chromium (certificate errors of an internal CA are ignored):
 
