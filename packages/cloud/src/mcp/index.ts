@@ -35,6 +35,10 @@ export function startCloudMcp(connection: CloudConnection): () => void {
                 pageSocket: mcp.pageSocket,
                 userName: user.displayName || user.email,
                 deviceName: () => account.deviceSettings.effectiveDeviceName,
+                checkSession: async () => {
+                    await account.refresh();
+                    return account.status === "signedIn" && account.user?.id === user.id;
+                },
                 createToken: () => void showCreateToken(ctx, () => {}, { scopes: MCP_SCOPES }),
             };
         }

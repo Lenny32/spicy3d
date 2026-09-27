@@ -588,6 +588,7 @@ function mcpConfigs(endpoint: string, secret: string): HTMLElement {
                     copied,
                 ),
                 code,
+                ...(config.kind === "claudeCode" ? [paragraph("mcp.remote.shellHistoryHint")] : []),
             );
         }),
     );

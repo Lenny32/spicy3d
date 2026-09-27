@@ -839,11 +839,15 @@ export default {
         "mcp.offlineHint":
             "Bridge not reachable. Check that your agent has started it and that its port and token match the settings below. Retrying…",
         "mcp.pairing.allow": "Allow",
+        "mcp.pairing.client{0}": "The client calls itself “{0}” (not verified).",
         "mcp.pairing.deny": "Deny",
+        "mcp.pairing.denyToken": "Deny all from this token",
         "mcp.pairing.hint":
             "It will be able to read and change the open model with your permissions. Allow it only if you just connected this client yourself.",
-        "mcp.pairing.question{0}": "{0} wants to control this tab.",
+        "mcp.pairing.question": "An MCP client wants to control this tab.",
         "mcp.pairing.title": "Allow an agent?",
+        "mcp.pairing.token": "Access token:",
+        "mcp.pairing.unnamedToken": "(unnamed)",
         "mcp.port": "Port",
         "mcp.remote.agentWithToken{0}{1}": "{0} (token {1})",
         "mcp.remote.claudeCode": "Claude Code: run in a terminal",
@@ -857,6 +861,8 @@ export default {
             "The first call of every new client session asks you in this tab to allow it. While an agent is connected, a badge in the title bar shows it, with Disconnect agent.",
         "mcp.remote.registerHint":
             "Replace <token> with your token, or create one above: its last step shows these configs with the token filled in.",
+        "mcp.remote.shellHistoryHint":
+            "The command reads the token from the SPICY3D_TOKEN variable, so it stays out of your shell history. Set it first without echoing it: read -rs SPICY3D_TOKEN && export SPICY3D_TOKEN (PowerShell: $env:SPICY3D_TOKEN = Read-Host -MaskInput).",
         "mcp.remote.signedInAs{0}": "Signed in as {0}",
         "mcp.remote.status.connected": "Ready: your MCP clients can reach this tab",
         "mcp.remote.status.connecting": "Connecting to the server…",
@@ -867,6 +873,8 @@ export default {
             "Clients that only start local programs: the bridge in server mode (download it under Local bridge)",
         "mcp.remote.step.register": "2. Register the server with your client",
         "mcp.remote.step.token": "1. Access token",
+        "mcp.remote.tabInfoHint":
+            "Before you allow a client, anyone with one of your MCP tokens can already see that this tab is open, its document's name and this device's name (the server's tab list). The model itself stays out of reach until you press Allow.",
         "mcp.remote.tokenHint":
             "Clients authenticate with a personal access token of your account (Edit the open model for full control). It is shown only once.",
         "mcp.remoteHint":

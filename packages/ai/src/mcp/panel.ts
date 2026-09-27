@@ -284,10 +284,12 @@ export class McpPanel extends HTMLElement {
                 "mcp.remote.step.register",
                 div({ className: style.muted, textContent: new Localize("mcp.remote.registerHint") }),
                 this.remoteSnippet("mcp.remote.claudeCode", remoteClaudeCodeCommand(link.endpoint)),
+                div({ className: style.muted, textContent: new Localize("mcp.remote.shellHistoryHint") }),
                 this.remoteSnippet("mcp.remote.jsonConfig", remoteJsonConfig(link.endpoint)),
                 this.snippet("mcp.remote.stdioConfig", stdio),
             ),
             div({ className: style.muted, textContent: new Localize("mcp.remote.pairingHint") }),
+            div({ className: style.muted, textContent: new Localize("mcp.remote.tabInfoHint") }),
         );
         this.remoteView = { statusCard, statusText, agents, enabled, stdio };
     }

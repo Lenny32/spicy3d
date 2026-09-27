@@ -9,6 +9,7 @@ import { Logger } from "@spicy3d/core";
 import { ensureAgentBadge } from "./agentBadge";
 import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
 import {
+    isWindowsClient,
     loadMcpSettings,
     type McpSettings,
     resolveBridgeCommand,
@@ -72,10 +73,13 @@ export function serverUrlOf(endpoint: string): string {
     return endpoint.replace(/\/mcp\/?$/, "");
 }
 
-/** Claude Code over Streamable HTTP: no bridge at all. */
-export function remoteClaudeCodeCommand(endpoint: string, token = TOKEN_PLACEHOLDER): string {
-    // Endpoint and token (base62) need no escaping inside double quotes in any shell.
-    return `claude mcp add --transport http spicy3d ${endpoint} --header "Authorization: Bearer ${token}"`;
+/**
+ * Claude Code over Streamable HTTP: no bridge at all. The token comes from the `SPICY3D_TOKEN`
+ * variable the shell expands, so it never lands in the shell history.
+ */
+export function remoteClaudeCodeCommand(endpoint: string, windows = isWindowsClient()): string {
+    const variable = windows ? "$env:SPICY3D_TOKEN" : "$SPICY3D_TOKEN";
+    return `claude mcp add --transport http spicy3d ${endpoint} --header "Authorization: Bearer ${variable}"`;
 }
 
 /** Cursor, VS Code (under "servers") and other clients that speak Streamable HTTP. */
@@ -108,7 +112,7 @@ export function remoteClientConfigs(
     appUrl = `${location.origin}${location.pathname}`,
 ): { kind: "claudeCode" | "http" | "stdio"; text: string }[] {
     return [
-        { kind: "claudeCode", text: remoteClaudeCodeCommand(endpoint, token) },
+        { kind: "claudeCode", text: remoteClaudeCodeCommand(endpoint) },
         { kind: "http", text: remoteJsonConfig(endpoint, token) },
         { kind: "stdio", text: remoteStdioConfig(endpoint, settings, appUrl, token) },
     ];

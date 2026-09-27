@@ -66,7 +66,7 @@ function top(): HTMLDialogElement {
 /** In tests, translations are their keys: buttons and texts are found by key. */
 function buttonOf(root: ParentNode, key: string): HTMLButtonElement {
     const found = Array.from(root.querySelectorAll("button")).find((b) => b.textContent === key);
-    expect(found).toBeDefined();
+    expect(found).toBeInstanceOf(HTMLButtonElement);
     return found!;
 }
 
@@ -545,7 +545,7 @@ describe("account settings", () => {
         const box = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
             (b) => b.parentElement?.textContent?.includes("account.settings.keepOfflineCopies"),
         );
-        expect(box).toBeDefined();
+        expect(box).toBeInstanceOf(HTMLInputElement);
         expect(box!.checked).toBe(false);
 
         box!.checked = true;
@@ -584,7 +584,7 @@ describe("account settings", () => {
         const box = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
             (b) => b.parentElement?.textContent?.includes("account.settings.newDocumentsInCloud"),
         );
-        expect(box).toBeDefined();
+        expect(box).toBeInstanceOf(HTMLInputElement);
         expect(box!.checked).toBe(true);
         box!.checked = false;
         box!.dispatchEvent(new Event("change"));
@@ -672,9 +672,14 @@ describe("account settings", () => {
         expect(server.requests[0].body).toMatchObject({ scopes: ["mcp:read", "mcp:write"] });
         const configs = Array.from(dialog.querySelectorAll<HTMLElement>("[data-mcp-config]"));
         expect(configs.map((c) => c.dataset["mcpConfig"])).toEqual(["claudeCode", "http", "stdio"]);
+        // The command reads the token from the environment: it never enters the shell history.
         expect(configs[0].textContent).toBe(
-            'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer spicy_pat_s3cret"',
+            'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer $SPICY3D_TOKEN"',
         );
+        expect(dialog.textContent).toContain("mcp.remote.shellHistoryHint");
+        expect(JSON.parse(configs[1].textContent ?? "").mcpServers.spicy3d.headers).toEqual({
+            Authorization: "Bearer spicy_pat_s3cret",
+        });
         expect(JSON.parse(configs[2].textContent ?? "").mcpServers.spicy3d.env).toEqual({
             SPICY3D_TOKEN: "spicy_pat_s3cret",
         });

@@ -349,6 +349,22 @@
     padding: 16px;
 }
 
+.pairingToken {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--control-background-color);
+}
+
+.pairingTokenName {
+    font-weight: 700;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
 .pairingActions {
     display: flex;
     justify-content: flex-end;

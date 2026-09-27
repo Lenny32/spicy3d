@@ -3,7 +3,7 @@
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Logger } from "@spicy3d/core";
-import { setImageByteBudget } from "../tools/imageEncoding";
+import { imageBudgetFor } from "../tools/imageEncoding";
 import {
     CLOSE_POLICY_VIOLATION,
     PageSocketTransport,
@@ -19,8 +19,6 @@ import { currentTabInfo, watchTabInfo } from "./tabInfo";
 
 const MIN_RETRY_MS = 1000;
 const MAX_RETRY_MS = 30_000;
-/** Room for the JSON-RPC envelope and the text part around a screenshot's base64. */
-const ENVELOPE_BYTES = 64 * 1024;
 
 /** Capped exponential backoff with ±25 % jitter, so a server restart is not met by every tab at once. */
 export function relayRetryDelay(attempt: number, random: () => number = Math.random): number {
@@ -41,8 +39,9 @@ export interface RemoteMcpSessionOptions {
 /**
  * This tab as an MCP server behind the server's relay (SRV-09): connects to `/ws/mcp-page` with the
  * session cookie, registers the tab (document, device, focus) and keeps it up to date, shows which
- * sessions target it, and reconnects with backoff — except after a 1008 close (signed out or
- * session revoked), which waits for the next sign-in instead.
+ * sessions target it, and reconnects with backoff. A 1008 close (signed out, session revoked, or
+ * "not reading") first re-checks the web session: still signed in → reconnect, else stop (the next
+ * sign-in starts a new session).
  */
 export class RemoteMcpSession {
     readonly gate: PairingGate;
@@ -51,6 +50,10 @@ export class RemoteMcpSession {
     private unwatch?: () => void;
     /** Client info from the requests' `_meta`, for sessions the relay listed before their initialize. */
     private readonly seen = new Map<string, RemoteAgent>();
+    /** Image budget of this relay's calls, from its `maxMessageBytes`. */
+    private imageBudget?: number;
+    /** Consecutive 1008 closes: their reconnects back off even though each connect succeeds. */
+    private policyCloses = 0;
 
     constructor(
         readonly link: RemoteMcpLink,
@@ -63,19 +66,20 @@ export class RemoteMcpSession {
             onStatus: (status) => state.update({ status }),
             onToolCall: (name, isError) => state.recordCall(name, isError),
             createServer: options.createServer,
+            serverOptions: { imageByteBudget: () => this.imageBudget },
             createTransport: (url) =>
                 new RelayTransport(new PageSocketTransport(url, options.createSocket), {
                     gate: this.gate,
                     onWelcome: ({ tabId, maxMessageBytes }) => {
                         state.update({ tabId });
-                        if (maxMessageBytes) setImageByteBudget(maxMessageBytes - ENVELOPE_BYTES);
+                        if (maxMessageBytes) this.imageBudget = imageBudgetFor(maxMessageBytes);
                     },
                     onAgents: (agents) => this.onAgents(agents),
                     onAgentSeen: (agent) => this.onAgentSeen(agent),
                 }),
             onConnected: (transport) => this.onConnected(transport as RelayTransport),
             canRetry: (transport) => this.canRetry(transport as RelayTransport),
-            retryDelay: (attempt) => relayRetryDelay(attempt),
+            retryDelay: (attempt) => relayRetryDelay(Math.max(attempt, this.policyCloses)),
         });
     }
 
@@ -95,7 +99,8 @@ export class RemoteMcpSession {
         this.unwatch = undefined;
         this.relay = undefined;
         this.session.close();
-        setImageByteBudget(undefined);
+        // Open prompts belong to requests that can no longer be answered.
+        this.gate.abortPending();
     }
 
     /** "Disconnect agent": the relay ends that session; asking again if it comes back is right. */
@@ -143,16 +148,25 @@ export class RemoteMcpSession {
         if (listed.some((a) => a.id === agent.id && a.clientName === UNNAMED_CLIENT)) this.onAgents(listed);
     }
 
-    private canRetry(relay: RelayTransport): boolean {
+    private canRetry(relay: RelayTransport): boolean | Promise<boolean> {
         if (this.relay === relay) this.relay = undefined;
         this.options.state.update({ agents: [] });
+        // The relay failed every request of that socket: their prompts must not run them later.
+        this.gate.abortPending();
         const code = (relay.inner as PageSocketTransport).closeCode;
-        if (code === CLOSE_POLICY_VIOLATION) {
-            Logger.info("[mcp] the relay closed this tab's connection (signed out or session ended)");
-            this.unwatch?.();
-            this.unwatch = undefined;
-            return false;
+        if (code !== CLOSE_POLICY_VIOLATION) {
+            this.policyCloses = 0;
+            return true;
         }
-        return true;
+        this.policyCloses++;
+        Logger.info("[mcp] the relay closed this tab's connection (1008); checking the session");
+        return this.link.checkSession().then((signedIn) => {
+            if (!signedIn) {
+                Logger.info("[mcp] signed out: leaving the relay");
+                this.unwatch?.();
+                this.unwatch = undefined;
+            }
+            return signedIn;
+        });
     }
 }

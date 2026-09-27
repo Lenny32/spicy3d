@@ -15,6 +15,11 @@ export interface RemoteMcpLink {
     userName: string;
     /** This device's name as the account settings define it, reported to the relay. */
     deviceName(): string;
+    /**
+     * The relay closed this tab's socket as a policy violation (1008: signed out, session revoked,
+     * or not reading): re-checks the web session; true = still signed in, reconnect.
+     */
+    checkSession(): Promise<boolean>;
     /** Opens the "create access token" dialog, MCP scopes preselected; its last step shows the configs. */
     createToken(): void;
 }

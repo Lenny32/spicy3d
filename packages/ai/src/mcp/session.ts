@@ -22,7 +22,7 @@ export interface McpSessionOptions extends Pick<McpServerOptions, "onToolCall"> 
     /** Called once a connection is up, with the transport it runs on. */
     onConnected?: (transport: Transport) => void;
     /** Asked when a connection ends: false stops reconnecting (e.g. the relay said "signed out"). */
-    canRetry?: (transport: Transport) => boolean;
+    canRetry?: (transport: Transport) => boolean | Promise<boolean>;
     /** Retry delays in milliseconds: attempt 0, 1, … (default: 1 s doubling, capped at 10 s). */
     retryDelay?: (attempt: number) => number;
 }
@@ -109,10 +109,21 @@ export class McpSession {
         this.server = undefined;
         this.transport = undefined;
         this.setStatus("offline");
-        if (transport && this.options.canRetry && !this.options.canRetry(transport)) {
-            this.closed = true;
-            return;
+        const verdict = transport && this.options.canRetry ? this.options.canRetry(transport) : true;
+        if (verdict === true) this.schedule();
+        else if (verdict === false) this.closed = true;
+        else {
+            void verdict
+                .catch(() => false)
+                .then((retry) => {
+                    if (this.closed || this.server !== undefined || this.timer !== undefined) return;
+                    if (retry) this.schedule();
+                    else this.closed = true;
+                });
         }
+    }
+
+    private schedule() {
         const delay =
             this.options.retryDelay?.(this.attempt) ??
             Math.min(MIN_RETRY_MS * 2 ** this.attempt, MAX_RETRY_MS);

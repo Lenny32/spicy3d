@@ -28,10 +28,12 @@ const SOCKET_OPEN = 1; // WebSocket.OPEN
 /** JSON-RPC error of a request the user refused in the pairing prompt. */
 export const PAIRING_DENIED = -32005;
 
+/** The handshake: answered even for a request that names no session. */
+const HANDSHAKE = new Set(["initialize", "ping"]);
+
 /** Requests that neither act on the tab nor read the document: they never wait for the prompt. */
 const NO_PAIRING_NEEDED = new Set([
-    "initialize",
-    "ping",
+    ...HANDSHAKE,
     "tools/list",
     "resources/list",
     "resources/templates/list",
@@ -160,12 +162,20 @@ export class RelayTransport implements Transport {
     /** Ids of the requests held back by the prompt, and those of them the client cancelled meanwhile. */
     private readonly held = new Set<string>();
     private readonly cancelled = new Set<string>();
+    /**
+     * Set once the socket is gone: a request still held by the prompt is then dropped, never run
+     * (the relay already failed it, and a client retry arrives on the next connection).
+     */
+    private closed = false;
 
     constructor(
         readonly inner: Transport,
         private readonly options: RelayTransportOptions,
     ) {
-        inner.onclose = () => this.onclose?.();
+        inner.onclose = () => {
+            this.markClosed();
+            this.onclose?.();
+        };
         inner.onerror = (error) => this.onerror?.(error);
         inner.onmessage = (message) => this.receive(message as Message);
     }
@@ -179,7 +189,19 @@ export class RelayTransport implements Transport {
     }
 
     close(): Promise<void> {
+        this.markClosed();
         return this.inner.close();
+    }
+
+    get isClosed(): boolean {
+        return this.closed;
+    }
+
+    private markClosed() {
+        this.closed = true;
+        this.held.clear();
+        this.cancelled.clear();
+        this.waiting.clear();
     }
 
     /** Registers or updates this tab: document, device, focus. */
@@ -216,10 +238,20 @@ export class RelayTransport implements Transport {
             if (requestId !== undefined && this.held.has(String(requestId)))
                 this.cancelled.add(String(requestId));
         }
-        const agent = method && message.id !== undefined ? this.agentOf(message) : undefined;
+        const isRequest = method !== undefined && message.id !== undefined;
+        if (!isRequest) {
+            this.deliver(message); // notifications, and answers to the tab's own requests
+            return;
+        }
+        const agent = this.agentOf(message);
         if (agent) this.options.onAgentSeen?.(agent);
-        if (!agent || NO_PAIRING_NEEDED.has(method as string)) {
+        if (HANDSHAKE.has(method) || (agent && NO_PAIRING_NEEDED.has(method))) {
             this.deliver(message);
+            return;
+        }
+        // Fail closed: a request that names no session could never be paired.
+        if (!agent) {
+            this.refuse(message, 'The request names no MCP session (_meta["spicy3d/agent"]); refused.');
             return;
         }
         this.whenPaired(agent, message);
@@ -231,6 +263,7 @@ export class RelayTransport implements Transport {
     }
 
     private whenPaired(agent: RemoteAgent, request: Message) {
+        if (this.closed) return;
         const known = this.options.gate.decisionOf(agent.id);
         if (known && !this.waiting.has(agent.id)) {
             this.answerDecision(known, request);
@@ -248,6 +281,8 @@ export class RelayTransport implements Transport {
     }
 
     private answerDecision(decision: "allow" | "deny", request: Message) {
+        // The socket it came on is gone: the relay has failed it already.
+        if (this.closed) return;
         const id = String(request.id);
         this.held.delete(id);
         if (this.cancelled.delete(id)) return;
@@ -255,21 +290,25 @@ export class RelayTransport implements Transport {
             this.deliver(request);
             return;
         }
+        this.refuse(
+            request,
+            "Denied by the user: this MCP session may not control the Spicy3D tab. Ask the user to reconnect the client and press Allow in the tab.",
+        );
+    }
+
+    private refuse(request: Message, message: string) {
         this.inner
             .send({
                 jsonrpc: "2.0",
                 id: request.id as string | number,
-                error: {
-                    code: PAIRING_DENIED,
-                    message:
-                        "Denied by the user: this MCP session may not control the Spicy3D tab. Ask the user to reconnect the client and press Allow in the tab.",
-                },
+                error: { code: PAIRING_DENIED, message },
             })
-            .catch((err) => Logger.debug(`[mcp] could not answer a denied request: ${err}`));
+            .catch((err) => Logger.debug(`[mcp] could not answer a refused request: ${err}`));
     }
 
     /** To the SDK server; a cancellation of a held-back request goes too (unknown ids are ignored). */
     private deliver(message: Message) {
+        if (this.closed) return;
         this.onmessage?.(message);
     }
 }

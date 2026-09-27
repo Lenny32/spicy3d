@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { AgentBadge } from "../src/mcp/agentBadge";
+import { askPairing } from "../src/mcp/pairing";
 import { createMcpPanel } from "../src/mcp/panel";
 import { remoteMcpState } from "../src/mcp/remote";
 import { loadMcpSettings } from "../src/mcp/settings";
@@ -106,6 +107,7 @@ describe("McpPanel through the server", () => {
         userName: "Ada",
         deviceName: () => "Laptop",
         createToken: rs.fn(() => {}),
+        checkSession: async () => true,
     };
 
     afterEach(() => {
@@ -142,7 +144,7 @@ describe("McpPanel through the server", () => {
 
         const [claude, json, stdio] = remoteSnippets(panel);
         expect(claude).toBe(
-            'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer <token>"',
+            'claude mcp add --transport http spicy3d https://spicy.lan/mcp --header "Authorization: Bearer $SPICY3D_TOKEN"',
         );
         expect(JSON.parse(json).mcpServers.spicy3d.url).toBe("https://spicy.lan/mcp");
         expect(JSON.parse(stdio).mcpServers.spicy3d.args).toEqual(["--server", "https://spicy.lan"]);
@@ -188,5 +190,43 @@ describe("McpPanel through the server", () => {
         box?.dispatchEvent(new Event("change"));
 
         expect(loadMcpSettings().remoteEnabled).toBe(false);
+    });
+});
+
+describe("askPairing", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+    });
+
+    function prompt() {
+        const abort = new AbortController();
+        const answer = askPairing({ id: "a1", clientName: "claude-code", tokenName: "Laptop" }, abort.signal);
+        const dialog = document.querySelector<HTMLDialogElement>("dialog[data-agent-id]");
+        expect(dialog).not.toBeNull();
+        return { answer, abort, dialog: dialog as HTMLDialogElement };
+    }
+
+    test("shows the token name on its own and the client name as unverified", () => {
+        const { dialog, abort } = prompt();
+        const tokenName = Array.from(dialog.querySelectorAll("span")).find((s) => s.textContent === "Laptop");
+        expect(tokenName).toBeInstanceOf(HTMLSpanElement);
+        expect(dialog.textContent).toContain("mcp.pairing.clientclaude-code");
+        abort.abort();
+    });
+
+    test("Deny all from this token answers denyToken", async () => {
+        const { dialog, answer } = prompt();
+        const button = dialog.querySelector<HTMLButtonElement>('button[data-action="denyToken"]');
+        expect(button).not.toBeNull();
+        button?.click();
+        await expect(answer).resolves.toBe("denyToken");
+        expect(document.querySelector("dialog")).toBeNull();
+    });
+
+    test("an aborted prompt closes as a denial", async () => {
+        const { answer, abort } = prompt();
+        abort.abort();
+        await expect(answer).resolves.toBe("deny");
+        expect(document.querySelector("dialog")).toBeNull();
     });
 });
