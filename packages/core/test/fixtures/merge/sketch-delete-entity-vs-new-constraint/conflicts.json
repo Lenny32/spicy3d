@@ -1,0 +1,22 @@
+{
+    "description": "This device deleted a line of the spare sketch, the other made it vertical: both applied, the new constraint references a deleted entity.",
+    "conflicts": [
+        {
+            "kind": "dangling-ref",
+            "path": "node/sketch-2/constraint/527604118392/refs",
+            "theirs": [
+                {
+                    "entityId": 2,
+                    "pointIndex": 0
+                },
+                {
+                    "entityId": 2,
+                    "pointIndex": 1
+                }
+            ],
+            "messageKey": "merge.conflict.danglingRef{0}{1}",
+            "args": ["constraint 527604118392", "line 2"],
+            "choices": ["accept", "ours", "theirs"]
+        }
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "description": "This device deleted the boss extrude f3, the other filleted the boss's top edge (tracked id f3:2): both applied, the fillet's edge is a dangling reference.",
+    "conflicts": [
+        {
+            "kind": "dangling-ref",
+            "path": "node/body-1/feature/boss-fillet/param/edges",
+            "theirs": [
+                {
+                    "kind": "circle",
+                    "center": {
+                        "x": 20,
+                        "y": 10,
+                        "z": 15
+                    },
+                    "radius": 3,
+                    "axis": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1
+                    },
+                    "edgeId": "f3:2"
+                }
+            ],
+            "messageKey": "merge.conflict.danglingRef{0}{1}",
+            "args": ["fillet boss-fillet", "f3"],
+            "choices": ["accept", "ours", "theirs"]
+        }
+    ]
+}

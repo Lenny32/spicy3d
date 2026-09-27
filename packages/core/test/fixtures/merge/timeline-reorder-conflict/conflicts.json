@@ -1,0 +1,15 @@
+{
+    "description": "The pad f4 moved after f1 here and after f2 there: one feature reordered differently — an order conflict, ours held.",
+    "conflicts": [
+        {
+            "kind": "order",
+            "path": "node/body-1/feature/f4/position",
+            "base": "f3",
+            "ours": "f1",
+            "theirs": "f2",
+            "messageKey": "merge.conflict.order{0}",
+            "args": ["extrude f4"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

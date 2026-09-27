@@ -1,0 +1,86 @@
+{
+    "description": "This device deleted the box, the other made it longer: delete-vs-modify, the deletion held.",
+    "conflicts": [
+        {
+            "kind": "delete-vs-modify",
+            "path": "node/seFZEYsHrtzwpOiyaxckw",
+            "base": {
+                "plane": {
+                    "origin": {
+                        "x": 100,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dx": 10,
+                "dy": 20,
+                "dz": 30,
+                "materialId": "6kcZ3cZCcVo9YFloW6W9B",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "seFZEYsHrtzwpOiyaxckw",
+                "name": "body.box1",
+                "visible": true,
+                "__cla$$__": "BoxNode",
+                "parentId": "fJ8oZYZU28huXd6_BAPDu"
+            },
+            "theirs": {
+                "plane": {
+                    "origin": {
+                        "x": 100,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dx": 25,
+                "dy": 20,
+                "dz": 30,
+                "materialId": "6kcZ3cZCcVo9YFloW6W9B",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "seFZEYsHrtzwpOiyaxckw",
+                "name": "body.box1",
+                "visible": true,
+                "__cla$$__": "BoxNode",
+                "parentId": "fJ8oZYZU28huXd6_BAPDu"
+            },
+            "messageKey": "merge.conflict.deleteVsModify{0}",
+            "args": ["body.box1"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

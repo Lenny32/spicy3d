@@ -1,0 +1,82 @@
+{
+    "description": "This device deleted the spare sketch, the other added a radius constraint to it: delete-vs-modify, the deletion held.",
+    "conflicts": [
+        {
+            "kind": "delete-vs-modify",
+            "path": "node/sketch-2",
+            "base": {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"circle\",\"params\":[60,10,5]}],\"constraints\":[]}",
+                "materialId": "fQnNVYa1q5JyF1bROHuKN",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-2",
+                "name": "Spare sketch",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-parts"
+            },
+            "theirs": {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"circle\",\"params\":[60,10,5]}],\"constraints\":[{\"id\":1,\"kind\":10,\"refs\":[{\"entityId\":1,\"pointIndex\":0}],\"datum\":5}]}",
+                "materialId": "fQnNVYa1q5JyF1bROHuKN",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-2",
+                "name": "Spare sketch",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-parts"
+            },
+            "messageKey": "merge.conflict.deleteVsModify{0}",
+            "args": ["Spare sketch"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

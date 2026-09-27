@@ -1,0 +1,4 @@
+{
+    "description": "Each device appended a variable: both kept, ours first (every expression still resolves).",
+    "conflicts": []
+}

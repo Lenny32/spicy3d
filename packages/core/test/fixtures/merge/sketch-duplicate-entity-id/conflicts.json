@@ -1,0 +1,22 @@
+{
+    "description": "Both devices added a different entity under the same id (the collision random ids make vanishingly rare): duplicate-id, ours held.",
+    "conflicts": [
+        {
+            "kind": "duplicate-id",
+            "path": "node/sketch-1/entity/408117326905",
+            "ours": {
+                "id": 408117326905,
+                "type": "line",
+                "params": [0, 40, 10, 40]
+            },
+            "theirs": {
+                "id": 408117326905,
+                "type": "line",
+                "params": [0, 50, 10, 50]
+            },
+            "messageKey": "merge.conflict.duplicateId{0}",
+            "args": ["line 408117326905"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

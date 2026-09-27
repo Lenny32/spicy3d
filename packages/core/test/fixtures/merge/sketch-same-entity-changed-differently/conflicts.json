@@ -1,0 +1,15 @@
+{
+    "description": "The same circle resized differently: an entity's params are one value — a property conflict, ours held.",
+    "conflicts": [
+        {
+            "kind": "property",
+            "path": "node/sketch-2/entity/1/params",
+            "base": [60, 10, 5],
+            "ours": [60, 10, 6],
+            "theirs": [60, 10, 7],
+            "messageKey": "merge.conflict.property{0}{1}",
+            "args": ["circle 1", "params"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

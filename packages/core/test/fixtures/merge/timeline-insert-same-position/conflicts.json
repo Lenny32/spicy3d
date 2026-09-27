@@ -1,0 +1,15 @@
+{
+    "description": "Both devices inserted a feature at timeline position 3 (after f3): their order changes the geometry — an order conflict, both kept ours first.",
+    "conflicts": [
+        {
+            "kind": "order",
+            "path": "node/body-1/insertAfter/f3",
+            "base": [],
+            "ours": ["ours-boss"],
+            "theirs": ["theirs-cut"],
+            "messageKey": "merge.conflict.insertAt{0}",
+            "args": ["body.parametricBody1"],
+            "choices": ["ours-first", "theirs-first", "ours", "theirs"]
+        }
+    ]
+}

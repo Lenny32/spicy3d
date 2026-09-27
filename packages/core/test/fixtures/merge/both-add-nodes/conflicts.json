@@ -1,0 +1,4 @@
+{
+    "description": "Each device added a box at the end of the root: both kept, ours first (a stable order, no conflict).",
+    "conflicts": []
+}
