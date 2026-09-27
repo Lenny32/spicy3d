@@ -666,9 +666,10 @@ const CASES: Record<string, CaseBuilder> = {
             conflicts: [
                 conflict(
                     "cycle",
-                    mergePath("node", "folder-a", "parent"),
-                    { base: ROOT, ours: "folder-b", theirs: ROOT },
-                    ["Folder A", "Folder B"],
+                    // reported on the node whose move is dropped (theirs'), which stays at the root
+                    mergePath("node", "folder-b", "parent"),
+                    { base: ROOT, ours: ROOT, theirs: "folder-a" },
+                    ["Folder B", "Folder A"],
                     sideChoices,
                 ),
             ],
