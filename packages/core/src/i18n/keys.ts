@@ -1185,6 +1185,22 @@ export const I18N_KEYS = [
     "merge.conflict.order{0}",
     "merge.conflict.property{0}{1}",
     "merge.conflict.rebuildFailure{0}{1}",
+    "cloud.status.pending",
+    "cloud.status.pendingHint",
+    "cloud.status.offlineHint",
+    "cloud.status.merging",
+    "cloud.status.remotePending",
+    "cloud.status.remotePendingHint",
+    "cloud.sync.updatedFrom{0}",
+    "cloud.sync.mergedFrom{0}",
+    "cloud.sync.conflict{0}",
+    "cloud.sync.quota",
+    "cloud.sync.keptOnDevice{0}",
+    "cloud.conflict.mergeKeepMine",
+    "cloud.conflict.syncMessage{0}{1}{2}",
+    "home.sync.pending",
+    "home.sync.conflict",
+    "cloud.history.restoreUnsynced",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

@@ -36,8 +36,14 @@
     }
 
     &[data-status="offline"],
-    &[data-status="readOnly"] {
+    &[data-status="readOnly"],
+    &[data-status="remotePending"] {
         color: var(--warning-color);
+    }
+
+    &[data-status="pending"],
+    &[data-status="merging"] {
+        color: var(--primary-color);
     }
 }
 

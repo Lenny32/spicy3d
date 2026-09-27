@@ -309,6 +309,13 @@ describe("title bar status", () => {
         ["saved", { online: false }, "offline"],
         ["error", {}, "error"],
         ["saving", { readOnly: true }, "readOnly"],
+        ["pending", {}, "pending"],
+        ["pending", { dirty: true }, "unsaved"],
+        ["pending", { online: false }, "offline"],
+        ["merging", {}, "merging"],
+        ["merging", { online: false }, "merging"],
+        ["remotePending", {}, "remotePending"],
+        ["remotePending", { dirty: true }, "remotePending"],
     ] as const)("%s %o → %s", (state, flags, expected) => {
         expect(documentStatus(state, { dirty: false, readOnly: false, online: true, ...flags })).toBe(
             expected,
@@ -331,6 +338,9 @@ describe("title bar status", () => {
         expect(item.querySelector("[role=status]")?.getAttribute("data-status")).toBe("saved");
 
         await documents.cloud!.save({ id: "doc-1", name: "Bracket", data: doc.serialize(), kind: "manual" });
+        // Saved on this device first, then pushed by the sync.
+        expect(item.querySelector("[role=status]")?.textContent).toBe("cloud.status.pending");
+        await documents.syncEngine!.settle();
         expect(item.querySelector("[role=status]")?.textContent).toBe("cloud.status.saved");
 
         doc.repository = app.repositories.local;
@@ -380,6 +390,7 @@ describe("title bar status", () => {
         });
         document.body.append(item);
         await documents.cloud!.save({ id: "doc-1", name: "Bracket", data: doc.serialize(), kind: "auto" });
+        await documents.syncEngine!.settle();
 
         const at = Date.UTC(2026, 8, 27, 12, 5);
         autosave.recordAutosave(doc as unknown as IDocument, at);
@@ -396,6 +407,8 @@ describe("title bar status", () => {
 
     test("a conflict an autosave met opens the dialog only when the status is clicked", async () => {
         const { app, documents, docs } = await setup();
+        // The repository on its own (the sync merges instead, see sync.test.ts).
+        documents.syncEngine!.stop();
         const doc = openDocument(app, "doc-1", documents.cloud!);
         (app as { activeView: unknown }).activeView = { document: doc };
         const first = await documents.cloud!.save({

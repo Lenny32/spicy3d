@@ -76,9 +76,95 @@ const TRANSFER_CONCURRENCY = 4;
 
 /**
  * What the title bar shows for a cloud document: the outcome of its last save, or `saving` while
- * one runs. `idle` = not saved (nor failed) since it was opened.
+ * one runs. `idle` = not saved (nor failed) since it was opened. With the offline sync (CLOUD-10):
+ * `pending` = saved on this device, waiting to be pushed; `offline` = the same, the server out of
+ * reach; `merging` = the head moved meanwhile and the sync merges; `remotePending` = a newer
+ * version from another device waits until the user is done (a command, a drag); `conflict` = a
+ * merge needs the user.
  */
-export type CloudSaveState = "idle" | "saving" | "saved" | "offline" | "conflict" | "error";
+export type CloudSaveState =
+    | "idle"
+    | "saving"
+    | "saved"
+    | "pending"
+    | "offline"
+    | "merging"
+    | "remotePending"
+    | "conflict"
+    | "error";
+
+/** A save as a manifest and its blobs (see {@link CloudDocumentRepository.prepare}). */
+export interface PreparedSave {
+    manifestSha256: string;
+    blobs: string[];
+    thumbnailSha256?: string;
+    formatVersion: number;
+    /** The manifest, the blobs and the thumbnail, by hash. */
+    bytes: Map<string, Uint8Array>;
+}
+
+/** A version to push whose content is known by hash (see {@link CloudDocumentRepository.push}). */
+export interface PushRequest {
+    id: string;
+    name: string;
+    /** The head it is based on (`If-Match`); `undefined` creates the document. */
+    baseVersion?: string;
+    /** A merge's second parent (this device's line); ignored unless `kind` is `merge`. */
+    mergeParent?: string;
+    kind: SaveRequest["kind"];
+    label?: string;
+    manifestSha256: string;
+    blobs: string[];
+    thumbnailSha256?: string;
+    formatVersion: number;
+    /** The same for every retry of this push. */
+    idempotencyKey: string;
+    /** The bytes of a hash the server lacks. */
+    bytes: (sha256: string) => Promise<Uint8Array | undefined>;
+}
+
+export type PushOutcome = { status: "saved"; version: CloudVersion } | SaveConflict;
+
+export interface PushFailure {
+    error: DocumentRepositoryError;
+    /** Offline, 5xx, 429, a session to renew: the same push may work later. */
+    retryable: boolean;
+    /** The server's `Retry-After`. */
+    retryAfterMs?: number;
+    /** The server's problem code, if it answered one. */
+    code?: string;
+}
+
+function isRetryableFailure(error: DocumentRepositoryError): boolean {
+    return error.kind === "offline" || error.kind === "unauthorized";
+}
+
+/** A document's head as the server has it, with its content. */
+export interface LoadedHead {
+    name: string;
+    head: CloudVersion;
+    data: Serialized;
+}
+
+/**
+ * The offline sync (CLOUD-10), attached while signed in: saves land on this device first and are
+ * pushed in the background, opening falls back to this device's copy, the listing too when offline.
+ */
+export interface IRepositorySync {
+    save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+    load(id: string): Promise<Result<LoadedDocument, DocumentRepositoryError>>;
+    /** The documents this device has copies of (the listing while offline), matching `search`. */
+    offlineList(search?: string): Promise<DocumentMeta[]>;
+    /** Marks the listed documents that have changes this device hasn't pushed. */
+    annotate(items: DocumentMeta[]): Promise<void>;
+    /** A conflict the sync can't merge on its own, for the MVP dialog. */
+    conflictOf(id: string): SaveConflict | undefined;
+    /**
+     * Pushes the document's pending save now; `ok` once the server has everything this device
+     * saved (e.g. before a restore, which would otherwise be merged with it afterwards).
+     */
+    flush(id: string): Promise<Result<void, DocumentRepositoryError | { kind: "conflict" }>>;
+}
 
 /** Tells the repository which documents this tab may only show (another tab edits them). */
 export interface IEditGuard {
@@ -97,6 +183,11 @@ export interface CloudDocumentRepositoryOptions {
     editGuard?: IEditGuard;
     /** Object URL of downloaded thumbnails (replaced in tests). */
     createObjectUrl?: (blob: Blob) => string;
+}
+
+/** Offline, 5xx, 429 or a session to renew (retrying may work), not an answer given for good. */
+export function isRetryableCloudError(error: CloudError): boolean {
+    return !isFinal(error);
 }
 
 const encoder = new TextEncoder();
@@ -219,6 +310,22 @@ export class CloudDocumentRepository implements IDocumentRepository {
         return () => this.stateListeners.delete(listener);
     }
 
+    /** The offline sync, while attached. */
+    get sync(): IRepositorySync | undefined {
+        return this.syncEngine;
+    }
+
+    private syncEngine?: IRepositorySync;
+
+    attachSync(sync: IRepositorySync | undefined): void {
+        this.syncEngine = sync;
+    }
+
+    /** The sync reports the state of the documents it handles. */
+    reportState(id: string, state: CloudSaveState): void {
+        this.setState(id, state);
+    }
+
     private setState(id: string, state: CloudSaveState) {
         if (this.stateOf(id) === state) return;
         this.states.set(id, state);
@@ -232,7 +339,8 @@ export class CloudDocumentRepository implements IDocumentRepository {
 
     /** The conflict the last save of a document met, while that is its state. */
     conflictOf(id: string): SaveConflict | undefined {
-        return this.stateOf(id) === "conflict" ? this.conflicts.get(id) : undefined;
+        if (this.stateOf(id) !== "conflict") return undefined;
+        return this.syncEngine?.conflictOf(id) ?? this.conflicts.get(id);
     }
 
     // ---- Listing -----------------------------------------------------------------------------
@@ -253,10 +361,18 @@ export class CloudDocumentRepository implements IDocumentRepository {
         const result = await this.account.call((api) =>
             api.GET("/api/documents", { params: { query: { cursor, q, limit, trash } } }),
         );
-        if (!result.isOk) return Result.err(toRepositoryError(result.error));
+        if (!result.isOk) {
+            const error = toRepositoryError(result.error);
+            // Offline: the documents this device has copies of.
+            if (error.kind === "offline" && this.syncEngine && !trash && !cursor) {
+                return Result.ok({ items: await this.syncEngine.offlineList(q) });
+            }
+            return Result.err(error);
+        }
         const { items, nextCursor } = result.value.data;
         const page: DocumentPage = { items: items.map((x) => this.toMeta(x)) };
         if (nextCursor) page.nextCursor = nextCursor;
+        if (!trash) await this.syncEngine?.annotate(page.items);
         return Result.ok(page);
     }
 
@@ -279,6 +395,11 @@ export class CloudDocumentRepository implements IDocumentRepository {
     async thumbnailUrl(meta: DocumentMeta): Promise<string | undefined> {
         const sha = this.thumbnailShas.get(meta.id);
         return sha ? this.imageUrl(sha) : undefined;
+    }
+
+    /** A document's thumbnail as this device has it (a pending save's), for the offline listing. */
+    rememberThumbnail(id: string, sha: string): void {
+        this.thumbnailShas.set(id, sha);
     }
 
     /** The object URL of a thumbnail blob (a version's), downloaded once; `undefined` if unusable. */
@@ -314,29 +435,57 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
         // A reload (open latest, taking over from another tab) starts from a clean state.
         this.resetState(id);
+        if (this.syncEngine) return this.syncEngine.load(id);
+        const loaded = await this.loadHead(id);
+        return loaded.isOk
+            ? Result.ok({ data: loaded.value.data, version: loaded.value.head.id })
+            : Result.err(loaded.error);
+    }
+
+    /** The head of a document and its content (named as the server names the document). */
+    async loadHead(id: string): Promise<Result<LoadedHead, DocumentRepositoryError>> {
+        const head = await this.fetchHead(id);
+        if (!head.isOk) return Result.err(head.error);
+        const { version, name } = head.value;
+        if (!version) return Result.err({ kind: "notFound", id });
+        const data = await this.content(version);
+        // Renames are metadata only: the server's name is the document's name.
+        return data.isOk
+            ? Result.ok({ name, head: version, data: { ...data.value, name } })
+            : Result.err(data.error);
+    }
+
+    /** `GET /api/documents/{id}`: the head version (`undefined` for none), name and trash state. */
+    async fetchHead(
+        id: string,
+    ): Promise<Result<{ version?: CloudVersion; name: string; trashed: boolean }, DocumentRepositoryError>> {
         const document = await this.account.call((api) =>
             api.GET("/api/documents/{id}", { params: { path: { id } } }),
         );
         if (!document.isOk) return Result.err(toRepositoryError(document.error, id));
-        const { head, name } = document.value.data;
-        if (!head) return Result.err({ kind: "notFound", id });
+        const { head, name, deletedAt } = document.value.data;
         this.serverNames.set(id, name);
-        if (head.thumbnailSha256) this.thumbnailShas.set(id, head.thumbnailSha256);
-
-        const data = await this.content(head);
-        // Renames are metadata only: the server's name is the document's name.
-        return data.isOk
-            ? Result.ok({ data: { ...data.value, name }, version: head.id })
-            : Result.err(data.error);
+        if (head?.thumbnailSha256) this.thumbnailShas.set(id, head.thumbnailSha256);
+        return Result.ok({ version: head ?? undefined, name, trashed: Boolean(deletedAt) });
     }
 
-    /** The serialized document a version holds: its manifest, assembled with its blobs (cached). */
-    private async content(version: CloudVersion): Promise<Result<Serialized, DocumentRepositoryError>> {
+    /** The manifest of a version (cached), with the blobs it references. */
+    async manifestOf(
+        version: Pick<CloudVersion, "id" | "manifestSha256">,
+    ): Promise<Result<{ manifest: unknown; blobs: string[] }, DocumentRepositoryError>> {
         try {
             const manifest = await this.manifest(version);
-            const refs = manifestBlobRefs(manifest);
+            return Result.ok({ manifest, blobs: manifestBlobRefs(manifest) });
+        } catch (error) {
+            return Result.err(failureOf(error));
+        }
+    }
+
+    /** A manifest assembled with its blobs (from the cache, else the server). */
+    async assemble(manifest: unknown): Promise<Result<Serialized, DocumentRepositoryError>> {
+        try {
             const blobs = new Map<string, Uint8Array>();
-            await mapLimit(refs, TRANSFER_CONCURRENCY, async (sha) => {
+            await mapLimit(manifestBlobRefs(manifest), TRANSFER_CONCURRENCY, async (sha) => {
                 blobs.set(sha, await this.blob(sha));
             });
             const assembled = assembleManifest(manifest, (sha) => blobs.get(sha));
@@ -349,8 +498,21 @@ export class CloudDocumentRepository implements IDocumentRepository {
         }
     }
 
+    /** The serialized document a version holds: its manifest, assembled with its blobs (cached). */
+    private async content(
+        version: Pick<CloudVersion, "id" | "manifestSha256">,
+    ): Promise<Result<Serialized, DocumentRepositoryError>> {
+        let manifest: unknown;
+        try {
+            manifest = await this.manifest(version);
+        } catch (error) {
+            return Result.err(failureOf(error));
+        }
+        return this.assemble(manifest);
+    }
+
     /** A version's manifest (JSON), from the cache or `GET /api/versions/{id}`. Throws. */
-    private async manifest(version: CloudVersion): Promise<unknown> {
+    private async manifest(version: Pick<CloudVersion, "id" | "manifestSha256">): Promise<unknown> {
         return JSON.parse(decoder.decode(await this.blob(version.manifestSha256, version.id)));
     }
 
@@ -386,6 +548,8 @@ export class CloudDocumentRepository implements IDocumentRepository {
     async save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
         if (this.isReadOnly(request.id)) return Result.err({ kind: "readOnly" });
+        // Local-first: the sync writes the save to this device, then pushes it when it can.
+        if (this.sync) return this.sync.save(request);
         this.setState(request.id, "saving");
         let result: Result<SaveOutcome, DocumentRepositoryError>;
         try {
@@ -403,41 +567,112 @@ export class CloudDocumentRepository implements IDocumentRepository {
         return result;
     }
 
-    private async saveVersion(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
-        const { id, baseVersion } = request;
-        const split = await splitManifest(request.data, this.options.split);
+    /**
+     * A save as a manifest and its blobs: the manifest bytes, their hash, the blobs, the thumbnail.
+     * Refuses a manifest over the server's limit.
+     */
+    async prepare(
+        data: Serialized,
+        thumbnailUrl?: string,
+    ): Promise<Result<PreparedSave, DocumentRepositoryError>> {
+        const split = await splitManifest(data, this.options.split);
         const manifestBytes = encoder.encode(JSON.stringify(split.manifest));
-        const manifestSha = await sha256Hex(manifestBytes);
         if (manifestBytes.byteLength > this.options.config.storage.maxManifestBytes) {
             return Result.err({
                 kind: "failed",
                 message: I18n.translate(fieldErrorMessageKey("manifest_too_large")),
             });
         }
-
-        const thumbnail = request.thumbnail ? await this.encodeThumbnail(request.thumbnail) : undefined;
-        const thumbnailSha = thumbnail ? await sha256Hex(thumbnail) : undefined;
-        const uploads = new Map<string, Uint8Array>([[manifestSha, manifestBytes], ...split.blobs]);
-        if (thumbnail && thumbnailSha) uploads.set(thumbnailSha, thumbnail);
-        await this.upload(uploads, await this.missing([...uploads.keys()]));
-
-        const version: NewVersionRequest = {
-            parentIds: baseVersion ? [baseVersion] : null,
-            kind: request.kind,
-            label: request.label ?? null,
-            manifestSha256: manifestSha,
+        const manifestSha256 = await sha256Hex(manifestBytes);
+        const thumbnail = thumbnailUrl ? await this.encodeThumbnail(thumbnailUrl) : undefined;
+        const thumbnailSha256 = thumbnail ? await sha256Hex(thumbnail) : undefined;
+        const bytes = new Map<string, Uint8Array>([[manifestSha256, manifestBytes], ...split.blobs]);
+        if (thumbnail && thumbnailSha256) bytes.set(thumbnailSha256, thumbnail);
+        return Result.ok({
+            manifestSha256,
             blobs: [...split.blobs.keys()],
-            thumbnailSha256: thumbnailSha ?? null,
-            formatVersion: Number(request.data["formatVersion"]) || DOCUMENT_FORMAT_VERSION,
-            deviceName: this.account.deviceSettings.effectiveDeviceName,
-            clientId: this.clientId,
-        };
-        const pendingKey = [id, baseVersion, manifestSha, request.kind, request.label, thumbnailSha]
+            thumbnailSha256,
+            formatVersion: Number(data["formatVersion"]) || DOCUMENT_FORMAT_VERSION,
+            bytes,
+        });
+    }
+
+    private async saveVersion(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        const { id, baseVersion } = request;
+        const prepared = await this.prepare(request.data, request.thumbnail);
+        if (!prepared.isOk) return Result.err(prepared.error);
+        const { manifestSha256, thumbnailSha256, bytes } = prepared.value;
+        const pendingKey = [id, baseVersion, manifestSha256, request.kind, request.label, thumbnailSha256]
             .map((x) => x ?? "")
             .join("|");
         const key = this.pendingKeys.get(pendingKey) ?? newIdempotencyKey();
         this.pendingKeys.set(pendingKey, key);
+        const pushed = await this.push({
+            id,
+            name: request.name,
+            baseVersion,
+            kind: request.kind,
+            label: request.label,
+            manifestSha256,
+            blobs: prepared.value.blobs,
+            thumbnailSha256,
+            formatVersion: prepared.value.formatVersion,
+            idempotencyKey: key,
+            bytes: async (sha) => bytes.get(sha),
+        });
+        if (!pushed.isOk) {
+            if (!pushed.error.retryable) this.pendingKeys.delete(pendingKey);
+            return Result.err(pushed.error.error);
+        }
+        this.pendingKeys.delete(pendingKey);
+        if (pushed.value.status === "conflict") return Result.ok(pushed.value);
+        // The server keeps every blob of the version now: cache them for the next load.
+        await Promise.all([...bytes].map(([sha, blob]) => this.cache.put(sha, blob)));
+        const head = pushed.value.version;
+        return Result.ok({ status: "saved", updatedAt: parseUtc(head.createdAt), version: head.id });
+    }
 
+    /**
+     * Pushes a version whose manifest and blobs are known: `POST /api/blobs/check`, uploads of the
+     * missing ones (read through `bytes`), then the create (no `baseVersion`) or a new version on
+     * top of `baseVersion` (`If-Match`), with `Idempotency-Key`. A stale base (or a create of an id
+     * that exists) answers `conflict` with the head. Renames the document when `name` differs from
+     * the server's. Never throws.
+     */
+    async push(request: PushRequest): Promise<Result<PushOutcome, PushFailure>> {
+        try {
+            return await this.pushOnce(request);
+        } catch (error) {
+            const failure = failureOf(error);
+            return Result.err({ error: failure, retryable: isRetryableFailure(failure) });
+        }
+    }
+
+    private async pushOnce(request: PushRequest): Promise<Result<PushOutcome, PushFailure>> {
+        const { id, baseVersion, manifestSha256, thumbnailSha256 } = request;
+        const referenced = [manifestSha256, ...request.blobs];
+        if (thumbnailSha256) referenced.push(thumbnailSha256);
+        const unique = [...new Set(referenced)];
+        await this.upload(request.bytes, await this.missing(unique));
+
+        const parentIds = baseVersion
+            ? request.kind === "merge" && request.mergeParent && request.mergeParent !== baseVersion
+                ? [baseVersion, request.mergeParent]
+                : [baseVersion]
+            : null;
+        const version: NewVersionRequest = {
+            parentIds,
+            // A merge whose second parent is gone (or the same) is an ordinary save of its content.
+            kind: request.kind === "merge" && parentIds?.length !== 2 ? "auto" : request.kind,
+            label: request.label ?? null,
+            manifestSha256,
+            blobs: [...new Set(request.blobs)],
+            thumbnailSha256: thumbnailSha256 ?? null,
+            formatVersion: request.formatVersion,
+            deviceName: this.account.deviceSettings.effectiveDeviceName,
+            clientId: this.clientId,
+        };
+        const key = request.idempotencyKey;
         const send = (): Promise<Result<SavedVersion, CloudError>> =>
             baseVersion
                 ? this.account
@@ -463,7 +698,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
                           const head = r.value.data.head;
                           // A replayed create answers the document's *current* head: when it is no
                           // longer our version, a newer save got in meanwhile.
-                          if (r.value.replayed && head.manifestSha256 !== manifestSha) {
+                          if (r.value.replayed && head.manifestSha256 !== manifestSha256) {
                               return Result.err(replayedConflict(head));
                           }
                           return Result.ok(head);
@@ -473,26 +708,26 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (!answer.isOk && problemCode(answer.error) === "blobs_missing") {
             // Garbage collected between the check and the save: upload them and retry once.
             const missing = answer.error.kind === "problem" ? (answer.error.problem.missing ?? []) : [];
-            await this.upload(uploads, missing);
+            await this.upload(request.bytes, missing);
             answer = await send();
         }
         if (!answer.isOk) {
-            if (isFinal(answer.error)) this.pendingKeys.delete(pendingKey);
-            return this.saveFailure(id, answer.error);
+            const outcome = await this.saveFailure(id, answer.error);
+            if (outcome.isOk) return Result.ok(outcome.value as SaveConflict);
+            return Result.err({
+                error: outcome.error,
+                retryable: !isFinal(answer.error),
+                retryAfterMs:
+                    answer.error.kind === "problem" && answer.error.retryAfterSeconds !== undefined
+                        ? answer.error.retryAfterSeconds * 1000
+                        : undefined,
+                code: problemCode(answer.error),
+            });
         }
-        this.pendingKeys.delete(pendingKey);
-
-        // The server keeps every blob of the version now: cache them for the next load.
-        await Promise.all([...uploads].map(([sha, bytes]) => this.cache.put(sha, bytes)));
-        if (thumbnailSha) this.thumbnailShas.set(id, thumbnailSha);
+        if (thumbnailSha256) this.thumbnailShas.set(id, thumbnailSha256);
         if (!baseVersion) this.serverNames.set(id, request.name);
         await this.renameIfNeeded(id, request.name);
-        const head = answer.value;
-        return Result.ok({
-            status: "saved",
-            updatedAt: parseUtc(head.createdAt),
-            version: head.id,
-        });
+        return Result.ok({ status: "saved", version: answer.value });
     }
 
     private async saveFailure(
@@ -542,9 +777,12 @@ export class CloudDocumentRepository implements IDocumentRepository {
      * `PUT /api/blobs/{sha256}` of each missing blob, as raw bytes: the server hashes the body as
      * received and stores it gzipped itself; it doesn't accept `Content-Encoding: gzip` uploads.
      */
-    private async upload(uploads: Map<string, Uint8Array>, missing: string[]): Promise<void> {
+    private async upload(
+        bytesOf: (sha: string) => Promise<Uint8Array | undefined>,
+        missing: string[],
+    ): Promise<void> {
         await mapLimit(missing, TRANSFER_CONCURRENCY, async (sha) => {
-            const bytes = uploads.get(sha);
+            const bytes = await bytesOf(sha);
             if (!bytes) {
                 throw new RepositoryFailure({ kind: "failed", message: `the server lacks blob ${sha}` });
             }
@@ -635,9 +873,31 @@ export class CloudDocumentRepository implements IDocumentRepository {
      * The document a version holds, as saved (in its own format: the caller migrates, e.g. through
      * `Document.load`). Its manifest and blobs are downloaded once, then read from the cache.
      */
-    loadVersion(version: CloudVersion): Promise<Result<Serialized, DocumentRepositoryError>> {
+    loadVersion(
+        version: Pick<CloudVersion, "id" | "manifestSha256">,
+    ): Promise<Result<Serialized, DocumentRepositoryError>> {
         if (!this.isOwnersSession()) return Promise.resolve(Result.err({ kind: "unauthorized" }));
         return this.content(version);
+    }
+
+    /**
+     * A version's content by id alone (its manifest hash unknown here, e.g. the base of a save made
+     * before the sync knew the document): `GET /api/versions/{id}`, then cached by its hash.
+     */
+    async loadVersionById(versionId: string): Promise<Result<Serialized, DocumentRepositoryError>> {
+        const result = await this.account.call((api) =>
+            api.GET("/api/versions/{versionId}", { params: { path: { versionId } }, parseAs: "arrayBuffer" }),
+        );
+        if (!result.isOk) return Result.err(toRepositoryError(result.error));
+        const bytes = new Uint8Array(result.value.data as unknown as ArrayBuffer);
+        let manifest: unknown;
+        try {
+            manifest = JSON.parse(decoder.decode(bytes));
+        } catch (error) {
+            return Result.err({ kind: "failed", message: String(error) });
+        }
+        await this.cache.put(await sha256Hex(bytes), bytes);
+        return this.assemble(manifest);
     }
 
     /** Sets or clears the label, pins or unpins (a labeled or pinned autosave is never pruned). */

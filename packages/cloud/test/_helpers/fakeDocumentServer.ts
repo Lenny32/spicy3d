@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { sha256Hex } from "@spicy3d/core";
+import { assembleManifest, type Serialized, sha256Hex, splitManifest } from "@spicy3d/core";
 import type { ApiSchema } from "../../src/api";
 import { type FakeServer, json, problem, type RecordedRequest } from "./fakeServer";
 
@@ -31,6 +31,8 @@ export class FakeDocumentServer {
     /** SHA-256 of every `PUT /api/blobs/{sha}` that stored a blob, in order. */
     readonly uploaded: string[] = [];
     private readonly keys = new Map<string, { documentId: string; versionId: string; create: boolean }>();
+    /** Called with every new head (a save, a create, another device's save): SRV-07's events. */
+    readonly headListeners = new Set<(documentId: string, version: VersionResponse) => void>();
     private clock = Date.parse("2026-09-27T10:00:00Z");
     private sequence = 0;
 
@@ -76,7 +78,63 @@ export class FakeDocumentServer {
         };
         document.versions.push(version);
         document.updatedAt = version.createdAt;
+        this.published(id, version);
         return version;
+    }
+
+    private published(documentId: string, version: VersionResponse) {
+        for (const listener of [...this.headListeners]) listener(documentId, version);
+    }
+
+    /**
+     * Another device saves `data` as the new head of `id` (on top of the current head): its
+     * manifest and blobs stored as that device would have uploaded them.
+     */
+    async saveContentElsewhere(
+        id: string,
+        data: Serialized | ((head: Serialized) => Serialized),
+        deviceName = "Laptop – Chrome",
+        kind: VersionResponse["kind"] = "auto",
+    ): Promise<VersionResponse> {
+        const document = this.documents.get(id)!;
+        // Like a real device's save with If-Match: based on the head it read, or read again.
+        let previous: VersionResponse;
+        let split: Awaited<ReturnType<typeof splitManifest>>;
+        do {
+            previous = document.versions.at(-1)!;
+            split = await splitManifest(typeof data === "function" ? data(this.content(previous)) : data);
+        } while (previous !== document.versions.at(-1));
+        const manifestBytes = new TextEncoder().encode(JSON.stringify(split.manifest));
+        const manifestSha256 = await sha256Hex(manifestBytes);
+        if (previous !== document.versions.at(-1))
+            return this.saveContentElsewhere(id, data, deviceName, kind);
+        this.blobs.set(manifestSha256, manifestBytes);
+        for (const [sha, bytes] of split.blobs) this.blobs.set(sha, bytes);
+        const version: VersionResponse = {
+            ...previous,
+            id: this.versionId(),
+            parentIds: [previous.id],
+            kind,
+            label: null,
+            pinned: false,
+            createdAt: this.now(),
+            deviceName,
+            clientId: "other-device",
+            manifestSha256,
+            thumbnailSha256: null,
+        };
+        document.versions.push(version);
+        document.updatedAt = version.createdAt;
+        this.published(id, version);
+        return version;
+    }
+
+    /** The content a version holds, assembled (its manifest and blobs as stored here). */
+    content(version: VersionResponse): Serialized {
+        const manifest = JSON.parse(new TextDecoder().decode(this.blobs.get(version.manifestSha256)!));
+        const assembled = assembleManifest(manifest, (sha) => this.blobs.get(sha));
+        if (!assembled.isOk) throw new Error(`cannot assemble ${version.id}`);
+        return assembled.value;
     }
 
     /**
@@ -121,6 +179,7 @@ export class FakeDocumentServer {
         };
         document.versions.push(version);
         document.updatedAt = version.createdAt;
+        this.published(id, version);
         return version;
     }
 
@@ -168,6 +227,7 @@ export class FakeDocumentServer {
         };
         document.versions.push(version);
         document.updatedAt = version.createdAt;
+        this.published(document.id, version);
         return version;
     }
 

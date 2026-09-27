@@ -11,4 +11,5 @@ export * from "./history";
 export * from "./links";
 export * from "./problem";
 export * from "./settings";
+export * from "./sync";
 export * from "./ui";

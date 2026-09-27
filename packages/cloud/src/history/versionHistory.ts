@@ -324,6 +324,16 @@ export class VersionHistory {
             }
         }
 
+        // Saved here but not pushed yet (offline sync): pushed first, else it would be merged back
+        // on top of the restored version afterwards.
+        const flushed = await this.repository.sync?.flush(this.documentId);
+        if (flushed && !flushed.isOk) {
+            return Result.err(
+                flushed.error.kind === "conflict"
+                    ? failure("cloud.history.restoreConflict")
+                    : failure("cloud.history.restoreUnsynced"),
+            );
+        }
         const restored = await this.repository.restoreVersion(this.documentId, version);
         if (!restored.isOk) return Result.err(repositoryFailure(restored.error));
 

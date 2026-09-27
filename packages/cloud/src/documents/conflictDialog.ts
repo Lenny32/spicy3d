@@ -2,12 +2,14 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DocumentRepositoryError,
     formatDateTime,
     I18n,
     type IApplication,
     type IDocument,
     type IDocumentRepository,
     PubSub,
+    type Result,
     repositoryErrorMessage,
     type SaveConflict,
     saveDocumentCopy,
@@ -33,6 +35,20 @@ const errorText = (error: Parameters<typeof repositoryErrorMessage>[0]) => {
 };
 
 /**
+ * The conflict dialog's actions when the offline sync met the conflict (CLOUD-10): the pending save
+ * lives in the sync's records, so "open latest" drops it there, "save mine as the latest version"
+ * rebases it, and a merge whose conflicts all keep this device's side is offered.
+ */
+export interface ConflictSyncActions {
+    /** Pauses the document's sync (and autosave) while the dialog is open; returns the release. */
+    hold(): () => void;
+    discardMine(): Promise<void>;
+    keepMine(): Promise<Result<void, DocumentRepositoryError>>;
+    /** Resolves every conflict with this device's side; `undefined` when there is no merge to finish. */
+    mergeKeepingMine?: () => Promise<boolean>;
+}
+
+/**
  * The MVP answer to a stale save (409, until the merge of CLOUD-13): "A newer version was saved
  * from <device> at <local time>", then
  * - **Open latest**: closes this tab's copy without saving and opens the head (unsaved changes are
@@ -40,6 +56,8 @@ const errorText = (error: Parameters<typeof repositoryErrorMessage>[0]) => {
  * - **Save mine as a copy**: saves this tab's content as a new cloud document and opens it;
  * - **Save mine as the latest version**: a new version on top of the head — nothing is lost, the
  *   history keeps both. Only offered when the head is known (it becomes the base).
+ * With the offline sync (`sync`), the conflict is one its merge couldn't finish: the dialog also
+ * offers **Merge, keeping mine where both changed**, and the actions go through the sync.
  * Resolves once the dialog closes.
  */
 export function showConflictDialog(
@@ -47,8 +65,11 @@ export function showConflictDialog(
     document: IDocument,
     conflict: SaveConflict,
     repository: IDocumentRepository,
+    sync?: ConflictSyncActions,
 ): Promise<void> {
     return new Promise((resolve) => {
+        const release = sync?.hold();
+        const mergeKeepingMine = sync?.mergeKeepingMine;
         const modal = new Modal({
             title: "cloud.conflict.title",
             wide: true,
@@ -70,6 +91,7 @@ export function showConflictDialog(
                         label: "cloud.conflict.openLatest",
                         kind: "danger",
                         run: async () => {
+                            await sync?.discardMine();
                             await document.close({ discardChanges: true });
                             const opened = await app.openDocument(document.id, repository);
                             opened?.application.activeView?.cameraController.fitContent();
@@ -85,6 +107,7 @@ export function showConflictDialog(
                                 modal.showError(errorText(copy.error));
                                 return false;
                             }
+                            await sync?.discardMine();
                             await document.close({ discardChanges: true });
                             await app.openDocument(copy.value.id, repository);
                             PubSub.default.pub("showToast", "cloud.conflict.copySaved");
@@ -96,6 +119,16 @@ export function showConflictDialog(
                         kind: "primary",
                         submit: true,
                         run: async () => {
+                            if (sync) {
+                                release?.();
+                                const kept = await sync.keepMine();
+                                if (!kept.isOk) {
+                                    modal.showError(errorText(kept.error));
+                                    return false;
+                                }
+                                PubSub.default.pub("showToast", "toast.document.saved");
+                                return undefined;
+                            }
                             document.version = conflict.headVersion;
                             const saved = await document.save("manual");
                             if (!saved.isOk) {
@@ -119,13 +152,31 @@ export function showConflictDialog(
                             return undefined;
                         },
                     },
+                    ...(mergeKeepingMine
+                        ? [
+                              {
+                                  label: "cloud.conflict.mergeKeepMine",
+                                  run: async () => {
+                                      release?.();
+                                      if (!(await mergeKeepingMine())) {
+                                          modal.showError(I18n.translate("cloud.status.conflictHint"));
+                                          return false;
+                                      }
+                                      return undefined;
+                                  },
+                              } satisfies ModalAction,
+                          ]
+                        : []),
                 ] as ModalAction[]
             ).filter(
                 (action) =>
                     action.label !== "cloud.conflict.saveLatest" || conflict.headVersion !== undefined,
             ),
         });
-        modal.onClosed(resolve);
+        modal.onClosed(() => {
+            release?.();
+            resolve();
+        });
         modal.open();
     });
 }

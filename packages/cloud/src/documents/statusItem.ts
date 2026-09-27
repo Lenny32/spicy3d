@@ -20,21 +20,44 @@ import type { EditLocks } from "./editLocks";
 import type { CloudDocumentRepository, CloudSaveState } from "./repository";
 
 /** What the title bar says about the active cloud document. */
-export type DocumentStatus = "saved" | "unsaved" | "saving" | "offline" | "conflict" | "error" | "readOnly";
+export type DocumentStatus =
+    | "saved"
+    | "unsaved"
+    | "saving"
+    | "pending"
+    | "offline"
+    | "merging"
+    | "remotePending"
+    | "conflict"
+    | "error"
+    | "readOnly";
 
 export const DOCUMENT_STATUS_LABELS: Record<DocumentStatus, I18nKeys> = {
     saved: "cloud.status.saved",
     unsaved: "cloud.status.unsaved",
     saving: "cloud.status.saving",
+    pending: "cloud.status.pending",
     offline: "cloud.status.offline",
+    merging: "cloud.status.merging",
+    remotePending: "cloud.status.remotePending",
     conflict: "cloud.status.conflict",
     error: "cloud.status.error",
     readOnly: "cloud.status.readOnly",
 };
 
+/** The tooltip of a status, where one helps. */
+export const DOCUMENT_STATUS_HINTS: Partial<Record<DocumentStatus, I18nKeys>> = {
+    pending: "cloud.status.pendingHint",
+    offline: "cloud.status.offlineHint",
+    remotePending: "cloud.status.remotePendingHint",
+    conflict: "cloud.status.conflictHint",
+};
+
 /**
- * The status of a cloud document from its last save and its state here. `unsaved` = edits since
- * the last save (autosave catches up within its interval).
+ * The status of a cloud document from its sync state and its state here. `unsaved` = edits since
+ * the last save (autosave catches up within its interval); `pending` = saved on this device, not
+ * on the server yet (the sync pushes it); `remotePending` = a newer version from another device
+ * waits until the user is done.
  */
 export function documentStatus(
     state: CloudSaveState,
@@ -43,9 +66,12 @@ export function documentStatus(
     if (readOnly) return "readOnly";
     if (state === "saving") return "saving";
     if (state === "conflict") return "conflict";
+    if (state === "merging") return "merging";
     if (state === "offline" || !online) return "offline";
     if (state === "error") return "error";
-    return dirty ? "unsaved" : "saved";
+    if (state === "remotePending") return "remotePending";
+    if (dirty) return "unsaved";
+    return state === "pending" ? "pending" : "saved";
 }
 
 export interface DocumentStatusContext {
@@ -190,7 +216,12 @@ export class DocumentStatusItem extends HTMLElement {
                     : span({
                           className: style.state,
                           textContent: text,
-                          title: autosavedAt !== undefined ? formatDateTime(autosavedAt) : "",
+                          title:
+                              autosavedAt !== undefined
+                                  ? formatDateTime(autosavedAt)
+                                  : DOCUMENT_STATUS_HINTS[status]
+                                    ? I18n.translate(DOCUMENT_STATUS_HINTS[status])
+                                    : "",
                       });
             label.dataset["status"] = status;
             label.setAttribute("role", "status");

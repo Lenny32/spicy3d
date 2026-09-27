@@ -5,6 +5,7 @@ import {
     type IApplication,
     type IDocument,
     type IDocumentRepository,
+    Id,
     Logger,
     PubSub,
     SidePanels,
@@ -15,8 +16,11 @@ import type { CloudConnection } from "../cloud";
 import { VersionHistoryPanel } from "../history/historyPanel";
 import { previewOf } from "../history/previewRepository";
 import { VersionHistory } from "../history/versionHistory";
+import { EventsChannel } from "../sync/events";
+import { SyncEngine, type SyncEngineOptions } from "../sync/syncEngine";
+import { defaultSyncStore, type ISyncStore } from "../sync/syncStore";
 import { defaultBlobCache, type IBlobCache } from "./blobCache";
-import { showConflictDialog } from "./conflictDialog";
+import { type ConflictSyncActions, showConflictDialog } from "./conflictDialog";
 import { keepChangesAfterSignOut } from "./documentActions";
 import { EditLocks } from "./editLocks";
 import { CloudDocumentRepository, type CloudDocumentRepositoryOptions } from "./repository";
@@ -29,6 +33,12 @@ export interface CloudDocumentsOptions {
     repository?: Partial<CloudDocumentRepositoryOptions>;
     /** Mount the title bar status (default true). */
     titleBar?: boolean;
+    /** The offline sync's records (default: IndexedDB). */
+    store?: ISyncStore;
+    /** The events WebSocket (default: `config.eventsSocket`, where the browser has WebSockets); `false`: none. */
+    events?: EventsChannel | false;
+    /** Sync engine options for tests (backoff, timers, activity…). */
+    sync?: Partial<SyncEngineOptions>;
 }
 
 /**
@@ -42,7 +52,9 @@ export interface CloudDocumentsOptions {
 export class CloudDocuments {
     readonly cache: IBlobCache;
     readonly locks: EditLocks;
+    readonly store: ISyncStore;
     private repository?: CloudDocumentRepository;
+    private engine?: SyncEngine;
     private historyPanel?: VersionHistoryPanel;
     private readonly statusItem?: DocumentStatusItem;
     private readonly removeSignOutHandler: () => void;
@@ -53,6 +65,7 @@ export class CloudDocuments {
         private readonly options: CloudDocumentsOptions = {},
     ) {
         this.cache = options.cache ?? defaultBlobCache();
+        this.store = options.store ?? defaultSyncStore();
         this.locks = options.locks ?? new EditLocks();
         this.locks.handoverHandler = this.beforeHandover;
         this.removeSignOutHandler = this.account.addSignOutHandler(this.onSignOut);
@@ -83,6 +96,11 @@ export class CloudDocuments {
 
     get cloud(): CloudDocumentRepository | undefined {
         return this.repository;
+    }
+
+    /** The offline sync while signed in. */
+    get syncEngine(): SyncEngine | undefined {
+        return this.engine;
     }
 
     /** The version history panel, while one is open. */
@@ -117,11 +135,31 @@ export class CloudDocuments {
             ...this.options.repository,
         });
         const repository = this.repository;
+        this.engine = new SyncEngine({
+            app: this.app,
+            repository,
+            store: this.store,
+            locks: this.locks,
+            events: this.createEvents(),
+            ...this.options.sync,
+        });
+        this.engine.start();
         this.app.repositories.conflictHandler = (document, conflict) =>
-            showConflictDialog(this.app, document, conflict, repository);
+            showConflictDialog(this.app, document, conflict, repository, this.conflictActions(document));
         this.app.repositories.cloud = repository;
         this.applyPreferred();
         for (const document of this.app.documents) this.onDocumentOpened(document);
+    }
+
+    private createEvents(): EventsChannel | undefined {
+        if (this.options.events === false) return undefined;
+        if (this.options.events) return this.options.events;
+        if (typeof WebSocket === "undefined") return undefined;
+        return new EventsChannel({
+            url: this.connection.config.eventsSocket,
+            baseUrl: this.connection.client.baseUrl,
+            account: this.account,
+        });
     }
 
     private readonly applyPreferred = () => {
@@ -133,6 +171,8 @@ export class CloudDocuments {
         const repository = this.repository;
         if (!repository) return;
         void this.closeHistory();
+        this.engine?.stop();
+        this.engine = undefined;
         for (const document of this.app.documents) {
             if (document.repository === repository) this.locks.release(document.id);
         }
@@ -150,26 +190,66 @@ export class CloudDocuments {
     private readonly onSignOut = async ({ removeCachedDocuments }: SignOutEvent) => {
         const repository = this.repository;
         const open = [...this.app.documents].filter((x) => repository && x.repository === repository);
+        const pending = (await this.engine?.pendingRecords()) ?? [];
+        const pendingIds = new Set(pending.map((x) => x.docId));
+        // Kept offline copies keep their pending saves too: pushed when this user signs in again.
+        const unsynced = removeCachedDocuments ? pendingIds : new Set<string>();
         this.stop();
         for (const document of open) {
             await document.settled();
-            if (document.isDirty) await keepChangesAfterSignOut(this.app, document);
+            if (document.isDirty || unsynced.has(document.id))
+                await keepChangesAfterSignOut(this.app, document);
             await document.close({ discardChanges: true });
         }
-        if (removeCachedDocuments) await this.cache.clear();
+        if (removeCachedDocuments && repository) {
+            // Saved here but never pushed, and not open: kept on this device instead of being lost.
+            const closed = pending.filter((x) => !open.some((d) => d.id === x.docId));
+            for (const record of closed) await this.keepOnDevice(repository, record.docId, record.name);
+            await this.cache.clear();
+            await this.store.clear();
+        }
     };
+
+    /** A pending save of a closed document, as a new document on this device. */
+    private async keepOnDevice(repository: CloudDocumentRepository, docId: string, name: string) {
+        const loaded = await this.loadPending(repository, docId);
+        if (!loaded) return;
+        const id = Id.generate();
+        const saved = await this.app.repositories.local.save({
+            id,
+            name,
+            data: { ...loaded, id, name },
+            kind: "manual",
+        });
+        if (saved.isOk) PubSub.default.pub("showToast", "cloud.sync.keptOnDevice{0}", name);
+        else Logger.warn(`[cloud] ${docId}: the unsynced changes could not be kept (${saved.error.kind})`);
+    }
+
+    private async loadPending(repository: CloudDocumentRepository, docId: string) {
+        const record = await this.store.get(docId);
+        const sha = record?.localSnapshot?.manifestSha256;
+        const bytes = sha ? await this.cache.get(sha) : undefined;
+        if (!bytes) return undefined;
+        const assembled = await repository.assemble(JSON.parse(new TextDecoder().decode(bytes)));
+        return assembled.isOk ? assembled.value : undefined;
+    }
 
     private readonly onDocumentOpened = (document: IDocument) => {
         if (!this.repository || document.repository !== this.repository) return;
+        const engine = this.engine;
         void this.locks.acquire(document.id).then((mode) => {
             if (mode === "readOnly") PubSub.default.pub("showToast", "cloud.status.openedReadOnly");
+            // Synced by this tab once it holds the lock; a read-only tab only shows newer versions.
+            if (engine === this.engine) engine?.documentOpened(document);
         });
     };
 
     private readonly onDocumentClosed = (document: IDocument) => {
         if (document.repository !== this.repository) return;
-        this.locks.release(document.id);
         this.repository?.resetState(document.id);
+        // Its lock goes, unless it still has changes to push (pushed in the background first).
+        if (this.engine) void this.engine.documentClosed(document);
+        else this.locks.release(document.id);
     };
 
     /** Moved to the cloud: this tab takes the edit lock; moved away: it lets go. */
@@ -180,6 +260,29 @@ export class CloudDocuments {
         }
         this.onDocumentOpened(document);
     };
+
+    /** What the MVP conflict dialog does through the sync (a conflict met by the offline sync). */
+    private conflictActions(document: IDocument): ConflictSyncActions | undefined {
+        const engine = this.engine;
+        if (!engine) return undefined;
+        const id = document.id;
+        return {
+            hold: () => engine.hold(id),
+            discardMine: () => engine.discardLocal(id),
+            keepMine: () => engine.keepMine(id),
+            mergeKeepingMine: engine.syncConflictOf(id)?.result
+                ? async () => {
+                      const conflict = engine.syncConflictOf(id);
+                      const choices = (conflict?.result?.conflicts ?? []).map((x) => ({
+                          path: x.path,
+                          choice: x.choices[0],
+                      }));
+                      const resolved = await engine.resolve(id, choices);
+                      return resolved.isOk;
+                  }
+                : undefined,
+        };
+    }
 
     /** The editing tab, asked to hand over: saves unsaved changes first so nothing is lost. */
     private readonly beforeHandover = async (id: string) => {
@@ -200,7 +303,15 @@ export class CloudDocuments {
         if (!repository || document.repository !== repository) return;
         await document.settled();
         const conflict = repository.conflictOf(document.id);
-        if (conflict) await showConflictDialog(this.app, document, conflict, repository);
+        if (conflict) {
+            await showConflictDialog(
+                this.app,
+                document,
+                conflict,
+                repository,
+                this.conflictActions(document),
+            );
+        }
     };
 
     /**
@@ -211,8 +322,14 @@ export class CloudDocuments {
     readonly takeOver = async (document: IDocument) => {
         const repository = this.repository;
         if (!repository || !(await this.locks.takeOver(document.id))) return;
+        // The other tab may have left a save it couldn't push: this tab opens and pushes it.
+        const pending = (await this.store.get(document.id))?.localDirty === true;
         const head = await repository.headVersion(document.id);
-        if (!head.isOk || head.value === document.version || document.isDirty) return;
+        const moved = head.isOk && head.value !== document.version;
+        if ((!moved && !pending) || document.isDirty) {
+            this.engine?.documentOpened(document);
+            return;
+        }
         await document.close({ discardChanges: true });
         await this.app.openDocument(document.id, repository);
     };

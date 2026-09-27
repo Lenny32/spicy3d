@@ -1256,5 +1256,24 @@ export default {
         "merge.conflict.order{0}": "{0} was moved to a different position on each device",
         "merge.conflict.property{0}{1}": "{0}: {1} was changed on both devices",
         "merge.conflict.rebuildFailure{0}{1}": "{0} fails after the merge: {1}",
+        "cloud.status.pending": "Saved on this device",
+        "cloud.status.pendingHint": "Waiting to sync with the server",
+        "cloud.status.offlineHint":
+            "Offline: changes are saved on this device and synced once the server is back",
+        "cloud.status.merging": "Merging…",
+        "cloud.status.remotePending": "Remote changes pending",
+        "cloud.status.remotePendingHint": "A newer version from another device is shown once you are done",
+        "cloud.sync.updatedFrom{0}": "Updated from {0}",
+        "cloud.sync.mergedFrom{0}": "Merged changes from {0}",
+        "cloud.sync.conflict{0}": "{0}: changes from another device conflict with yours",
+        "cloud.sync.quota": "Cloud storage is full: your changes are kept on this device",
+        "cloud.sync.keptOnDevice{0}": "Changes to {0} that were not synced were saved on this device",
+        "cloud.conflict.mergeKeepMine": "Merge, keeping mine where both changed",
+        "cloud.conflict.syncMessage{0}{1}{2}":
+            "{0} was also changed on {1} at {2}, and some changes conflict with yours.",
+        "home.sync.pending": "Not synced",
+        "home.sync.conflict": "Conflict",
+        "cloud.history.restoreUnsynced":
+            "Changes saved on this device are not synced yet: restore once the server can be reached",
     },
 } satisfies Locale;
