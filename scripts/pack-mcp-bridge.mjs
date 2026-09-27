@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { bridgeNotices } from "./mcp-bridge-notices.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bridgeDir = path.join(rootDir, "packages/mcp-bridge");
@@ -45,7 +46,7 @@ const stage = mkdtempSync(path.join(tmpdir(), "spicy3d-mcp-bridge-"));
 try {
     // One CommonJS file, like the standalone executables (scripts/build-mcp-bridge-binaries.mjs).
     // bufferutil / utf-8-validate are optional `ws` speed-ups loaded inside a try/catch.
-    await build({
+    const { metafile } = await build({
         entryPoints: [path.join(bridgeDir, "src/cli.mjs")],
         bundle: true,
         platform: "node",
@@ -53,8 +54,13 @@ try {
         target: "node20",
         external: ["bufferutil", "utf-8-validate"],
         outfile: path.join(stage, "cli.cjs"),
+        metafile: true,
         logLevel: "warning",
     });
+    // The bundle carries third-party code: its licenses go with it, next to the bridge's own.
+    const { license, notices } = bridgeNotices(metafile);
+    writeFileSync(path.join(stage, "LICENSE"), license);
+    writeFileSync(path.join(stage, "THIRD-PARTY-NOTICES.txt"), notices);
     const manifest = {
         name: bridge.name,
         version: bridge.version,
@@ -63,7 +69,7 @@ try {
         license: bridge.license,
         repository: bridge.repository,
         bin: { "spicy3d-mcp-bridge": "cli.cjs" },
-        files: ["cli.cjs", "README.md"],
+        files: ["cli.cjs", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.txt"],
         engines: bridge.engines,
     };
     writeFileSync(path.join(stage, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);

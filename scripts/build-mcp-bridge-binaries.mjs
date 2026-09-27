@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { inject } from "postject";
+import { bridgeNotices } from "./mcp-bridge-notices.mjs";
 
 const TARGETS = {
     "windows-x64": { dist: "win-x64", archive: "node.exe", ext: ".exe" },
@@ -49,13 +50,15 @@ if (unknown.length > 0) {
     process.exit(2);
 }
 const targets = requested.length > 0 ? requested : Object.keys(TARGETS);
+/** Node.js's LICENSE, taken from the first downloaded archive that has one. */
+let nodeLicense;
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(workDir, { recursive: true });
 
 // 1. One CommonJS file. bufferutil / utf-8-validate are optional `ws` speed-ups it loads inside a
 //    try/catch; leaving them out keeps ws on its pure-JS path.
-await build({
+const { metafile } = await build({
     entryPoints: [path.join(rootDir, "packages/mcp-bridge/src/cli.mjs")],
     bundle: true,
     platform: "node",
@@ -65,6 +68,7 @@ await build({
     // cli.mjs starts with a shebang; SEA runs the file as a script, where it is harmless, but
     // esbuild keeps it only on the first line, which is what we want.
     outfile: path.join(workDir, "bridge.cjs"),
+    metafile: true,
     logLevel: "warning",
 });
 
@@ -110,6 +114,17 @@ for (const name of targets) {
 
 rmSync(workDir, { recursive: true, force: true });
 writeFileSync(path.join(outDir, "SHA256SUMS"), `${sums.join("\n")}\n`);
+
+// Licenses next to the executables (named like them, so the release workflow's pattern picks them
+// up): the bridge's AGPL-3.0, the bundled packages' notices, and Node.js's license (a windows-only
+// build has no archive to take it from: then it comes from the Node.js repository at this version).
+nodeLicense ??= await fetchText(`https://raw.githubusercontent.com/nodejs/node/${process.version}/LICENSE`);
+const { license, notices } = bridgeNotices(metafile);
+writeFileSync(path.join(outDir, "spicy3d-mcp-bridge-LICENSE.txt"), license);
+writeFileSync(
+    path.join(outDir, "spicy3d-mcp-bridge-THIRD-PARTY-NOTICES.txt"),
+    `${notices}\nNode.js ${process.version} (the runtime inside each executable)\n${"-".repeat(40)}\n${nodeLicense.trim()}\n`,
+);
 console.log(`built ${targets.length} bridge executable(s) into dist-bridge/ (Node ${process.version})`);
 
 /**
@@ -136,8 +151,16 @@ async function nodeBinary(target) {
 
     // tar ships with Linux, macOS and Windows 10+; the archive's top folder is node-<v>-<dist>.
     // It reads the archive from stdin and writes the one member to stdout.
-    const member = `node-${process.version}-${target.dist}/bin/node`;
-    return execFileSync("tar", ["-xzOf", "-", member], { input: archive, maxBuffer: 512 * 1024 * 1024 });
+    const folder = `node-${process.version}-${target.dist}`;
+    // Node.js's own license (and those of what it bundles) goes with every executable.
+    nodeLicense ??= execFileSync("tar", ["-xzOf", "-", `${folder}/LICENSE`], {
+        input: archive,
+        maxBuffer: 16 * 1024 * 1024,
+    }).toString("utf8");
+    return execFileSync("tar", ["-xzOf", "-", `${folder}/bin/node`], {
+        input: archive,
+        maxBuffer: 512 * 1024 * 1024,
+    });
 }
 
 async function fetchOk(url) {
