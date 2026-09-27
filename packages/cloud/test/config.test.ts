@@ -60,6 +60,16 @@ describe("discoverCloud", () => {
         expect(request.headers.get("X-Spicy3D-Request")).toBeNull();
     });
 
+    test("an integer apiVersion (the servers since the first contract) is read like the string one", async () => {
+        const config = { ...CONFIG, apiVersion: 1 };
+        const { discovery } = discoverWith(() => Response.json(config));
+
+        expect(await discovery).toEqual({ status: "ready", config });
+        expect((await discoverWith(() => Response.json({ ...CONFIG, apiVersion: 2 })).discovery).status).toBe(
+            "incompatible",
+        );
+    });
+
     test("a compatible server is ready with its config", async () => {
         const { discovery } = discoverWith(() => Response.json(CONFIG));
 
@@ -72,7 +82,10 @@ describe("discoverCloud", () => {
         ["HTML (SPA fallback)", () => new Response("<!doctype html><html></html>", { status: 200 })],
         ["JSON that isn't a config", () => Response.json({ hello: "world" })],
         ["a JSON array", () => Response.json([CONFIG])],
-        ["an apiVersion that isn't a string", () => Response.json({ ...CONFIG, apiVersion: 1 })],
+        [
+            "an apiVersion that is neither a string nor a number",
+            () => Response.json({ ...CONFIG, apiVersion: [1] }),
+        ],
         [
             "no network",
             () => {

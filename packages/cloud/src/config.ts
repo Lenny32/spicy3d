@@ -65,7 +65,8 @@ function isConfig(value: unknown): value is ConfigResponse {
     if (!isRecord(value)) return false;
     const config: { readonly [K in keyof ConfigResponse]?: unknown } = value;
     return (
-        typeof config.apiVersion === "string" &&
+        // A string in the first contract, an integer since (SpicySrv 908bf51 and before).
+        (typeof config.apiVersion === "string" || typeof config.apiVersion === "number") &&
         typeof config.version === "string" &&
         isRecord(config.features)
     );
@@ -97,7 +98,7 @@ export async function discoverCloud(options: DiscoveryOptions = {}): Promise<Clo
     }
     if (!isConfig(config)) return dormant(`${request.url} is not a Spicy3D server`);
 
-    const compatibility = checkApiVersion(config.apiVersion);
+    const compatibility = checkApiVersion(String(config.apiVersion));
     if (compatibility !== "compatible") {
         Logger.warn(
             `[cloud] server API ${config.apiVersion} is outside the supported range ` +
