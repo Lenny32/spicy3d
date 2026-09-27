@@ -3,35 +3,41 @@ name: Deploy
 # Continuous delivery: builds the web application, deploys it to GitHub Pages and publishes it as a
 # Docker image.
 #
-# - Push to main or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
-#   site. A manual run asks for the Docker image version (empty = package.json's version).
+# - Push to develop or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
+#   site. A manual run asks for the version; empty (and every push) = the last release tag with its
+#   patch number bumped (0.0.1 -> 0.0.2, 0.1.0 -> 0.1.1; 0.0.1 when there is none). An explicit
+#   version that is already a tag fails the run.
+# - Versions: the release tags `X.Y.Z` in this repository, nothing in package.json. Job `docker`
+#   creates the tag on the built commit before pushing the image; the app shows the version
+#   (SPICY3D_VERSION at build time).
 # - Docker image: the same dist/ in the hardened nginx-unprivileged runtime (Dockerfile, target
 #   `prebuilt`: port 8080, non-root, read-only root file system, its own CSP). Job `image` runs it
 #   as SpicySrv's compose does (read-only, no capabilities), checks the headers and the
 #   SPICY3D_*_ORIGINS validation, smoke-tests it in headless Chromium and keeps it as a run
 #   artifact (`spicy3d-web-<version>.tar.gz` for `docker load`, plus the dist/ tarball). Then, from
 #   main, develop or a tag only, job `docker` pushes it to ghcr.io/<owner>/<repo> as `latest` and
-#   `<image version>`, for linux/amd64 and linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs
+#   `<version>`, for linux/amd64 and linux/arm64. `docker pull ghcr.io/lenny32/spicy3d` needs
 #   the package to be public (Packages > spicy3d > Package settings) or a `docker login ghcr.io`.
 #
 # One-time setup: Settings > Pages > Source = "GitHub Actions".
 
 on:
     push:
-        branches: ["main"]
+        branches: ["develop"]
     workflow_dispatch:
         inputs:
             version:
-                description: "Docker image version tag (e.g. 1.2.0); empty = package.json version"
+                description: "Version (e.g. 1.2.0), must not exist yet; empty = last release + 1 patch"
                 required: false
                 type: string
 
 permissions:
     contents: read
 
-# Never cancel a deployment halfway; a newer push waits for the running one.
+# Never cancel a deployment halfway; a newer run waits for the running one. One group for every
+# branch: the next version is read from the tags only once the previous run has created its tag.
 concurrency:
-    group: deploy-${{ github.ref }}
+    group: deploy
     cancel-in-progress: false
 
 jobs:
@@ -41,24 +47,39 @@ jobs:
         outputs:
             image-version: ${{ steps.version.outputs.image-version }}
         steps:
+            # Full history for the tags.
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
+                  fetch-depth: 0
 
-            # The version: the manual run's input, else package.json's version. Used for the image tag and
-            # shown in the app (SPICY3D_VERSION at build time).
+            # The version: the manual run's input (semver, not a tag yet), else the highest release tag
+            # X.Y.Z (pre-releases like 0.0.1-rc.1 ignored) with its patch number bumped, 0.0.1 when
+            # there is none. Used for the image tag, the git tag and shown in the app.
             - id: version
               env:
                   INPUT_VERSION: ${{ inputs.version }}
               run: |
-                  pkg=$(node -p "require('./package.json').version")
-                  image="${INPUT_VERSION:-$pkg}"
-                  if [[ ! "$image" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ || "$image" == "latest" ]]; then
-                      echo "::error::Invalid image version '$image' (a Docker tag other than 'latest')"
-                      exit 1
+                  input="${INPUT_VERSION//[[:space:]]/}"
+                  last=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+                  if [[ -n "$input" ]]; then
+                      version="$input"
+                      if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                          echo "::error::Invalid version '$version' (expected semver like 1.2.0)"
+                          exit 1
+                      fi
+                      if git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+                          echo "::error::Version $version already exists (tag $version)"
+                          exit 1
+                      fi
+                  elif [[ -z "$last" ]]; then
+                      version=0.0.1
+                  else
+                      IFS=. read -r major minor patch <<< "$last"
+                      version="$major.$minor.$((patch + 1))"
                   fi
-                  echo "image-version=$image" >> "$GITHUB_OUTPUT"
-                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), version $image (package.json: $pkg)" >> "$GITHUB_STEP_SUMMARY"
+                  echo "image-version=$version" >> "$GITHUB_OUTPUT"
+                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME) as version $version (last release: ${last:-none})" >> "$GITHUB_STEP_SUMMARY"
 
     web:
         name: Build web application
@@ -179,7 +200,7 @@ jobs:
                   path: out/
                   if-no-files-found: error
 
-    # The only job that may write packages, and only from main or a tag: the same dist/, Dockerfile
+    # The only job that may write packages and tags, and only from main, develop or a tag: the same dist/, Dockerfile
     # target and digest-pinned base as the tested image, for both platforms.
     docker:
         name: Publish Docker image
@@ -187,7 +208,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/')
         runs-on: ubuntu-latest
         permissions:
-            contents: read
+            contents: write # the version tag
             packages: write
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -215,6 +236,22 @@ jobs:
                   tags: |
                       type=raw,value=latest
                       type=raw,value=${{ needs.prepare.outputs.image-version }}
+
+            # Before the image: the tag reserves the version, so a version is never pushed twice. A rerun of
+            # this job finds its own tag (same commit) and goes on; any other commit is an error.
+            - name: Tag the version
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  VERSION: ${{ needs.prepare.outputs.image-version }}
+              run: |
+                  if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" > /dev/null; then
+                      tagged=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq .object.sha || true)
+                      if [[ "$tagged" != "$GITHUB_SHA" ]]; then
+                          echo "::error::Version $VERSION already exists (tag $VERSION on ${tagged:-?})"
+                          exit 1
+                      fi
+                  fi
+                  echo "Tagged $VERSION on ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
 
             # The prebuilt target only copies files (no RUN), so arm64 needs no QEMU.
             - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

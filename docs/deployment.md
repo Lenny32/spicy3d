@@ -49,15 +49,19 @@ docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web
 docker compose pull && docker compose up    # compose.yml: the published image, same options
 ```
 
-The GitHub workflow **Deploy** (push to `main`, or manual with an optional image version, default
-`package.json`'s) builds and tests the app once — with that version as the one the app shows
-(`SPICY3D_VERSION` at build time; `docker build --build-arg SPICY3D_VERSION=…` from source) — deploys that `dist/` to Pages and packages it with
+The GitHub workflow **Deploy** (push to `develop`, or manual with an optional version) picks the
+version from the repository's release tags `X.Y.Z`, not from `package.json`: empty = the highest one
+with its patch number bumped (`0.0.1` → `0.0.2`, `0.1.0` → `0.1.1`; `0.0.1` when there is none,
+pre-release tags ignored), an explicit version must be semver and not a tag yet. It builds and tests
+the app once — showing that version (`SPICY3D_VERSION` at build time; `docker build --build-arg
+SPICY3D_VERSION=…` from source) — deploys that `dist/` to Pages and packages it with
 the `prebuilt` target. Job *Test Docker image* runs the image like SpicySrv's compose (read-only,
 no capabilities), checks it is not root, the account-link routes, the CSP header and that an invalid
 `SPICY3D_PLUGIN_ORIGINS` stops the container, runs `npm run smoke -- --url` against it, and keeps it
 as a run artifact (`spicy3d-web-<version>.tar.gz` for `docker load` on a server without registry
-access, plus the plain `dist/` tarball and `SHA256SUMS`). Then, from `main` or a tag only, job
-*Publish Docker image* (the only one allowed to write packages) pushes the same target for
+access, plus the plain `dist/` tarball and `SHA256SUMS`). Then, from `main`, `develop` or a tag only, job
+*Publish Docker image* (the only one allowed to write packages and tags) tags the built commit with
+the version (a rerun of the same commit reuses its tag) and pushes the same target for
 `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repo>` (`ghcr.io/lenny32/spicy3d`) as `latest`
 and `<version>`. The version is the server's `SPICY_VERSION`; SpicySrv's compose runs it as
 `spicy3d-web:<version>` (`docker tag ghcr.io/lenny32/spicy3d:<version> spicy3d-web:<version>`, or
