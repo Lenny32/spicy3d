@@ -3,13 +3,14 @@
 
 /**
  * Offline smoke test of the production build (CLOUD-16): serves dist/ like the web image (SPA
- * routes, docker/nginx.conf's Content-Security-Policy), opens it in headless Chromium with every
+ * routes, docker/default.conf.template's Content-Security-Policy), opens it in headless Chromium with every
  * request to another origin blocked, and checks that
  *
  *   1. the app starts and the OCCT WebAssembly kernel works (a box is built),
  *   2. a document saved to the browser's storage opens again with its content,
  *   3. nothing ever asked for another origin (a LAN without internet access sees no failed request),
- *   4. over plain HTTP on a non-loopback host the insecure-context banner shows, and not on localhost.
+ *   4. over plain HTTP on a non-loopback host the insecure-context banner shows, and not on localhost,
+ *   5. a `.spicyplugin` whose entry uses its import map loads (blob: module, no inline import map).
  *
  * With --url it checks a running deployment instead (the dev server proxying a SpicySrv, or the
  * server's compose stack; certificate errors of an internal CA are ignored): 1–3, the banner
@@ -28,6 +29,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import JSZip from "jszip";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,11 +49,15 @@ if (!args.url && !existsSync(path.join(distDir, "index.html"))) {
     process.exit(2);
 }
 
-// The policy the web image sends (docker/nginx.conf), so a directive the app outgrows fails here.
-const nginxConf = readFileSync(path.join(rootDir, "docker/nginx.conf"), "utf8");
-const CSP = /add_header Content-Security-Policy "([^"]+)"/.exec(nginxConf)?.[1];
+// The policy the web image sends (docker/default.conf.template), so a directive the app outgrows fails here.
+// SPICY3D_PLUGIN_ORIGINS as the image's default: empty.
+const nginxConf = readFileSync(path.join(rootDir, "docker/default.conf.template"), "utf8");
+const CSP = /add_header Content-Security-Policy "([^"]+)"/
+    .exec(nginxConf)?.[1]
+    .replaceAll("${SPICY3D_PLUGIN_ORIGINS}", "")
+    .replace(/ +;/g, ";");
 if (!CSP) {
-    console.error("docker/nginx.conf sends no Content-Security-Policy");
+    console.error("docker/default.conf.template sends no Content-Security-Policy");
     process.exit(2);
 }
 // A name that is not loopback: plain HTTP there is not a secure context (resolved to 127.0.0.1 below).
@@ -74,10 +80,35 @@ const TYPES = {
 };
 const APP_ROUTES = /^\/(verify-email|reset-password|confirm-email-change)\/?$/;
 
-/** dist/ as docker/nginx.conf serves it. */
+/**
+ * A `.spicyplugin` archive whose entry imports a module through its import map, as the example
+ * plugins do: it loads from a blob: URL and needs the map applied without an inline import map.
+ */
+async function smokePlugin() {
+    const zip = new JSZip();
+    zip.file(
+        "manifest.json",
+        JSON.stringify({ name: "smoke", version: "1.0.0", main: "main.js", importmap: "importmap.json" }),
+    );
+    zip.file("importmap.json", JSON.stringify({ imports: { "smoke-dep": "dep.js" } }));
+    zip.file("dep.js", 'export const answer = "linked";');
+    zip.file(
+        "main.js",
+        'import { answer } from "smoke-dep";\nglobalThis.__spicy3dSmokePlugin = answer;\nexport default {};',
+    );
+    return zip.generateAsync({ type: "nodebuffer" });
+}
+const PLUGIN_PATH = "/smoke/smoke.spicyplugin";
+const pluginArchive = args.url ? undefined : await smokePlugin();
+
+/** dist/ as docker/default.conf.template serves it, plus the smoke plugin. */
 function serve() {
     const server = createServer((request, response) => {
         const { pathname } = new URL(request.url ?? "/", "http://localhost");
+        if (pathname === PLUGIN_PATH) {
+            response.writeHead(200, { "Content-Type": "application/octet-stream" }).end(pluginArchive);
+            return;
+        }
         let file = path.join(
             distDir,
             decodeURIComponent(APP_ROUTES.test(pathname) ? "/index.html" : pathname),
@@ -166,7 +197,7 @@ async function open(browser, url) {
 }
 
 /** 1–3 and the banner on one URL. */
-async function checkApp(browser, url, { expectServer = false } = {}) {
+async function checkApp(browser, url, { expectServer = false, withPlugin = false } = {}) {
     console.log(`\n${url}`);
     const run = await open(browser, url);
     const result = await run.page.evaluate(async () => {
@@ -223,6 +254,17 @@ async function checkApp(browser, url, { expectServer = false } = {}) {
             .catch(() => false);
         check(found, "a Spicy3D server answered /api/config (account button shown)");
     }
+    if (withPlugin) {
+        const plugin = await run.page.evaluate(async (pluginUrl) => {
+            const app = globalThis.Spicy3DCore.getCurrentApplication();
+            await app.pluginManager.loadFromUrl(new URL(pluginUrl, location.href).href);
+            return { loaded: app.pluginManager.isLoaded("smoke"), answer: globalThis.__spicy3dSmokePlugin };
+        }, PLUGIN_PATH);
+        check(
+            plugin.loaded && plugin.answer === "linked",
+            `a .spicyplugin with an import map loads under the CSP (${JSON.stringify(plugin)})`,
+        );
+    }
     check(
         run.external.length === 0,
         `no request to another origin${run.external.length ? `: ${run.external.join(", ")}` : ""}`,
@@ -245,7 +287,7 @@ try {
     } else {
         const { port } = server.address();
         // localhost: a secure context over plain HTTP. spicy.lan: plain HTTP on a LAN name.
-        await checkApp(browser, `http://localhost:${port}/`);
+        await checkApp(browser, `http://localhost:${port}/`, { withPlugin: true });
         await checkApp(browser, `http://${LAN_HOST}:${port}/`);
     }
 } finally {

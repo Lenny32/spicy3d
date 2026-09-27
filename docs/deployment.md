@@ -58,10 +58,12 @@ docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web
 
 The GitHub workflow **Web image** (manual) builds `spicy3d-web:<version>`, smoke-tests it running like
 that, and keeps it as a run artifact (`spicy3d-web-<version>.tar.gz` for `docker load`, plus the plain
-`dist/` tarball); with `publish = ghcr` it also pushes `ghcr.io/<owner>/spicy3d-web:<version>`. The tag
-is the server's `SPICY_VERSION`.
+`dist/` tarball); with `publish = ghcr` (from `main` or a tag) a separate job pushes that image to
+`ghcr.io/<owner>/spicy3d-web:<version>`. The tag is the server's `SPICY_VERSION`. The base images are
+pinned by digest and kept current by Dependabot.
 
-`docker/nginx.conf`:
+`docker/default.conf.template` (rendered at start into the `/tmp` tmpfs, so the root file system
+stays read-only):
 
 - the app routes of account email links (`/verify-email`, `/reset-password`, `/confirm-email-change`)
   serve `index.html`; everything else is a file or 404;
@@ -74,6 +76,22 @@ is the server's `SPICY_VERSION`.
   endpoints need `connect-src https:`, the local MCP bridge `ws://127.0.0.1:*`. The smoke test
   serves the build with the policy read from this file, so it fails when the app outgrows it.
   `SPICY_WEB_CSP` on the server therefore has no effect with this image.
+- **plugins** are code the user chose to run: `script-src blob:` lets `.spicyplugin` archives run
+  (their modules are loaded from blob: URLs). A plugin's import map is not injected as an inline
+  `<script type="importmap">` (that would need `'unsafe-inline'`, and a nonce or hash is impossible for
+  a static server and arbitrary plugins): the app links the modules itself, rewriting each import of a
+  mapped specifier to the blob: URL of that module (`packages/app/src/pluginModules.ts`). Limits: an
+  import map with `scopes`, or mapped modules importing each other in a cycle, fall back to the inline
+  map and are blocked by this policy; a *served* plugin (a folder URL) with an import map runs from a
+  blob: URL, so its `import.meta.url` is not its file's. Served plugins without an import map, like
+  the default ones, load as before.
+- `SPICY3D_PLUGIN_ORIGINS` (container environment, default empty): space-separated origins plugins may
+  be loaded from besides the app's own (`?plugin=`, the plugin manager, trusted domains), e.g.
+  `SPICY3D_PLUGIN_ORIGINS="https://plugins.example.lan https://*.example.com"`. They are added to
+  `script-src`, `connect-src` (manifest, CSS) and `img-src` (icons). Anything that is not an origin
+  (`scheme://host[:port]`) stops the container at start (`docker/19-spicy3d-plugin-origins.sh`).
+- `absolute_redirect off`: a redirect (a folder without its trailing slash) keeps the address the
+  browser used, not nginx's own port behind the proxy.
 
 To change `deployment.json` or add the bridge executables, mount them (SpicySrv
 `deploy/docker-compose.override.yml`):
@@ -81,6 +99,8 @@ To change `deployment.json` or add the bridge executables, mount them (SpicySrv
 ```yaml
 services:
   web:
+    environment:
+      SPICY3D_PLUGIN_ORIGINS: https://plugins.example.lan   # optional, see above
     volumes:
       - ./web/deployment.json:/usr/share/nginx/html/deployment.json:ro
       - ./web/mcp-bridge:/usr/share/nginx/html/downloads/mcp-bridge/bin:ro   # the release's spicy3d-mcp-bridge-* files
@@ -95,7 +115,8 @@ services:
    server refuses a non-loopback `http://` `SPICY_PUBLIC_URL` for that reason). Opened that way, the
    app shows a banner saying HTTPS is required and keeps working locally.
 2. Move the images with `docker save` / `docker load` (SpicySrv `deploy/README.md`).
-3. MCP bridge: put the release's executables next to the app and point `mcpBridge.downloadUrl` at
+3. MCP bridge: put the release's executables (with their `spicy3d-mcp-bridge-LICENSE.txt` and
+   `-THIRD-PARTY-NOTICES.txt`) next to the app and point `mcpBridge.downloadUrl` at
    them (above). The Node.js alternative works too: the page's `npx` command fetches the bridge
    tarball the app serves at `downloads/mcp-bridge/spicy3d-mcp-bridge-<version>.tgz`, which bundles
    its dependencies, so npx needs no npm registry (it needs Node.js 20+ on the machine;

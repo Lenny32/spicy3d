@@ -42,7 +42,7 @@ to `downloads/mcp-bridge/` — SpicySrv's Caddy sends `/mcp/*` to the API, so it
 gains `--allow-remote=all`, without which npm 12 refuses any package from a URL. Found on the way: the
 macro plugin loaded ace from jsDelivr (offline: an alert on every start) — now bundled; SpicySrv's
 default CSP stops the app at startup (embind's `new Function` needs `'unsafe-eval'`), so the image
-sends its own (`docker/nginx.conf`), which the smoke test reads. The image is
+sends its own (`docker/default.conf.template`), which the smoke test reads. The image is
 `nginxinc/nginx-unprivileged` on 8080, non-root, read-only-safe; workflow **Web image** builds, tests
 and exports/pushes it. `SPICY3D_API_URL=… npm run dev` proxies `/api/*`, `/ws/*` (not `/ws`, the
 dev server's live reload) and `/mcp*`. Verified live: the dev proxy against a local SpicySrv copy
