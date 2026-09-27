@@ -3,7 +3,11 @@
 
 // Bundled, not from a CDN: the editor must work on a LAN without internet access and under the
 // server's `script-src 'self'` policy. The mode and themes register themselves on import.
-import ace from "ace-builds";
+// Imported for its side effect only and used through the global: ace's modules call the global
+// `ace.define`, and a module-level binding (`const ace = __webpack_require__(...)` in the plugin's
+// ESM output) would shadow it while still uninitialized — "can't access lexical declaration 'ace'".
+import "ace-builds";
+import type * as AceBuilds from "ace-builds";
 import "ace-builds/src-noconflict/mode-javascript";
 import "ace-builds/src-noconflict/theme-dracula";
 import "ace-builds/src-noconflict/theme-xcode";
@@ -20,6 +24,10 @@ import { div, input, label } from "@spicy3d/element";
 import style from "./macro.module.css";
 import { runMacro } from "./macroRunner";
 import type { MacroDefinition, MacroStorage } from "./macroStorage";
+
+function aceGlobal(): typeof AceBuilds {
+    return (globalThis as unknown as { ace: typeof AceBuilds }).ace;
+}
 
 const DefaultCode = `// Available variables:
 // app - IApplication instance
@@ -82,7 +90,7 @@ export class MacroEditor extends HTMLElement {
     }
 
     private embeddingEditor() {
-        this.editor = ace.edit(this.codeTextarea!, {
+        this.editor = aceGlobal().edit(this.codeTextarea!, {
             mode: "ace/mode/javascript",
             selectionStyle: "text",
             // The syntax-check worker would be loaded from ace's basePath (a separate file).
