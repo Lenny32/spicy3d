@@ -9,7 +9,6 @@ export * from "./eventHandler";
 export * from "./highlighter";
 export * from "./meshExporter";
 export * from "./nullVisual";
-export * from "./textGenerator";
 export * from "./view";
 export * from "./viewGizmo";
 export * from "./viewport";
