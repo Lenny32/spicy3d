@@ -49,9 +49,14 @@ answer retried as one version, and the first box for real — the server process
 (auto, manual, auto), a reload while it was down (cached config and user, the pending snapshot
 reopened), restarted → one `manual` version on the pre-stop head. Not run in a browser: IndexedDB
 (the fake's `get`→`put` in one transaction relies on promise microtasks keeping it active, as modern
-browsers do), `navigator.storage.persist()`, the status pill and the home badges. The merge result
-is not validated with the kernel (`validateMerge`, CLOUD-13's panel); `settings.updated` events are
-not used yet (the settings still refetch on focus / `online`).
+browsers do), `navigator.storage.persist()`, the status pill and the home badges. Before a clean
+merge is pushed it is rebuilt with the app's `IMergeEvaluator` (`validateMerge`): rebuild failures
+the merge introduced put the document in `conflict` (CLOUD-13 shows them); without an evaluator the
+merge is pushed unvalidated and logged. `settings.updated` events are not used yet (the settings
+still refetch on focus / `online`). After the review: push attempts are persisted with every field
+the server's idempotency hash covers, and the fault injection also reloads the tab (new client id),
+makes both devices change one variable (conflicts resolved keeping mine), leaves edits unsaved,
+fails saves on a full disk and evicts under a tiny cache cap — 200 seeded runs converged.
 
 ## Dependencies and complexity
 
