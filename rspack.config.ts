@@ -33,7 +33,7 @@ export default defineConfig({
     },
     devServer: {
         // Account email links point at app routes (`/verify-email?…`, `/reset-password?…`,
-        // `/confirm-email-change?…`); like docker/nginx.conf, they serve the app.
+        // `/confirm-email-change?…`); like docker/default.conf.template, they serve the app.
         historyApiFallback: {
             rewrites: [
                 { from: /^\/(verify-email|reset-password|confirm-email-change)\/?$/, to: "/index.html" },
@@ -46,9 +46,9 @@ export default defineConfig({
                     target: apiUrl,
                     // WebSockets too: /ws/events (sync), /ws/mcp-page (remote MCP).
                     ws: true,
-                    // Rewrites Host only; the browser's Origin (the dev server) passes unchanged, which
-                    // is what the server compares with Spicy__PublicUrl.
-                    changeOrigin: true,
+                    // Host and Origin pass unchanged (the dev server's), as behind SpicySrv's Caddy: the
+                    // server compares Origin with Spicy__PublicUrl, and a Host rewritten to the target
+                    // (changeOrigin) would trip its host filtering for e.g. http://127.0.0.1:5080.
                 },
             ],
         }),

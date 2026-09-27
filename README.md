@@ -83,7 +83,9 @@ SPICY3D_API_URL=http://localhost:5080 npm run dev
   every request is 401. For other devices use the server's compose stack with TLS (`SPICY_TLS=internal`).
 - With the Aspire AppHost (`aspire run` in SpicySrv, adds smtp4dev for email), change its `Spicy__PublicUrl` line in
   `src/Spicy.AppHost/AppHost.cs` to the dev server's origin and point `SPICY3D_API_URL` at the API endpoint it prints.
-- Without `SPICY3D_API_URL` nothing is proxied and the app stays local-only.
+- `SPICY3D_API_URL` is the API's own address (scheme, host, port; e.g. `http://localhost:5080` or
+  `http://127.0.0.1:5080`), read when the dev server starts. The browser's `Host` and `Origin` (the dev server's) are
+  passed on unchanged, as SpicySrv's proxy does. Without it nothing is proxied and the app stays local-only.
 
 ### Deployment
 
