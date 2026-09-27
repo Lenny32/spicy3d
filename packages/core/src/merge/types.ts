@@ -140,6 +140,10 @@ export interface MergeResult {
     readonly changes: readonly Change[];
     /** The inputs, migrated: `resolveMerge` / `applyResolutions` re-merge from them with the user's choices. */
     readonly inputs: MergeInputs;
+    /** The user's choices this result applies (a later `resolveMerge` keeps them, adding its own). */
+    readonly resolutions: readonly MergeResolution[];
+    /** The conflicts those choices answered (no longer in `conflicts`, still resolvable again by path). */
+    readonly resolved: readonly MergeConflict[];
 }
 
 // ------------------------------------------------------------------ Paths

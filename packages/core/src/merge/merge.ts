@@ -83,16 +83,27 @@ export function resolveMerge(
     choices: readonly MergeResolution[],
     rules: MergeRuleRegistry = MergeRules,
 ): Result<MergeResult, MergeError> {
-    const byPath = new Map<string, ResolutionChoice>();
+    // the choices applied before stay (a later one for the same path replaces it); a choice may
+    // answer a conflict still open or one answered before
+    const byPath = new Map<string, ResolutionChoice>(result.resolutions.map((r) => [r.path, r.choice]));
+    const known = [...result.conflicts, ...result.resolved];
     for (const { path, choice } of choices) {
-        const conflict = result.conflicts.find((c) => c.path === path);
+        const conflict = known.find((c) => c.path === path);
         if (conflict === undefined) return Result.err({ kind: "unknownConflict", path });
         if (!conflict.choices.includes(choice)) return Result.err({ kind: "invalidChoice", path, choice });
         byPath.set(path, choice);
     }
     const merged = runMerge(result.inputs, rules, byPath);
     const rebuilds = result.conflicts.filter((c) => c.kind === "rebuild-failure" && !byPath.has(c.path));
-    return Result.ok({ ...merged, conflicts: [...merged.conflicts, ...rebuilds] });
+    const resolved = new Map(result.resolved.map((c) => [c.path, c]));
+    for (const conflict of [...known, ...merged.resolved]) {
+        if (byPath.has(conflict.path) && !resolved.has(conflict.path)) resolved.set(conflict.path, conflict);
+    }
+    return Result.ok({
+        ...merged,
+        conflicts: [...merged.conflicts, ...rebuilds],
+        resolved: [...resolved.values()],
+    });
 }
 
 /** The merged document with the user's choices applied (see {@link resolveMerge}). */
@@ -318,6 +329,8 @@ function runMerge(
     let merge: StructuralMerge;
     let finalized: Finalized;
     let dangling: PendingConflict[];
+    /** Conflicts the choices answer, as first detected (their paths stay resolvable). */
+    const answered = new Map<string, MergeConflict>();
     for (let round = 0; ; round++) {
         merge = new StructuralMerge(views, rules, choices, forces);
         structural = merge.run();
@@ -330,6 +343,14 @@ function runMerge(
         );
         const found = integrity(mergedView, views, sideRefs, rules, names, merge.eq, round);
         dangling = found.dangling;
+        for (const pending of [
+            ...structural.conflicts,
+            ...dangling,
+            ...found.duplicates.map((d) => d.pending),
+        ]) {
+            const path = pending.conflict.path;
+            if (choices.has(path) && !answered.has(path)) answered.set(path, pending.conflict);
+        }
         let again = false;
         for (const record of found.danglingRecords) {
             const choice = choices.get(record.path);
@@ -380,7 +401,8 @@ function runMerge(
     const conflicts: MergeConflict[] = keyed.map((x) => x.pending.conflict);
     const merged = serializeMerged(finalized.document, merge.eq);
     const changes = diffViews(views.ours, new DocumentView("merged", merged, rules), rules);
-    return { merged, conflicts, changes, inputs };
+    const resolutions = [...choices].map(([path, choice]) => ({ path, choice }));
+    return { merged, conflicts, changes, inputs, resolutions, resolved: [...answered.values()] };
 }
 
 interface IntegrityFindings {

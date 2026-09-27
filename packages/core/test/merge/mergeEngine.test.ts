@@ -10,6 +10,7 @@ import {
     mergeDocuments,
     mergeOrder,
     NODE_PROPERTIES,
+    resolveMerge,
     type Serialized,
     sha256Hex,
     sha256HexSync,
@@ -241,5 +242,65 @@ describe("diffDocuments", () => {
         expect(
             diffDocuments(gadgetDocument({}), renamed, rules).value.map((c) => [c.kind, c.path, c.args]),
         ).toEqual([["renamed", "node/g/prop/name", ["Gadget", "Widget"]]]);
+    });
+});
+
+// ------------------------------------------------------------------ Trees and chained resolutions
+
+function tree(nodes: [string, string?][]): Serialized {
+    return {
+        __cla$$__: "Document",
+        formatVersion: 1,
+        moduleVersions: {},
+        id: "tree",
+        name: "Tree",
+        models: {
+            nodes: nodes.map(([id, parentId]) => ({
+                __cla$$__: "FolderNode",
+                id,
+                name: id,
+                visible: true,
+                ...(parentId ? { parentId } : {}),
+            })),
+            materials: [],
+            components: [],
+        },
+        variables: [],
+        settings: {},
+        acts: [],
+        userData: {},
+    } as unknown as Serialized;
+}
+
+const shape = (doc: Serialized) =>
+    (doc["models"].nodes as { id: string; parentId?: string }[]).map((n) => `${n.id}<${n.parentId ?? ""}`);
+
+describe("tree edge cases", () => {
+    const base = tree([["root"], ["Y", "root"], ["X", "root"], ["A", "root"]]);
+    const ours = tree([["root"], ["A", "root"], ["X", "A"], ["Y", "X"]]);
+    const theirs = tree([["root"], ["Y", "root"], ["X", "Y"], ["A", "root"]]);
+
+    test("a resolution that closes a cycle breaks it once, with one conflict, losing nothing", () => {
+        const merged = mergeDocuments(base, ours, theirs).value;
+        expect(merged.conflicts.map((c) => c.path)).toEqual(["node/X/parent"]);
+        const resolved = resolveMerge(merged, [{ path: "node/X/parent", choice: "theirs" }]).value;
+        expect(shape(resolved.merged)).toEqual(["root<", "Y<root", "X<Y", "A<root"]);
+        expect(resolved.conflicts.map((c) => [c.kind, c.path])).toEqual([["cycle", "node/Y/parent"]]);
+    });
+
+    test("choices applied before are kept: resolving the new conflict does not revert the first", () => {
+        const first = resolveMerge(mergeDocuments(base, ours, theirs).value, [
+            { path: "node/X/parent", choice: "theirs" },
+        ]).value;
+        const second = resolveMerge(first, [{ path: "node/Y/parent", choice: "ours" }]);
+        expect(second.isOk).toBe(true);
+        expect(shape(second.value.merged)).toEqual(["root<", "Y<root", "X<Y", "A<root"]);
+        expect(second.value.resolutions).toEqual([
+            { path: "node/X/parent", choice: "theirs" },
+            { path: "node/Y/parent", choice: "ours" },
+        ]);
+        // an answered conflict can be answered again
+        const back = resolveMerge(second.value, [{ path: "node/X/parent", choice: "ours" }]).value;
+        expect(shape(back.merged)).toEqual(shape(mergeDocuments(base, ours, theirs).value.merged));
     });
 });
