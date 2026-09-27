@@ -59,6 +59,16 @@ describe("NodeListDiffer (placeholder until CLOUD-12)", () => {
         ]);
     });
 
+    test("a node renamed and changed is reported as both", () => {
+        const before = documentWith([node("a", "Box 1", { dx: 10 })]);
+        const after = documentWith([node("a", "Base", { dx: 20 })]);
+
+        expect(summary(new NodeListDiffer().diff(before, after))).toEqual([
+            ["renamed", "a", "diff.renamed{0}{1}", "Box 1", "Base"],
+            ["modified", "a", "diff.modified{0}", "Base"],
+        ]);
+    });
+
     test("key order of a node's fields is not a change; the root node is never reported", () => {
         const before = documentWith([
             { visible: true, parentId: "root", name: "Box 1", id: "a", __cla$$__: "BoxNode", dx: 1 },

@@ -72,20 +72,24 @@ export class NodeListDiffer implements IDocumentDiffer {
             const previous = old.get(node.id);
             if (!previous) {
                 changes.push({ kind: "added", target: node.id, message: "diff.added{0}", args: [name] });
-            } else if ((previous.name ?? "") !== (node.name ?? "")) {
-                changes.push({
-                    kind: "renamed",
-                    target: node.id,
-                    message: "diff.renamed{0}{1}",
-                    args: [previous.name ?? "", name],
-                });
-            } else if (contentOf(previous) !== contentOf(node)) {
-                changes.push({
-                    kind: "modified",
-                    target: node.id,
-                    message: "diff.modified{0}",
-                    args: [name],
-                });
+            } else {
+                // A rename and a change of the same node are both reported.
+                if ((previous.name ?? "") !== (node.name ?? "")) {
+                    changes.push({
+                        kind: "renamed",
+                        target: node.id,
+                        message: "diff.renamed{0}{1}",
+                        args: [previous.name ?? "", name],
+                    });
+                }
+                if (contentOf(previous) !== contentOf(node)) {
+                    changes.push({
+                        kind: "modified",
+                        target: node.id,
+                        message: "diff.modified{0}",
+                        args: [name],
+                    });
+                }
             }
         }
         for (const [id, node] of old) {
