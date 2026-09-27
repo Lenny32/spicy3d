@@ -52,6 +52,25 @@ Flags win over environment variables.
 | `-t, --token <secret>` | `SPICY3D_BRIDGE_TOKEN` | random | Pairing token from the MCP panel. Prefer the environment variable, which stays out of the process list |
 | `--no-token` | `SPICY3D_BRIDGE_NO_TOKEN=1` | off | Accept the page without a token (see Security) |
 | `--allow-origin <url>` | `SPICY3D_ALLOWED_ORIGINS` (comma-separated) | — | Also accept pages from these origins |
+| `-s, --server <url>` | `SPICY3D_SERVER` | — | Server mode, see below |
+
+## Server mode
+
+When Spicy3D runs with a server that has remote MCP on (`/api/config.features.mcp`), MCP clients connect to the server directly (`https://<server>/mcp`, Streamable HTTP, a personal access token), and the server passes the calls to your signed-in tab: no bridge needed. For clients that can only start local programs, the bridge relays to that endpoint instead:
+
+```json
+{
+    "mcpServers": {
+        "spicy3d": {
+            "command": "/path/to/spicy3d-mcp-bridge",
+            "args": ["--server", "https://spicy.lan"],
+            "env": { "SPICY3D_TOKEN": "spicy_pat_…" }
+        }
+    }
+}
+```
+
+The MCP panel (*Through the server*) and the last step of *Create access token* show this block filled in. The token comes from `SPICY3D_TOKEN` (`--token` works too but shows in the process list); `--server` takes the server's address or its `/mcp` endpoint and cannot be combined with the local flags. No port is opened. A session the server dropped (restart, idle expiry) is re-created silently; a revoked or expired token fails calls with a message saying so. With an internal CA, set `NODE_EXTRA_CA_CERTS=<ca.pem>`.
 
 ## Browsers
 
