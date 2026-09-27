@@ -79,3 +79,30 @@ describe("parseOptions", () => {
         expect(() => parseOptions(argv, {})).toThrow(message);
     });
 });
+
+describe("parseOptions --server", () => {
+    test("relays to the server's /mcp with the token from SPICY3D_TOKEN", () => {
+        const options = parseOptions(["--server", "https://spicy.lan"], { SPICY3D_TOKEN: " spicy_pat_x " });
+
+        expect(options.server).toBe("https://spicy.lan/mcp");
+        expect(options.serverToken).toBe("spicy_pat_x");
+    });
+
+    test("takes the server from SPICY3D_SERVER too", () => {
+        const options = parseOptions([], { SPICY3D_SERVER: "https://spicy.lan/mcp", SPICY3D_TOKEN: "t" });
+        expect(options.server).toBe("https://spicy.lan/mcp");
+    });
+
+    test("the local bridge has no server", () => {
+        expect(parseOptions([], { SPICY3D_TOKEN: "t" }).server).toBeUndefined();
+    });
+
+    test.each([
+        [["--server", "https://spicy.lan"], {}, "SPICY3D_TOKEN"],
+        [["--server", "https://spicy.lan", "--port", "9000"], { SPICY3D_TOKEN: "t" }, "--port"],
+        [["--server", "https://spicy.lan", "--no-token"], { SPICY3D_TOKEN: "t" }, "--no-token"],
+        [["--server", "ftp://spicy.lan"], { SPICY3D_TOKEN: "t" }, "http(s)"],
+    ])("rejects %j", (argv, env, message) => {
+        expect(() => parseOptions(argv, env as Record<string, string>)).toThrow(message);
+    });
+});
