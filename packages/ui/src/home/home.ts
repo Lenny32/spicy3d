@@ -415,6 +415,17 @@ export class Home extends HTMLElement {
         if (item.location === "cloud") {
             title.append(span({ className: style.badge, textContent: I18n.translate("home.badge.cloud") }));
         }
+        if (item.syncState && item.syncState !== "synced") {
+            // Saved on this device only (the sync pushes it), or waiting for the user to merge.
+            const badge = span({
+                className: style.badge,
+                textContent: I18n.translate(
+                    item.syncState === "conflict" ? "home.sync.conflict" : "home.sync.pending",
+                ),
+            });
+            badge.dataset["sync"] = item.syncState;
+            title.append(badge);
+        }
         return div({ className: style.description }, title, div({ className: style.details }, ...details));
     }
 

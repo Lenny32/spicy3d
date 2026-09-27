@@ -386,6 +386,16 @@
                             line-height: 16px;
                             color: var(--primary-color);
                             background-color: color-mix(in srgb, var(--primary-color) 12%, transparent);
+
+                            &[data-sync] {
+                                color: var(--warning-color);
+                                background-color: color-mix(in srgb, var(--warning-color) 12%, transparent);
+                            }
+
+                            &[data-sync="conflict"] {
+                                color: var(--error-color);
+                                background-color: color-mix(in srgb, var(--error-color) 12%, transparent);
+                            }
                         }
 
                         & .details {

@@ -28,6 +28,8 @@ class TrashRepository extends MemoryDocumentRepository {
     readonly trash = new Map<string, SaveRequest>();
     readonly queries: DocumentListQuery[] = [];
     readonly trashRetentionDays = 30;
+    /** What the offline sync reports per document (CLOUD-10). */
+    readonly syncStates = new Map<string, DocumentMeta["syncState"]>();
 
     constructor() {
         super("cloud");
@@ -43,6 +45,7 @@ class TrashRepository extends MemoryDocumentRepository {
                 ...x,
                 updatedAt: UPDATED_AT,
                 sizeBytes: 1_500_000,
+                ...(this.syncStates.has(x.id) ? { syncState: this.syncStates.get(x.id) } : {}),
             })),
         });
     }
@@ -158,6 +161,27 @@ describe("home with the cloud", () => {
         const [localCard] = cards("local");
         expect(localCard.textContent).not.toContain("home.badge.cloud");
         expect(localCard.querySelector("[data-relative-time]")).toBeNull();
+    });
+
+    test.each([
+        ["pending", "home.sync.pending"],
+        ["offline", "home.sync.pending"],
+        ["conflict", "home.sync.conflict"],
+    ] as const)("a document the sync reports %s has a badge", async (state, label) => {
+        cloud.syncStates.set("c1", state);
+        await render();
+
+        const badge = cards("cloud")[0].querySelector<HTMLElement>("[data-sync]");
+        expect(badge).not.toBeNull();
+        expect(badge!.dataset["sync"]).toBe(state);
+        expect(badge!.textContent).toBe(label);
+    });
+
+    test("a synced document has no sync badge", async () => {
+        cloud.syncStates.set("c1", "synced");
+        await render();
+
+        expect(cards("cloud")[0].querySelector("[data-sync]")).toBeNull();
     });
 
     test("local documents keep their absolute date and time", async () => {
