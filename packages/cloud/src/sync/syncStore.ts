@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Logger, type SaveKind } from "@spicy3d/core";
+import { combineSaves, Logger, type SaveKind } from "@spicy3d/core";
 import { idbRequest, openCloudCacheDb, SYNC_STORE } from "../documents/blobCache";
 
 /** The kinds a pending local save pushes as: `merge` once a merge was applied on top of the base. */
@@ -201,14 +201,25 @@ export function defaultSyncStore(): ISyncStore {
     return globalThis.indexedDB ? new IndexedDbSyncStore() : new MemorySyncStore();
 }
 
-/** The kind a pending save pushes as once `next` joins `pending` (manual wins, a merge stays one). */
+/** The kind a pending save pushes as once `next` joins `pending` (see {@link combinePending}). */
 export function combineKinds(pending: PendingKind | undefined, next: SaveKind): PendingKind {
+    return combinePending(pending, undefined, next, undefined).kind;
+}
+
+/**
+ * The kind and label of a pending push once a save (`next`, `nextLabel`) joins it: core's
+ * `combineSaves` (a merge stays one, manual wins, else the latest save's kind; a label only with its
+ * own kind), a restore counting as manual.
+ */
+export function combinePending(
+    pending: PendingKind | undefined,
+    pendingLabel: string | undefined,
+    next: SaveKind,
+    nextLabel: string | undefined,
+): { kind: PendingKind; label?: string } {
     const kind: PendingKind = next === "restore" ? "manual" : next;
-    if (!pending) return kind;
-    if (pending === "merge" || kind === "merge") return "merge";
-    if (pending === "manual" || kind === "manual") return "manual";
-    if (pending === "mcp" || kind === "mcp") return "mcp";
-    return "auto";
+    const previous = pending ? { kind: pending, label: pendingLabel } : undefined;
+    return combineSaves(previous, { kind, label: nextLabel }) as { kind: PendingKind; label?: string };
 }
 
 /**

@@ -427,6 +427,24 @@ describe("RelayTransport", () => {
         expect(delivered.map((m) => m.id)).toEqual(["s1", "s2", "s3"]);
     });
 
+    test.each([
+        "spicy3d_open_document",
+        "spicy3d_new_document",
+        "spicy3d_save",
+    ])("the cloud tool %s waits for the pairing prompt like any other tool", async (name) => {
+        const { receive, delivered, sent, asked, answer } = setup();
+        receive(call("s1", name));
+        await settle();
+        expect(asked.map((a) => a.id)).toEqual(["a1"]);
+        expect(delivered).toEqual([]);
+
+        answer("deny");
+        await settle();
+
+        expect(delivered).toEqual([]);
+        expect(sent.map((m) => [m.id, m.error?.code])).toEqual([["s1", PAIRING_DENIED]]);
+    });
+
     test("Deny answers every call of that session with an error and never runs a tool", async () => {
         const { receive, delivered, sent, answer } = setup();
         receive(call("s1", "extrude"));

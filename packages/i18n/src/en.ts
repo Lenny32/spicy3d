@@ -578,7 +578,8 @@ export default {
         "account.token.scopes": "Permissions",
         "account.token.scope.mcpRead": "Read the open model and take screenshots (mcp:read)",
         "account.token.scope.mcpWrite": "Edit the open model (mcp:write)",
-        "account.token.scope.documentsRead": "Read cloud documents and their history (documents:read)",
+        "account.token.scope.documentsRead":
+            "Let agents list documents and history (also grants read access to all document content) (documents:read)",
         "account.token.expiry": "Expires",
         "account.token.expiry.days{0}": "In {0} days",
         "account.token.expiry.never": "Never",
@@ -842,6 +843,11 @@ export default {
             "Needs Node.js 20 or newer (nodejs.org). npx downloads the bridge from this site the first time the agent starts it.",
         "mcp.offlineHint":
             "Bridge not reachable. Check that your agent has started it and that its port and token match the settings below. Retrying…",
+        "mcp.open.hint": "The document with the unsaved changes stays open in its own view tab either way.",
+        "mcp.open.keep": "Open, keep unsaved",
+        "mcp.open.question{0}{1}": "An agent wants to open “{0}”. “{1}” has unsaved changes.",
+        "mcp.open.save": "Save and open",
+        "mcp.open.title": "Open another document?",
         "mcp.pairing.allow": "Allow",
         "mcp.pairing.client{0}": "The client calls itself “{0}” (not verified).",
         "mcp.pairing.deny": "Deny",

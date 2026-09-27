@@ -45,7 +45,13 @@ interface Seen {
 }
 
 /** A minimal Streamable HTTP server: sessions, JSON or SSE answers, and a switch to expire them. */
-function fakeServer(options: { answerAs?: "json" | "sse"; status?: number } = {}) {
+function fakeServer(
+    options: {
+        answerAs?: "json" | "sse";
+        status?: number;
+        answerFor?: (body: Message) => Message | undefined;
+    } = {},
+) {
     const seen: Seen[] = [];
     const sessions = new Set<string>();
     let next = 0;
@@ -86,7 +92,11 @@ function fakeServer(options: { answerAs?: "json" | "sse"; status?: number } = {}
         }
         if (!session || !sessions.has(session)) return new Response(null, { status: 404 });
         if (body?.id === undefined || body.method === undefined) return new Response(null, { status: 202 });
-        const answer = { jsonrpc: "2.0", id: body.id, result: { echo: body.method } };
+        const answer = options.answerFor?.(body) ?? {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: { echo: body.method },
+        };
         return options.answerAs === "json"
             ? new Response(JSON.stringify(answer), {
                   status: 200,
@@ -221,6 +231,33 @@ describe("RemoteProxy", () => {
 
         expect(toClient.map((m) => m.id)).toEqual([0, 1]);
         expect(toClient[1].result).toEqual({ echo: "tools/call" });
+    });
+
+    test("the relay's no-tab error for a tab tool reaches the client as is", async () => {
+        // SpicySrv McpRelay.NoTab(): a tab tool (spicy3d_open_document…) called with no tab connected.
+        const noTab = {
+            code: -32000,
+            message:
+                "No Spicy3D tab is connected. Ask the user to open https://spicy.lan in their browser and sign in with the account this access token belongs to; the Spicy3D tools then appear in the tool list.",
+        };
+        const { proxy, toClient } = setup(
+            fakeServer({
+                answerFor: (body) =>
+                    body.method === "tools/call" ? { jsonrpc: "2.0", id: body.id, error: noTab } : undefined,
+            }),
+        );
+        proxy.handleClientMessage(INIT);
+        proxy.handleClientMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "spicy3d_open_document", arguments: { id: "doc-1" } },
+        });
+        await settle();
+
+        const answer = toClient.find((m) => m.id === 1);
+        expect(answer?.error).toEqual(noTab);
+        expect(answer?.result).toBeUndefined();
     });
 
     test("a session the server lost is re-created silently and the call retried once", async () => {

@@ -45,7 +45,7 @@ import type {
 } from "../documents/repository";
 import type { CloudEvent, EventsChannel } from "./events";
 import {
-    combineKinds,
+    combinePending,
     type ISyncStore,
     type LocalSnapshot,
     type PushAttempt,
@@ -656,11 +656,18 @@ export class SyncEngine implements IRepositorySync {
             record.localDirty = true;
             // An attempt made (maybe in flight): this save is the next push's.
             if (record.attempt) {
-                record.nextKind = combineKinds(record.nextKind, request.kind);
-                if (request.label) record.nextLabel = request.label;
+                const next = combinePending(record.nextKind, record.nextLabel, request.kind, request.label);
+                record.nextKind = next.kind;
+                record.nextLabel = next.label;
             } else {
-                record.pendingKind = combineKinds(record.pendingKind, request.kind);
-                if (request.label) record.pendingLabel = request.label;
+                const next = combinePending(
+                    record.pendingKind,
+                    record.pendingLabel,
+                    request.kind,
+                    request.label,
+                );
+                record.pendingKind = next.kind;
+                record.pendingLabel = next.label;
             }
             record.pendingSince ??= now;
             record.clientId = this.repository.clientId;
@@ -977,8 +984,16 @@ export class SyncEngine implements IRepositorySync {
 
     /** The kinds and label of the saves made since the attempt join the pending ones; no attempt. */
     private fold(record: SyncRecord) {
-        if (record.nextKind) record.pendingKind = combineKinds(record.pendingKind, record.nextKind);
-        if (record.nextLabel) record.pendingLabel = record.nextLabel;
+        if (record.nextKind) {
+            const next = combinePending(
+                record.pendingKind,
+                record.pendingLabel,
+                record.nextKind,
+                record.nextLabel,
+            );
+            record.pendingKind = next.kind;
+            record.pendingLabel = next.label;
+        }
         record.nextKind = undefined;
         record.nextLabel = undefined;
         record.attempt = undefined;

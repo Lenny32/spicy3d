@@ -39,7 +39,8 @@ export interface IApplication extends IPropertyChanged {
     lastCommand: CommandKeys | undefined;
     executingCommand: ICommand | undefined;
     activeView: IView | undefined;
-    newDocument(name: string): Promise<IDocument>;
+    /** A new, empty document; it saves to `repository` (default: `repositories.forNewDocuments()`). */
+    newDocument(name: string, repository?: IDocumentRepository): Promise<IDocument>;
     /** Opens a stored document; `repository` defaults to the local one. */
     openDocument(id: string, repository?: IDocumentRepository): Promise<IDocument | undefined>;
     /** Opens serialized data (e.g. a `.spicy` file); the document then saves to `source.repository`. */

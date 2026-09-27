@@ -5,6 +5,7 @@ import {
     type Act,
     AnalysisManager,
     type CloseDocumentOptions,
+    combineSaves,
     DOCUMENT_FORMAT_VERSION,
     type DocumentFormatError,
     DocumentMigrations,
@@ -33,6 +34,7 @@ import {
     repositoryErrorMessage,
     type SaveConflict,
     type SaveKind,
+    type SaveOptions,
     type SaveOutcome,
     type Serialized,
     Serializer,
@@ -44,6 +46,12 @@ import { registerPrerequisiteInspectAnalyses } from "./analysis/prerequisites";
 import { Picker } from "./picker";
 import { askToSaveChanges } from "./saveChangesPrompt";
 import { SelectionManager } from "./selectionManager";
+
+interface FollowUpSave {
+    kind: SaveKind;
+    label?: string;
+    promise: Promise<Result<SaveOutcome, DocumentRepositoryError>>;
+}
 
 export class Document extends Observable implements IDocument {
     readonly analyses: AnalysisManager;
@@ -167,21 +175,28 @@ export class Document extends Observable implements IDocument {
     /**
      * Saves one at a time: a save requested while one runs waits for it (its base version is the
      * one that save produces, so the two never conflict with each other), and every request made
-     * meanwhile shares that single follow-up save — manual if any of them was.
+     * meanwhile shares that single follow-up save, its kind and label combined by `combineSaves`
+     * (manual wins, else the latest request's kind; a label only with the kind it was given for).
      */
-    save(kind: SaveKind = "manual"): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+    save(
+        kind: SaveKind = "manual",
+        options: SaveOptions = {},
+    ): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         if (this.followUp) {
-            if (kind === "manual") this.followUp.kind = "manual";
+            const combined = combineSaves(this.followUp, { kind, label: options.label });
+            this.followUp.kind = combined.kind;
+            this.followUp.label = combined.label;
             return this.followUp.promise;
         }
-        if (!this.running) return this.startSave(kind);
-        const followUp = {
+        if (!this.running) return this.startSave(kind, options.label);
+        const followUp: FollowUpSave = {
             kind,
+            label: options.label,
             promise: undefined as unknown as Promise<Result<SaveOutcome, DocumentRepositoryError>>,
         };
         followUp.promise = this.running.then(() => {
             this.followUp = undefined;
-            return this.startSave(followUp.kind);
+            return this.startSave(followUp.kind, followUp.label);
         });
         this.followUp = followUp;
         return followUp.promise;
@@ -193,10 +208,10 @@ export class Document extends Observable implements IDocument {
     }
 
     private running?: Promise<unknown>;
-    private followUp?: { kind: SaveKind; promise: Promise<Result<SaveOutcome, DocumentRepositoryError>> };
+    private followUp?: FollowUpSave;
 
-    private startSave(kind: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
-        const promise = this.saveNow(kind);
+    private startSave(kind: SaveKind, label?: string): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        const promise = this.saveNow(kind, label);
         const running = promise.finally(() => {
             if (this.running === running) this.running = undefined;
         });
@@ -204,7 +219,10 @@ export class Document extends Observable implements IDocument {
         return promise;
     }
 
-    private async saveNow(kind: SaveKind): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+    private async saveNow(
+        kind: SaveKind,
+        label?: string,
+    ): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         // A save queued behind the one made while closing: the document is gone (disposed, its
         // models cleared), and serializing it now would store an empty document over the real one.
         if (this.closing || this._isDisposed) {
@@ -218,6 +236,7 @@ export class Document extends Observable implements IDocument {
             kind,
             thumbnail: this.ownView()?.toImage(),
             baseVersion: this.version,
+            ...(label && { label }),
         });
         if (result.isOk && result.value.status === "saved") {
             this.version = result.value.version ?? this.version;
