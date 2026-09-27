@@ -130,6 +130,18 @@ registerMergePayload("parametric.features", {
                         consumeTools: scalar,
                     },
                 },
+                emboss: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        sketchId: nodeRef,
+                        profiles,
+                        faces: profiles,
+                        depth: expression,
+                        deboss: scalar,
+                    },
+                    groups: { input: ["sketchId", "profiles"] },
+                },
             },
             fallback: { kind: "object", fields: featureBase, rest: atomic },
         },
@@ -211,6 +223,26 @@ registerMergePayload("sketch.data", {
                     },
                 },
             },
+            texts: {
+                kind: "list",
+                key: "id",
+                order: "stable",
+                segment: "text",
+                item: {
+                    kind: "object",
+                    fields: {
+                        id: scalar,
+                        value: scalar,
+                        x: scalar,
+                        y: scalar,
+                        height: scalar,
+                        angle: scalar,
+                        font: scalar,
+                    },
+                    // the start point is one placement: moved as a whole
+                    groups: { position: ["x", "y"] },
+                },
+            },
             refPositions: {
                 kind: "map",
                 segment: "refPosition",
@@ -222,8 +254,8 @@ registerMergePayload("sketch.data", {
     },
     normalize: normalizeSketchData,
     note:
-        "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
-        "references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` " +
+        "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors, external " +
+        "references and texts are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` " +
         "one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, " +
         "`dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min.",
 });

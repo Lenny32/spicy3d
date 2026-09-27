@@ -36,7 +36,8 @@ export type FeatureData =
     | RevolveFeatureData
     | FilletFeatureData
     | ChamferFeatureData
-    | BooleanFeatureData;
+    | BooleanFeatureData
+    | EmbossFeatureData;
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";
@@ -120,6 +121,29 @@ export interface BooleanFeatureData extends FeatureBase {
      * the scene, still listed and editable under the body in the model tree.
      */
     readonly consumeTools?: boolean;
+}
+
+/**
+ * Emboss / deboss (`emboss.ts`): the sketch's profiles projected along the sketch normal onto
+ * faces of the body, raised (or recessed) by `depth` along the face — follows curved faces.
+ */
+export interface EmbossFeatureData extends FeatureBase {
+    readonly type: "emboss";
+    readonly sketchId: string;
+    /**
+     * Fingerprints of the sketch profiles to emboss (`profileRef.ts`); undefined or empty
+     * embosses every closed outer profile of the sketch (holes included, e.g. text).
+     */
+    readonly profiles?: ProfileRef[];
+    /**
+     * Faces of the host body's input the profiles are projected onto, as press-pull style
+     * face refs captured in world coordinates with the face's tracked id.
+     */
+    readonly faces: ProfileRef[];
+    /** Relief height (emboss) or recess depth (deboss), along the face normal. */
+    readonly depth: ParameterValue;
+    /** When true the region is recessed into the body instead of raised. */
+    readonly deboss?: boolean;
 }
 
 /**

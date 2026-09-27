@@ -6,6 +6,7 @@ export * from "./boolean";
 export * from "./edgeCorner";
 export * from "./edgeMatcher";
 export * from "./edgeRef";
+export * from "./emboss";
 export * from "./extrude";
 export * from "./feature";
 export * from "./historyCompletion";

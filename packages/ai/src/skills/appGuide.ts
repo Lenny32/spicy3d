@@ -117,7 +117,7 @@ ${navigationProfiles()}
 The workflow to teach:
 1. {sketch.create} — pick a plane or a flat face; the sketch is created and opens for editing.
 2. The Sketch tab appears (it is contextual — visible only while sketching, and get_ribbon reports it as contextual). The camera locks to a straight-on orthographic view of the sketch plane, the solid's own faces are hidden, and rotation is disabled.
-3. Draw with {sketch.line}, {sketch.circle}, {sketch.arc}, {sketch.rectangle}.
+3. Draw with {sketch.line}, {sketch.circle}, {sketch.arc}, {sketch.rectangle}. {sketch.text} places a text (Text, Height, Angle in its options; click an existing text to apply new settings to it, an empty Text deletes it) whose letters become profiles.
 4. Points snap while drawing — to nearby points, to lines and axes, and to circles and arcs — and a nearly horizontal or vertical line silently gets a Horizontal/Vertical constraint; near-tangent entities are constrained tangent. The same magnetic snapping applies while dragging a point, and the constraint is added when the drag settles.
 5. Constraints come from the Constraint group and dimensions from the Dimension group. A dimension is placed with a live preview and a value dialog: confirming commits it as one undo step, cancelling rolls the constraint back. Double-click a dimension later to change its value.
 6. The status bar reports under-constrained, fully-constrained or conflicting.
@@ -132,7 +132,7 @@ The workflow to teach:
 - If a feature fails, the body keeps the last shape that did build and the failing row shows the error: fix it or suppress that feature.
 - References resolve against the timeline position of the feature that owns them, so a feature added later cannot break an earlier reference.
 - Suppressed features are skipped when rebuilding but keep their place in the list.
-- The features are added from the SOLID tab (CREATE and MODIFY groups): {feature.extrude} (operation New/Join/Cut/Intersect, symmetric, start offset, depth), {feature.revolve}, {feature.fillet}, {feature.chamfer}, {feature.fuse}, {feature.cut} and {feature.common}.
+- The features are added from the SOLID tab (CREATE and MODIFY groups): {feature.extrude} (operation New/Join/Cut/Intersect, symmetric, start offset, depth), {feature.revolve}, {feature.emboss} (a sketch's profiles or text projected onto picked body faces, raised by Depth along the face — curved faces included — or recessed with Deboss), {feature.fillet}, {feature.chamfer}, {feature.fuse}, {feature.cut} and {feature.common}.
 - {feature.variable} opens the document-wide Parameters dialog: each parameter has a name, a type (length / angle / unitless), an expression and an optional description. Parameters are shared by the whole document — any feature parameter or sketch dimension may reference one by name, and a variable may reference the ones listed above it.
 - An expression takes numbers, other parameter names, + - * / %, parentheses, pi/e, and abs, sqrt, floor, ceil, round, min, max, sin, cos, tan, asin, acos, atan, atan2 — angles are in degrees throughout. Types are checked: a length parameter in an angle slot is an error, sqrt wants even exponents, and a variable cannot reference one declared below it.`,
 

@@ -678,7 +678,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, emboss, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -727,6 +727,17 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `operation`: scalar
       - `toolIds`: atomic of ref → node
       - `consumeTools`: scalar
+    - `type: "emboss"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `sketchId`: ref → node
+      - `profiles`: atomic of ref → profile
+      - `faces`: atomic of ref → profile
+      - `depth`: expression
+      - `deboss`: scalar
+      - group `input` (one value): `sketchId`, `profiles`
     - any other `type`
       - `id`: scalar
       - `type`: scalar
@@ -736,7 +747,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 
 #### Payload `sketch.data`
 
-`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
+`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors, external references and texts are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
 
 - `entities`: list of `entity` by `id` (stable order)
   - `id`: scalar
@@ -763,6 +774,15 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
   - `type`: derived
   - `snapshot`: derived
   - `dangling`: derived
+- `texts`: list of `text` by `id` (stable order)
+  - `id`: scalar
+  - `value`: scalar
+  - `x`: scalar
+  - `y`: scalar
+  - `height`: scalar
+  - `angle`: scalar
+  - `font`: scalar
+  - group `position` (one value): `x`, `y`
 - `refPositions`: map of timeline-position (body = map key)
 - `entityIdSeq`: max
 - `externalIdSeq`: min

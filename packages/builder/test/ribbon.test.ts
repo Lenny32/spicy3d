@@ -93,6 +93,7 @@ describe("SketchRibbonProfiles", () => {
         expect(finish.primary).toBe(true);
         expect(finish.items).toEqual(["sketch.exit", "sketch.autoConstrain"]);
         expect(flattenItems(sketchTab.groups[0].items)).toContain("sketch.spline");
+        expect(flattenItems(sketchTab.groups[0].items)).toContain("sketch.text");
     });
 
     test("constraint group should be icon-only and hold all 18 constraint tools", () => {
@@ -115,10 +116,11 @@ describe("mergeRibbonProfiles", () => {
     test("with parametric, SOLID/CREATE should lead with sketch.create then the features", () => {
         const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
         const create = findGroup(merged, "ribbon.tab.solid", "ribbon.group.create");
-        expect(flattenItems(create.items).slice(0, 5)).toEqual([
+        expect(flattenItems(create.items).slice(0, 6)).toEqual([
             "sketch.create",
             "feature.extrude",
             "feature.revolve",
+            "feature.emboss",
             "create.sweep",
             "create.loft",
         ]);

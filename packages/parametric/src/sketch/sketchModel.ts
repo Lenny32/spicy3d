@@ -17,6 +17,7 @@ import {
 } from "@spicy3d/core";
 import type { EdgeRef } from "../features/edgeRef";
 import { ConstraintKind } from "./planegcs";
+import { type SketchTextData, textEdgeCount } from "./sketchText";
 
 export { ConstraintKind };
 
@@ -208,6 +209,11 @@ export interface SketchData {
     /** Edges of other nodes usable as constraint targets (and optionally profiles). */
     externalRefs?: ExternalRefData[];
     /**
+     * Placed texts (`sketchText.ts`): not solver entities, their glyph outlines join the
+     * profile edges after the entities and the profile-role externals.
+     */
+    texts?: SketchTextData[];
+    /**
      * Timeline anchor per referenced parametric body (nodeId → feature count when
      * the sketch first referenced it). The sketch editor rolls each such body back
      * to this position for the session (see `computeSketchRollback`), so the plane
@@ -306,7 +312,7 @@ export function profileExternalRefs(data: SketchData): ExternalRefData[] {
 
 /**
  * Entity ids parallel to the edges `SketchNode.generateShape` emits: the sketch's
- * own entities first, then the profile-role external refs. `sketchProfiles` maps
+ * own entities first, then the profile-role external refs, then every text's glyph edges. `sketchProfiles` maps
  * the kernel's source edge indexes through this list on the crossing path.
  */
 export function shapeEntityIds(data: SketchData): number[] {
@@ -320,6 +326,7 @@ export function shapeEntityIds(data: SketchData): number[] {
                     ) as number[],
             ),
         ...profileExternalRefs(data).map((r) => r.entityId),
+        ...(data.texts ?? []).flatMap((text) => Array(textEdgeCount(text)).fill(text.id) as number[]),
     ];
 }
 

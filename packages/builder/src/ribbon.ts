@@ -194,7 +194,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
         groups: [
             {
                 groupName: "ribbon.group.create",
-                items: ["feature.extrude", "feature.revolve"],
+                items: ["feature.extrude", "feature.revolve", "feature.emboss"],
             },
             {
                 groupName: "ribbon.group.modify",

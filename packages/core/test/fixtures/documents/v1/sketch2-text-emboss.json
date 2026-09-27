@@ -1,0 +1,112 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 1,
+    "moduleVersions": {
+        "parametric": 1,
+        "sketch": 2
+    },
+    "id": "fixture-sketch2-text-emboss",
+    "name": "Fixture sketch v2: text + emboss",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[0,0,60,0]},{\"id\":2,\"type\":\"line\",\"params\":[60,0,60,20]},{\"id\":3,\"type\":\"line\",\"params\":[60,20,0,20]},{\"id\":4,\"type\":\"line\",\"params\":[0,20,0,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-base",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-base\",\"type\":\"extrude\",\"sketchId\":\"sketch-base\",\"depth\":10},{\"id\":\"feature-emboss\",\"type\":\"emboss\",\"sketchId\":\"sketch-text\",\"faces\":[{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":60,\"y\":20,\"z\":10},\"end\":{\"x\":0,\"y\":20,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":20,\"z\":10},\"end\":{\"x\":0,\"y\":0,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":10},\"end\":{\"x\":60,\"y\":0,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":60,\"y\":0,\"z\":10},\"end\":{\"x\":60,\"y\":20,\"z\":10}}],\"splitPiece\":false,\"id\":\"sketch:sketch-base:e1.2.3.4:top\",\"normal\":{\"x\":0,\"y\":0,\"z\":1},\"center\":{\"x\":30,\"y\":10,\"z\":10},\"area\":1200}],\"depth\":1}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-plate",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 15,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[],\"constraints\":[],\"texts\":[{\"id\":7318255520341,\"value\":\"Spicy\",\"x\":4,\"y\":5,\"height\":10}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-text",
+                "name": "body.sketch2",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

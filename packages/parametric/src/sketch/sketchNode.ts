@@ -41,6 +41,7 @@ import {
     type SketchEntityData,
     toWorld,
 } from "./sketchModel";
+import { textContours } from "./sketchText";
 import { SketchSolver } from "./solver";
 import { splineParams, splinePoints, splineSegments } from "./splineGeometry";
 
@@ -312,7 +313,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         return shapeFactory.combine(edges.value);
     }
 
-    /** The sketch's own entity edges, followed by the profile-role external refs. */
+    /** The sketch's own entity edges, followed by the profile-role external refs and the texts. */
     private buildEdges(data: SketchData): Result<IEdge[]> {
         const edges: IEdge[] = [];
         for (const entity of data.entities) {
@@ -338,6 +339,20 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
             const edge = this.entityEdge({ id: ref.entityId, type: ref.type, params: ref.snapshot });
             if (!edge.isOk) return Result.err(edge.error);
             edges.push(edge.value);
+        }
+        // Texts last, one edge per glyph outline segment (the count `shapeEntityIds` reports).
+        for (const text of data.texts ?? []) {
+            for (const contour of textContours(text)) {
+                for (const segment of contour) {
+                    const points = segment.map(([u, v]) => toWorld(this.plane, u, v));
+                    const edge =
+                        points.length === 2
+                            ? shapeFactory.line(points[0], points[1])
+                            : shapeFactory.bezier(points);
+                    if (!edge.isOk) return Result.err(edge.error);
+                    edges.push(edge.value);
+                }
+            }
         }
         return Result.ok(edges);
     }

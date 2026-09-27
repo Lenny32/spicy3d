@@ -36,6 +36,7 @@ import {
     syncExternalRoles,
     toDatumSource,
 } from "./sketchModel";
+import type { SketchTextData } from "./sketchText";
 import { type SplinePoint, splineParams } from "./splineGeometry";
 import { type SketchTransform, transformSketchSelection } from "./utilityOperations";
 
@@ -162,6 +163,9 @@ export class SketchSolver implements ExternalEntityHost {
      * is not reissued either), so the counters are never read nor advanced.
      */
     private legacyCounters: Pick<SketchData, "entityIdSeq" | "externalIdSeq"> = {};
+
+    /** Placed texts (`sketchText.ts`) — not solved, carried through `toData` verbatim. */
+    private texts: SketchTextData[] = [];
 
     /**
      * @param ids how new entity, constraint and external ids are chosen — random by default;
@@ -795,6 +799,37 @@ export class SketchSolver implements ExternalEntityHost {
         return this.solve(true);
     }
 
+    // ------------------------------------------------------------------ Texts
+
+    /** The sketch's placed texts (copies). */
+    textsData(): SketchTextData[] {
+        return this.texts.map((text) => ({ ...text }));
+    }
+
+    /** Adds a text with a new id from the entity id space (texts and entities never share one). */
+    addText(text: Omit<SketchTextData, "id">): number {
+        const id = this.ids.next(
+            "entity",
+            (candidate) => this.entityTypes.has(candidate) || this.texts.some((t) => t.id === candidate),
+        );
+        this.texts.push({ ...text, id });
+        return id;
+    }
+
+    /** Replaces a text's fields (its id stays); false when there is no such text. */
+    updateText(id: number, text: Partial<Omit<SketchTextData, "id">>): boolean {
+        const index = this.texts.findIndex((t) => t.id === id);
+        if (index < 0) return false;
+        this.texts[index] = { ...this.texts[index], ...text, id };
+        return true;
+    }
+
+    removeText(id: number): boolean {
+        const count = this.texts.length;
+        this.texts = this.texts.filter((t) => t.id !== id);
+        return this.texts.length !== count;
+    }
+
     // ------------------------------------------------------------------ Serialization and lifecycle
 
     toData(): SketchData {
@@ -810,6 +845,8 @@ export class SketchSolver implements ExternalEntityHost {
         if (this.external.refPositions !== undefined) {
             result.refPositions = { ...this.external.refPositions };
         }
+        // texts are placed, not solved — carried verbatim (see `sketchText.ts`)
+        if (this.texts.length > 0) result.texts = this.texts.map((text) => ({ ...text }));
         // legacy id counters, carried verbatim (see the field comment)
         if (this.legacyCounters.entityIdSeq !== undefined)
             result.entityIdSeq = this.legacyCounters.entityIdSeq;
@@ -1035,7 +1072,10 @@ export class SketchSolver implements ExternalEntityHost {
     private registerEntity(type: SketchEntityType, paramIds: number[], id?: number): number {
         let entityId: number;
         if (id === undefined) {
-            entityId = this.ids.next("entity", (candidate) => this.entityTypes.has(candidate));
+            entityId = this.ids.next(
+                "entity",
+                (candidate) => this.entityTypes.has(candidate) || this.texts.some((t) => t.id === candidate),
+            );
         } else {
             entityId = id;
         }
@@ -1493,6 +1533,7 @@ export class SketchSolver implements ExternalEntityHost {
         // The constraints are rebuilt below, so their datum errors are too.
         this._datumErrors.clear();
         this.external.refPositions = data.refPositions === undefined ? undefined : { ...data.refPositions };
+        this.texts = (data.texts ?? []).map((text) => ({ ...text }));
         // external refs seed before the constraints that may reference them
         for (const ref of data.externalRefs ?? []) {
             this.external.addExternalEntity(ref);

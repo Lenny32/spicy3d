@@ -3,6 +3,7 @@
 
 import "./booleanCommand";
 import "./edgeCornerCommand";
+import "./embossCommand";
 import "./extrudeCommand";
 import "./reselectCommand";
 import "./revolveCommand";

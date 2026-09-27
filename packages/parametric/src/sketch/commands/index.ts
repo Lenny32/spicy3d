@@ -7,6 +7,7 @@ import "./sketchEllipse";
 import "./sketchSpline";
 import "./sketchPoint";
 import "./sketchPolygon";
+import "./sketchText";
 import "./sketchCommands";
 import "./sketchConstraints";
 import "./sketchDimensions";

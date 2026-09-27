@@ -10,6 +10,7 @@ export * from "./ribbon";
 export * from "./sketchIds";
 export * from "./sketchModel";
 export * from "./sketchNode";
+export * from "./sketchText";
 export * from "./solver";
 import "./commands";
 
