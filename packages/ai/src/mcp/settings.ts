@@ -60,7 +60,9 @@ export function bridgeDownloadBase(): string {
     const configured = DeploymentConfig.section("mcpBridge")?.["downloadUrl"];
     const base =
         typeof configured === "string" && configured.trim() ? configured.trim() : __MCP_BRIDGE_DOWNLOAD_URL__;
-    return resolveAppUrl(base.endsWith("/") ? base : `${base}/`) ?? __MCP_BRIDGE_DOWNLOAD_URL__;
+    const resolved = resolveAppUrl(base.endsWith("/") ? base : `${base}/`);
+    // Links only: no javascript:, data: or the like from a misconfigured file.
+    return resolved && /^https?:$/.test(new URL(resolved).protocol) ? resolved : __MCP_BRIDGE_DOWNLOAD_URL__;
 }
 
 export function bridgeDownloadUrl(platform: BridgePlatform): string {

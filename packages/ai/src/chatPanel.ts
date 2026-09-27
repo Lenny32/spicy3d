@@ -956,7 +956,7 @@ export class ChatPanel extends HTMLElement {
                 config.baseURL ??
                 PROVIDER_PRESETS.find((p) => p.provider === config.provider)?.baseURL ??
                 config.provider;
-            this.appendError(I18n.translate("ai.error.unreachable", endpoint));
+            this.appendError(I18n.translate("ai.error.unreachable", endpoint, (err as Error).message));
         } else {
             this.appendError((err as Error).message);
         }

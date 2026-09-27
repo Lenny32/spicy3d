@@ -97,14 +97,19 @@ export function presetFor(config: Pick<LLMConfig, "provider" | "baseURL">): Prov
     return presets.find((p) => trim(p.baseURL) === trim(config.baseURL)) ?? presets[0];
 }
 
+/** What `fetch` rejects with when no answer came (Chromium, Firefox, Safari, Node's undici). */
+const FETCH_NETWORK_ERROR =
+    /^(Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed|fetch failed)$/;
+
 /**
- * Whether a request never got an answer: no network, DNS, a blocked or refused connection (the
- * provider SDKs' `APIConnectionError` / `APIConnectionTimeoutError`, or fetch's `TypeError`). On a
- * LAN without internet access the public APIs always end up here.
+ * Whether a request never got an answer: no network, DNS, a blocked or refused connection — the
+ * provider SDKs' `APIConnectionError` / `APIConnectionTimeoutError`, or fetch's network
+ * `TypeError` (not any `TypeError`: a bug in a stream handler keeps its own message). On a LAN
+ * without internet access the public APIs always end up here.
  */
 export function isUnreachableError(error: unknown): boolean {
     if (!(error instanceof Error)) return false;
-    if (error instanceof TypeError) return true;
+    if (error instanceof TypeError) return FETCH_NETWORK_ERROR.test(error.message);
     // By class name, so this module doesn't load the SDKs (the build keeps class names).
     for (let proto = Object.getPrototypeOf(error); proto; proto = Object.getPrototypeOf(proto)) {
         if (proto.constructor?.name === "APIConnectionError") return true;

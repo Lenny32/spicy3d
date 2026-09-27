@@ -28,7 +28,7 @@ export default {
         "ai.error.unknownRef":
             'Unknown ref "{0}". Available refs: {1} — a ref exists only after the op defining it has run; check op order, and do not guess ids from numbering patterns.',
         "ai.error.unreachable":
-            "Can't reach {0}. Check the network connection; on a network without internet access, choose an endpoint that is reachable from here in the chat settings (ask your administrator).",
+            "Can't reach {0} ({1}). Check the network connection; on a network without internet access, choose an endpoint that is reachable from here in the chat settings (ask your administrator).",
         "ai.history": "Conversations",
         "ai.historyDelete": 'Delete "{0}"?',
         "ai.historyEmpty": "No conversations yet",

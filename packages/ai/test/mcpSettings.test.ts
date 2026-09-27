@@ -250,7 +250,14 @@ describe("mcp settings", () => {
             );
         });
 
-        test.each([[""], [42], [null]])("%p falls back to the build's release URL", (downloadUrl) => {
+        test.each([
+            [""],
+            [42],
+            [null],
+            ["javascript:alert(1)//"],
+            ["data:text/html,x"],
+            ["ftp://files.lan/"],
+        ])("%p falls back to the build's release URL", (downloadUrl) => {
             DeploymentConfig.set({ mcpBridge: { downloadUrl } });
 
             expect(bridgeDownloadUrl(BRIDGE_PLATFORMS[0])).toBe(

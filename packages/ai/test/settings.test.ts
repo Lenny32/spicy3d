@@ -111,6 +111,9 @@ describe("isUnreachableError", () => {
 
     test.each([
         [new TypeError("Failed to fetch"), true],
+        [new TypeError("NetworkError when attempting to fetch resource."), true],
+        [new TypeError("Load failed"), true],
+        [new TypeError("Cannot read properties of undefined (reading 'delta')"), false],
         [new APIConnectionError("Connection error."), true],
         [new APIConnectionTimeoutError("Request timed out."), true],
         [new Error("401 Unauthorized"), false],

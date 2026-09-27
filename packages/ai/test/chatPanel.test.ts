@@ -975,9 +975,13 @@ describe("ChatPanel on a deployment without internet access", () => {
     class APIConnectionError extends Error {}
 
     test.each([
-        ["fetch's TypeError", () => new TypeError("Failed to fetch")],
-        ["the SDKs' APIConnectionError", () => new APIConnectionError("Connection error.")],
-    ])("an unreachable endpoint (%s) is named, with what to do", async (_case, error) => {
+        ["fetch's TypeError", () => new TypeError("Failed to fetch"), "Failed to fetch"],
+        [
+            "the SDKs' APIConnectionError",
+            () => new APIConnectionError("Connection error."),
+            "Connection error.",
+        ],
+    ])("an unreachable endpoint (%s) is named, with what to do", async (_case, error, message) => {
         saveConfig({ provider: "anthropic", apiKey: "k", model: "m" });
         agentMock.runAgent.mockImplementationOnce(async () => {
             throw error();
@@ -994,6 +998,7 @@ describe("ChatPanel on a deployment without internet access", () => {
             expect(translate.mock.calls).toContainEqual([
                 "ai.error.unreachable",
                 "https://api.anthropic.com",
+                message,
             ]);
         } finally {
             translate.mockRestore();
