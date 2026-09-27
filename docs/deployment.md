@@ -50,7 +50,8 @@ docker compose pull && docker compose up    # compose.yml: the published image, 
 ```
 
 The GitHub workflow **Deploy** (push to `main`, or manual with an optional image version, default
-`package.json`'s) builds and tests the app once, deploys that `dist/` to Pages and packages it with
+`package.json`'s) builds and tests the app once — with that version as the one the app shows
+(`SPICY3D_VERSION` at build time; `docker build --build-arg SPICY3D_VERSION=…` from source) — deploys that `dist/` to Pages and packages it with
 the `prebuilt` target. Job *Test Docker image* runs the image like SpicySrv's compose (read-only,
 no capabilities), checks it is not root, the account-link routes, the CSP header and that an invalid
 `SPICY3D_PLUGIN_ORIGINS` stops the container, runs `npm run smoke -- --url` against it, and keeps it

@@ -45,7 +45,8 @@ jobs:
               with:
                   persist-credentials: false
 
-            # The image version: the manual run's input, else package.json's version.
+            # The version: the manual run's input, else package.json's version. Used for the image tag and
+            # shown in the app (SPICY3D_VERSION at build time).
             - id: version
               env:
                   INPUT_VERSION: ${{ inputs.version }}
@@ -57,7 +58,7 @@ jobs:
                       exit 1
                   fi
                   echo "image-version=$image" >> "$GITHUB_OUTPUT"
-                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), app version $pkg, image version $image" >> "$GITHUB_STEP_SUMMARY"
+                  echo "Deploying ${GITHUB_SHA::7} ($GITHUB_REF_NAME), version $image (package.json: $pkg)" >> "$GITHUB_STEP_SUMMARY"
 
     web:
         name: Build web application
@@ -77,11 +78,12 @@ jobs:
 
             - run: npm run test
 
-            # Bundles the app, builds the plugins.
+            # Bundles the app, builds the plugins. The app shows the image version it ships in.
             - name: Build
               run: npm run build
               env:
                   NODE_ENV: production
+                  SPICY3D_VERSION: ${{ needs.prepare.outputs.image-version }}
 
             - name: Check output
               run: |

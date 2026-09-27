@@ -3,6 +3,7 @@
 #
 # - `docker build .` (and `docker compose build`) builds the app from source (the last stage):
 #     docker build -t spicy3d-web:0.0.1 .
+#   `--build-arg SPICY3D_VERSION=1.2.0` sets the version shown in the app (default: package.json's).
 #     docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web:0.0.1
 # - `--target prebuilt --build-context dist=<folder>` packages an already built dist/ into the same
 #   hardened runtime instead; the deploy workflow uses it to ship the exact files it tested and deployed
@@ -15,6 +16,8 @@
 # The output is static files: build on the build machine's platform, whatever platform the image targets.
 FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
 WORKDIR /app
+ARG SPICY3D_VERSION=
+ENV SPICY3D_VERSION=$SPICY3D_VERSION
 COPY . .
 RUN npm ci --no-audit --no-fund && NODE_ENV=production npm run build
 
