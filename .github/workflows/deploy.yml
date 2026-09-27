@@ -59,7 +59,7 @@ jobs:
 
             - run: npm run test
 
-            # Packs the npx bridge tarball into public/mcp/, bundles the app, builds the plugins.
+            # Packs the npx bridge tarball into public/downloads/mcp-bridge/, bundles the app, builds the plugins.
             - name: Build
               run: npm run build
               env:

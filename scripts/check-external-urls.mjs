@@ -2,10 +2,11 @@
 // See LICENSE file in the project root for full license information.
 
 /**
- * Fails on any absolute http(s) URL in what the browser gets that is not on the allowlist below
- * (CLOUD-16): the app must run on a LAN without internet access, so nothing may be fetched from
- * elsewhere (a CDN script, a web font, a hard-wired server). Scans the app's sources and public/,
- * and the build output (dist/) when present, which also covers the bundled dependencies.
+ * Fails on any absolute URL (http, https, ws, wss, or protocol-relative `//host/…` in a string or
+ * CSS `url(…)`) in what the browser gets that is not on the allowlist below (CLOUD-16): the app
+ * must run on a LAN without internet access, so nothing may be fetched from elsewhere (a CDN
+ * script, a web font, a hard-wired server). Scans the app's sources and public/, and the build
+ * output (dist/) when present, which also covers the bundled dependencies.
  *
  * A new URL either goes (make it relative, or a setting in deployment.json) or joins the allowlist
  * with the reason it is never fetched on its own.
@@ -20,10 +21,21 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** [URL pattern, why it is harmless]. */
+/**
+ * [URL pattern, why it is harmless, and optionally the only files (path from the repository root)
+ * it may appear in].
+ */
 const ALLOWED = [
-    // Placeholders in examples and comments (RFC 2606 names, loopback, "host").
-    [/^https?:\/\/(localhost|127\.0\.0\.1|host|([\w-]+\.)*example\.(com|org|net))([:/]|$)/, "placeholder"],
+    // Placeholders in examples and comments: RFC 2606 names, "host" and "…".
+    [/^(https?|wss?):\/\/(host|…|([\w-]+\.)*example\.(com|org|net))([:/]|$)/, "placeholder"],
+    // Loopback, only where it is meant: the base URL when there is no page, and the local MCP
+    // bridge's WebSocket on this machine.
+    [/^http:\/\/localhost\/$/, "base URL without a page", /^(packages\/(cloud|core)\/src\/|dist\/)/],
+    [
+        /^ws:\/\/(127\.0\.0\.1|localhost):(\$\{|\d+\/|$)/,
+        "the local MCP bridge",
+        /^(packages\/ai\/src\/mcp\/|dist\/)/,
+    ],
     // Identifiers, never requested.
     [/^http:\/\/www\.w3\.org\//, "XML namespace"],
     [/^https?:\/\/json-schema\.org\//, "JSON Schema $schema id (ajv, MCP SDK)"],
@@ -31,7 +43,7 @@ const ALLOWED = [
     [/^https?:\/\/www\.eclipse\.org\/(emf|elk)\//, "EMF / ELK namespace (visual-programming's elkjs)"],
     [/^http:\/\/vectornator\.io\/?$/, "SVG editor namespace (favicon)"],
     // Built at runtime from parts (`http://[${host}]`) or without a host (`http:///org/…`): no fixed target.
-    [/^https?:\/\/(\/|\[?\$\{)/, "URL template, not a fixed target"],
+    [/^(https?|wss?):\/\/(\/|\[?\$\{)/, "URL template, not a fixed target"],
     // Links the user may open; nothing loads them.
     [
         /^https:\/\/github\.com\/Lenny32\/spicy3d(\/|$)/,
@@ -55,15 +67,19 @@ const ALLOWED = [
 ];
 
 const TEXT = new Set([".ts", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".svg"]);
-const SKIP_DIRS = new Set(["node_modules", "test", "downloads"]);
-const URL_PATTERN = /\bhttps?:\/\/[^\s"'`<>()\\]+/g;
+/** Folders never scanned, by their path from the repository root (and every node_modules). */
+const SKIP_DIRS = new Set(["public/downloads", "dist/downloads"]); // the bridge tarball: a Node.js program
+const URL_PATTERN =
+    /\b(?:https?|wss?):\/\/[^\s"'`<>()\\]+|(?<=["'`(])\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s"'`<>()\\]*/gi;
+
+const fromRoot = (file) => path.relative(rootDir, file).split(path.sep).join("/");
 
 function* files(dir) {
     if (!existsSync(dir)) return;
     for (const entry of readdirSync(dir)) {
         const full = path.join(dir, entry);
         if (statSync(full).isDirectory()) {
-            if (!SKIP_DIRS.has(entry)) yield* files(full);
+            if (entry !== "node_modules" && !SKIP_DIRS.has(fromRoot(full))) yield* files(full);
         } else if (TEXT.has(path.extname(entry))) {
             yield full;
         }
@@ -89,11 +105,15 @@ for (const root of roots) {
         // The server's API types: its spec's links, never requested.
         if (file.endsWith("schema.generated.ts")) continue;
         scanned++;
+        const relative = fromRoot(file);
         for (const [url] of readFileSync(file, "utf8").matchAll(URL_PATTERN)) {
             const clean = url.replace(/[.,;:]+$/, "");
-            if (ALLOWED.some(([pattern]) => pattern.test(clean))) continue;
+            const allowed = ALLOWED.some(
+                ([pattern, , where]) => pattern.test(clean) && (!where || where.test(relative)),
+            );
+            if (allowed) continue;
             const where = found.get(clean) ?? [];
-            where.push(path.relative(rootDir, file));
+            where.push(relative);
             found.set(clean, where);
         }
     }
