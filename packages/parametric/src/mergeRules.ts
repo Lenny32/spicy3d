@@ -1,0 +1,211 @@
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
+// See LICENSE file in the project root for full license information.
+
+import {
+    GEOMETRY_NODE_PROPERTIES,
+    type MergeValueRule,
+    registerMergePayload,
+    registerMergeRule,
+} from "@spicy3d/core";
+
+// Merge rules of the parametric module's classes and of the JSON payloads they store
+// (docs/merge.md, "Features" and "Sketches"). Changing a payload's shape (a migration in
+// `migrations.ts`) means updating its rule here.
+
+const scalar: MergeValueRule = { kind: "scalar" };
+const atomic: MergeValueRule = { kind: "atomic" };
+const expression: MergeValueRule = { kind: "expression" };
+const nodeRef: MergeValueRule = { kind: "ref", target: "node" };
+const edges: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "edge" } };
+const profiles: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "profile" } };
+
+/** Fields every feature has (`FeatureBase`). `id` is the list key. */
+const featureBase = { id: scalar, type: scalar, suppressed: scalar, name: scalar };
+
+registerMergeRule("ParametricBodyNode", {
+    strategy: "node",
+    properties: {
+        ...GEOMETRY_NODE_PROPERTIES,
+        featuresJson: { kind: "json", payload: "parametric.features" },
+    },
+    note:
+        "A feature-list body: the stored features are its whole content (shapes are replayed). Consumed " +
+        "boolean tools are its children in the tree.",
+});
+
+registerMergeRule("SketchNode", {
+    strategy: "node",
+    properties: {
+        ...GEOMETRY_NODE_PROPERTIES,
+        plane: atomic,
+        planeRefJson: { kind: "json", payload: "sketch.planeRef" },
+        constructionPlaneRefJson: { kind: "atomic", of: { kind: "ref", target: "construction-ref" } },
+        dataJson: { kind: "json", payload: "sketch.data" },
+    },
+    note:
+        "A 2D sketch. The plane is one value (a snapshot the plane reference re-derives); the sketch data is " +
+        "merged entity by entity.",
+});
+
+registerMergePayload("parametric.features", {
+    rule: {
+        kind: "list",
+        key: "id",
+        order: "timeline",
+        segment: "feature",
+        item: {
+            kind: "union",
+            tag: "type",
+            variants: {
+                extrude: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        sketchId: nodeRef,
+                        source: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, profiles },
+                        },
+                        depth: expression,
+                        symmetric: scalar,
+                        startOffset: expression,
+                        operation: scalar,
+                        profiles,
+                    },
+                },
+                revolve: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        sketchId: nodeRef,
+                        axis: atomic,
+                        axisSource: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, edge: { kind: "ref", target: "edge" } },
+                        },
+                        constructionAxisRef: { kind: "ref", target: "construction-ref" },
+                        angle: expression,
+                        profiles,
+                    },
+                },
+                fillet: { kind: "object", fields: { ...featureBase, radius: expression, edges } },
+                chamfer: { kind: "object", fields: { ...featureBase, distance: expression, edges } },
+                boolean: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        operation: scalar,
+                        // the tool order is the order of the tool id ranges (operationIds.ts): one value
+                        toolIds: { kind: "atomic", of: nodeRef },
+                        consumeTools: scalar,
+                    },
+                },
+            },
+            fallback: { kind: "object", fields: featureBase, rest: atomic },
+        },
+    },
+    note:
+        "`ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters " +
+        "one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it " +
+        "as a whole. A feature type this build does not know merges its base fields and treats the rest " +
+        "as one value each.",
+});
+
+registerMergePayload("sketch.data", {
+    rule: {
+        kind: "object",
+        fields: {
+            entities: {
+                kind: "list",
+                key: "id",
+                order: "stable",
+                segment: "entity",
+                item: {
+                    kind: "object",
+                    fields: { id: scalar, type: scalar, params: atomic, construction: scalar },
+                },
+            },
+            constraints: {
+                kind: "list",
+                key: "id",
+                order: "stable",
+                segment: "constraint",
+                item: {
+                    kind: "object",
+                    fields: {
+                        id: scalar,
+                        kind: scalar,
+                        refs: {
+                            kind: "atomic",
+                            of: {
+                                kind: "object",
+                                fields: {
+                                    entityId: { kind: "ref", target: "sketch-entity" },
+                                    pointIndex: scalar,
+                                },
+                            },
+                        },
+                        datum: expression,
+                        datums: { kind: "atomic", of: expression },
+                        blockedParams: atomic,
+                        direction: atomic,
+                    },
+                },
+            },
+            anchors: {
+                kind: "list",
+                key: "id",
+                order: "stable",
+                segment: "anchor",
+                item: {
+                    kind: "object",
+                    fields: { id: { kind: "ref", target: "sketch-constraint" }, anchor: atomic },
+                },
+            },
+            externalRefs: {
+                kind: "list",
+                key: "entityId",
+                order: "stable",
+                segment: "external",
+                item: {
+                    kind: "object",
+                    fields: {
+                        entityId: scalar,
+                        nodeId: nodeRef,
+                        edge: { kind: "ref", target: "edge" },
+                        role: scalar,
+                        pinned: scalar,
+                        type: { kind: "derived" },
+                        snapshot: { kind: "derived" },
+                        dangling: { kind: "derived" },
+                    },
+                },
+            },
+            refPositions: {
+                kind: "map",
+                segment: "refPosition",
+                value: { kind: "timeline-position", bodyFrom: "key" },
+            },
+            entityIdSeq: { kind: "max" },
+            externalIdSeq: { kind: "min" },
+        },
+    },
+    note:
+        "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
+        "references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` " +
+        "one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, " +
+        "`dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min.",
+});
+
+registerMergePayload("sketch.planeRef", {
+    rule: {
+        kind: "object",
+        atomic: true,
+        fields: { nodeId: nodeRef, faceId: { kind: "ref", target: "plane-face" } },
+    },
+    note:
+        "`SketchNode.planeRefJson` (`PlaneFaceRef`): the face the sketch sits on, one value; its node and " +
+        "tracked face must resolve.",
+});

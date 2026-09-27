@@ -192,6 +192,11 @@ export class Serializer {
         return reflectMap.has(className);
     }
 
+    /** Every registered class name, sorted — the merge rule registry must cover each (docs/merge.md). */
+    static registeredClassNames(): string[] {
+        return [...reflectMap.keys()].sort();
+    }
+
     static serializeObject(target: object): Serialized {
         const raw = (target as { [RawSerialized]?: Serialized })[RawSerialized];
         if (raw !== undefined) return raw;

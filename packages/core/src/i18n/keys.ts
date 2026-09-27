@@ -1146,6 +1146,19 @@ export const I18N_KEYS = [
     "cloud.history.keepMineAsCopy",
     "cloud.history.restoredOnTop{0}{1}",
     "cloud.history.unsavedAfter{0}",
+    "diff.changedValue{0}{1}{2}{3}",
+    "diff.moved{0}",
+    "diff.reordered{0}",
+    "merge.conflict.blob{0}{1}",
+    "merge.conflict.cycle{0}{1}",
+    "merge.conflict.danglingRef{0}{1}",
+    "merge.conflict.deleteVsModify{0}",
+    "merge.conflict.duplicateId{0}",
+    "merge.conflict.insertAt{0}",
+    "merge.conflict.move{0}",
+    "merge.conflict.order{0}",
+    "merge.conflict.property{0}{1}",
+    "merge.conflict.rebuildFailure{0}{1}",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

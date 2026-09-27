@@ -1216,5 +1216,19 @@ export default {
             "Restored on top of a newer save from {0} ({1}): that save stays in the history",
         "cloud.history.unsavedAfter{0}":
             "“{0}” was changed while the version was being restored. Keep those changes as a copy, or discard them?",
+        "diff.changedValue{0}{1}{2}{3}": "{0}: {1} {2} → {3}",
+        "diff.moved{0}": "{0} moved",
+        "diff.reordered{0}": "{0} reordered",
+        "merge.conflict.blob{0}{1}": "{0}: {1} was replaced on both devices",
+        "merge.conflict.cycle{0}{1}": "{0} and {1} were each moved into the other",
+        "merge.conflict.danglingRef{0}{1}": "{0} refers to {1}, which is gone after the merge",
+        "merge.conflict.deleteVsModify{0}": "{0} was deleted on one device and changed on the other",
+        "merge.conflict.duplicateId{0}": "{0} was added on both devices with the same id",
+        "merge.conflict.insertAt{0}":
+            "Both devices inserted features at the same place in the timeline of {0}",
+        "merge.conflict.move{0}": "{0} was moved to different places",
+        "merge.conflict.order{0}": "{0} was moved to a different position on each device",
+        "merge.conflict.property{0}{1}": "{0}: {1} was changed on both devices",
+        "merge.conflict.rebuildFailure{0}{1}": "{0} fails after the merge: {1}",
     },
 } satisfies Locale;

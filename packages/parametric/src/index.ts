@@ -7,3 +7,4 @@ export * from "./parametricBodyNode";
 export * from "./program";
 export * from "./sketch";
 import "./commands";
+import "./mergeRules";
