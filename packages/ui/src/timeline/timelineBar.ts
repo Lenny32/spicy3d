@@ -2,20 +2,24 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    AnalysisNode,
     documentTimeline,
+    highlightTimelineEntry,
     I18n,
     type I18nKeys,
     type IApplication,
     type IDocument,
+    type INode,
     type IView,
-    Localize,
+    isNodeIcon,
     PubSub,
     revealTimelineEntry,
     type TimelineEntry,
     Transaction,
     timelineEntryLabel,
 } from "@spicy3d/core";
-import { div, input, span, svg } from "@spicy3d/element";
+import { div, input, svg } from "@spicy3d/element";
+import { type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { showDialog } from "../dialog";
 import inputStyle from "../property/input.module.css";
 import style from "./timelineBar.module.css";
@@ -26,14 +30,17 @@ const translate = (key: I18nKeys) => I18n.translate(key) ?? key;
  * The design history of the active document along the bottom of the viewport, Fusion-timeline
  * style: one icon per step (`documentTimeline`), its name on hover. The strip scrolls sideways
  * (the mouse wheel too) and follows new steps as they appear. Click selects the step's node (a
- * feature also opens in the body's feature list); right-click offers rename and delete, each one
- * undo step.
+ * feature also opens in the body's feature list) and highlights what the step made in the
+ * viewport; double-click edits it; right-click offers edit (the step, and the nodes a feature
+ * holds, e.g. an extrude's sketch), suppress, rename and delete, each change one undo step.
  */
 export class TimelineBar extends HTMLElement {
     private readonly track = div({ className: style.track });
     private document?: IDocument;
     private keys = new Set<string>();
-    private menu: HTMLElement | undefined;
+    private closeMenu: (() => void) | undefined;
+    /** Takes the clicked step's viewport highlight off again. */
+    private clearHighlight: (() => void) | undefined;
     private renderQueued = false;
 
     constructor(readonly app: IApplication) {
@@ -56,7 +63,7 @@ export class TimelineBar extends HTMLElement {
         PubSub.default.remove("activeViewChanged", this.handleActiveViewChanged);
         PubSub.default.remove("documentClosed", this.handleDocumentClosed);
         this.setDocument(undefined);
-        this.closeMenu();
+        this.closeMenu?.();
     }
 
     private readonly handleActiveViewChanged = (view: IView | undefined) => {
@@ -69,9 +76,12 @@ export class TimelineBar extends HTMLElement {
 
     private setDocument(document: IDocument | undefined) {
         if (document === this.document) return;
+        this.unhighlight();
         this.document?.history.onChanged.remove(this.scheduleRender);
+        this.document?.selection.onNodeChanged.remove(this.unhighlight);
         this.document = document;
         this.document?.history.onChanged.sub(this.scheduleRender);
+        this.document?.selection.onNodeChanged.sub(this.unhighlight);
         // A document switch is not "new steps": the strip opens on the latest ones.
         this.keys = new Set();
         this.render();
@@ -90,7 +100,9 @@ export class TimelineBar extends HTMLElement {
 
     /** Rebuilds the strip; the newest step that was not there before is scrolled into view. */
     render(): void {
-        this.closeMenu();
+        this.closeMenu?.();
+        // A rebuild renumbers faces: the highlight would land on the wrong ones.
+        this.unhighlight();
         const document = this.document;
         this.classList.toggle(style.hidden, document === undefined);
         const entries = document === undefined ? [] : documentTimeline(document);
@@ -115,9 +127,8 @@ export class TimelineBar extends HTMLElement {
             {
                 className: classes.filter((x) => x !== "").join(" "),
                 title: this.tooltip(entry),
-                onclick: () => {
-                    if (this.document) revealTimelineEntry(this.document, entry);
-                },
+                onclick: () => this.select(entry),
+                ondblclick: () => this.edit(entry),
                 oncontextmenu: (e: MouseEvent) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -146,60 +157,89 @@ export class TimelineBar extends HTMLElement {
         this.track.scrollLeft += e.deltaY;
     };
 
+    /** Selects the step's node and highlights what the step made, until the selection changes. */
+    private select(entry: TimelineEntry) {
+        const document = this.document;
+        if (document === undefined) return;
+        revealTimelineEntry(document, entry);
+        // After the selection, whose change takes the previous highlight off.
+        this.unhighlight();
+        this.clearHighlight = highlightTimelineEntry(document, entry);
+        document.visual.update();
+    }
+
+    private readonly unhighlight = () => {
+        const clear = this.clearHighlight;
+        if (clear === undefined) return;
+        this.clearHighlight = undefined;
+        clear();
+        this.document?.visual.update();
+    };
+
+    /**
+     * Opens the step for editing: a feature in the body's feature list, with its parameters; a
+     * node in the property panel, and what double-clicking it in the tree opens (a sketch enters
+     * its editing session).
+     */
+    private edit(entry: TimelineEntry) {
+        this.select(entry);
+        if (entry.kind === "node") this.open(entry.node);
+    }
+
+    private open(node: INode) {
+        if (node instanceof AnalysisNode) PubSub.default.pub("showAnalysisPanel", node);
+        else PubSub.default.pub("nodeDoubleClicked", node);
+    }
+
     // --- context menu ---
 
     private openMenu(x: number, y: number, entry: TimelineEntry) {
-        this.closeMenu();
-        const entries: [icon: string, display: I18nKeys, action: () => void][] = [
-            ["icon-edit", "common.rename", () => this.rename(entry)],
-            ["icon-delete", "common.delete", () => this.delete(entry)],
+        const label = timelineEntryLabel(entry, translate);
+        const entries: ContextMenuEntry[] = [
+            { icon: entry.icon, label: "timeline.edit{0}", args: [label], run: () => this.edit(entry) },
         ];
-        const menu = div(
-            { className: style.menu },
-            ...entries.map(([icon, display, action]) =>
-                div(
-                    {
-                        className: style.menuItem,
-                        onclick: (e: MouseEvent) => {
-                            e.stopPropagation();
-                            this.closeMenu();
-                            action();
-                        },
-                    },
-                    svg({ className: style.menuIcon, icon }),
-                    span({ textContent: new Localize(display) }),
-                ),
-            ),
+        if (entry.kind === "feature") entries.push(...this.featureActions(entry));
+        entries.push(
+            "separator",
+            { icon: "icon-edit", label: "common.rename", run: () => this.rename(entry) },
+            "separator",
+            { icon: "icon-delete", label: "common.delete", danger: true, run: () => this.delete(entry) },
         );
-        globalThis.document.body.appendChild(menu);
-        // Opens above the pointer (the bar sits at the bottom), kept inside the window.
-        const margin = 4;
-        const top = Math.max(margin, Math.min(y - menu.offsetHeight, window.innerHeight - menu.offsetHeight));
-        const left = Math.max(margin, Math.min(x, window.innerWidth - menu.offsetWidth - margin));
-        menu.style.top = `${top}px`;
-        menu.style.left = `${left}px`;
-        this.menu = menu;
-        globalThis.document.addEventListener("click", this.handleOutsideClick, true);
-        globalThis.document.addEventListener("contextmenu", this.handleOutsideClick, true);
-        globalThis.document.addEventListener("keydown", this.handleMenuKeyDown);
+        this.closeMenu = showContextMenu({ x, y }, entries);
     }
 
-    private closeMenu() {
-        if (this.menu === undefined) return;
-        this.menu.remove();
-        this.menu = undefined;
-        globalThis.document.removeEventListener("click", this.handleOutsideClick, true);
-        globalThis.document.removeEventListener("contextmenu", this.handleOutsideClick, true);
-        globalThis.document.removeEventListener("keydown", this.handleMenuKeyDown);
+    /** Editing a feature's surroundings: the nodes it holds (an extrude's sketch), its picks, suppression. */
+    private featureActions(entry: Extract<TimelineEntry, { kind: "feature" }>): ContextMenuEntry[] {
+        const { node, feature } = entry;
+        const actions: ContextMenuEntry[] = (feature.references ?? []).map((ref) => ({
+            icon: isNodeIcon(ref.node) ? ref.node.icon : "icon-edit",
+            label: "timeline.edit{0}",
+            args: [translate(ref.display)],
+            run: () => node.activateReference?.(feature.id, ref.key),
+        }));
+        if (feature.reselectable) {
+            actions.push({
+                icon: "icon-sync-alt",
+                label: "features.reselect",
+                run: () => node.reselectShapes?.(feature.id),
+            });
+        }
+        actions.push({
+            icon: feature.suppressed ? "icon-eye" : "icon-eye-slash",
+            label: feature.suppressed ? "features.unsuppress" : "features.suppress",
+            run: () => this.toggleSuppressed(entry),
+        });
+        return actions;
     }
 
-    private readonly handleOutsideClick = (e: Event) => {
-        if (this.menu !== undefined && !this.menu.contains(e.target as Node)) this.closeMenu();
-    };
-
-    private readonly handleMenuKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") this.closeMenu();
-    };
+    private toggleSuppressed(entry: Extract<TimelineEntry, { kind: "feature" }>) {
+        const document = this.document;
+        if (document === undefined) return;
+        Transaction.execute(document, "toggle feature", () => {
+            entry.node.setFeatureSuppressed(entry.feature.id, !entry.feature.suppressed);
+            document.visual.update();
+        });
+    }
 
     private rename(entry: TimelineEntry) {
         const document = this.document;
@@ -227,15 +267,36 @@ export class TimelineBar extends HTMLElement {
         const document = this.document;
         if (document === undefined) return;
         if (entry.kind === "feature") {
-            Transaction.execute(document, "remove feature", () => {
-                entry.node.removeFeature(entry.feature.id);
-                document.visual.update();
-            });
+            this.deleteFeature(document, entry);
             return;
         }
         // The delete command owns the rules (consumed tools refused, current node reset, toast).
         document.selection.setSelectedNodes([entry.node], false);
         PubSub.default.pub("executeCommand", "modify.deleteNode");
+    }
+
+    /**
+     * Features after this one may be built on its faces and edges, so deleting it can break them:
+     * asked first unless it is the body's last feature (as the feature list does).
+     */
+    private deleteFeature(document: IDocument, entry: Extract<TimelineEntry, { kind: "feature" }>) {
+        const remove = () =>
+            Transaction.execute(document, "remove feature", () => {
+                entry.node.removeFeature(entry.feature.id);
+                document.visual.update();
+            });
+        const items = entry.node.featureItems();
+        const later = items.length - 1 - items.findIndex((x) => x.id === entry.feature.id);
+        if (later <= 0) {
+            remove();
+            return;
+        }
+        const name = timelineEntryLabel(entry, translate);
+        showDialog(
+            "features.delete.title",
+            div({ textContent: I18n.translate("features.delete.warning{0}{1}", name, later) }),
+            [{ content: "common.delete", onclick: remove }, { content: "common.cancel" }],
+        );
     }
 }
 

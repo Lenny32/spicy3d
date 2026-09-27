@@ -61,37 +61,3 @@
     height: 16px;
     opacity: 0.85;
 }
-
-/* Right-click menu, appended to document.body at the pointer. */
-.menu {
-    position: fixed;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    min-width: 120px;
-    padding: 4px;
-    background-color: var(--panel-background-color);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-}
-
-.menuItem {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    white-space: nowrap;
-
-    &:hover {
-        background-color: var(--hover-background-color);
-    }
-}
-
-.menuIcon {
-    width: 14px;
-    height: 14px;
-    opacity: 0.75;
-}

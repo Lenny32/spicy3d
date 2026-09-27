@@ -3,7 +3,7 @@
 
 import type { IShape, Matrix4, Result } from "@spicy3d/core";
 import type { FeatureTimelineState } from "./bodyTracking";
-import { idIsShared, indexesOfOverlappingId } from "./trackedId";
+import { ID_COMPONENT_SEPARATOR, idIsShared, indexesOfOverlappingId } from "./trackedId";
 
 /**
  * What the last successful chain run produced, kept for reuse and for id lookup:
@@ -144,6 +144,27 @@ export class BodyTimeline {
     }
 
     /**
+     * Faces of the final shape the feature at `index` created: those carrying an id component
+     * that first appears in the chain state leaving that index. A face merged by a later boolean
+     * still counts (its compound id keeps the component); one a later feature consumed is gone.
+     * Empty when the index was not visited or any state involved lacks tracked ids.
+     */
+    facesCreatedAt(index: number): number[] {
+        const states = this._committed;
+        const final = this.idsOf("face");
+        if (index < 0 || index >= states.length || final === undefined) return [];
+        const entering = states[index];
+        // Nothing enters the first feature: its (absent) shape has no ids to compare with.
+        const before = entering.shape === undefined ? [] : entering.faceIds;
+        const after = index + 1 < states.length ? states[index + 1].faceIds : final;
+        if (before === undefined || after === undefined) return [];
+        const existing = new Set(before.flatMap(idComponents));
+        const created = new Set(after.flatMap(idComponents).filter((x) => !existing.has(x)));
+        if (created.size === 0) return [];
+        return final.flatMap((id, i) => (idComponents(id).some((x) => created.has(x)) ? [i] : []));
+    }
+
+    /**
      * The final shape's id arrays. The cache is swapped only by a fully successful run,
      * so these always describe the displayed shape — a failed re-evaluation changes
      * neither.
@@ -152,4 +173,8 @@ export class BodyTimeline {
         const entry = this._cache.at(-1);
         return kind === "face" ? entry?.faceIds : entry?.edgeIds;
     }
+}
+
+function idComponents(id: string): string[] {
+    return id.split(ID_COMPONENT_SEPARATOR);
 }

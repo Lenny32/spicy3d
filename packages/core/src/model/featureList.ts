@@ -78,6 +78,12 @@ export interface IFeatureListNode {
      * `FeatureItem.references`.
      */
     activateReference?(featureId: string, key: string): void;
+    /**
+     * Indexes (findSubShapes order) of the displayed shape's faces the feature created — what the
+     * timeline highlights for it. Empty when it created none that survive, or when faces cannot
+     * be traced back to features (tracking unavailable, a session rollback in progress).
+     */
+    featureFaces?(featureId: string): number[];
 }
 
 export function isFeatureListNode(node: unknown): node is IFeatureListNode {

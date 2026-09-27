@@ -935,6 +935,7 @@ export const I18N_KEYS = [
     "snap.vertex",
     "statusBar.snap",
     "statusBar.tracking",
+    "timeline.edit{0}",
     "timeline.feature{0}{1}",
     "timeline.title",
     "toast.command.{0}excuting",

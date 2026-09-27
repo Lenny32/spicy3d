@@ -975,6 +975,7 @@ export default {
         "snap.vertex": "Construction point",
         "statusBar.snap": "Snap",
         "statusBar.tracking": "Tracking",
+        "timeline.edit{0}": "Edit {0}",
         "timeline.feature{0}{1}": "{0} ({1})",
         "timeline.title": "Timeline",
         "toast.command.{0}excuting": "Command {0} is runing",
