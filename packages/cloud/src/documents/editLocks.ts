@@ -24,7 +24,7 @@ export interface ChannelLike {
 export type EditMode = "editing" | "readOnly";
 
 interface HandoverMessage {
-    type: "handover";
+    type: "handover" | "released";
     id: string;
 }
 
@@ -51,6 +51,7 @@ export class EditLocks implements IEditGuard {
     private readonly held = new Map<string, () => void>();
     private readonly readOnly = new Set<string>();
     private readonly listeners = new Set<(id: string, mode: EditMode) => void>();
+    private readonly releasedListeners = new Set<(id: string) => void>();
     /** Called in the editing tab before it lets go (e.g. to save unsaved changes). */
     handoverHandler: ((id: string) => Promise<void>) | undefined;
 
@@ -89,6 +90,14 @@ export class EditLocks implements IEditGuard {
         this.held.delete(id);
         release?.();
         this.readOnly.delete(id);
+        // Other tabs may now take it (e.g. to push changes it left pending).
+        if (release) this.channel?.postMessage({ type: "released", id } satisfies HandoverMessage);
+    }
+
+    /** Another tab of this browser let a document go. Returns the unsubscribe function. */
+    onReleasedElsewhere(listener: (id: string) => void): () => void {
+        this.releasedListeners.add(listener);
+        return () => this.releasedListeners.delete(listener);
     }
 
     /** "Edit here instead". Resolves `true` once this tab edits the document. */
@@ -145,7 +154,12 @@ export class EditLocks implements IEditGuard {
 
     private async onMessage(data: unknown) {
         const message = data as Partial<HandoverMessage> | null;
-        if (message?.type !== "handover" || typeof message.id !== "string") return;
+        if (typeof message?.id !== "string") return;
+        if (message.type === "released") {
+            for (const listener of [...this.releasedListeners]) listener(message.id);
+            return;
+        }
+        if (message.type !== "handover") return;
         const id = message.id;
         if (!this.held.has(id)) return;
         try {

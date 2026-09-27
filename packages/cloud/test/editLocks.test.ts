@@ -94,6 +94,18 @@ function twoTabs() {
 }
 
 describe("EditLocks", () => {
+    test("letting a document go tells the other tabs (they may push what it left pending)", async () => {
+        const { first, second } = twoTabs();
+        const released = rs.fn((_id: string) => {});
+        second.onReleasedElsewhere(released);
+        await first.acquire("doc");
+        first.release("doc");
+        second.release("never-held");
+        await flush();
+
+        expect(released.mock.calls).toEqual([["doc"]]);
+    });
+
     test("the first tab edits, the second opens the same document read-only", async () => {
         const { first, second } = twoTabs();
 
