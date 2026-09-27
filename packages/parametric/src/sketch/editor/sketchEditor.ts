@@ -3,6 +3,7 @@
 
 import {
     type AsyncController,
+    AutosaveHolds,
     type CameraType,
     documentLengthUnit,
     formatLengthParameter,
@@ -136,6 +137,8 @@ export class SketchEditor implements IDisposable {
      * (committing changes) with `exit` or Escape.
      */
     private static activeEditor?: SketchEditor;
+    /** Ends the session's hold on autosave. */
+    private releaseAutosave?: () => void;
 
     // ------------------------------------------------------------------ Static entry points — at most one session is live
 
@@ -149,6 +152,8 @@ export class SketchEditor implements IDisposable {
         node.setShowProfileFaces(false);
         try {
             const editor = new SketchEditor(node.document, node);
+            // The session rolls bodies back: an autosave now would save that state.
+            editor.releaseAutosave = AutosaveHolds.hold("sketch");
             SketchEditor.activeEditor = editor;
             node.document.application.mainWindow?.ribbon.openTab("ribbon.tab.sketch");
             PubSub.default.pub("pushShortcutContext", "sketch");
@@ -893,7 +898,11 @@ export class SketchEditor implements IDisposable {
         try {
             this.restoreRolledBackBodies();
         } finally {
-            this.teardownSession();
+            try {
+                this.teardownSession();
+            } finally {
+                this.releaseAutosave?.();
+            }
         }
     }
 
