@@ -4,6 +4,7 @@
 import { download, formatDateTime, I18n, type I18nKeys, PubSub, parseUtc } from "@spicy3d/core";
 import { button, div, h3, li, option, select, span, ul } from "@spicy3d/element";
 import type { AccessToken, AccountSession } from "../account/account";
+import { DEVICE_NAME_MAX_LENGTH, defaultDeviceName } from "../account/deviceSettings";
 import { describeUserAgent } from "../account/userAgent";
 import { type CloudError, cloudErrorMessage, fieldErrorMessages } from "../problem";
 import style from "./account.module.css";
@@ -542,11 +543,35 @@ function showSecret(modal: Modal, secret: string) {
 
 function deviceSection(ctx: AccountUiContext) {
     const settings = ctx.account.deviceSettings;
+    const deviceName = textField({
+        label: "account.settings.deviceName",
+        name: "deviceName",
+        value: settings.deviceName,
+        maxLength: DEVICE_NAME_MAX_LENGTH,
+    });
+    deviceName.input.placeholder = defaultDeviceName();
+    deviceName.input.onchange = () => {
+        settings.deviceName = deviceName.input.value;
+    };
+    const newInCloud = checkbox(
+        "account.settings.newDocumentsInCloud",
+        settings.newDocumentLocation === "cloud",
+    );
+    newInCloud.input.onchange = () => {
+        settings.newDocumentLocation = newInCloud.input.checked ? "cloud" : "local";
+    };
     const keep = checkbox("account.settings.keepOfflineCopies", settings.keepOfflineCopies);
     keep.input.onchange = () => {
         settings.keepOfflineCopies = keep.input.checked;
     };
-    return section("account.settings.device", keep.root, paragraph("account.settings.keepOfflineCopiesHint"));
+    return section(
+        "account.settings.device",
+        deviceName.root,
+        paragraph("account.settings.deviceNameHint"),
+        newInCloud.root,
+        keep.root,
+        paragraph("account.settings.keepOfflineCopiesHint"),
+    );
 }
 
 // ---- Privacy / danger zone -------------------------------------------------------------------

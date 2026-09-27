@@ -4,7 +4,11 @@
 import { rs } from "@rstest/core";
 import { ObjectStorage } from "@spicy3d/core";
 import { type Account, exportFileName, type SignOutEvent } from "../src/account/account";
-import { CloudDeviceSettings } from "../src/account/deviceSettings";
+import {
+    CloudDeviceSettings,
+    DEVICE_NAME_MAX_LENGTH,
+    defaultDeviceName,
+} from "../src/account/deviceSettings";
 import {
     accountOn,
     FakeServer,
@@ -561,5 +565,43 @@ describe("CloudDeviceSettings", () => {
 
         expect(new CloudDeviceSettings(storage).keepOfflineCopies).toBe(true);
         storage.clear();
+    });
+
+    test("the device name is user-editable, trimmed and capped; empty means the default", () => {
+        const storage = new ObjectStorage("spicy3d-test", "device-name");
+        storage.clear();
+        const settings = new CloudDeviceSettings(storage);
+        expect(settings.deviceName).toBe("");
+        expect(settings.effectiveDeviceName).toBe(defaultDeviceName());
+
+        settings.deviceName = `  Desk ${"x".repeat(200)}`;
+
+        expect(settings.deviceName).toHaveLength(DEVICE_NAME_MAX_LENGTH);
+        expect(settings.deviceName.startsWith("Desk x")).toBe(true);
+        expect(new CloudDeviceSettings(storage).deviceName).toBe(settings.deviceName);
+        storage.clear();
+    });
+
+    test("new documents go to the cloud unless the device says otherwise", () => {
+        const storage = new ObjectStorage("spicy3d-test", "new-location");
+        storage.clear();
+        const settings = new CloudDeviceSettings(storage);
+        expect(settings.newDocumentLocation).toBe("cloud");
+
+        settings.newDocumentLocation = "local";
+
+        expect(new CloudDeviceSettings(storage).newDocumentLocation).toBe("local");
+        storage.clear();
+    });
+
+    test.each([
+        ["Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0", "Linux – Firefox"],
+        [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+            "Windows – Chrome",
+        ],
+        ["", "This device"],
+    ])("default device name of %s is %s", (userAgent, expected) => {
+        expect(defaultDeviceName(userAgent)).toBe(expected);
     });
 });

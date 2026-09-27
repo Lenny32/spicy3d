@@ -6,6 +6,7 @@ export * from "./api";
 export * from "./client";
 export * from "./cloud";
 export * from "./config";
+export * from "./documents";
 export * from "./links";
 export * from "./problem";
 export * from "./ui";

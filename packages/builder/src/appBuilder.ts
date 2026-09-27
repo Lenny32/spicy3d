@@ -143,7 +143,7 @@ export class AppBuilder {
      * client and the account UI only once a server is found.
      */
     useCloud(options: UseCloudOptions = {}): this {
-        this._started.push(async () => {
+        this._started.push(async (app) => {
             const { discoverCloud } = await import("@spicy3d/cloud/src/config");
             const { accountLink, ...connection } = options;
             const discovery = await discoverCloud(connection);
@@ -157,7 +157,9 @@ export class AppBuilder {
             );
             const cloud = await import("@spicy3d/cloud");
             const started = cloud.startCloud(discovery, connection);
-            if (started) await cloud.startAccountUi(started, accountLink);
+            if (!started) return;
+            await cloud.startAccountUi(started, accountLink);
+            cloud.startCloudDocuments(started, app);
         });
         return this;
     }

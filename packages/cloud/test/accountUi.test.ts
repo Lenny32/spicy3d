@@ -535,6 +535,25 @@ describe("account settings", () => {
         expect(account.deviceSettings.keepOfflineCopies).toBe(true);
     });
 
+    test("the device name and where new documents go are device settings", async () => {
+        const { account, dialog } = await openSettings();
+        const name = inputOf(dialog, "deviceName");
+        expect(name.placeholder).not.toBe("");
+
+        name.value = "Desk – Firefox";
+        name.dispatchEvent(new Event("change"));
+        const box = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
+            (b) => b.parentElement?.textContent?.includes("account.settings.newDocumentsInCloud"),
+        );
+        expect(box).toBeDefined();
+        expect(box!.checked).toBe(true);
+        box!.checked = false;
+        box!.dispatchEvent(new Event("change"));
+
+        expect(account.deviceSettings.deviceName).toBe("Desk – Firefox");
+        expect(account.deviceSettings.newDocumentLocation).toBe("local");
+    });
+
     test("download my data saves the ZIP", async () => {
         const { server, dialog } = await openSettings();
         server.on("GET /api/me/export", new Response(new Blob(["PK"]), { status: 200 }));

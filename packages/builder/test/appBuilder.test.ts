@@ -38,6 +38,7 @@ const cloudMock = rs.hoisted(() => ({
     discoverCalls: [] as unknown[],
     startCalls: [] as unknown[][],
     accountUiCalls: [] as unknown[][],
+    documentsCalls: [] as unknown[][],
     mainModuleLoaded: 0,
 }));
 
@@ -57,6 +58,10 @@ rs.mock("@spicy3d/cloud", () => {
         },
         startAccountUi: async (...args: unknown[]) => {
             cloudMock.accountUiCalls.push(args);
+        },
+        startCloudDocuments: (...args: unknown[]) => {
+            cloudMock.documentsCalls.push(args);
+            return () => {};
         },
     };
 });
@@ -239,6 +244,7 @@ describe("AppBuilder", () => {
             cloudMock.discoverCalls.length = 0;
             cloudMock.startCalls.length = 0;
             cloudMock.accountUiCalls.length = 0;
+            cloudMock.documentsCalls.length = 0;
         });
 
         test("adds a post-startup step, not a startup init", () => {
@@ -260,6 +266,7 @@ describe("AppBuilder", () => {
             expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
             expect(cloudMock.startCalls).toEqual([]);
             expect(cloudMock.accountUiCalls).toEqual([]);
+            expect(cloudMock.documentsCalls).toEqual([]);
             // Runs before the "a server" case, which is the first to import the client module.
             expect(cloudMock.mainModuleLoaded).toBe(0);
         });
@@ -274,6 +281,7 @@ describe("AppBuilder", () => {
             expect(cloudMock.discoverCalls).toEqual([{}]);
             expect(cloudMock.startCalls).toEqual([[discovery, {}]]);
             expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, undefined]]);
+            expect(cloudMock.documentsCalls).toEqual([[{ connection: discovery }, fakeApp]]);
             expect(cloudMock.mainModuleLoaded).toBe(1);
         });
 

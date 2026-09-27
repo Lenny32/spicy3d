@@ -37,9 +37,22 @@
 
 - [ ] Signed in: create cloud document, save, reload, reopen from Cloud list.
 - [ ] Local and cloud documents coexist; moving a document between them works both ways.
-- [ ] Saving a document with unchanged imported geometry uploads only the manifest.
+- [x] Saving a document with unchanged imported geometry uploads only the manifest.
 - [ ] Stale save shows the MVP dialog; each option behaves as described.
 - [ ] Deleted cloud document can be restored from trash.
+
+Implementation notes (CLOUD-06 branch): `CloudDocumentRepository` was run against a local SpicySrv
+(PostgreSQL in Docker, from Node through the real client, no browser): create, new version with
+`If-Match`, stale save → `version_conflict` with head device and time, reload from a fresh cache,
+listing, trash and restore, and a second save with unchanged geometry uploading one blob (the
+manifest) — hence the ticked box. The server's data export `latest.spicy` was reopened with
+`decodeDocumentFile`. Everything with UI (home sections, move both ways, the conflict dialog's three
+options, trash view, two tabs) is covered by tests against a fake server / fake repositories only
+(`packages/cloud/test/cloudDocuments.test.ts`, `packages/ui/test/home.test.ts`) and still needs a run in
+a browser. Uploads are raw: the server hashes the body as received, stores it gzipped itself and
+doesn't accept `Content-Encoding: gzip` (`PUT /api/blobs/{sha256}`: "raw bytes, uncompressed").
+The title bar adds "Unsaved changes" to the five states (edits since the last save, until
+autosave, CLOUD-07); a read-only tab can still edit in memory but cannot save.
 
 ## Dependencies and complexity
 

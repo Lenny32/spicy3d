@@ -47,7 +47,10 @@ export interface RecordedRequest {
     method: string;
     path: string;
     search: string;
+    /** Parsed JSON, or the raw bytes of a non-JSON body (a blob upload). */
     body: unknown;
+    /** Lower-case header names. */
+    headers: Record<string, string>;
 }
 
 type Handler = (request: RecordedRequest) => Response | Promise<Response>;
@@ -59,21 +62,30 @@ type Handler = (request: RecordedRequest) => Response | Promise<Response>;
 export class FakeServer {
     readonly requests: RecordedRequest[] = [];
     private readonly routes = new Map<string, Handler[]>();
+    /** Answers the requests no `on()` route matches (a stateful fake, e.g. documents). */
+    fallback: Handler | undefined;
 
     readonly fetch = rs.fn(async (request: Request) => {
         const url = new URL(request.url);
         const path = url.pathname;
-        const text = await request.text();
+        const bytes = new Uint8Array(await request.arrayBuffer());
+        const binary = (request.headers.get("Content-Type") ?? "").includes("octet-stream");
         const recorded: RecordedRequest = {
             method: request.method,
             path,
             search: url.search,
-            body: text ? JSON.parse(text) : undefined,
+            body:
+                bytes.length === 0 ? undefined : binary ? bytes : JSON.parse(new TextDecoder().decode(bytes)),
+            headers: Object.fromEntries(
+                Array.from(request.headers.entries(), ([name, value]) => [name.toLowerCase(), value]),
+            ),
         };
         this.requests.push(recorded);
         const key = `${request.method} ${path}`;
         const handlers = this.routes.get(key);
-        if (!handlers || handlers.length === 0) return problem(404, "not_found");
+        if (!handlers || handlers.length === 0) {
+            return this.fallback ? this.fallback(recorded) : problem(404, "not_found");
+        }
         const handler = handlers.length > 1 ? handlers.shift()! : handlers[0];
         return handler(recorded);
     });
