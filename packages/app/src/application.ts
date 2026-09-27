@@ -27,6 +27,8 @@ import {
     PLUGIN_FILE_EXTENSION,
     Plane,
     PubSub,
+    redactSecrets,
+    redactUrl,
     type Serialized,
     setCurrentApplication,
     VisualConfig,
@@ -34,6 +36,7 @@ import {
 } from "@spicy3d/core";
 import { Document } from "./document";
 import { type DocumentFileEntry, openDocumentFile } from "./documentFiles";
+import { approveExternalFile } from "./externalFile";
 import { HeadlessDocumentEvaluator } from "./mergeEvaluator";
 import { PluginManager } from "./pluginManager";
 import { LocalDocumentRepository } from "./repositories";
@@ -278,23 +281,34 @@ export class Application extends Observable implements IApplication {
         return document;
     }
 
+    /**
+     * Opens the file at `url` (`?url=` / `?model=`): the app's own origin and the deployment's
+     * allowlist at once, any other origin only once the user confirms (`approveExternalFile`).
+     * Cross-origin requests carry no cookies.
+     */
     async loadFileFromUrl(url: string): Promise<void> {
         return Promise.try(async () => {
-            const filename = url.substring(url.lastIndexOf("/") + 1);
+            const approved = await approveExternalFile(url);
+            if (!approved) return;
+            const filename = decodeURIComponent(
+                approved.pathname.substring(approved.pathname.lastIndexOf("/") + 1),
+            );
             if (!filename || !filename.includes(".")) {
-                throw new Error(`No file name in url: ${url}`);
+                throw new Error(`No file name in url: ${redactUrl(approved)}`);
             }
 
-            const response = await fetch(url);
+            const response = await fetch(approved.href, { credentials: "same-origin" });
             if (!response.ok) {
-                throw new Error(`Failed to fetch model: ${url}, statusText: ${response.statusText}`);
+                throw new Error(
+                    `Failed to fetch model: ${redactUrl(approved)}, statusText: ${response.statusText}`,
+                );
             }
 
             const blob = await response.blob();
             const file = new File([blob], filename, { type: blob.type });
             await this.importFiles([file]);
         }).catch((err) => {
-            Logger.error(err);
+            Logger.error(err instanceof Error ? redactSecrets(err.message) : redactSecrets(String(err)));
         });
     }
 

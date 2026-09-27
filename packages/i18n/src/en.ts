@@ -1091,7 +1091,16 @@ export default {
         "viewport.mode.solid": "Solid",
         "viewport.mode.wireframe": "Wireframe",
         "viewport.mode.solidAndWireframe": "Solid And Wireframe",
-        "warning.script.fromDomain": "Do you trust scripts from the following domains?",
+        "warning.script.fromDomain": "Do you trust plugins from this origin?",
+        "warning.plugin.origin":
+            "A plugin runs with the same rights as the app. Only trust origins whose plugins you trust.",
+        "warning.plugin.signedIn":
+            "While you are signed in, this plugin can read, change and delete your cloud documents and act for your account. The trust lasts until the page is reloaded.",
+        "warning.plugin.untrusted": "Plain HTTP: anyone on the network path could replace this plugin.",
+        "warning.plugin.refused{0}": "Plugin not loaded: {0}",
+        "warning.file.fromOrigin": "Open a file from another site? It will be downloaded from:",
+        "warning.file.open": "Open",
+        "warning.file.refused{0}": "File not opened: {0}",
         "command.edit.commandSearch": "Command Search",
         "commandSearch.placeholder": "Search commands…",
         "ribbon.group.assemble": "Assemble",

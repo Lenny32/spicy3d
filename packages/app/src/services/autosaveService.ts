@@ -246,7 +246,7 @@ export class AutosaveService implements IService {
         try {
             outcome = await this.autosave(document, entry);
         } catch (error) {
-            Logger.warn(`autosave of ${document.name} failed`, error);
+            Logger.warn(`autosave of ${document.id} failed`, error);
             outcome = "failed";
         } finally {
             entry.saving = false;
@@ -279,7 +279,7 @@ export class AutosaveService implements IService {
 
         const saved = await document.save("auto");
         if (!saved.isOk) {
-            Logger.info(`autosave of ${document.name}: ${saved.error.kind}`);
+            Logger.info(`autosave of ${document.id}: ${saved.error.kind}`);
             return saved.error.kind === "readOnly" ? "skipped" : "failed";
         }
         if (saved.value.status === "conflict") {

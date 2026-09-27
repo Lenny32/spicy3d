@@ -4,6 +4,8 @@
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { ICommand, IDocument, IView, IVisualFactory, Serialized } from "@spicy3d/core";
 import {
+    DeploymentConfig,
+    type DialogButton,
     DOCUMENT_FORMAT_VERSION,
     encodeDocumentFile,
     Logger,
@@ -422,6 +424,8 @@ describe("Application", () => {
 
         beforeEach(() => {
             originalFetch = globalThis.fetch;
+            // example.com is allowlisted by the deployment: opened without asking.
+            DeploymentConfig.set({ security: { fileOrigins: ["https://example.com"] } });
             if (!(Promise as any).try) {
                 (Promise as any).try = (fn: (...args: any[]) => any, ...args: any[]) =>
                     Promise.resolve().then(() => fn(...args));
@@ -432,6 +436,85 @@ describe("Application", () => {
         afterEach(() => {
             globalThis.fetch = originalFetch;
             errorSpy.mockRestore();
+            DeploymentConfig.reset();
+            PubSub.default.removeAll("showDialog");
+        });
+
+        function okFetch() {
+            const fetchSpy = rs.fn(async (_url: string, _init?: RequestInit) => ({
+                ok: true,
+                statusText: "OK",
+                blob: async () => new Blob(["x"]),
+            }));
+            globalThis.fetch = fetchSpy as unknown as typeof fetch;
+            return fetchSpy;
+        }
+
+        test("a file from another origin is fetched only after the user confirms the prompt naming it", async () => {
+            const fetchSpy = okFetch();
+            sharedApp.dataExchange.import = async () => {};
+            const dialogs: { content: HTMLElement; buttons: DialogButton[] }[] = [];
+            PubSub.default.sub("showDialog", (_title, content, buttons) => {
+                dialogs.push({ content, buttons: buttons as DialogButton[] });
+            });
+
+            const loading = sharedApp.loadFileFromUrl("https://evil.example.net/files/model.step?sig=secret");
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(dialogs).toHaveLength(1);
+            expect(fetchSpy).not.toHaveBeenCalled();
+            const origin = dialogs[0].content.querySelector("[data-origin]") as HTMLElement | null;
+            expect(origin).not.toBeNull();
+            expect(origin!.dataset["origin"]).toBe("https://evil.example.net");
+            // The query (a signature, a token) is not shown.
+            expect(dialogs[0].content.textContent).not.toContain("secret");
+            expect(dialogs[0].buttons.map((b) => b.content)).toEqual(["common.cancel", "warning.file.open"]);
+
+            await dialogs[0].buttons[1].onclick!();
+            await loading;
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            expect(fetchSpy.mock.calls[0][0]).toBe("https://evil.example.net/files/model.step?sig=secret");
+        });
+
+        test("cancelling the prompt fetches nothing", async () => {
+            const fetchSpy = okFetch();
+            let buttons: DialogButton[] = [];
+            PubSub.default.sub("showDialog", (_title, _content, b) => {
+                buttons = b as DialogButton[];
+            });
+
+            const loading = sharedApp.loadFileFromUrl("https://other.example.org/model.step");
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(buttons).toHaveLength(2);
+            await buttons[0].onclick!();
+            await loading;
+
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(sharedApp.documents.size).toBe(0);
+        });
+
+        test.each([
+            "javascript:alert(1)",
+            "data:text/plain,hello.step",
+            "file:///etc/passwd.step",
+            "https://user:pw@example.com/model.step",
+        ])("%s is refused without a prompt or a request", async (url) => {
+            const fetchSpy = okFetch();
+            const dialog = rs.fn();
+            PubSub.default.sub("showDialog", dialog);
+            const toasts: unknown[][] = [];
+            PubSub.default.sub("showToast", (...args: unknown[]) => toasts.push(args));
+            try {
+                await sharedApp.loadFileFromUrl(url);
+            } finally {
+                PubSub.default.removeAll("showToast");
+            }
+
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(dialog).not.toHaveBeenCalled();
+            expect(toasts[0]?.[0]).toBe("warning.file.refused{0}");
         });
 
         test("should fetch the URL, create a document and import the file", async () => {

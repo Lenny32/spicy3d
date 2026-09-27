@@ -263,7 +263,7 @@ export class Document extends Observable implements IDocument {
 
         PubSub.default.pub("documentClosed", this);
 
-        Logger.info(`document: ${this.name} closed`);
+        Logger.info(`document: ${this.id} closed`);
         this.dispose();
         return true;
     }
@@ -300,7 +300,7 @@ export class Document extends Observable implements IDocument {
             version: loaded.value.version,
         });
         if (document !== undefined) {
-            Logger.info(`document: ${document.name} opened`);
+            Logger.info(`document: ${document.id} opened`);
         }
         return document;
     }

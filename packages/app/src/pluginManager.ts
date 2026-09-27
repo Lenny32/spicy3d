@@ -6,7 +6,9 @@ import {
     CommandStore,
     Config,
     type DialogButton,
+    ExternalContentPolicy,
     I18n,
+    type I18nKeys,
     type IApplication,
     type IconPath,
     type IPluginManager,
@@ -14,12 +16,22 @@ import {
     type Plugin,
     type PluginManifest,
     PubSub,
+    redactUrl,
 } from "@spicy3d/core";
-import { div, hr, toBase64Img } from "@spicy3d/element";
+import { div, hr, p, toBase64Img } from "@spicy3d/element";
 import type JSZip from "jszip";
 import { linkPluginModules, type PluginModuleSource } from "./pluginModules";
 
-const untrustedDomains: string[] = [];
+/** Origins the user refused in this page. */
+const untrustedOrigins = new Set<string>();
+/** Origins the user trusted in this page (signed in, that trust is not saved). */
+const trustedThisPage = new Set<string>();
+
+function warning(kind: string, text: I18nKeys): HTMLElement {
+    const element = p({ textContent: I18n.translate(text) });
+    element.dataset["warning"] = kind;
+    return element;
+}
 
 export class PluginManager implements IPluginManager {
     readonly plugins = new Map<string, Plugin>();
@@ -60,19 +72,41 @@ export class PluginManager implements IPluginManager {
         }
     }
 
+    /**
+     * Loads the plugin at `urlString` (a folder with a `manifest.json`, or a `.spicyplugin`). The
+     * app's own origin and the deployment's allowlist load at once (`ExternalContentPolicy`);
+     * anything else asks first, naming the origin — while a cloud session may exist every time the
+     * page loads, since the plugin would run with that session; signed out, a trusted origin is
+     * remembered (`Config.trustedDomains`).
+     */
     async loadFromUrl(urlString: string) {
-        const url = new URL(urlString);
-        if (untrustedDomains.includes(url.host)) return;
-
-        if (url.host === window.location.host || Config.instance.trustedDomains.includes(url.host)) {
-            await this.loadFromRemoteFile(urlString);
+        const decision = ExternalContentPolicy.evaluate(urlString, "plugin", {
+            trusted: Config.instance.trustedDomains,
+        });
+        if (decision.verdict === "refused") {
+            Logger.warn(`[plugin] not loading ${redactUrl(urlString)}: ${decision.reason}`);
+            PubSub.default.pub("showToast", "warning.plugin.refused{0}", decision.reason);
             return;
         }
+        const { url } = decision;
+        if (decision.verdict === "allowed" || trustedThisPage.has(url.origin)) {
+            await this.loadFromRemoteFile(url.href);
+            return;
+        }
+        if (untrustedOrigins.has(url.origin)) return;
 
+        const signedIn = ExternalContentPolicy.hasSession;
         PubSub.default.pub(
             "showDialog",
             "common.warning",
-            div(I18n.translate("warning.script.fromDomain"), hr(), url.host),
+            div(
+                I18n.translate("warning.script.fromDomain"),
+                hr(),
+                div({ textContent: url.origin }),
+                warning("origin", "warning.plugin.origin"),
+                ...(signedIn ? [warning("signedIn", "warning.plugin.signedIn")] : []),
+                ...(url.protocol === "http:" ? [warning("plainHttp", "warning.plugin.untrusted")] : []),
+            ),
             this.buttons(url),
         );
     }
@@ -82,14 +116,21 @@ export class PluginManager implements IPluginManager {
             {
                 content: "common.dontTrust",
                 onclick: () => {
-                    untrustedDomains.push(url.host);
+                    untrustedOrigins.add(url.origin);
                 },
             },
             {
                 content: "common.trust",
                 onclick: () => {
-                    Config.instance.trustedDomains.push(url.host);
-                    Config.instance.saveToStorage();
+                    trustedThisPage.add(url.origin);
+                    // Signed in, the trust lasts for this page only: the next load asks again.
+                    if (
+                        !ExternalContentPolicy.hasSession &&
+                        !Config.instance.trustedDomains.includes(url.origin)
+                    ) {
+                        Config.instance.trustedDomains.push(url.origin);
+                        Config.instance.saveToStorage();
+                    }
 
                     this.loadFromRemoteFile(url.href);
                 },
