@@ -27,6 +27,13 @@
             overflow: hidden;
             flex: 1 1 auto;
             height: 0;
+
+            /* An empty property view keeps only its header, at the bottom. */
+            &[data-empty] {
+                flex: 0 0 auto;
+                height: auto;
+                margin-bottom: 4px;
+            }
         }
     }
 

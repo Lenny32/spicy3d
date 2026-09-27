@@ -45,6 +45,7 @@ export class PropertyView extends HTMLElement {
             }),
             this.panel,
         );
+        this.updateCollapsed();
         PubSub.default.sub("showProperties", this.handleShowProperties);
         PubSub.default.sub("showProjectProperties", this.handleShowProjectProperties);
         PubSub.default.sub("activeViewChanged", this.handleActiveViewChanged);
@@ -54,6 +55,7 @@ export class PropertyView extends HTMLElement {
         this.removeProperties();
         this.watch({ document });
         this.panel.append(new ProjectPropertiesPanel(document));
+        this.updateCollapsed();
     };
 
     /**
@@ -84,12 +86,19 @@ export class PropertyView extends HTMLElement {
     private readonly handleShowProperties = (document: IDocument, nodes: INode[]) => {
         this.removeProperties();
         this.watch(nodes.length === 0 ? undefined : { document, nodes: [...nodes] });
-        if (nodes.length === 0) return;
-        this.addModel(document, nodes);
-        this.addGeometry(nodes, document);
-        this.addFeatureList(document, nodes);
-        this.addConstructionEditor(nodes);
+        if (nodes.length > 0) {
+            this.addModel(document, nodes);
+            this.addGeometry(nodes, document);
+            this.addFeatureList(document, nodes);
+            this.addConstructionEditor(nodes);
+        }
+        this.updateCollapsed();
     };
+
+    /** With nothing to show, the panel shrinks to its header and leaves the room to the project tree. */
+    private updateCollapsed() {
+        this.toggleAttribute("data-empty", this.panel.childElementCount === 0);
+    }
 
     private removeProperties() {
         while (this.panel.lastElementChild) {

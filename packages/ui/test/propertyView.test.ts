@@ -133,6 +133,20 @@ describe("PropertyView", () => {
             expect(panel.childElementCount).toBe(0);
         });
 
+        test("should collapse to its header while there is nothing to show", () => {
+            const pv = new PropertyView({ className: "test-panel" });
+            const doc = createMockDocument();
+            const handler = pubSubRecorder.handlers.get("showProperties");
+            expect(handler).toBeDefined();
+            expect(pv.hasAttribute("data-empty")).toBe(true);
+
+            handler!(doc, [new TestNode() as unknown as INode]);
+            expect(pv.hasAttribute("data-empty")).toBe(false);
+
+            handler!(doc, []);
+            expect(pv.hasAttribute("data-empty")).toBe(true);
+        });
+
         test("should render property controls for a Node", () => {
             const pv = new PropertyView({ className: "test-panel" });
             const doc = createMockDocument();
