@@ -9,13 +9,15 @@ rs.mock("../src/toast/toast.module.css", () => ({
     info: "toast-info",
     error: "toast-error",
     warning: "toast-warning",
+    withAction: "toast-with-action",
+    action: "toast-action",
 }));
 
 // Mock I18n
 import "./_helpers/mockCoreI18n";
 
 // Mock @spicy3d/element
-import "./_helpers/mockElement";
+import "./_helpers/mockElementRealEvents";
 
 import { Toast } from "../src/toast";
 
@@ -89,6 +91,27 @@ describe("Toast", () => {
             const toasts = getToasts();
             expect(toasts.length).toBe(1);
             expect(toasts[0]?.textContent ?? "").toBe("c");
+        });
+    });
+
+    describe("action", () => {
+        test("shows the message with one action button that runs and dismisses", () => {
+            const run = rs.fn();
+            Toast.action("home.toast.trashed{0}" as Parameters<typeof Toast.action>[0], {
+                label: "common.undo",
+                run,
+            });
+            const toast = getToast();
+            expect(toast).not.toBeNull();
+            expect(toast!.classList.contains("toast-with-action")).toBe(true);
+            const button = toast!.querySelector("button");
+            expect(button).not.toBeNull();
+            expect(button!.textContent).toBe("common.undo");
+
+            button!.click();
+
+            expect(run).toHaveBeenCalledTimes(1);
+            expect(getToast()).toBeNull();
         });
     });
 });

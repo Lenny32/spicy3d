@@ -25,3 +25,26 @@
 .warning {
     color: var(--warning-color);
 }
+
+.withAction {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    opacity: 0.95;
+}
+
+.action {
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--panel-background-color);
+    color: var(--primary-color);
+    font: inherit;
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+        border-color: var(--border-hover-color);
+    }
+}

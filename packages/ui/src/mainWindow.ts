@@ -88,6 +88,7 @@ export class MainWindow extends HTMLElement implements IWindow {
     private _initEventHandlers(app: IApplication) {
         const displayHome = debounce(this.displayHome, 100);
         PubSub.default.sub("showToast", Toast.info);
+        PubSub.default.sub("showActionToast", Toast.action);
         PubSub.default.sub("displayError", Toast.error);
         PubSub.default.sub("showDialog", showDialog);
         PubSub.default.sub("showAnalysisPanel", showAnalysisPanel);
