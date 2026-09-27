@@ -1,7 +1,10 @@
 services:
-  spicy3d:
-    build:
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "8080:80"
+    spicy3d:
+        # `docker compose pull` takes the image the deploy workflow published;
+        # `docker compose build` builds it from this checkout instead.
+        image: ghcr.io/lenny32/spicy3d:latest
+        build:
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        ports:
+            - "8080:80"
