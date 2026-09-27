@@ -103,6 +103,28 @@ describe("validateMerge", () => {
         for (let i = 1; i < progress.length; i++) expect(progress[i][0]).toBeGreaterThan(progress[i - 1][0]);
     });
 
+    test("the kernel still works after a failing rebuild (an OCCT abort inside the fillet)", async () => {
+        const validated = await validateMerge(merge("rebuild-failure-thin-wall"), { evaluator: evaluator() });
+        expect(validated.value.conflicts.map((c) => c.kind)).toEqual(["rebuild-failure"]);
+        const healthy = await evaluator().evaluate(
+            fixtures.find((f) => f.name === "identity-unchanged")!.base,
+        );
+        expect(healthy.isOk).toBe(true);
+        expect([...healthy.value.keys()]).toEqual([]);
+        const again = await evaluator().evaluate(
+            fixtures.find((f) => f.name === "rebuild-failure-thin-wall")!.ours,
+        );
+        expect([...again.value.keys()]).toEqual([]);
+    });
+
+    test("an evaluator that throws is a failed validation, not a rejected promise", async () => {
+        const throwing: IMergeEvaluator = {
+            evaluate: () => Promise.reject(new Error("kernel gone")),
+        };
+        const validated = await validateMerge(merge("identity-unchanged"), { evaluator: throwing });
+        expect(!validated.isOk && validated.error).toEqual({ kind: "failed", message: "kernel gone" });
+    });
+
     test("uses the sides' own reports when given: only the merge is rebuilt", async () => {
         const calls: string[] = [];
         const result = merge("rebuild-failure-thin-wall");

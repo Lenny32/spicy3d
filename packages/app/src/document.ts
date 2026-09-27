@@ -331,10 +331,17 @@ export class Document extends Observable implements IDocument {
     static async loadHeadless(
         app: IApplication,
         stored: Serialized,
-    ): Promise<Result<Document, DocumentFormatError>> {
+    ): Promise<Result<Document, DocumentFormatError | { kind: "loadFailed"; message: string }>> {
         const migrated = DocumentMigrations.migrate(stored);
         if (!migrated.isOk) return Result.err(migrated.error);
-        return Result.ok(await Document.build(app, migrated.value, {}, true));
+        try {
+            return Result.ok(await Document.build(app, migrated.value, {}, true));
+        } catch (error) {
+            return Result.err({
+                kind: "loadFailed",
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     private static async build(
@@ -344,6 +351,17 @@ export class Document extends Observable implements IDocument {
         headless: boolean,
     ): Promise<Document> {
         const document = new Document(app, data["name"], data["id"], source, { headless });
+        try {
+            await Document.fill(document, data);
+        } catch (error) {
+            // a headless document is nobody's: it must not outlive a failed load
+            if (headless) document.dispose();
+            throw error;
+        }
+        return document;
+    }
+
+    private static async fill(document: Document, data: Serialized): Promise<void> {
         document.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
         document.history.disabled = true;
         // Before the models: a body's feature chain resolves its parameters against
@@ -360,7 +378,6 @@ export class Document extends Observable implements IDocument {
         document.analyses.attachModel();
         document.history.disabled = false;
         document.markSaved();
-        return document;
     }
 
     private static foreignVersionsOf(moduleVersions: Record<string, number>): Record<string, number> {

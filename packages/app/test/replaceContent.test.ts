@@ -111,6 +111,14 @@ describe("replaceContent", () => {
         expect(heard).toEqual([["remove:a1", "move:b", "insertAfter:c", "insertAfter:a1"]]);
     });
 
+    test("the root node's own properties follow; a record without a usable parent lands at the root", () => {
+        const hidden = version([folder("a", "Parts"), folder("x", "Stray", "missing")]);
+        (hidden["models"] as { nodes: { visible: boolean }[] }).nodes[0].visible = false;
+        document.replaceContent(hidden, "pull");
+        expect(document.modelManager.rootNode.visible).toBe(false);
+        expect(ids(document)).toEqual(["a<root", "x<root"]);
+    });
+
     test("a document that cannot be migrated is refused and nothing changes", () => {
         const before = document.serialize();
         const newer = document.replaceContent(version([], { formatVersion: 99 }), "pull");
@@ -184,6 +192,16 @@ describe("headless documents", () => {
         expect(report.isOk).toBe(true);
         expect([...report.value.keys()]).toEqual(["node/datum/rebuild"]);
         expect(progress).toEqual([1, 2]);
+        expect([...app.documents].map((d) => d.id)).toEqual([document.id]);
+    });
+
+    test("a load that throws is disposed and reported, never left open or rejected", async () => {
+        const broken = version([]);
+        (broken["models"] as { nodes: unknown }).nodes = null;
+        const loaded = await Document.loadHeadless(app, broken);
+        expect(!loaded.isOk && loaded.error.kind).toBe("loadFailed");
+        const report = await new HeadlessDocumentEvaluator(app).evaluate(broken);
+        expect(!report.isOk && report.error.kind).toBe("failed");
         expect([...app.documents].map((d) => d.id)).toEqual([document.id]);
     });
 

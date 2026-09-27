@@ -4,6 +4,7 @@
 import type { IDocument } from "./document";
 import {
     type CollectionChangedArgs,
+    Logger,
     NodeLinkedListHistoryRecord,
     type NodeRecord,
     Observable,
@@ -200,6 +201,14 @@ export class ModelManager extends Observable {
             }
         }
         const targetRoot = target[0]?.["id"];
+        // the root is kept (views and the tree hold it); its own properties follow the record
+        const rootRecord = target[0] as Record<string, unknown> | undefined;
+        if (typeof rootRecord?.["name"] === "string" && this.rootNode.name !== rootRecord["name"]) {
+            this.rootNode.name = rootRecord["name"];
+        }
+        if (typeof rootRecord?.["visible"] === "boolean" && this.rootNode.visible !== rootRecord["visible"]) {
+            this.rootNode.visible = rootRecord["visible"];
+        }
         const parentOf = (record: Serialized) => {
             const parentId = record["parentId"] as string | undefined;
             return parentId === targetRoot ? rootId : parentId;
@@ -221,8 +230,14 @@ export class ModelManager extends Observable {
             const lastChild = new Map<string, INode | undefined>();
             for (const record of target.slice(1)) {
                 const id = record["id"] as string;
-                const parent = live.get(parentOf(record) ?? rootId) as INodeLinkedList | undefined;
-                if (parent === undefined || !NodeUtils.isLinkedListNode(parent)) continue;
+                let parent = live.get(parentOf(record) ?? rootId) as INodeLinkedList | undefined;
+                if (parent === undefined || !NodeUtils.isLinkedListNode(parent)) {
+                    // a record out of pre-order, or under a node that holds no children: kept, at the root
+                    Logger.warn(
+                        `applyContent: ${id} has no usable parent ${String(record["parentId"])}, put at the root`,
+                    );
+                    parent = this.rootNode;
+                }
                 const previous = lastChild.get(parent.id);
                 let node = kept.has(id) ? live.get(id)! : undefined;
                 if (node !== undefined) {

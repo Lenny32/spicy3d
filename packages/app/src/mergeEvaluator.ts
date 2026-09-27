@@ -30,6 +30,11 @@ export class HeadlessDocumentEvaluator implements IMergeEvaluator {
         if (!loaded.isOk) return Result.err({ kind: "failed", message: JSON.stringify(loaded.error) });
         try {
             return await collectRebuildReport(loaded.value, options);
+        } catch (error) {
+            return Result.err({
+                kind: "failed",
+                message: error instanceof Error ? error.message : String(error),
+            });
         } finally {
             loaded.value.dispose();
         }

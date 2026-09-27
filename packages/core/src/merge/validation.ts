@@ -154,10 +154,20 @@ export async function validateMerge(
     };
     const documents = { merged: result.merged, ours: result.inputs.ours, theirs: result.inputs.theirs };
     for (const [phase, which] of pending.entries()) {
-        const report = await evaluator.evaluate(documents[which], {
-            signal: options.signal,
-            onProgress: (done, total) => options.onProgress?.(phase * total + done, pending.length * total),
-        });
+        let report: Result<RebuildReport, RebuildError>;
+        try {
+            report = await evaluator.evaluate(documents[which], {
+                signal: options.signal,
+                onProgress: (done, total) =>
+                    options.onProgress?.(phase * total + done, pending.length * total),
+            });
+        } catch (error) {
+            // an evaluator that throws is a failed validation, never a rejected promise
+            report = Result.err({
+                kind: "failed",
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
         if (!report.isOk) return Result.err(report.error);
         reports[which] = report.value;
     }
