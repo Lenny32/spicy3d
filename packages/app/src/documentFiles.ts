@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    AutosaveStatus,
     DOCUMENT_FILE_EXTENSION,
     DOCUMENT_FILE_MIME_TYPE,
     decodeDocumentFile,
@@ -113,6 +114,8 @@ export async function openDocumentFile(
         fileHandles.set(document, handle);
         originFiles.set(document, handle);
         if (await isAutosavedFile(handle)) fileAutosaveOn.add(document);
+        // Its view (and the status bar) appeared while loading, before the file was known.
+        AutosaveStatus.current.changed(document);
     }
     return document;
 }

@@ -3,9 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import {
+    AutosaveStatus,
     DOCUMENT_FILE_EXTENSION,
     type DocumentSource,
     encodeDocumentFile,
+    type FileAutosaveState,
     type IApplication,
     type IDocument,
     Material,
@@ -269,6 +271,19 @@ describe("document files", () => {
             const other = permissionHandle("other.spicy", "granted");
             expect(fileAutosave.state(await openWith(other.handle))).toBe("off");
             await fileAutosave.set(opened, false);
+        });
+
+        test("the status is told once the file is known, so the opt-in shows for the file just opened", async () => {
+            const seen: FileAutosaveState[] = [];
+            const unsubscribe = AutosaveStatus.current.onChanged((document) => {
+                seen.push(fileAutosave.state(document));
+            });
+            try {
+                await openWith(permissionHandle("opened.spicy", "granted").handle);
+            } finally {
+                unsubscribe();
+            }
+            expect(seen).toEqual(["off"]);
         });
 
         test("a document not opened from a writable .spicy file has no such option", () => {
