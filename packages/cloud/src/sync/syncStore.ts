@@ -16,6 +16,8 @@ export interface SyncVersionRef {
     deviceName?: string;
     /** Epoch milliseconds. */
     createdAt?: number;
+    /** How the version was made (`mcp`: by an agent), for the conflict panel's labels. */
+    kind?: string;
 }
 
 /**

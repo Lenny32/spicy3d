@@ -9,7 +9,7 @@ import {
     type IDocument,
     type IDocumentRepository,
     PubSub,
-    type Result,
+    Result,
     repositoryErrorMessage,
     type SaveConflict,
     saveDocumentCopy,
@@ -29,10 +29,46 @@ export function conflictMessage(conflict: SaveConflict): string {
     return I18n.translate("cloud.conflict.message{0}{1}", device, time);
 }
 
-const errorText = (error: Parameters<typeof repositoryErrorMessage>[0]) => {
+export const errorText = (error: Parameters<typeof repositoryErrorMessage>[0]) => {
     const [key, ...args] = repositoryErrorMessage(error);
     return I18n.translate(key, ...args);
 };
+
+/**
+ * "Open latest": this tab's copy closes without saving (through the sync, its pending changes are
+ * dropped first) and the head opens instead.
+ */
+export async function openLatestVersion(
+    app: IApplication,
+    document: IDocument,
+    repository: IDocumentRepository,
+    discardMine?: () => Promise<void>,
+): Promise<void> {
+    await discardMine?.();
+    await document.close({ discardChanges: true });
+    const opened = await app.openDocument(document.id, repository);
+    opened?.application.activeView?.cameraController.fitContent();
+}
+
+/**
+ * "Save mine as a copy": this tab's content becomes a new cloud document (a new id), which opens;
+ * the other version stays the head of this one (this device's pending changes to it are dropped).
+ */
+export async function saveMineAsCopy(
+    app: IApplication,
+    document: IDocument,
+    repository: IDocumentRepository,
+    discardMine?: () => Promise<void>,
+): Promise<Result<string, DocumentRepositoryError>> {
+    const name = I18n.translate("cloud.conflict.copyName{0}", document.name);
+    const copy = await saveDocumentCopy(app, document, repository, name);
+    if (!copy.isOk) return Result.err(copy.error);
+    await discardMine?.();
+    await document.close({ discardChanges: true });
+    await app.openDocument(copy.value.id, repository);
+    PubSub.default.pub("showToast", "cloud.conflict.copySaved");
+    return Result.ok(copy.value.id);
+}
 
 /**
  * The conflict dialog's actions when the offline sync met the conflict (CLOUD-10): the pending save
@@ -91,26 +127,18 @@ export function showConflictDialog(
                         label: "cloud.conflict.openLatest",
                         kind: "danger",
                         run: async () => {
-                            await sync?.discardMine();
-                            await document.close({ discardChanges: true });
-                            const opened = await app.openDocument(document.id, repository);
-                            opened?.application.activeView?.cameraController.fitContent();
+                            await openLatestVersion(app, document, repository, sync?.discardMine);
                             return undefined;
                         },
                     },
                     {
                         label: "cloud.conflict.saveCopy",
                         run: async () => {
-                            const name = I18n.translate("cloud.conflict.copyName{0}", document.name);
-                            const copy = await saveDocumentCopy(app, document, repository, name);
+                            const copy = await saveMineAsCopy(app, document, repository, sync?.discardMine);
                             if (!copy.isOk) {
                                 modal.showError(errorText(copy.error));
                                 return false;
                             }
-                            await sync?.discardMine();
-                            await document.close({ discardChanges: true });
-                            await app.openDocument(copy.value.id, repository);
-                            PubSub.default.pub("showToast", "cloud.conflict.copySaved");
                             return undefined;
                         },
                     },

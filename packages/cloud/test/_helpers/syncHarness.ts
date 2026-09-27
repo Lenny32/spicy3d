@@ -12,6 +12,7 @@ import {
     Result,
     type SaveKind,
     type Serialized,
+    type ToastAction,
     UserActivity,
 } from "@spicy3d/core";
 import { createMockApplication } from "@spicy3d/core/test-utils";
@@ -402,6 +403,16 @@ export class Device {
     readonly store: ISyncStore;
     readonly cache: IBlobCache;
     private readonly onToast = (key: string, ...args: unknown[]) => void this.toasts.push([key, args]);
+    /** A toast with buttons (Resolve, View changes / Undo merge): recorded like a plain one, buttons kept. */
+    readonly actions: [string, ToastAction[]][] = [];
+    private readonly onActionToast = (
+        key: string,
+        action: ToastAction | readonly ToastAction[],
+        ...args: unknown[]
+    ) => {
+        this.toasts.push([key, args]);
+        this.actions.push([key, Array.isArray(action) ? [...action] : [action as ToastAction]]);
+    };
 
     private constructor(
         readonly network: FlakyNetwork,
@@ -427,6 +438,7 @@ export class Device {
         const connection = new CloudConnection(CONFIG, account.client);
         (connection as { account: Account }).account = account;
         PubSub.default.sub("showToast", this.onToast);
+        PubSub.default.sub("showActionToast", this.onActionToast);
         this.documents = new CloudDocuments(connection, this.app, {
             cache: this.cache,
             store: this.store,
@@ -496,12 +508,18 @@ export class Device {
         return document;
     }
 
+    /** The buttons of the last toast `key` shown with some. */
+    toastActions(key: string): ToastAction[] {
+        return this.actions.filter(([k]) => k === key).at(-1)?.[1] ?? [];
+    }
+
     toasted(key: string): unknown[][] {
         return this.toasts.filter(([k]) => k === key).map(([, args]) => args);
     }
 
     dispose() {
         PubSub.default.remove("showToast", this.onToast);
+        PubSub.default.remove("showActionToast", this.onActionToast);
         this.documents.dispose();
     }
 }

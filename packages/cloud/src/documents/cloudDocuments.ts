@@ -8,12 +8,17 @@ import {
     Id,
     Logger,
     PubSub,
-    type ResolutionChoice,
     SidePanels,
     TitleBar,
+    type ToastAction,
 } from "@spicy3d/core";
 import type { SignOutEvent } from "../account/account";
 import type { CloudConnection } from "../cloud";
+import { ConflictPanel } from "../conflicts/conflictPanel";
+import { ConflictResolution } from "../conflicts/conflictResolution";
+import { theirsName } from "../conflicts/conflictText";
+import { showMergeChanges } from "../conflicts/mergeChanges";
+import { keepMineChoice } from "../conflicts/resolutions";
 import { VersionHistoryPanel } from "../history/historyPanel";
 import { previewOf } from "../history/previewRepository";
 import { VersionHistory } from "../history/versionHistory";
@@ -21,7 +26,12 @@ import { EventsChannel } from "../sync/events";
 import { SyncEngine, type SyncEngineOptions } from "../sync/syncEngine";
 import { defaultSyncStore, type ISyncStore } from "../sync/syncStore";
 import { defaultBlobCache, type IBlobCache } from "./blobCache";
-import { type ConflictSyncActions, showConflictDialog } from "./conflictDialog";
+import {
+    type ConflictSyncActions,
+    openLatestVersion,
+    saveMineAsCopy,
+    showConflictDialog,
+} from "./conflictDialog";
 import { keepChangesAfterSignOut } from "./documentActions";
 import { EditLocks } from "./editLocks";
 import { CloudDocumentRepository, type CloudDocumentRepositoryOptions } from "./repository";
@@ -57,6 +67,7 @@ export class CloudDocuments {
     private repository?: CloudDocumentRepository;
     private engine?: SyncEngine;
     private historyPanel?: VersionHistoryPanel;
+    private conflictPanel?: ConflictPanel;
     private readonly statusItem?: DocumentStatusItem;
     private readonly removeSignOutHandler: () => void;
 
@@ -109,6 +120,11 @@ export class CloudDocuments {
         return this.historyPanel;
     }
 
+    /** The conflict panel, while one is open. */
+    get conflicts(): ConflictPanel | undefined {
+        return this.conflictPanel;
+    }
+
     dispose(): void {
         this.removeSignOutHandler();
         this.account.removePropertyChanged(this.onAccountChanged);
@@ -142,11 +158,11 @@ export class CloudDocuments {
             store: this.store,
             locks: this.locks,
             events: this.createEvents(),
+            toastActions: { merged: this.mergedActions, conflict: this.conflictToastActions },
             ...this.options.sync,
         });
         this.engine.start();
-        this.app.repositories.conflictHandler = (document, conflict) =>
-            showConflictDialog(this.app, document, conflict, repository, this.conflictActions(document));
+        this.app.repositories.conflictHandler = (document) => this.resolveConflict(document);
         this.app.repositories.cloud = repository;
         this.applyPreferred();
         for (const document of this.app.documents) this.onDocumentOpened(document);
@@ -172,6 +188,7 @@ export class CloudDocuments {
         const repository = this.repository;
         if (!repository) return;
         void this.closeHistory();
+        this.closeConflicts();
         this.engine?.stop();
         this.engine = undefined;
         for (const document of this.app.documents) {
@@ -246,6 +263,9 @@ export class CloudDocuments {
     };
 
     private readonly onDocumentClosed = (document: IDocument) => {
+        const conflicts = this.conflictPanel?.resolution;
+        conflicts?.documentClosed(document);
+        if (conflicts?.document === document) this.closeConflicts();
         if (document.repository !== this.repository) return;
         this.repository?.resetState(document.id);
         // Its lock goes, unless it still has changes to push (pushed in the background first).
@@ -298,11 +318,15 @@ export class CloudDocuments {
         }
     };
 
-    /** The dialog of the conflict the last save met — an autosave opens none by itself. */
+    /**
+     * The conflict the last save met — an autosave opens nothing by itself: the conflict panel when
+     * the sync has a merge to resolve, the MVP dialog otherwise (no merge: the base is gone).
+     */
     readonly resolveConflict = async (document: IDocument) => {
         const repository = this.repository;
         if (!repository || document.repository !== repository) return;
         await document.settled();
+        if (this.openConflicts(document)) return;
         const conflict = repository.conflictOf(document.id);
         if (conflict) {
             await showConflictDialog(
@@ -365,6 +389,96 @@ export class CloudDocuments {
         return panel;
     };
 
+    // ---- Conflicts (CLOUD-13) ------------------------------------------------------------------
+
+    /**
+     * The conflict panel of an open cloud document whose merge waits for the user (one at a time:
+     * another document's closes first); `undefined` when there is no merge to resolve.
+     */
+    readonly openConflicts = (document: IDocument): ConflictPanel | undefined => {
+        const engine = this.engine;
+        const repository = this.repository;
+        if (!engine || !repository || document.repository !== repository) return undefined;
+        if (this.conflictPanel?.resolution.document === document) return this.conflictPanel;
+        if (!engine.syncConflictOf(document.id)?.result) return undefined;
+        this.closeConflicts();
+        const resolution = ConflictResolution.open({ app: this.app, engine, repository, document });
+        if (!resolution) return undefined;
+        const discardMine = () => engine.discardLocal(document.id);
+        const panel = new ConflictPanel({
+            resolution,
+            onClose: () => this.closeConflicts(panel),
+            saveCopy: () => saveMineAsCopy(this.app, document, repository, discardMine),
+            openLatest: () => openLatestVersion(this.app, document, repository, discardMine),
+        });
+        this.conflictPanel = panel;
+        SidePanels.items.push(panel);
+        return panel;
+    };
+
+    /** Closes the conflict panel (`panel`: only if it is that one); the conflict stays until resolved. */
+    readonly closeConflicts = (panel?: ConflictPanel): void => {
+        const open = this.conflictPanel;
+        if (!open || (panel && panel !== open)) return;
+        this.conflictPanel = undefined;
+        SidePanels.items.remove(open);
+        open.resolution.dispose();
+    };
+
+    /** The buttons of "Merged changes from <device>". */
+    private readonly mergedActions = (docId: string): ToastAction[] => [
+        { label: "cloud.merge.viewChanges", run: () => void this.viewMergeChanges(docId) },
+        { label: "cloud.merge.undo", run: () => void this.undoMerge(docId) },
+    ];
+
+    /** The button of "changes from another device conflict with yours". */
+    private readonly conflictToastActions = (docId: string): ToastAction[] => [
+        {
+            label: "cloud.merge.resolve",
+            run: () => {
+                const document = this.openCloudDocument(docId);
+                if (document) void this.resolveConflict(document);
+            },
+        },
+    ];
+
+    private openCloudDocument(docId: string): IDocument | undefined {
+        return [...this.app.documents].find((x) => x.id === docId && x.repository === this.repository);
+    }
+
+    /** "View changes" of a clean merge: what it changed in this device's document. */
+    readonly viewMergeChanges = async (docId: string): Promise<void> => {
+        const merge = this.engine?.lastMergeOf(docId);
+        if (!merge) {
+            PubSub.default.pub("showToast", "cloud.merge.undoUnavailable");
+            return;
+        }
+        await showMergeChanges(merge.before, merge.result.merged, theirsName(merge.theirs), () =>
+            this.undoMerge(docId),
+        );
+    };
+
+    /**
+     * "Undo merge": this device's content from before the merge is back, and the sync waits for
+     * the user in the conflict panel (merge again, or keep mine as a copy) — see `SyncEngine.undoMerge`.
+     */
+    readonly undoMerge = async (docId: string): Promise<boolean> => {
+        const engine = this.engine;
+        if (!engine) return false;
+        const undone = await engine.undoMerge(docId);
+        if (!undone.isOk) {
+            PubSub.default.pub(
+                "showToast",
+                undone.error.kind === "edited" ? "cloud.merge.undoEdited" : "cloud.merge.undoUnavailable",
+            );
+            return false;
+        }
+        PubSub.default.pub("showToast", "cloud.merge.undone");
+        const document = this.openCloudDocument(docId);
+        if (document) this.openConflicts(document);
+        return true;
+    };
+
     /** Closes the history panel, and the version it previews. */
     readonly closeHistory = async (): Promise<void> => {
         const panel = this.historyPanel;
@@ -376,15 +490,7 @@ export class CloudDocuments {
     };
 }
 
-/**
- * "Keep mine" for one conflict: this device's side when offered, else this device's first (both
- * kept), else as merged (a dangling reference or a rebuild failure, fixed afterwards).
- */
-export function keepMineChoice(choices: readonly ResolutionChoice[]): ResolutionChoice {
-    if (choices.includes("ours")) return "ours";
-    if (choices.includes("ours-first")) return "ours-first";
-    return choices.includes("accept") ? "accept" : choices[0];
-}
+export { keepMineChoice };
 
 /** Starts cloud documents for the connection; returns the teardown. */
 export function startCloudDocuments(

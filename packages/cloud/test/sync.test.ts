@@ -337,7 +337,7 @@ describe("diverged", () => {
         expect(doc.isDirty).toBe(false);
     });
 
-    test("the MVP dialog opens from the conflict and merges keeping this device's side", async () => {
+    test("the conflict pill opens the conflict panel, which merges keeping this device's side", async () => {
         const a = await device();
         const doc = await a.create("doc-1", { w: "10" });
         a.network.down = true;
@@ -348,19 +348,17 @@ describe("diverged", () => {
         a.engine.refreshAll();
         await until(() => a.repository.stateOf("doc-1") === "conflict", "conflict");
 
-        const closed = a.documents.resolveConflict(doc as unknown as IDocument);
-        await until(() => document.querySelector("dialog[open]") !== null, "the dialog");
-        const buttons = Array.from(document.querySelectorAll("dialog[open] button"));
-        const merge = buttons.find(
-            (b) => b.textContent === "cloud.conflict.mergeKeepMine",
-        ) as HTMLButtonElement;
-        expect(merge).not.toBeUndefined();
-        merge.click();
-        await closed;
+        await a.documents.resolveConflict(doc as unknown as IDocument);
+        const panel = a.documents.conflicts;
+        expect(panel).not.toBeUndefined();
+        expect(document.querySelector("dialog[open]")).toBeNull();
+        panel!.querySelector<HTMLButtonElement>('[data-action="keepAllMine"]')!.click();
+        await panel!.finish();
         await until(() => a.repository.stateOf("doc-1") === "saved", "pushed");
 
         expect(head().kind).toBe("merge");
         expect(headValues()).toEqual({ w: "20" });
+        expect(a.documents.conflicts).toBeUndefined();
     });
 
     test("'Open latest' drops this device's pending save and reopens the head", async () => {
@@ -374,13 +372,9 @@ describe("diverged", () => {
         a.engine.refreshAll();
         await until(() => a.repository.stateOf("doc-1") === "conflict", "conflict");
 
-        const closed = a.documents.resolveConflict(doc as unknown as IDocument);
-        await until(() => document.querySelector("dialog[open]") !== null, "the dialog");
-        const open = Array.from(document.querySelectorAll("dialog[open] button")).find(
-            (b) => b.textContent === "cloud.conflict.openLatest",
-        ) as HTMLButtonElement;
-        open.click();
-        await closed;
+        await a.documents.resolveConflict(doc as unknown as IDocument);
+        a.documents.conflicts!.querySelector<HTMLButtonElement>('[data-action="openLatest"]')!.click();
+        await until(() => [...a.app.documents].some((x) => x !== (doc as unknown as IDocument)), "reopened");
         await a.engine.settle();
 
         const reopened = [...a.app.documents].find((x) => x.id === "doc-1") as unknown as SyncDoc;
@@ -388,6 +382,7 @@ describe("diverged", () => {
         expect(reopened.values).toEqual({ w: "30" });
         expect((await a.store.get("doc-1"))?.localDirty).toBe(false);
         expect(headValues()).toEqual({ w: "30" });
+        expect(a.documents.conflicts).toBeUndefined();
     });
 });
 

@@ -27,10 +27,12 @@ import {
     type SaveOutcome,
     type SaveRequest,
     type Serialized,
+    type ToastAction,
     UserActivity,
     validateMerge,
 } from "@spicy3d/core";
 import { newIdempotencyKey } from "../client";
+import { reapplyResolutions } from "../conflicts/resolutions";
 import type { EditLocks } from "../documents/editLocks";
 import type {
     CloudDocumentRepository,
@@ -73,6 +75,8 @@ export interface SyncSide {
     deviceName?: string;
     /** Epoch milliseconds. */
     at?: number;
+    /** The version's kind (`mcp`: saved by an agent). */
+    kind?: string;
 }
 
 /**
@@ -88,6 +92,31 @@ export interface SyncConflict {
     ours: SyncSide;
     theirs: SyncSide;
     local: "pending" | "unsaved";
+    /**
+     * The user undid a clean merge ("Undo merge"): this device's content is back, and the sync
+     * waits for the user to merge again or keep theirs as a copy instead of merging it back.
+     */
+    undone?: boolean;
+}
+
+/**
+ * A clean merge the sync applied to an open document, while it can still be undone ("View
+ * changes" / "Undo merge" of its toast): this device's state before it, and what came in.
+ */
+export interface AppliedMerge {
+    docId: string;
+    /** The open document's content before the merge (this device's side). */
+    before: Serialized;
+    result: MergeResult;
+    theirs: SyncSide;
+}
+
+/** Buttons of the sync's toasts, given by the UI (CLOUD-13). */
+export interface SyncToastActions {
+    /** "Merged changes from <device>": View changes / Undo merge. */
+    merged?: (docId: string) => ToastAction[];
+    /** "<document>: changes from another device conflict with yours": Resolve. */
+    conflict?: (docId: string) => ToastAction[];
 }
 
 export interface SyncEngineOptions {
@@ -114,10 +143,26 @@ export interface SyncEngineOptions {
     requestPersistence?: () => Promise<boolean>;
     /** Rebuilds a merge before it is pushed (default: the app's registered `MergeEvaluators.current`). */
     evaluator?: IMergeEvaluator;
+    /** Actions offered on the merge and conflict toasts (none: plain toasts). */
+    toastActions?: SyncToastActions;
+}
+
+/** A clean merge applied in place, kept for "Undo merge". */
+interface LastMerge extends AppliedMerge {
+    /** The undo position right after the merge was applied: edited since = no undo. */
+    appliedAt: object;
+    /** What this device had: a pending save (its kind and label), or unsaved edits only. */
+    local: "pending" | "unsaved";
+    /** The version this device was based on before the merge (the merge base). */
+    base?: SyncVersionRef;
+    pendingKind?: SyncRecord["pendingKind"];
+    pendingLabel?: string;
 }
 
 /** The undo step of a newer version applied in place (its undo goes back to the version before). */
 export const REMOTE_UPDATE_HISTORY_NAME = "remote update";
+/** The undo step of "Undo merge" (this device's content from before a clean merge, back in place). */
+export const UNDO_MERGE_HISTORY_NAME = "undo merge";
 
 interface Entry {
     state: DocumentSyncState;
@@ -148,6 +193,8 @@ interface Entry {
     /** Counts the saves written here: tells a save made after a merge was applied from one before. */
     saves: number;
     errorReported?: string;
+    /** The last clean merge applied to the open document, while "Undo merge" is possible. */
+    lastMerge?: LastMerge;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -165,6 +212,7 @@ function versionRef(version: CloudVersion, blobs: string[]): SyncVersionRef {
     if (version.deviceName) ref.deviceName = version.deviceName;
     const at = parseUtc(version.createdAt);
     if (Number.isFinite(at)) ref.createdAt = at;
+    if (version.kind) ref.kind = version.kind;
     return ref;
 }
 
@@ -173,6 +221,7 @@ function sideOf(ref: SyncVersionRef | undefined): SyncSide {
     if (ref?.id) side.versionId = ref.id;
     if (ref?.deviceName) side.deviceName = ref.deviceName;
     if (ref?.createdAt !== undefined) side.at = ref.createdAt;
+    if (ref?.kind) side.kind = ref.kind;
     return side;
 }
 
@@ -202,9 +251,10 @@ function isQuota(failure: PushFailure): boolean {
  * head on (re)connect, window focus and `online`. A newer head on a clean document is applied in
  * place (`replaceContent`, views kept) unless the user is busy ("remote changes pending" until they
  * are done). A document with changes here merges (CLOUD-12): a clean merge is applied as one undo
- * step and pushed as a `merge` version (parents: the head, then this device's base); a merge with
- * conflicts waits in `conflict` ({@link conflictOf}, {@link onChanged}) for the user (the MVP dialog
- * now, CLOUD-13's panel later).
+ * step and pushed as a `merge` version (parents: the head, then this device's base), and can be
+ * taken back ({@link undoMerge}); a merge with conflicts waits in `conflict` ({@link syncConflictOf},
+ * {@link onChanged}) for the user — CLOUD-13's conflict panel, which holds the sync ({@link hold})
+ * and finishes with {@link resolve}.
  *
  * One tab syncs a document: the one holding its edit lock ({@link EditLocks}); a closed document
  * with pending changes is synced by whichever tab gets its lock first.
@@ -814,13 +864,14 @@ export class SyncEngine implements IRepositorySync {
             if (document && entry.pullRequested) await this.pullReadOnly(docId, entry, document);
             return;
         }
-        if (entry.holds > 0) return;
         const record = await this.record(docId);
         if (entry.state === "conflict") {
-            // Waits for the user; a newer head re-merges (the UI reapplies its choices by path).
+            // Waits for the user; a newer head re-merges, also while the conflict panel holds the
+            // sync (nothing is pushed or applied: the panel reapplies its choices by path).
             if (entry.pullRequested) await this.remerge(docId, entry, record);
             return;
         }
+        if (entry.holds > 0) return;
         if (record?.localDirty) {
             await this.push(docId, entry, record);
         } else if (entry.pullRequested || entry.waitingIdle) {
@@ -1205,6 +1256,7 @@ export class SyncEngine implements IRepositorySync {
         document.markSaved();
         document.version = version.id;
         entry.pullRequested = false;
+        entry.lastMerge = undefined;
         await this.rebase(docId, version, manifest.isOk ? manifest.value.blobs : []);
         this.setState(docId, "clean", false);
         PubSub.default.pub("showToast", "cloud.sync.updatedFrom{0}", this.deviceLabel(version.deviceName));
@@ -1345,7 +1397,8 @@ export class SyncEngine implements IRepositorySync {
             }
             const position = document.history.position();
             const saves = entry.saves;
-            const merged = mergeDocuments(base, document.serialize(), theirs);
+            const before = document.serialize();
+            const merged = mergeDocuments(base, before, theirs);
             if (!merged.isOk || merged.value.conflicts.length > 0) {
                 this.enterConflict(
                     docId,
@@ -1381,6 +1434,17 @@ export class SyncEngine implements IRepositorySync {
             }
             const appliedAt = document.history.position();
             document.version = version.id;
+            entry.lastMerge = {
+                docId,
+                before,
+                result: merged.value,
+                theirs: sideOf(versionRef(version, [])),
+                appliedAt,
+                local: "pending",
+                base: record.baseVersion,
+                pendingKind: record.pendingKind,
+                pendingLabel: record.pendingLabel,
+            };
             const recorded = await this.recordMerge(
                 docId,
                 entry,
@@ -1411,9 +1475,18 @@ export class SyncEngine implements IRepositorySync {
             }
             await this.recordMerge(docId, entry, version, merged.value.merged);
         }
-        PubSub.default.pub("showToast", "cloud.sync.mergedFrom{0}", this.deviceLabel(version.deviceName));
+        this.mergedToast(docId, entry, version);
         this.setState(docId, "dirty");
         entry.again = true;
+    }
+
+    /** "Merged changes from <device>", with View changes / Undo merge while the merge can be undone. */
+    private mergedToast(docId: string, entry: Entry, version: CloudVersion) {
+        const device = this.deviceLabel(version.deviceName);
+        const actions = entry.lastMerge ? this.options.toastActions?.merged?.(docId) : undefined;
+        if (actions?.length)
+            PubSub.default.pub("showActionToast", "cloud.sync.mergedFrom{0}", actions, device);
+        else PubSub.default.pub("showToast", "cloud.sync.mergedFrom{0}", device);
     }
 
     /**
@@ -1531,7 +1604,8 @@ export class SyncEngine implements IRepositorySync {
             entry.again = true;
             return;
         }
-        const merged = base ? mergeDocuments(base, document.serialize(), theirs) : undefined;
+        const before = document.serialize();
+        const merged = base ? mergeDocuments(base, before, theirs) : undefined;
         if (!merged?.isOk || merged.value.conflicts.length > 0) {
             this.enterConflict(
                 docId,
@@ -1548,12 +1622,21 @@ export class SyncEngine implements IRepositorySync {
             this.enterConflict(docId, entry, record, version, merged.value, "unsaved");
             return;
         }
+        entry.lastMerge = {
+            docId,
+            before,
+            result: merged.value,
+            theirs: sideOf(versionRef(version, [])),
+            appliedAt: document.history.position(),
+            local: "unsaved",
+            base: record?.baseVersion,
+        };
         document.version = version.id;
         entry.pullRequested = false;
         const manifest = await this.repository.manifestOf(version);
         await this.rebase(docId, version, manifest.isOk ? manifest.value.blobs : []);
         this.setState(docId, "clean", false);
-        PubSub.default.pub("showToast", "cloud.sync.mergedFrom{0}", this.deviceLabel(version.deviceName));
+        this.mergedToast(docId, entry, version);
     }
 
     private enterConflict(
@@ -1563,8 +1646,21 @@ export class SyncEngine implements IRepositorySync {
         head: CloudVersion,
         result: MergeResult | undefined,
         local: SyncConflict["local"],
+        undone = false,
     ) {
-        const theirs = versionRef(head, []);
+        this.enterConflictWith(docId, entry, record, sideOf(versionRef(head, [])), result, local, undone);
+    }
+
+    private enterConflictWith(
+        docId: string,
+        entry: Entry,
+        record: SyncRecord | undefined,
+        theirs: SyncSide,
+        result: MergeResult | undefined,
+        local: SyncConflict["local"],
+        undone: boolean,
+    ) {
+        entry.lastMerge = undefined;
         const conflict: Mutable<SyncConflict> = {
             docId,
             base: sideOf(record?.baseVersion),
@@ -1572,10 +1668,11 @@ export class SyncEngine implements IRepositorySync {
                 deviceName: this.repository.account.deviceSettings.effectiveDeviceName,
                 at: record?.localSnapshot?.savedAt ?? this.now(),
             },
-            theirs: sideOf(theirs),
+            theirs,
             local,
         };
         if (result) conflict.result = result;
+        if (undone) conflict.undone = true;
         const first = entry.state !== "conflict";
         entry.conflict = conflict;
         entry.pullRequested = false;
@@ -1588,9 +1685,13 @@ export class SyncEngine implements IRepositorySync {
         }
         this.setState(docId, "conflict");
         this.emit(docId);
-        if (first) {
-            const name = this.openDocument(docId)?.name ?? record?.name ?? docId;
-            PubSub.default.pub("showToast", "cloud.sync.conflict{0}", name);
+        if (first && !undone) {
+            const document = this.openDocument(docId);
+            const name = document?.name ?? record?.name ?? docId;
+            const actions = document ? this.options.toastActions?.conflict?.(docId) : undefined;
+            if (actions?.length)
+                PubSub.default.pub("showActionToast", "cloud.sync.conflict{0}", actions, name);
+            else PubSub.default.pub("showToast", "cloud.sync.conflict{0}", name);
         }
     }
 
@@ -1620,10 +1721,11 @@ export class SyncEngine implements IRepositorySync {
             version,
             merged.isOk ? merged.value : undefined,
             entry.conflict?.local ?? "pending",
+            entry.conflict?.undone,
         );
     }
 
-    // ---- Resolution (MVP dialog, CLOUD-13) ---------------------------------------------------
+    // ---- Resolution (the conflict panel, CLOUD-13; the MVP dialog) ---------------------------
 
     /**
      * Pauses the sync of a document (and autosave) while the user resolves its conflict; returns the
@@ -1687,12 +1789,11 @@ export class SyncEngine implements IRepositorySync {
         const ours = document ? document.serialize() : inputs.value.ours!;
         const merged = mergeDocuments(inputs.value.base, ours, inputs.value.theirs);
         if (!merged.isOk) return Result.err({ kind: "failed", message: merged.error.kind });
-        const known = new Set([...merged.value.conflicts].map((x) => x.path));
-        const resolved = resolveMerge(
-            merged.value,
-            choices.filter((x) => known.has(x.path)),
-        );
-        if (!resolved.isOk) return Result.err({ kind: "failed", message: resolved.error.kind });
+        // Chained: a choice for a conflict another choice creates (a dangling reference) applies too;
+        // choices for paths the merge no longer has (the head moved) are dropped.
+        const reapplied = reapplyResolutions(merged.value, choices);
+        if (!reapplied.isOk) return Result.err({ kind: "failed", message: reapplied.error.kind });
+        const resolved = Result.ok<MergeResult>(reapplied.value.result);
         if (resolved.value.conflicts.length > 0) {
             conflict.result = resolved.value;
             this.emit(docId);
@@ -1732,6 +1833,7 @@ export class SyncEngine implements IRepositorySync {
      */
     async keepMine(docId: string): Promise<Result<void, DocumentRepositoryError>> {
         const entry = this.entry(docId);
+        entry.lastMerge = undefined;
         const head = await this.repository.fetchHead(docId);
         if (!head.isOk) return Result.err(head.error);
         const version = head.value.version;
@@ -1763,6 +1865,7 @@ export class SyncEngine implements IRepositorySync {
     /** "Open latest": this device's pending changes are dropped (the caller reopens the head). */
     async discardLocal(docId: string): Promise<void> {
         const entry = this.entry(docId);
+        entry.lastMerge = undefined;
         this.clearConflict(entry);
         await this.withRecord(docId, async () => {
             const current = await this.record(docId);
@@ -1780,6 +1883,112 @@ export class SyncEngine implements IRepositorySync {
         });
         this.setState(docId, "clean", false);
         this.emit(docId);
+    }
+
+    // ---- Undo merge (CLOUD-13) ---------------------------------------------------------------
+
+    /** The clean merge last applied to the open document, while "Undo merge" can take it back. */
+    lastMergeOf(docId: string): AppliedMerge | undefined {
+        const last = this.entries.get(docId)?.lastMerge;
+        const document = this.openDocument(docId);
+        if (!last || !document || document.history.position() !== last.appliedAt) return undefined;
+        return { docId, before: last.before, result: last.result, theirs: last.theirs };
+    }
+
+    /**
+     * "Undo merge": the open document gets its content from before the clean merge back (one undo
+     * step), and the sync stands where it stood before the merge — based on the same version,
+     * this device's changes pending (or unsaved) again, the merge (pushed or not) now being
+     * "theirs". It then waits in `conflict` (`undone`): pushing this device's content on top would
+     * silently revert the other device's changes, and merging again by itself would loop. The user
+     * merges again (`resolve`), keeps their content as a copy, or opens the latest. Refused once
+     * the document was edited after the merge (`edited`).
+     */
+    async undoMerge(
+        docId: string,
+    ): Promise<Result<void, { kind: "unavailable" } | { kind: "edited" } | DocumentRepositoryError>> {
+        const entry = this.entries.get(docId);
+        const document = this.openDocument(docId);
+        const last = entry?.lastMerge;
+        if (!entry || !last || !document) return Result.err({ kind: "unavailable" });
+        if (document.history.position() !== last.appliedAt) return Result.err({ kind: "edited" });
+        const release = this.hold(docId);
+        try {
+            // A push of the merge in flight lands (or not) first; the hold keeps the next one back.
+            while (entry.running) await entry.running;
+            await document.settled();
+            if (entry.lastMerge !== last) return Result.err({ kind: "unavailable" });
+            if (document.history.position() !== last.appliedAt) return Result.err({ kind: "edited" });
+            let snapshot: LocalSnapshot | undefined;
+            if (last.local === "pending") {
+                const prepared = await this.repository.prepare(
+                    last.before,
+                    documentThumbnail(this.app, document),
+                );
+                if (!prepared.isOk) return Result.err(prepared.error);
+                const { bytes, ...rest } = prepared.value;
+                try {
+                    await Promise.all(
+                        [...bytes].map(([sha, blob]) => this.repository.cache.putStrict(sha, blob)),
+                    );
+                } catch (error) {
+                    return Result.err(storageError(docId, error));
+                }
+                snapshot = { ...rest, savedAt: this.now() };
+            }
+            await this.withRecord(docId, async () => {
+                const current = await this.record(docId);
+                if (!current) return;
+                current.baseVersion = last.base;
+                current.mergeParent = undefined;
+                // A merge push that landed unanswered is "theirs" now, not this device's base.
+                current.unconfirmed = undefined;
+                this.fold(current);
+                current.nextKind = undefined;
+                current.nextLabel = undefined;
+                if (snapshot) {
+                    current.localSnapshot = snapshot;
+                    current.localDirty = true;
+                    current.pendingKind = last.pendingKind ?? "auto";
+                    current.pendingLabel = last.pendingLabel;
+                    current.pendingSince ??= this.now();
+                }
+                current.updatedAt = this.now();
+                await this.options.store.put(current);
+            });
+            // Synchronous from here to the replacement: no save serializes in between.
+            const replaced = document.replaceContent(last.before, UNDO_MERGE_HISTORY_NAME);
+            if (!replaced.isOk) return Result.err({ kind: "failed", message: replaced.error.kind });
+            document.version = last.base?.id;
+            // Saved as it was: the pending snapshot holds it; unsaved edits stay unsaved.
+            if (snapshot) document.markSaved();
+            entry.lastMerge = undefined;
+            const head = await this.repository.fetchHead(docId);
+            const headVersion = head.isOk ? head.value.version : undefined;
+            const record = await this.record(docId);
+            if (headVersion) {
+                const inputs = await this.mergeInputs(record, headVersion, false);
+                const result =
+                    inputs.isOk && inputs.value.base
+                        ? mergeDocuments(inputs.value.base, document.serialize(), inputs.value.theirs)
+                        : undefined;
+                this.enterConflict(
+                    docId,
+                    entry,
+                    record,
+                    headVersion,
+                    result?.isOk ? result.value : last.result,
+                    last.local,
+                    true,
+                );
+            } else {
+                // Offline: the merge it undid stands as it was merged against.
+                this.enterConflictWith(docId, entry, record, last.theirs, last.result, last.local, true);
+            }
+            return Result.ok(undefined);
+        } finally {
+            release();
+        }
     }
 
     // ---- Triggers ----------------------------------------------------------------------------

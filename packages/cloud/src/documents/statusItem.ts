@@ -12,6 +12,7 @@ import {
     PubSub,
 } from "@spicy3d/core";
 import { button, div, span, svg } from "@spicy3d/element";
+import { mergePreviewOf } from "../conflicts/mergePreview";
 import { previewOf } from "../history/previewRepository";
 import accountStyle from "../ui/account.module.css";
 import { downloadDocument, saveCopyOnThisDevice, saveOpenDocumentToCloud } from "./documentActions";
@@ -81,7 +82,7 @@ export interface DocumentStatusContext {
     repository: () => CloudDocumentRepository | undefined;
     /** "Edit here instead". */
     takeOver: (document: IDocument) => Promise<void>;
-    /** Opens the conflict dialog of a document whose last save (an autosave) met a conflict. */
+    /** Opens the conflict panel (or the dialog) of a document whose last save (an autosave) met a conflict. */
     resolveConflict?: (document: IDocument) => Promise<void>;
     /** When each document was last autosaved (default: the app's). */
     autosave?: AutosaveStatus;
@@ -164,6 +165,18 @@ export class DocumentStatusItem extends HTMLElement {
         this.watch(open);
         if (!repository || !open) {
             this.replaceChildren();
+            return;
+        }
+        if (mergePreviewOf(open)) {
+            // The live preview of a merge being resolved: nothing to save, the panel finishes it.
+            const label = span({
+                className: style.state,
+                textContent: I18n.translate("cloud.status.mergePreview"),
+                title: I18n.translate("cloud.status.mergePreviewHint"),
+            });
+            label.dataset["status"] = "mergePreview";
+            label.setAttribute("role", "status");
+            this.replaceChildren(label);
             return;
         }
         if (previewOf(open)) {
