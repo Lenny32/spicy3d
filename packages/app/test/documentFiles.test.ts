@@ -11,6 +11,7 @@ import {
     Material,
     PubSub,
     type Serialized,
+    Transaction,
 } from "@spicy3d/core";
 import { createMockApplication } from "@spicy3d/core/test-utils";
 import { Document } from "../src/document";
@@ -136,6 +137,45 @@ describe("document files", () => {
         expect(saved.unchecked()).toBe("written");
         expect(picker).not.toHaveBeenCalled();
         expect(source.written).toHaveLength(1);
+    });
+
+    test("a legacy .cd file is never written back: saving picks a new .spicy file", async () => {
+        const legacy = fakeHandle("old.cd");
+        const target = fakeHandle("old.spicy");
+        const picker = rs.fn(async (_options: { suggestedName: string }) => target.handle);
+        (window as any).showSaveFilePicker = picker;
+        const file = new File([JSON.stringify(makeDocument().serialize())], "old.cd");
+        const opened = await openDocumentFile(app, { file, handle: legacy.handle });
+
+        await saveDocumentFile(opened!);
+
+        expect(legacy.written).toHaveLength(0);
+        expect(picker).toHaveBeenCalledTimes(1);
+        expect(picker.mock.calls[0][0].suggestedName).toBe(`${opened!.name}${DOCUMENT_FILE_EXTENSION}`);
+        expect(target.written).toHaveLength(1);
+    });
+
+    test("writing back to the file it was opened from saves the document; a new file is only a copy", async () => {
+        const source = fakeHandle("opened.spicy");
+        const file = new File([await encodeDocumentFile(makeDocument().serialize())], "opened.spicy");
+        const opened = await openDocumentFile(app, { file, handle: source.handle });
+        const edit = () =>
+            Transaction.execute(opened!, "rename", () => {
+                opened!.modelManager.rootNode.name = `edited ${Math.random()}`;
+            });
+        edit();
+        expect(opened!.isDirty).toBe(true);
+
+        await saveDocumentFile(opened!);
+        expect(opened!.isDirty).toBe(false);
+
+        const copy = makeDocument();
+        Transaction.execute(copy, "rename", () => {
+            copy.modelManager.rootNode.name = "edited";
+        });
+        (window as any).showSaveFilePicker = async () => fakeHandle("copy.spicy").handle;
+        await saveDocumentFile(copy);
+        expect(copy.isDirty).toBe(true);
     });
 
     test("dismissing the save picker cancels: nothing written or downloaded", async () => {

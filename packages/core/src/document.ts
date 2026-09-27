@@ -59,6 +59,11 @@ export interface IDocument extends IPropertyChanged, IDisposable {
     /** Resolves once no save of the document is running or queued. */
     settled(): Promise<void>;
     /**
+     * Takes `position` (a `history.position()` taken when the content was serialized; default:
+     * now) as the saved one, for a save outside the repository — writing back to its own file.
+     */
+    markSaved(position?: object): void;
+    /**
      * Asks to save unsaved changes, then closes the document and its views. Resolves `false`
      * when the user cancels or the save fails (the document stays open). `discardChanges` closes
      * without asking, e.g. to reopen the latest cloud version.

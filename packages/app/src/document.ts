@@ -128,9 +128,9 @@ export class Document extends Observable implements IDocument {
         this.setProperty("isDirty", this.history.position() !== this.savedPosition);
     };
 
-    /** Takes the current undo position as the saved one (after a save, or once loaded). */
-    private markSaved() {
-        this.savedPosition = this.history.position();
+    /** Takes `position` (default: the current undo position) as the saved one. */
+    markSaved(position: object = this.history.position()) {
+        this.savedPosition = position;
         this.updateDirty();
     }
 

@@ -44,6 +44,12 @@ export type DocumentFileSaveOutcome = "written" | "downloaded";
 
 /** The file each document was opened from or last saved to (File System Access API only). */
 const fileHandles = new WeakMap<IDocument, FileSystemFileHandle>();
+/** The `.spicy` file each document was opened from, when it was opened from a writable one. */
+const originFiles = new WeakMap<IDocument, FileSystemFileHandle>();
+
+/** Only a `.spicy` file is written back: a legacy `.cd` (plain JSON) must not get gzip bytes. */
+const isSpicyHandle = (handle: FileSystemFileHandle) =>
+    handle.name.toLowerCase().endsWith(DOCUMENT_FILE_EXTENSION);
 
 const pickerWindow = () => window as unknown as FilePickerWindow;
 
@@ -81,7 +87,8 @@ export async function pickDocumentFile(): Promise<Result<DocumentFileEntry[]>> {
 
 /**
  * Opens a `.spicy` (or legacy plain-JSON) file. The document saves to the local repository;
- * with a `handle`, "save to file" writes back to the same file.
+ * with the `handle` of a `.spicy` file, "save to file" writes back to the same file (a legacy
+ * `.cd` file is never overwritten: saving picks a new `.spicy` file).
  */
 export async function openDocumentFile(
     app: IApplication,
@@ -94,7 +101,10 @@ export async function openDocumentFile(
         return undefined;
     }
     const document = await app.loadDocument(decoded.value);
-    if (document && handle) fileHandles.set(document, handle);
+    if (document && handle && isSpicyHandle(handle)) {
+        fileHandles.set(document, handle);
+        originFiles.set(document, handle);
+    }
     return document;
 }
 
@@ -117,6 +127,9 @@ export async function saveDocumentFile(document: IDocument): Promise<Result<Docu
         }
     }
 
+    // Taken with the content: edits made while writing stay unsaved.
+    const origin = originFiles.get(document);
+    const position = origin ? document.history.position() : undefined;
     const blob = await encodeDocumentFile(document.serialize());
     if (!handle) {
         download([blob], fileName);
@@ -127,6 +140,11 @@ export async function saveDocumentFile(document: IDocument): Promise<Result<Docu
         await writable.write(blob);
         await writable.close();
         fileHandles.set(document, handle);
+        // Written back to the file the document was opened from: that file is where it lives, so
+        // it is saved (no "unsaved changes" on close). A download or a newly picked file is a
+        // copy and leaves the state alone; the local repository's copy may then be older, but
+        // saving there still works as before.
+        if (origin && origin === handle) document.markSaved(position);
         return Result.ok("written");
     } catch (error) {
         Logger.warn(`document file: cannot write ${handle.name}`, error);

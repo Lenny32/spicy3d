@@ -66,6 +66,8 @@ export class TestDocument implements IDocument {
         return Promise.resolve(Result.ok({ status: "saved", updatedAt: 0 }));
     }
 
+    markSaved(): void {}
+
     settled(): Promise<void> {
         return Promise.resolve();
     }
