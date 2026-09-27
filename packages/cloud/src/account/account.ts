@@ -30,7 +30,12 @@ export type SignOutReason =
     /** The user gave up re-signing in after the session expired. */
     | "expired"
     /** The account was deleted: every cloud copy goes, whatever the setting. */
-    | "deleted";
+    | "deleted"
+    /**
+     * Another user signed in on this device (another tab, an email link of theirs): the previous
+     * user's cloud copies go, whatever the setting, so the new user never sees them.
+     */
+    | "switchUser";
 
 export interface SignOutEvent {
     reason: SignOutReason;
@@ -139,7 +144,7 @@ export class Account extends Observable {
     async refresh(): Promise<Result<AccountUser | undefined, CloudError>> {
         const result = await this.client.call((api) => api.GET("/api/me"));
         if (result.isOk) {
-            this.setSignedIn(result.value.data);
+            await this.setSignedIn(result.value.data);
             return Result.ok(result.value.data);
         }
         if (isUnauthorized(result.error)) {
@@ -197,7 +202,7 @@ export class Account extends Observable {
         const result = await this.client.call((api) => api.POST("/api/auth/signup", { body: request }));
         if (!result.isOk) return Result.err(result.error);
         if (result.value.status === 201 && result.value.data) {
-            this.setSignedIn(result.value.data);
+            await this.setSignedIn(result.value.data);
             return Result.ok({ status: "signedIn", user: result.value.data });
         }
         return Result.ok({ status: "verificationRequired" });
@@ -208,12 +213,7 @@ export class Account extends Observable {
             api.POST("/api/auth/login", { body: { email, password } }),
         );
         if (!result.isOk) return Result.err(result.error);
-        const previous = this.user;
-        if (this.status === "expired" && previous && previous.id !== result.value.data.id) {
-            // Someone else signed in on this device: the previous user's cached copies must go.
-            await this.finishSignOut("signOut");
-        }
-        this.setSignedIn(result.value.data);
+        await this.setSignedIn(result.value.data);
         return Result.ok(result.value.data);
     }
 
@@ -362,7 +362,15 @@ export class Account extends Observable {
 
     // ---- Internals ---------------------------------------------------------------------------
 
-    private setSignedIn(user: AccountUser) {
+    /**
+     * The one place a user becomes signed in. Another user than the previous one (whatever the
+     * status: signed in, expired with a re-login pending) first signs the previous one out —
+     * handlers run, cloud copies are removed, a pending re-login answers `false` so nothing queued
+     * for them is retried under the new session — and only then signs the new one in.
+     */
+    private async setSignedIn(user: AccountUser) {
+        const previous = this.user;
+        if (previous && previous.id !== user.id) await this.finishSignOut("switchUser");
         this.setProperty("user", user);
         this.setProperty("status", "signedIn");
         this.settleReauthentication(true);
@@ -387,7 +395,8 @@ export class Account extends Observable {
 
         const event: SignOutEvent = {
             reason,
-            removeCachedDocuments: reason === "deleted" || !this.deviceSettings.keepOfflineCopies,
+            removeCachedDocuments:
+                reason === "deleted" || reason === "switchUser" || !this.deviceSettings.keepOfflineCopies,
         };
         for (const handler of [...this.signOutHandlers]) {
             try {

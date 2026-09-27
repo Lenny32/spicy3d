@@ -209,6 +209,59 @@ describe("sign up, in, out", () => {
     });
 });
 
+describe("another user signing in on this device", () => {
+    const OTHER = { ...USER, id: "0190a0c2-0000-7000-8000-00000000000b", email: "bob@example.test" };
+
+    test("signing in as someone else while signed in signs the previous user out first, cache removed", async () => {
+        const server = new FakeServer();
+        const account = await signedInAccount(server, true);
+        const events = recordSignOuts(account);
+        const statuses: string[] = [];
+        account.onPropertyChanged((p) => {
+            if (p === "status") statuses.push(account.status);
+        });
+        server.on("POST /api/auth/login", json(200, OTHER));
+
+        await account.signIn(OTHER.email, "pw");
+
+        // keepOfflineCopies is on, but the next user must never inherit the cache.
+        expect(events).toEqual([{ reason: "switchUser", removeCachedDocuments: true }]);
+        expect(statuses).toEqual(["signedOut", "signedIn"]);
+        expect(account.user).toEqual(OTHER);
+    });
+
+    test("a refresh that finds another user while a re-login is pending never retries under their session", async () => {
+        const server = new FakeServer();
+        const account = await signedInAccount(server);
+        const events = recordSignOuts(account);
+        account.setReauthenticationHandler(() => {});
+        server.on("GET /api/me/sessions", problem(401, "unauthorized"), json(200, []));
+
+        const pending = account.listSessions();
+        await rs.waitFor(() => expect(account.status).toBe("expired"));
+        server.on("GET /api/me", json(200, OTHER));
+        await account.refresh();
+        const result = await pending;
+
+        expect(result.isOk).toBe(false);
+        expect(server.calls.filter((c) => c === "GET /api/me/sessions")).toHaveLength(1);
+        expect(events).toEqual([{ reason: "switchUser", removeCachedDocuments: true }]);
+        expect(account.user).toEqual(OTHER);
+    });
+
+    test("the same user again is not a switch", async () => {
+        const server = new FakeServer();
+        const account = await signedInAccount(server);
+        const events = recordSignOuts(account);
+        server.on("GET /api/me", json(200, { ...USER, displayName: "Ada L." }));
+
+        await account.refresh();
+
+        expect(events).toEqual([]);
+        expect(account.user?.displayName).toBe("Ada L.");
+    });
+});
+
 describe("session expiry", () => {
     test("a 401 while signed in asks to sign in again, then retries the request once", async () => {
         const server = new FakeServer();
@@ -315,7 +368,7 @@ describe("session expiry", () => {
 
         await account.signIn(other.email, "pw");
 
-        expect(events).toEqual([{ reason: "signOut", removeCachedDocuments: true }]);
+        expect(events).toEqual([{ reason: "switchUser", removeCachedDocuments: true }]);
         expect(account.user).toEqual(other);
         expect(account.status).toBe("signedIn");
     });
