@@ -37,15 +37,15 @@ describe("AutosaveSettings", () => {
     });
 
     test("the key is spicy3d.settings.autosave", () => {
-        const settings = new AutosaveSettings();
-        const before = settings.localIntervalMinutes;
+        const previous = localStorage.getItem("spicy3d.settings.autosave");
         try {
-            settings.intervalMinutes = 2;
+            new AutosaveSettings().intervalMinutes = 2;
             expect(JSON.parse(localStorage.getItem("spicy3d.settings.autosave") ?? "null")).toEqual({
                 intervalMinutes: 2,
             });
         } finally {
-            settings.intervalMinutes = before;
+            if (previous === null) localStorage.removeItem("spicy3d.settings.autosave");
+            else localStorage.setItem("spicy3d.settings.autosave", previous);
         }
     });
 
