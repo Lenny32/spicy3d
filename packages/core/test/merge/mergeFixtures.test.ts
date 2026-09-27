@@ -58,11 +58,18 @@ function expectWellFormed(doc: Serialized): void {
     const nodes = nodesOf(doc);
     expect(nodes[0].parentId).toBeUndefined();
     expectUniqueIds(nodes);
-    const seen = new Set<string>();
+    // strictly pre-order: re-flattening the tree depth-first gives the stored order back
+    const children = new Map<string, string[]>();
+    for (const node of nodes.slice(1))
+        children.set(node.parentId!, [...(children.get(node.parentId!) ?? []), node.id]);
+    const flattened: string[] = [];
+    const visit = (id: string) => {
+        flattened.push(id);
+        for (const child of children.get(id) ?? []) visit(child);
+    };
+    visit(nodes[0].id);
+    expect(flattened).toEqual(nodes.map((node) => node.id));
     for (const node of nodes) {
-        // pre-order: a parent is stored before its children
-        if (node !== nodes[0]) expect(seen).toContain(node.parentId);
-        seen.add(node.id);
         if (node.featuresJson !== undefined) expectUniqueIds(JSON.parse(node.featuresJson));
         if (node.dataJson !== undefined) {
             const data = JSON.parse(node.dataJson);
@@ -92,8 +99,8 @@ test("the corpus covers the ticket's cases and more", () => {
         ]),
     );
     const kinds = new Set(fixtures.flatMap((x) => x.conflicts.map((c) => c.kind)));
-    // every kind but rebuild-failure, which needs the kernel (the validation pass) to be observed
-    expect([...kinds].sort()).toEqual(CONFLICT_KINDS.filter((kind) => kind !== "rebuild-failure").sort());
+    // every kind (rebuild-failure is observed by the kernel validation pass)
+    expect([...kinds].sort()).toEqual([...CONFLICT_KINDS].sort());
 });
 
 test("the files are what fixtureCases.ts generates (npm run merge:fixtures rewrites them)", () => {

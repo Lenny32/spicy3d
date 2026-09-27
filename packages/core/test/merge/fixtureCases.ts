@@ -151,6 +151,33 @@ function sketchNode(id: string, name: string, data: Json, extra: Json = {}): Jso
     };
 }
 
+/** A datum plane offset from the body's top face, captured after `f2` (position `featureIndex`). */
+function datumOnTop(featureIndex: number): Json {
+    const definition = {
+        kind: "plane-offset",
+        source: {
+            kind: "shape",
+            nodeId: BODY,
+            shapeType: "face",
+            index: 6,
+            trackedId: "sketch:sketch-1:e1.2.3.4:top",
+            featureIndex,
+        },
+        distance: 5,
+    };
+    return {
+        definitionJson: JSON.stringify(definition),
+        displaySize: 50,
+        materialId: MATERIAL,
+        faceMaterialPair: [],
+        transform: clone(IDENTITY),
+        id: "datum-top",
+        name: "Datum above the top",
+        visible: true,
+        __cla$$__: "ConstructionNode",
+    };
+}
+
 function folder(id: string, name: string): Json {
     return { id, name, visible: true, __cla$$__: "FolderNode" };
 }
@@ -250,6 +277,152 @@ const OURS_LINE_ID = 734_251_950_211;
 const THEIRS_LINE_ID = 91_827_364_555;
 
 const CASES: Record<string, CaseBuilder> = {
+    "delete-node-vs-modify-theirs-deleted": () => {
+        const base = sharedBase();
+        const ours = edit(base, (d) => (nodeOf(d, BOX)["dx"] = 25));
+        return {
+            description:
+                "The mirror of delete-node-vs-modify: this device made the box longer, the other deleted it — delete-vs-modify, merged holds ours (the edited box).",
+            base,
+            ours,
+            theirs: edit(base, (d) => removeNode(d, BOX)),
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "delete-vs-modify",
+                    mergePath("node", BOX),
+                    { base: nodeOf(base, BOX), ours: nodeOf(ours, BOX) },
+                    ["body.box1"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
+
+    "variables-same-name-both-add": () => {
+        const base = sharedBase();
+        const ours = edit(base, (d) =>
+            d["variables"].push({ id: "var-ours", name: "thickness", expression: "2 mm", type: "length" }),
+        );
+        return {
+            description:
+                "Both devices added a variable named thickness with different values: the table may hold one name once — a duplicate name, merged keeps ours (theirs' definition dropped).",
+            base,
+            ours,
+            theirs: edit(base, (d) =>
+                d["variables"].push({
+                    id: "var-theirs",
+                    name: "thickness",
+                    expression: "3 mm",
+                    type: "length",
+                }),
+            ),
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "duplicate-id",
+                    mergePath("variable", "var-theirs", "name"),
+                    { theirs: "thickness" },
+                    ["thickness"],
+                    sideChoices,
+                    "merge.conflict.duplicateName{0}",
+                ),
+            ],
+        };
+    },
+
+    "construction-anchor-remap": () => {
+        const base = sharedBase();
+        const inserted = {
+            id: "early-pad",
+            type: "extrude",
+            sketchId: "sketch-2",
+            depth: 3,
+            operation: "fuse",
+        };
+        const insertEarly = (d: Doc) => insertFeature(d, BODY, 1, inserted);
+        return {
+            description:
+                "This device added a datum plane on the body's top face captured after f2 (featureIndex 2); the other inserted a feature before f2. A ConstructionRef's featureIndex is a timeline position: it follows f2 to 3.",
+            base,
+            ours: edit(base, (d) => addNode(d, datumOnTop(2), ROOT)),
+            theirs: edit(base, insertEarly),
+            expected: edit(base, insertEarly, (d) => addNode(d, datumOnTop(3), ROOT)),
+            conflicts: [],
+        };
+    },
+
+    "tree-move-two-cycles": () => {
+        const base = edit(
+            sharedBase(),
+            (d) => addNode(d, folder("folder-c", "Folder C"), ROOT),
+            (d) => addNode(d, folder("folder-d", "Folder D"), ROOT),
+        );
+        const ours = edit(
+            base,
+            (d) => moveNode(d, "folder-a", "folder-b"),
+            (d) => moveNode(d, "folder-c", "folder-d"),
+        );
+        return {
+            description:
+                "Two cycles at once (A into B and C into D here, B into A and D into C there): each is broken on its own, one cycle conflict per move of theirs reverted.",
+            base,
+            ours,
+            theirs: edit(
+                base,
+                (d) => moveNode(d, "folder-b", "folder-a"),
+                (d) => moveNode(d, "folder-d", "folder-c"),
+            ),
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "cycle",
+                    mergePath("node", "folder-b", "parent"),
+                    { base: ROOT, ours: ROOT, theirs: "folder-a" },
+                    ["Folder B", "Folder A"],
+                    sideChoices,
+                ),
+                conflict(
+                    "cycle",
+                    mergePath("node", "folder-d", "parent"),
+                    { base: ROOT, ours: ROOT, theirs: "folder-c" },
+                    ["Folder D", "Folder C"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
+
+    "rebuild-failure-thin-wall": () => {
+        const base = sharedBase();
+        // this device narrowed the block to 8 mm (y), the other set the fillet on its vertical
+        // edge to 12 mm: each is fine alone, together the fillet no longer fits the 8 mm face
+        const narrow = (d: Doc) =>
+            editSketch(d, "sketch-1", (s) => {
+                s["entities"][1]["params"] = [40, 0, 40, 8];
+                s["entities"][2]["params"] = [40, 8, 0, 8];
+                s["entities"][3]["params"] = [0, 8, 0, 0];
+            });
+        const bigFillet = (d: Doc) => editFeature(d, BODY, "f2", { radius: 12 });
+        return {
+            description:
+                "A thinner wall here, a bigger fillet there: two valid parameter changes whose combination fails — merged structurally without conflict; the validation pass (kernel) reports the fillet as a rebuild-failure. Its args[1] is the kernel's error message, not stored here.",
+            base,
+            ours: edit(base, narrow),
+            theirs: edit(base, bigFillet),
+            expected: edit(base, narrow, bigFillet),
+            conflicts: [
+                conflict(
+                    "rebuild-failure",
+                    mergePath("node", BODY, "feature", "f2", "rebuild"),
+                    {},
+                    ["fillet f2"],
+                    ["accept"],
+                ),
+            ],
+        };
+    },
+
     "blob-both-replaced": () => {
         const base = edit(sharedBase(), (d) =>
             addNode(d, meshNode("mesh-1", "Scan", [0, 0, 0, 1, 0, 0, 0, 1, 0]), ROOT),

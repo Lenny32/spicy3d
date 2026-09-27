@@ -1,0 +1,13 @@
+{
+    "description": "Both devices added a variable named thickness with different values: the table may hold one name once — a duplicate name, merged keeps ours (theirs' definition dropped).",
+    "conflicts": [
+        {
+            "kind": "duplicate-id",
+            "path": "variable/var-theirs/name",
+            "theirs": "thickness",
+            "messageKey": "merge.conflict.duplicateName{0}",
+            "args": ["thickness"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

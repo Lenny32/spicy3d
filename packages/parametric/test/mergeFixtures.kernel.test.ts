@@ -19,8 +19,8 @@ import "./sketch/setup";
 
 // Every document of the merge fixture corpus (packages/core/test/fixtures/merge) loads into a real
 // document and saves back unchanged, and every body and sketch of base / ours / theirs rebuilds —
-// they are states the app could have saved. In `expected`, only the nodes a dangling-ref conflict
-// points at may fail (that is what the conflict reports).
+// they are states the app could have saved. In `expected`, only the nodes a dangling-ref or a
+// rebuild-failure conflict points at may fail (that is what the conflict reports).
 
 const WASM_BINARY = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
@@ -59,7 +59,7 @@ describe.each(cases)("merge fixture %s", (_name, fixture, file) => {
             file === "expected"
                 ? new Set(
                       fixture.conflicts
-                          .filter((c) => c.kind === "dangling-ref")
+                          .filter((c) => c.kind === "dangling-ref" || c.kind === "rebuild-failure")
                           .map((c) => parseMergePath(c.path)[1]),
                   )
                 : new Set<string>();

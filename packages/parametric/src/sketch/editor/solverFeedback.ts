@@ -42,13 +42,17 @@ export class SolverFeedback {
         this.review.replaceChildren();
         this.details.replaceChildren();
         const diagnosis = this.editor.solver.diagnose();
-        for (const [id, error] of this.editor.solver.datumErrors) this.text(`Constraint #${id}: ${error}`);
+        const data = this.editor.solver.toData();
+        // items are numbered by their place in the sketch: stored ids are random 12–13 digit numbers
+        const constraintNo = (id: number) => `#${data.constraints.findIndex((c) => c.id === id) + 1}`;
+        const entityNo = (id: number) => `#${data.entities.findIndex((e) => e.id === id) + 1}`;
+        for (const [id, error] of this.editor.solver.datumErrors)
+            this.text(`Constraint ${constraintNo(id)}: ${error}`);
         const issues = new Set([...diagnosis.conflicting, ...diagnosis.redundant]);
         this.editor.annotations.setDiagnosticConstraints(issues);
         if (diagnosis.redundant.length && outcome.result.startsWith("Ok")) {
             this.status.textContent = `Over-constrained: redundant relationships (${outcome.dofs} degrees of freedom)`;
         }
-        const data = this.editor.solver.toData();
         const analysis = analyzeConstraints(data);
         if (outcome.dofs > 0) {
             this.text(
@@ -60,7 +64,7 @@ export class SolverFeedback {
         }
         if (diagnosis.conflicting.length) {
             this.text(
-                `The solver reports an incompatible set: ${diagnosis.conflicting.map((id) => `#${id}`).join(", ")}. Select a row to inspect its geometry; edit or remove a relationship. This is a set, not a proven pairwise conflict.`,
+                `The solver reports an incompatible set: ${diagnosis.conflicting.map(constraintNo).join(", ")}. Select a row to inspect its geometry; edit or remove a relationship. This is a set, not a proven pairwise conflict.`,
             );
         }
         if (diagnosis.redundant.length) {
@@ -93,7 +97,7 @@ export class SolverFeedback {
                   : "";
             this.button(
                 row,
-                `#${c.id} ${constraintLabel(c.kind)}${c.datum === undefined ? "" : ` = ${formatDatum(c.kind, c.datum, documentLengthUnit(this.editor.document))}`}${suffix}`,
+                `${constraintNo(c.id)} ${constraintLabel(c.kind)}${c.datum === undefined ? "" : ` = ${formatDatum(c.kind, c.datum, documentLengthUnit(this.editor.document))}`}${suffix}`,
                 () => this.editor.annotations.selectConstraint(c.id),
             );
             if (c.datum !== undefined || c.kind === ConstraintKind.Fix)
@@ -103,15 +107,15 @@ export class SolverFeedback {
         }
         const construction = data.entities.filter((e) => e.construction);
         for (const entity of construction) {
-            this.button(this.details, `Construction #${entity.id}: use as profile geometry`, () => {
+            this.button(this.details, `Construction ${entityNo(entity.id)}: use as profile geometry`, () => {
                 this.editor.solver.setConstruction(entity.id, false);
                 this.editor.solve(true);
                 this.editor.commit();
             });
         }
         for (const id of analysis.unusedConstruction) {
-            this.text(`Construction #${id} does not constrain another entity.`);
-            this.button(this.details, `Remove unused construction #${id}`, () =>
+            this.text(`Construction ${entityNo(id)} does not constrain another entity.`);
+            this.button(this.details, `Remove unused construction ${entityNo(id)}`, () =>
                 this.editor.deleteEntities([id]),
             );
         }

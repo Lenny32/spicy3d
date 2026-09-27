@@ -1,0 +1,25 @@
+{
+    "description": "Two cycles at once (A into B and C into D here, B into A and D into C there): each is broken on its own, one cycle conflict per move of theirs reverted.",
+    "conflicts": [
+        {
+            "kind": "cycle",
+            "path": "node/folder-b/parent",
+            "base": "fJ8oZYZU28huXd6_BAPDu",
+            "ours": "fJ8oZYZU28huXd6_BAPDu",
+            "theirs": "folder-a",
+            "messageKey": "merge.conflict.cycle{0}{1}",
+            "args": ["Folder B", "Folder A"],
+            "choices": ["ours", "theirs"]
+        },
+        {
+            "kind": "cycle",
+            "path": "node/folder-d/parent",
+            "base": "fJ8oZYZU28huXd6_BAPDu",
+            "ours": "fJ8oZYZU28huXd6_BAPDu",
+            "theirs": "folder-c",
+            "messageKey": "merge.conflict.cycle{0}{1}",
+            "args": ["Folder D", "Folder C"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

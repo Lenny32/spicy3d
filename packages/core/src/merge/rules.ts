@@ -23,7 +23,7 @@ export type MergeRefTarget =
     | "edge"
     /** A `ProfileRef`: sketch entity ids (`entities`) and/or a tracked face `id`. */
     | "profile"
-    /** A `ConstructionRef`: a node id, a tracked sub-shape id and a timeline `featureIndex`. */
+    /** A tracked sub-shape id of a `ConstructionRef`, in the body named by the ref's `nodeId` (see {@link CONSTRUCTION_REF_RULE}). */
     | "construction-ref"
     /** A `PlaneFaceRef` (a sketch's `planeRefJson`): a node id and a tracked `faceId`. */
     | "plane-face";
@@ -67,13 +67,16 @@ export type MergeValueRule =
     | { readonly kind: "parent" }
     /**
      * Field by field; `rest` covers fields not listed (default: the "Defaults" above). `atomic`
-     * merges the object as one value, the fields then only describe references.
+     * merges the object as one value, the fields then only describe references. `groups` name
+     * fields that are alternatives of one choice (a revolve axis snapshot, edge and construction
+     * axis): each group is one value, at the path segment of its name.
      */
     | {
           readonly kind: "object";
           readonly fields: Readonly<Record<string, MergeValueRule>>;
           readonly rest?: MergeValueRule;
           readonly atomic?: boolean;
+          readonly groups?: Readonly<Record<string, readonly string[]>>;
       }
     /**
      * An object whose shape depends on `tag`: the same tag on every side → that variant's rule
@@ -128,6 +131,17 @@ export interface MergeClassRule {
 export interface MergePayloadRule {
     readonly rule: MergeValueRule;
     readonly note: string;
+    /**
+     * The path segment of the payload's root below its node (`node/<id>/<segment>`, e.g.
+     * `definition`); absent when the payload's items carry their own segments (`feature/…`,
+     * `entity/…`) right below the node.
+     */
+    readonly segment?: string;
+    /**
+     * Post-merge normalization of derived state (docs/merge.md), applied to a merged payload that
+     * differs from every side's: pure, returns the normalized value (never mutates its input).
+     */
+    readonly normalize?: (value: unknown) => unknown;
 }
 
 /** Properties every node shares (`Node`, `VisualNode`, `GeometryNode`); node rules spread this. */
@@ -143,6 +157,24 @@ export const GEOMETRY_NODE_PROPERTIES: Readonly<Record<string, MergeValueRule>> 
     transform: { kind: "atomic" },
     materialId: { kind: "atomic", of: { kind: "ref", target: "material" } },
     faceMaterialPair: { kind: "atomic" },
+};
+
+/**
+ * A `ConstructionRef` (core `construction/types.ts`), one value: its `nodeId` and tracked ids
+ * (`trackedId`, `incidentEdgeIds`) must resolve, and its `featureIndex` is a timeline position in
+ * the body named by its `nodeId`, merged as an anchor id like `refPositions` (docs/merge.md,
+ * "Timeline positions"). Refs nest (a snap's `source`, a path's `segments`): every nested one is
+ * read the same way.
+ */
+export const CONSTRUCTION_REF_RULE: MergeValueRule = {
+    kind: "object",
+    atomic: true,
+    fields: {
+        nodeId: { kind: "ref", target: "node" },
+        featureIndex: { kind: "timeline-position", bodyFrom: "nodeId" },
+        trackedId: { kind: "ref", target: "construction-ref" },
+        incidentEdgeIds: { kind: "atomic", of: { kind: "ref", target: "construction-ref" } },
+    },
 };
 
 /**

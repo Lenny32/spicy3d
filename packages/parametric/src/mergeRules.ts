@@ -2,11 +2,13 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    CONSTRUCTION_REF_RULE,
     GEOMETRY_NODE_PROPERTIES,
     type MergeValueRule,
     registerMergePayload,
     registerMergeRule,
 } from "@spicy3d/core";
+import { type SketchData, syncExternalRoles } from "./sketch/sketchModel";
 
 // Merge rules of the parametric module's classes and of the JSON payloads they store
 // (docs/merge.md, "Features" and "Sketches"). Changing a payload's shape (a migration in
@@ -18,6 +20,24 @@ const expression: MergeValueRule = { kind: "expression" };
 const nodeRef: MergeValueRule = { kind: "ref", target: "node" };
 const edges: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "edge" } };
 const profiles: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "profile" } };
+
+/**
+ * Derived state of a merged sketch (docs/merge.md, "Post-merge normalization"): an unpinned external
+ * reference's role follows the constraints now using it, and dimension anchors of removed
+ * constraints go (the solver drops them too).
+ */
+function normalizeSketchData(value: unknown): unknown {
+    if (typeof value !== "object" || value === null) return value;
+    const data = structuredClone(value) as SketchData;
+    if (Array.isArray(data.constraints)) {
+        syncExternalRoles(data);
+        if (Array.isArray(data.anchors)) {
+            const ids = new Set(data.constraints.map((c) => c.id));
+            data.anchors = data.anchors.filter((anchor) => ids.has(anchor.id));
+        }
+    }
+    return data;
+}
 
 /** Fields every feature has (`FeatureBase`). `id` is the list key. */
 const featureBase = { id: scalar, type: scalar, suppressed: scalar, name: scalar };
@@ -39,7 +59,7 @@ registerMergeRule("SketchNode", {
         ...GEOMETRY_NODE_PROPERTIES,
         plane: atomic,
         planeRefJson: { kind: "json", payload: "sketch.planeRef" },
-        constructionPlaneRefJson: { kind: "atomic", of: { kind: "ref", target: "construction-ref" } },
+        constructionPlaneRefJson: { kind: "json", payload: "construction.ref" },
         dataJson: { kind: "json", payload: "sketch.data" },
     },
     note:
@@ -73,6 +93,9 @@ registerMergePayload("parametric.features", {
                         operation: scalar,
                         profiles,
                     },
+                    // the input is a sketch (and its picked profiles) or source faces (press-pull):
+                    // alternatives of one choice, one value
+                    groups: { input: ["sketchId", "source", "profiles"] },
                 },
                 revolve: {
                     kind: "object",
@@ -85,9 +108,14 @@ registerMergePayload("parametric.features", {
                             atomic: true,
                             fields: { nodeId: nodeRef, edge: { kind: "ref", target: "edge" } },
                         },
-                        constructionAxisRef: { kind: "ref", target: "construction-ref" },
+                        constructionAxisRef: CONSTRUCTION_REF_RULE,
                         angle: expression,
                         profiles,
+                    },
+                    // the axis is a snapshot, a picked edge or a construction axis: one choice
+                    groups: {
+                        input: ["sketchId", "profiles"],
+                        axis: ["axis", "axisSource", "constructionAxisRef"],
                     },
                 },
                 fillet: { kind: "object", fields: { ...featureBase, radius: expression, edges } },
@@ -192,6 +220,7 @@ registerMergePayload("sketch.data", {
             externalIdSeq: { kind: "min" },
         },
     },
+    normalize: normalizeSketchData,
     note:
         "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
         "references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` " +
@@ -200,6 +229,7 @@ registerMergePayload("sketch.data", {
 });
 
 registerMergePayload("sketch.planeRef", {
+    segment: "planeRef",
     rule: {
         kind: "object",
         atomic: true,

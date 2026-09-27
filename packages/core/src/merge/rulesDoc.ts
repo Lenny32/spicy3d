@@ -25,6 +25,8 @@ export function formatMergeRule(rule: MergeValueRule): string {
         case "object": {
             const fields = Object.entries(rule.fields).map(([k, v]) => `${k}: ${formatMergeRule(v)}`);
             if (rule.rest !== undefined) fields.push(`…: ${formatMergeRule(rule.rest)}`);
+            for (const [group, members] of Object.entries(rule.groups ?? {}))
+                fields.push(`${group} = ${members.join(" + ")}`);
             return `${rule.atomic ? "atomic " : ""}{ ${fields.join("; ")} }`;
         }
         case "union":
@@ -57,6 +59,10 @@ function renderRuleTree(rule: MergeValueRule, indent: string, lines: string[]): 
             }
             if (rule.rest !== undefined)
                 lines.push(`${indent}- any other field: ${formatMergeRule(rule.rest)}`);
+            for (const [group, fields] of Object.entries(rule.groups ?? {}))
+                lines.push(
+                    `${indent}- group \`${group}\` (one value): ${fields.map((f) => `\`${f}\``).join(", ")}`,
+                );
             return;
         default:
             lines.push(`${indent}- ${formatMergeRule(rule)}`);
@@ -122,7 +128,8 @@ export function renderMergeRules(registry: MergeRuleRegistry): string {
     }
     for (const name of registry.payloadNames()) {
         const payload = registry.payloadRule(name)!;
-        lines.push("", `#### Payload \`${name}\``, "", payload.note, "");
+        const root = payload.segment === undefined ? "`node/<id>`" : `\`node/<id>/${payload.segment}\``;
+        lines.push("", `#### Payload \`${name}\``, "", `${payload.note} Paths below ${root}.`, "");
         renderRuleTree(payload.rule, "", lines);
     }
     lines.push("", MERGE_RULES_END);

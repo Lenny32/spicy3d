@@ -46,7 +46,11 @@ function declaredSerializableClasses(): string[] {
     const names = new Set<string>();
     for (const file of roots.flatMap(sourceFiles)) {
         const text = readFileSync(file, "utf8");
-        for (const match of text.matchAll(/^@serializable\b[\s\S]*?^export (?:abstract )?class (\w+)/gm)) {
+        // the first class line after the decorator, exported or not (a lazy scan to the next *exported*
+        // class would take a later class for an unexported one)
+        const declared =
+            /^@serializable\b[\s\S]*?^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/gm;
+        for (const match of text.matchAll(declared)) {
             names.add(match[1]);
         }
         for (const match of text.matchAll(/^\s*registerTypeArray\((\w+)\);/gm)) names.add(match[1]);

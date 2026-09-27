@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    CONSTRUCTION_REF_RULE,
     GEOMETRY_NODE_PROPERTIES,
     type MergeValueRule,
     NODE_PROPERTIES,
@@ -217,9 +218,6 @@ registerMergeRule("Result", {
 
 // ------------------------------------------------------------------ Payloads
 
-/** A `ConstructionRef` (core `construction/types.ts`): one value whose node, tracked id and timeline position must resolve. */
-const constructionRef: MergeValueRule = { kind: "ref", target: "construction-ref" };
-
 registerMergePayload("construction.definition", {
     rule: {
         // a changed `kind` makes the whole definition one value (the other fields change meaning);
@@ -227,11 +225,19 @@ registerMergePayload("construction.definition", {
         kind: "union",
         tag: "kind",
         variants: {},
-        fallback: { kind: "object", fields: {}, rest: { kind: "atomic", of: constructionRef } },
+        fallback: { kind: "object", fields: {}, rest: CONSTRUCTION_REF_RULE },
     },
+    segment: "definition",
     note:
         "`ConstructionNode.definitionJson` (`ConstructionDefinition`). A changed `kind` replaces the whole " +
         "definition (atomic); otherwise field by field, each `ConstructionRef` one value that must resolve " +
-        "(its `nodeId`, tracked `trackedId`/`incidentEdgeIds`, and `featureIndex` remapped like a timeline " +
-        "position).",
+        "(its `nodeId`, tracked `trackedId`/`incidentEdgeIds`), its `featureIndex` a timeline position.",
+});
+
+registerMergePayload("construction.ref", {
+    rule: CONSTRUCTION_REF_RULE,
+    segment: "constructionPlaneRef",
+    note:
+        "`SketchNode.constructionPlaneRefJson` (`ConstructionRef`): the construction plane a sketch sits " +
+        "on, one value; its `featureIndex` a timeline position.",
 });
