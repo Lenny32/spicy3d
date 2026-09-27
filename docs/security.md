@@ -18,7 +18,7 @@ policy, and `packages/builder/test/contentSecurityPolicy.test.ts` fails when it 
 ```
 default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: <plugin origins>;
 style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: <plugin origins>; font-src 'self' data:;
-connect-src 'self' ws://127.0.0.1:* ws://localhost:* <connect origins> <plugin origins>;
+connect-src 'self' <connect origins> <plugin origins>;
 worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
 
@@ -32,7 +32,6 @@ in the bundle. What stays relaxed, and what would remove it:
 | `script-src blob:` | `.spicyplugin` archives and plugins with an import map run from blob: URLs (`pluginModules.ts` links the modules instead of an inline import map). | Nothing planned: plugins are code the user chose to run (see below). |
 | `style-src 'unsafe-inline'` | Elements set inline styles; plugins and the macro editor (ace) inject `<style>`. | Moving the remaining inline styles to CSS modules and constructable stylesheets. |
 | `img-src data: blob:` | Icons, thumbnails, screenshots. | — |
-| `connect-src ws://127.0.0.1:* ws://localhost:*` | The local MCP bridge. The app refuses any other bridge address (`parseBridgeUrl`). | — |
 
 `connect-src` has **no `https:` wildcard**: a plugin or an injected script cannot post documents to
 an arbitrary host. The assistant's LLM endpoints, and hosts `?url=` opens files from, are added by
@@ -96,10 +95,6 @@ A `.spicyplugin` link is code, not a file: it goes through the plugin rules abov
   `spicy3d_list_documents` / `spicy3d_document_history` need it, but it also lets anyone holding the
   token download every one of the user's documents over the REST API. Leave it off unless the agent
   must find documents by itself.
-- **The local bridge's pairing token** is a different secret: generated in the page, kept in
-  `localStorage` (`spicy3d.app.mcp.settings`) because the page must present it on every reconnect,
-  and only good for `ws://127.0.0.1` on this machine. A `?mcp=…?token=…` link is taken out of the
-  address bar and the history as soon as it is read.
 - The assistant's LLM API keys (`spicy3d.app.ai.config`) are the user's own, for endpoints they
   chose, and stay on the device; they are not account data.
 
@@ -119,7 +114,7 @@ Signing out (or an expired session given up, another user signing in, the accoun
 | memory | agent cloud tools (`spicy3d_open_document`, `spicy3d_save`, …) | An agent's pending open-document question, conflict UIs its saves opened | Tools unlisted (`tools/list_changed`), the question closed, the list forgotten. |
 | localStorage | `spicy3d.app.cloud.config` | The server's `/api/config` | Kept: not user data (it lets an offline start find the server). |
 | localStorage | `spicy3d.app.cloud.device` | Device name, keep-offline-copies, new-document location | Kept: settings of this browser. |
-| localStorage | `spicy3d.app.config`, `spicy3d.app.mcp.settings`, `spicy3d.app.ai.config`, `spicy3d.settings.autosave` | App preferences, bridge settings, LLM keys | Kept: not tied to the account. |
+| localStorage | `spicy3d.app.config`, `spicy3d.app.mcp.settings`, `spicy3d.app.ai.config`, `spicy3d.settings.autosave` | App preferences, the remote MCP switch, LLM keys | Kept: not tied to the account. |
 | IndexedDB | `spicy3d-db` | Device documents | Never touched. |
 
 ## MCP
@@ -132,12 +127,11 @@ Signing out (or an expired session given up, another user signing in, the accoun
 - **Before Allow**, a token of the user can list the tab (document name, device name) — that is the
   server's tab registry, used to pick a tab.
 - **Cloud tools** (CLOUD-15): while signed in, agents also get `spicy3d_open_document`,
-  `spicy3d_new_document`, `spicy3d_save` and, on the local bridge, `spicy3d_list_cloud_documents`.
+  `spicy3d_new_document` and `spicy3d_save`.
   They act through the tab's own session, like the modelling tools: opening over unsaved changes
   asks the user first (the question belongs to the session that asked and closes with it or on
   sign-out), a save is an `mcp` version the user sees in the history, and a conflict is always left
-  to the user. Over the relay, listing documents and reading history are the server's own tools and
-  need the `documents:read` opt-in (see Tokens). Logs name documents by id, never by name.
+  to the user. Listing documents and reading history are the server's own tools and need the `documents:read` opt-in (see Tokens). Logs name documents by id, never by name.
 - **Prompt injection**: everything the tools return that comes from the document — node, document
   and file names, version labels and device names from the cloud tools, annotations, sketch labels,
   variable names and expressions, strings contributed by plugins — reaches the agent's context. Anyone who can edit or share a document with the user can
@@ -153,7 +147,7 @@ Signing out (or an expired session given up, another user signing in, the accoun
   and `npm audit --audit-level=high` (the build tools, which run with the source and, in release
   workflows, publishing credentials), plus GitHub's dependency review on pull requests. There are no
   ignored findings; one without a fix gets a line here with its justification and a review date.
-- `@modelcontextprotocol/sdk`, `openapi-fetch`, `openapi-typescript` and the bridge's `ws` are
+- `@modelcontextprotocol/sdk`, `openapi-fetch`, and `openapi-typescript` are
   pinned to exact versions (`packages/builder/test/dependencyPins.test.ts`); Dependabot proposes
   each one as its own pull request (`.github/dependabot.yml`, 7-day cooldown), reviewed with its
   changelog. The generated API types (`schema.generated.ts`) come only from the committed
@@ -165,8 +159,8 @@ Signing out (or an expired session given up, another user signing in, the accoun
 - There is no telemetry; logs go to the browser console only.
 - `redactUrl` / `redactSecrets` (core `foundation/redact.ts`) strip queries, fragments and user info
   from URLs and mask `Bearer …`, `token=…`/`"password": …` style fields and `spicy_pat_…` secrets.
-  They are used wherever a URL or a foreign error message is logged (plugin and file URLs, the
-  refused bridge address, bridge connection errors, file-fetch failures).
+  They are used wherever a URL or a foreign error message is logged (plugin and file URLs, relay
+  connection errors, file-fetch failures).
 - Document content stays out of logs: open/close and autosave lines name the document id, not its
   name; toasts show only what the user already sees.
 

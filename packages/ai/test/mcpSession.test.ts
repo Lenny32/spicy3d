@@ -3,10 +3,9 @@
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpSession } from "../src/mcp/session";
-import { parseBridgeUrl } from "../src/mcp/settings";
 import type { McpStatus } from "../src/mcp/state";
 
-/** A transport whose start() fails the first `failures` times, as when the bridge is not up yet. */
+/** A transport whose start() fails the first `failures` times, as when the relay is not reachable yet. */
 function flakyTransports(failures: number) {
     let attempts = 0;
     const transports: Transport[] = [];
@@ -28,36 +27,16 @@ function flakyTransports(failures: number) {
     return { create, transports, attempts: () => attempts };
 }
 
-describe("parseBridgeUrl", () => {
-    test.each([
-        "ws://127.0.0.1:7777/?token=abc",
-        "ws://localhost:7777/",
-        "ws://[::1]:7777/",
-    ])("accepts the loopback bridge %s", (raw) => {
-        expect(parseBridgeUrl(raw)?.href).toBe(new URL(raw).href);
-    });
-
-    test.each([
-        "wss://evil.example/?token=abc",
-        "ws://evil.example:7777/",
-        "ws://127.0.0.1.evil.example/",
-        "http://127.0.0.1:7777/",
-        "not a url",
-    ])("refuses %s", (raw) => {
-        expect(parseBridgeUrl(raw)).toBeUndefined();
-    });
-});
-
 describe("McpSession", () => {
     afterEach(() => {
         rs.useRealTimers();
     });
 
-    test("retries until the bridge is up, then reports connected", async () => {
+    test("retries until the relay is reachable, then reports connected", async () => {
         rs.useFakeTimers();
         const transports = flakyTransports(2);
         const statuses: McpStatus[] = [];
-        const session = new McpSession(new URL("ws://127.0.0.1:7777/"), {
+        const session = new McpSession(new URL("wss://spicy.lan/ws/mcp-page"), {
             onStatus: (s) => statuses.push(s),
             createTransport: transports.create,
         }).start();
@@ -73,10 +52,10 @@ describe("McpSession", () => {
         session.close();
     });
 
-    test("reconnects after the bridge drops the connection", async () => {
+    test("reconnects after the relay drops the connection", async () => {
         rs.useFakeTimers();
         const transports = flakyTransports(0);
-        const session = new McpSession(new URL("ws://127.0.0.1:7777/"), {
+        const session = new McpSession(new URL("wss://spicy.lan/ws/mcp-page"), {
             createTransport: transports.create,
         }).start();
         await rs.advanceTimersByTimeAsync(0);
@@ -94,7 +73,7 @@ describe("McpSession", () => {
     test("stops retrying once closed", async () => {
         rs.useFakeTimers();
         const transports = flakyTransports(10);
-        const session = new McpSession(new URL("ws://127.0.0.1:7777/"), {
+        const session = new McpSession(new URL("wss://spicy.lan/ws/mcp-page"), {
             createTransport: transports.create,
         }).start();
         await rs.advanceTimersByTimeAsync(0);

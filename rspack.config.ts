@@ -6,11 +6,6 @@ import packages from "./package.json" with { type: "json" };
 
 const isProduction = process.env.NODE_ENV === "production";
 const configDir = import.meta.dirname;
-// Where the MCP panel links the standalone bridge executables. Forks and self-hosters that publish
-// their own releases set SPICY3D_BRIDGE_DOWNLOAD_URL (a folder URL ending in "/") at build time.
-const mcpBridgeDownloadUrl =
-    process.env["SPICY3D_BRIDGE_DOWNLOAD_URL"] ??
-    `https://github.com/Lenny32/spicy3d/releases/download/${packages.version}/`;
 
 // `SPICY3D_API_URL=http://localhost:5080 npm run dev`: the dev server proxies the SpicySrv paths to
 // that server, so the app and the API share one origin (the dev server's) like behind SpicySrv's
@@ -131,7 +126,6 @@ export default defineConfig({
         new rspack.DefinePlugin({
             __APP_VERSION__: JSON.stringify(packages.version),
             __IS_PRODUCTION__: JSON.stringify(process.env.NODE_ENV === "production"),
-            __MCP_BRIDGE_DOWNLOAD_URL__: JSON.stringify(mcpBridgeDownloadUrl),
         }),
         new rspack.HtmlRspackPlugin({
             template: resolve(configDir, "public/index.html"),

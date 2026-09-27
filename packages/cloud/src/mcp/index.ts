@@ -1,9 +1,10 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type RemoteMcpLink, setRemoteMcpLink } from "@spicy3d/ai";
+import { type RemoteMcpLink, setRemoteMcpLink, setRemoteMcpSignIn } from "@spicy3d/ai";
 import type { CloudConnection } from "../cloud";
 import { showCreateToken } from "../ui/accountSettings";
+import { showSignIn } from "../ui/authDialogs";
 import { accountUiContext } from "../ui/index";
 
 /**
@@ -17,8 +18,8 @@ export const MCP_SCOPES = ["mcp:read", "mcp:write"];
 /**
  * Remote MCP (CLOUD-14): while someone is signed in to a server with the relay
  * (`/api/config.features.mcp`), hands the MCP module the link it connects this tab with; signing
- * out, an expired session or another user takes it away (the tab leaves the relay). Returns the
- * stop function.
+ * out, an expired session or another user takes it away (the tab leaves the relay). Signed out, the
+ * MCP panel offers the sign-in instead. Returns the stop function.
  */
 export function startCloudMcp(connection: CloudConnection): () => void {
     const { config, account } = connection;
@@ -28,6 +29,7 @@ export function startCloudMcp(connection: CloudConnection): () => void {
 
     let link: RemoteMcpLink | undefined;
     let linkedUser: string | undefined;
+    const signIn = () => void showSignIn(ctx);
     const sync = () => {
         const user = account.status === "signedIn" ? account.user : undefined;
         if (!user) {
@@ -48,6 +50,7 @@ export function startCloudMcp(connection: CloudConnection): () => void {
             };
         }
         setRemoteMcpLink(link);
+        setRemoteMcpSignIn(account.status === "signedOut" ? signIn : undefined);
     };
     const onChanged = (property: string | number | symbol) => {
         if (property === "status" || property === "user") sync();
@@ -57,5 +60,6 @@ export function startCloudMcp(connection: CloudConnection): () => void {
     return () => {
         account.removePropertyChanged(onChanged);
         setRemoteMcpLink(undefined);
+        setRemoteMcpSignIn(undefined);
     };
 }

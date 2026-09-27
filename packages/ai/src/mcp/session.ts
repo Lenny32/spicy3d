@@ -1,7 +1,6 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/websocket.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Logger, redactSecrets } from "@spicy3d/core";
@@ -15,8 +14,8 @@ export interface McpSessionOptions extends Pick<McpServerOptions, "onToolCall"> 
     /** More options for every server this session creates. */
     serverOptions?: Omit<McpServerOptions, "onToolCall">;
     onStatus?: (status: McpStatus) => void;
-    /** Test seam; defaults to the SDK's WebSocket transport. */
-    createTransport?: (url: URL) => Transport;
+    /** The transport of each connection attempt (remoteSession.ts: the relay's page socket). */
+    createTransport: (url: URL) => Transport;
     /** Test seam; defaults to `createMcpServer`. */
     createServer?: (options: McpServerOptions) => Server;
     /** Called once a connection is up, with the transport it runs on. */
@@ -28,9 +27,9 @@ export interface McpSessionOptions extends Pick<McpServerOptions, "onToolCall"> 
 }
 
 /**
- * Keeps this tab connected to the local bridge (or the server's relay, remoteSession.ts): one MCP
- * server per WebSocket connection, and a reconnect with capped backoff whenever the bridge is not
- * running yet or restarts (MCP clients restart their stdio servers freely).
+ * Keeps this tab connected to the server's relay (remoteSession.ts): one MCP server per WebSocket
+ * connection, and a reconnect with capped backoff whenever the relay is not reachable yet or drops
+ * the connection (a server restart, a network change).
  */
 export class McpSession {
     private closed = false;
@@ -42,7 +41,7 @@ export class McpSession {
 
     constructor(
         readonly url: URL,
-        private readonly options: McpSessionOptions = {},
+        private readonly options: McpSessionOptions,
     ) {}
 
     get status(): McpStatus {
@@ -81,9 +80,7 @@ export class McpSession {
             onToolCall: this.options.onToolCall,
             ...this.options.serverOptions,
         });
-        const transport = (this.options.createTransport ?? ((url) => new WebSocketClientTransport(url)))(
-            this.url,
-        );
+        const transport = this.options.createTransport(this.url);
         this.server = server;
         this.transport = transport;
         // A failed connect fires both onclose and the rejection below; both land in retry(),
@@ -93,7 +90,7 @@ export class McpSession {
             await server.connect(transport);
         } catch (err) {
             Logger.debug(
-                `[mcp] bridge not reachable at ${this.url.host}: ${redactSecrets(String((err as Error)?.message ?? err))}`,
+                `[mcp] relay not reachable at ${this.url.host}: ${redactSecrets(String((err as Error)?.message ?? err))}`,
             );
             this.retry(server);
             return;

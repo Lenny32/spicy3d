@@ -24,9 +24,9 @@ updates:
               patterns: ["*"]
 
     # npm (every workspace through the root lockfile). The clients that handle credentials or run agent
-    # traffic — the MCP SDK, the generated API client's runtime and generator, the bridge's WebSocket
-    # server — are pinned to exact versions and get a pull request of their own, reviewed with their
-    # changelog (docs/security.md); everything else comes grouped.
+    # traffic — the MCP SDK, the generated API client's runtime and generator — are pinned to exact
+    # versions and get a pull request of their own, reviewed with their changelog
+    # (docs/security.md); everything else comes grouped.
     - package-ecosystem: npm
       directory: /
       schedule:
@@ -37,4 +37,4 @@ updates:
       groups:
           npm:
               patterns: ["*"]
-              exclude-patterns: ["@modelcontextprotocol/sdk", "openapi-fetch", "openapi-typescript", "ws"]
+              exclude-patterns: ["@modelcontextprotocol/sdk", "openapi-fetch", "openapi-typescript"]

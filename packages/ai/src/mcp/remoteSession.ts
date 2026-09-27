@@ -67,7 +67,7 @@ export class RemoteMcpSession {
             onStatus: (status) => state.update({ status }),
             onToolCall: (name, isError) => state.recordCall(name, isError),
             createServer: options.createServer,
-            serverOptions: { connection: "relay", imageByteBudget: () => this.imageBudget },
+            serverOptions: { imageByteBudget: () => this.imageBudget },
             createTransport: (url) =>
                 new RelayTransport(new PageSocketTransport(url, options.createSocket), {
                     gate: this.gate,

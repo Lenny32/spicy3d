@@ -558,7 +558,6 @@ export function showCreateToken(
 const MCP_CONFIG_TITLES: Record<string, I18nKeys> = {
     claudeCode: "mcp.remote.claudeCode",
     http: "mcp.remote.jsonConfig",
-    stdio: "mcp.remote.stdioConfig",
 };
 
 async function copyText(text: string, status: HTMLElement) {

@@ -6,20 +6,17 @@ import { type AccountLink, parseAccountLink } from "@spicy3d/cloud/src/links";
 export interface StartupParams {
     readonly plugins: string[];
     readonly fileUrl: string | undefined;
-    readonly mcpUrl: string | undefined;
 }
 
 /**
  * Parse the startup query string: each repeated `plugin` param is loaded as a
- * plugin, `url` (falling back to `model`) points to a file to open, and `mcp` is the local
- * MCP bridge to expose this tab through.
+ * plugin, and `url` (falling back to `model`) points to a file to open.
  */
 export function parseStartupParams(search: string): StartupParams {
     const params = new URLSearchParams(search);
     return {
         plugins: params.getAll("plugin").filter((x) => x.trim().length > 0),
         fileUrl: params.get("url") ?? params.get("model") ?? undefined,
-        mcpUrl: params.get("mcp") ?? undefined,
     };
 }
 
@@ -34,24 +31,4 @@ export function takeAccountLink(location: Location, history: History): AccountLi
     if (!route) return undefined;
     history.replaceState(history.state, "", `${route.appPath}${location.hash}`);
     return route.link;
-}
-
-/** Startup params that may carry a secret (`?mcp=` holds the local bridge URL with its pairing `?token=`). */
-const SECRET_PARAMS = ["mcp"];
-
-/**
- * Takes the secret-carrying startup params out of the address bar and the history once they are
- * read (the rest stays, so a reload still loads the same plugins and file), so the token is not
- * shown, bookmarked, shared or kept in the history.
- */
-export function dropSecretParams(location: Location, history: History): void {
-    const params = new URLSearchParams(location.search);
-    if (!SECRET_PARAMS.some((name) => params.has(name))) return;
-    for (const name of SECRET_PARAMS) params.delete(name);
-    const query = params.toString();
-    history.replaceState(
-        history.state,
-        "",
-        `${location.pathname}${query ? `?${query}` : ""}${location.hash}`,
-    );
 }

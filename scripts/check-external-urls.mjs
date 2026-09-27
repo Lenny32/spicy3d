@@ -28,14 +28,8 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ALLOWED = [
     // Placeholders in examples and comments: RFC 2606 names, "host" and "…".
     [/^(https?|wss?):\/\/(host|…|([\w-]+\.)*example\.(com|org|net))([:/]|$)/, "placeholder"],
-    // Loopback, only where it is meant: the base URL when there is no page, and the local MCP
-    // bridge's WebSocket on this machine.
+    // Loopback, only where it is meant: the base URL when there is no page.
     [/^http:\/\/localhost\/$/, "base URL without a page", /^(packages\/(cloud|core)\/src\/|dist\/)/],
-    [
-        /^ws:\/\/(127\.0\.0\.1|localhost):(\$\{|\d+\/|$)/,
-        "the local MCP bridge",
-        /^(packages\/ai\/src\/mcp\/|dist\/)/,
-    ],
     // Identifiers, never requested.
     [/^http:\/\/www\.w3\.org\//, "XML namespace"],
     [/^https?:\/\/json-schema\.org\//, "JSON Schema $schema id (ajv, MCP SDK)"],
@@ -45,10 +39,7 @@ const ALLOWED = [
     // Built at runtime from parts (`http://[${host}]`) or without a host (`http:///org/…`): no fixed target.
     [/^(https?|wss?):\/\/(\/|\[?\$\{)/, "URL template, not a fixed target"],
     // Links the user may open; nothing loads them.
-    [
-        /^https:\/\/github\.com\/Lenny32\/spicy3d(\/|$)/,
-        "repository link; release downloads (deployment.json overrides)",
-    ],
+    [/^https:\/\/github\.com\/Lenny32\/spicy3d(\/|$)/, "repository link"],
     [/^https:\/\/github\.com\/xiangechen\/chili3d(\/|$)/, "upstream repository link"],
     // LLM endpoints the user picks in the assistant's settings (deployment.json can offer others or hide them).
     [/^https:\/\/api\.anthropic\.com(\/|$)/, "LLM preset, used only when chosen"],
@@ -67,8 +58,6 @@ const ALLOWED = [
 ];
 
 const TEXT = new Set([".ts", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".svg"]);
-/** Folders never scanned, by their path from the repository root (and every node_modules). */
-const SKIP_DIRS = new Set(["public/downloads", "dist/downloads"]); // the bridge tarball: a Node.js program
 const URL_PATTERN =
     /\b(?:https?|wss?):\/\/[^\s"'`<>()\\]+|(?<=["'`(])\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s"'`<>()\\]*/gi;
 
@@ -79,7 +68,7 @@ function* files(dir) {
     for (const entry of readdirSync(dir)) {
         const full = path.join(dir, entry);
         if (statSync(full).isDirectory()) {
-            if (entry !== "node_modules" && !SKIP_DIRS.has(fromRoot(full))) yield* files(full);
+            if (entry !== "node_modules") yield* files(full);
         } else if (TEXT.has(path.extname(entry))) {
             yield full;
         }
@@ -87,9 +76,7 @@ function* files(dir) {
 }
 
 const roots = [
-    ...readdirSync(path.join(rootDir, "packages"))
-        .filter((p) => p !== "mcp-bridge") // a Node.js program, not served to the browser
-        .map((p) => path.join(rootDir, "packages", p, "src")),
+    ...readdirSync(path.join(rootDir, "packages")).map((p) => path.join(rootDir, "packages", p, "src")),
     ...readdirSync(path.join(rootDir, "plugins"))
         .map((p) => path.join(rootDir, "plugins", p, "src"))
         .filter((p) => existsSync(p)),

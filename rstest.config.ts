@@ -4,11 +4,6 @@ import { defineConfig } from "@rstest/core";
 import packages from "./package.json" with { type: "json" };
 
 const configDir = import.meta.dirname;
-// Where the MCP panel links the standalone bridge executables. Forks and self-hosters that publish
-// their own releases set SPICY3D_BRIDGE_DOWNLOAD_URL (a folder URL ending in "/") at build time.
-const mcpBridgeDownloadUrl =
-    process.env["SPICY3D_BRIDGE_DOWNLOAD_URL"] ??
-    `https://github.com/Lenny32/spicy3d/releases/download/${packages.version}/`;
 
 export default defineConfig({
     // Agent worktrees (`.claude/worktrees/`) are other checkouts of the repository.
@@ -25,7 +20,6 @@ export default defineConfig({
                 new DefinePlugin({
                     __APP_VERSION__: JSON.stringify(packages.version),
                     __IS_PRODUCTION__: JSON.stringify(process.env.NODE_ENV === "production"),
-                    __MCP_BRIDGE_DOWNLOAD_URL__: JSON.stringify(mcpBridgeDownloadUrl),
                 }),
             ],
             module: {

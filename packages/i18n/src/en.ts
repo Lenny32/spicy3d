@@ -812,37 +812,8 @@ export default {
         "mcp.agent.denied{0}": "{0} — denied",
         "mcp.agent.disconnect": "Disconnect agent",
         "mcp.agent.title": "An MCP client is driving this tab through the server",
-        "mcp.appUrl": "This page's address (the bridge only accepts pages from it)",
-        "mcp.autoConnect": "Connect automatically when Spicy3D opens",
-        "mcp.bridgeAt": "Bridge: {0}",
-        "mcp.bridgeCommand": "Command (change it only for a fork or a local build)",
-        "mcp.bridgeHint":
-            "The bridge is a small program on your computer that your agent starts. You never clone or build anything: pick one of the two ways to get it.",
-        "mcp.claudeCode": "Claude Code: run in a terminal",
-        "mcp.connect": "Connect",
-        "mcp.connectHint":
-            "Restart your agent (or reload its MCP servers), then press Connect above. The agent sees the Spicy3D tools as soon as this tab is connected. Keep the tab open while it works.",
         "mcp.copied": "Copied",
         "mcp.copy": "Copy",
-        "mcp.disconnect": "Disconnect",
-        "mcp.download": "Download:",
-        "mcp.executableHint":
-            "Keep it anywhere, e.g. your home folder. On macOS and Linux, make it executable once with chmod +x <file>. On macOS, if it is blocked as coming from an unidentified developer, run xattr -d com.apple.quarantine <file>.",
-        "mcp.executableMissing":
-            "Enter where you saved the executable in step 2: the commands below still contain a placeholder path.",
-        "mcp.executablePath": "Full path where you saved it",
-        "mcp.generate": "Generate",
-        "mcp.intro":
-            "Let an AI agent on your computer (Claude Code, Claude Desktop, Cursor…) model in this tab through the Model Context Protocol. The agent starts a small bridge program; this page connects to it and runs the tools itself, so your document never leaves the browser.",
-        "mcp.jsonConfig": "Claude Desktop, Cursor and other clients: add to the MCP config file",
-        "mcp.mode.local": "Local bridge",
-        "mcp.mode.remote": "Through the server",
-        "mcp.noTokenWarning":
-            "Insecure: without a token, any program on this computer can connect to the bridge port and drive this tab (read your model, change it, export it). Websites are still blocked by the origin check. Use this only on a machine you trust.",
-        "mcp.nodeHint":
-            "Needs Node.js 20 or newer (nodejs.org). npx downloads the bridge from this site the first time the agent starts it.",
-        "mcp.offlineHint":
-            "Bridge not reachable. Check that your agent has started it and that its port and token match the settings below. Retrying…",
         "mcp.open.hint": "The document with the unsaved changes stays open in its own view tab either way.",
         "mcp.open.keep": "Open, keep unsaved",
         "mcp.open.question{0}{1}": "An agent wants to open “{0}”. “{1}” has unsaved changes.",
@@ -858,51 +829,39 @@ export default {
         "mcp.pairing.title": "Allow an agent?",
         "mcp.pairing.token": "Access token:",
         "mcp.pairing.unnamedToken": "(unnamed)",
-        "mcp.port": "Port",
         "mcp.remote.agentWithToken{0}{1}": "{0} (token {1})",
         "mcp.remote.claudeCode": "Claude Code: run in a terminal",
         "mcp.remote.createToken": "Create access token…",
         "mcp.remote.enabled": "Let my MCP clients reach this tab through the server",
         "mcp.remote.intro":
-            "Your MCP client (Claude Code, Cursor, VS Code…) connects to the server with a personal access token; the server passes its calls to this tab, where the tools run. Nothing to install, and no bridge to start.",
+            "Your MCP client (Claude Code, Cursor, VS Code…) connects to the server with a personal access token; the server passes its calls to this tab, where the tools run. Nothing to install.",
         "mcp.remote.jsonConfig":
             'Cursor, VS Code (under "servers") and other HTTP clients: add to the MCP config file',
+        "mcp.remote.noServer":
+            "MCP clients reach Spicy3D through a Spicy3D server with remote MCP turned on. This page is not connected to such a server, so there is nothing to set up here.",
         "mcp.remote.pairingHint":
             "The first call of every new client session asks you in this tab to allow it. While an agent is connected, a badge in the title bar shows it, with Disconnect agent.",
         "mcp.remote.registerHint":
             "Replace <token> with your token, or create one above: its last step shows these configs with the token filled in.",
         "mcp.remote.shellHistoryHint":
             "The command reads the token from the SPICY3D_TOKEN variable, so it stays out of your shell history. Set it first without echoing it: read -rs SPICY3D_TOKEN && export SPICY3D_TOKEN (PowerShell: $env:SPICY3D_TOKEN = Read-Host -MaskInput).",
+        "mcp.remote.signIn": "Sign in…",
+        "mcp.remote.signInHint":
+            "Sign in to your Spicy3D account: your MCP clients then connect to the server with a personal access token, and the server passes their calls to this tab.",
         "mcp.remote.signedInAs{0}": "Signed in as {0}",
         "mcp.remote.status.connected": "Ready: your MCP clients can reach this tab",
         "mcp.remote.status.connecting": "Connecting to the server…",
         "mcp.remote.status.idle": "Off: MCP clients cannot reach this tab through the server",
+        "mcp.remote.status.noServer": "Not available: no Spicy3D server with MCP",
         "mcp.remote.status.offline": "Server not reachable. Retrying…",
         "mcp.remote.status.unavailable": "Sign in to use MCP through the server",
-        "mcp.remote.stdioConfig":
-            "Clients that only start local programs: the bridge in server mode (download it under Local bridge)",
         "mcp.remote.step.register": "2. Register the server with your client",
         "mcp.remote.step.token": "1. Access token",
         "mcp.remote.tabInfoHint":
             "Before you allow a client, anyone with one of your MCP tokens can already see that this tab is open, its document's name and this device's name (the server's tab list). The model itself stays out of reach until you press Allow.",
         "mcp.remote.tokenHint":
             "Clients authenticate with a personal access token of your account (Edit the open model for full control). It is shown only once.",
-        "mcp.remoteHint":
-            "This page is served from another machine, so your browser may ask whether it may access apps or devices on your local network: allow it, or the bridge stays unreachable. Chrome, Edge and Firefox support this; Safari blocks it.",
-        "mcp.requireToken": "Require a pairing token (recommended)",
-        "mcp.runner.executable": "Download the executable (nothing else to install)",
-        "mcp.runner.node": "Run it with Node.js (npx fetches it from this site)",
-        "mcp.status.connected": "Connected: an agent can drive this tab",
-        "mcp.status.connecting": "Connecting…",
-        "mcp.status.idle": "Not connected",
-        "mcp.status.offline": "Waiting for the bridge",
-        "mcp.step.bridge": "2. Bridge",
-        "mcp.step.connect": "4. Connect",
-        "mcp.step.register": "3. Register the bridge with your agent",
-        "mcp.step.token": "1. Pairing token",
         "mcp.title": "MCP",
-        "mcp.tokenHint":
-            "The bridge only accepts this page if it presents the same token. It is generated for you and saved in this browser; if you generate a new one, copy the updated config into your agent again.",
         "model.visible": "Visible",
         "node.unknown.warning": "Kept unchanged: its plugin is not loaded",
         "option.command.circularPattern": "Circular Pattern",

@@ -13,7 +13,7 @@ If you want the original project, its website ([chili3d.com](https://chili3d.com
 What we have added so far:
 
 - A 2D sketch solver based on PlaneGCS, used by the parametric sketch module
-- An MCP server that runs inside the page, plus a small bridge program (`packages/mcp-bridge`) so Claude Code, Claude Desktop, Cursor and other MCP clients can drive the open document. See the [bridge README](packages/mcp-bridge/README.md).
+- An MCP server that runs inside the page: signed in to a Spicy3D server with MCP, Claude Code, Cursor, VS Code and other MCP clients connect to the server with a personal access token and drive the open document (the MCP panel has the client configs).
 - A ribbon laid out like Fusion 360's, with context-aware shortcuts
 - An adaptive background grid in the viewport
 - CI: lint, typecheck, CodeQL, Semgrep and a dependency audit on pull requests to `develop` and `main`; the test suite runs on pull requests to `main`
@@ -90,8 +90,8 @@ SPICY3D_API_URL=http://localhost:5080 npm run dev
 
 ### Deployment
 
-The same build runs on a LAN-only server and on a public host; per-deployment settings (MCP bridge downloads, the
-assistant's LLM endpoints) go in `deployment.json`. The Docker image (`spicy3d-web`, port 8080, non-root, read-only)
+The same build runs on a LAN-only server and on a public host; per-deployment settings (the assistant's LLM endpoints,
+trusted plugin origins) go in `deployment.json`. The Docker image (`spicy3d-web`, port 8080, non-root, read-only)
 is what SpicySrv's compose runs; the Deploy workflow smoke-tests it and publishes it to `ghcr.io/lenny32/spicy3d`
 (`latest` and the app version, amd64 + arm64). See [docs/deployment.md](docs/deployment.md). Checks: `npm run check:urls` (no
 external URLs), `npm run smoke` (the build in headless Chromium with other origins blocked; needs
@@ -110,7 +110,6 @@ npm workspace under `packages/`:
 | `element`, `ui` | Custom elements and the app chrome (ribbon, panels, tree, dialogs) |
 | `app` | `Application`, body nodes, commands, hotkeys |
 | `ai` | In-app assistant tools and the MCP server |
-| `mcp-bridge` | stdio ⇄ WebSocket relay for MCP clients |
 | `builder` | `AppBuilder`, which wires everything together at startup |
 | `i18n`, `storage`, `web` | Translations, IndexedDB, entry point |
 

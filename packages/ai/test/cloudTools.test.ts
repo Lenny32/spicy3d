@@ -177,7 +177,6 @@ describe("cloud tool names", () => {
     test("are the ticket's, and never one the server answers itself", () => {
         expect([...CLOUD_TOOL_NAMES]).toEqual([
             "spicy3d_open_document",
-            "spicy3d_list_cloud_documents",
             "spicy3d_new_document",
             "spicy3d_save",
         ]);
@@ -509,15 +508,11 @@ describe("the MCP server with the cloud tools", () => {
         expect(resources.map((r) => r.uri)).toContain("spicy3d://skill/cloud-documents");
         expect(SKILLS.map((s) => s.name)).not.toContain("cloud-documents");
         expect(MCP_SKILLS.map((s) => s.name)).toContain("cloud-documents");
-        const bridge = buildMcpInstructions("bridge");
-        expect(bridge).toContain("spicy3d_list_cloud_documents → spicy3d_open_document { id }");
-        expect(bridge).not.toContain("spicy3d_document_history");
-        expect(bridge).toContain("spicy3d_save { label }");
-        expect(bridge).toContain("cloud-documents");
-        const relay = buildMcpInstructions("relay");
-        expect(relay).toContain("spicy3d_list_documents → spicy3d_open_document { id }");
-        expect(relay).toContain("Let agents list documents and history");
-        expect(relay).not.toContain("spicy3d_list_cloud_documents");
+        const instructions = buildMcpInstructions();
+        expect(instructions).toContain("spicy3d_list_documents → spicy3d_open_document { id }");
+        expect(instructions).toContain("spicy3d_save { label }");
+        expect(instructions).toContain("cloud-documents");
+        expect(instructions).toContain("Let agents list documents and history");
     });
 
     test("the default registry's load_skill offers the cloud skill to MCP clients", async () => {
@@ -582,36 +577,6 @@ describe("review fixes", () => {
 
     const agentPrompt = () => document.querySelector("dialog[data-prompt='agentOpen']");
 
-    test("spicy3d_list_cloud_documents lists through the tab, in UTC; only the local bridge offers it", async () => {
-        const { run, cloud } = setup();
-
-        const result = await run("spicy3d_list_cloud_documents", { query: " Brack ", limit: 500 });
-
-        expect((cloud as unknown as { list: ReturnType<typeof rs.fn> }).list).toHaveBeenCalledWith({
-            search: "Brack",
-            limit: 100,
-        });
-        expect(result).toEqual({
-            documents: [
-                {
-                    id: "doc-2",
-                    name: "Bracket",
-                    updatedAt: "2026-09-27T13:35:49Z",
-                    sizeBytes: 1234,
-                    headVersionId: "v7",
-                },
-            ],
-            more: true,
-        });
-
-        const bridge = await connect({ connection: "bridge" });
-        const relay = await connect({ connection: "relay" });
-        const names = async (c: Client) => (await c.listTools()).tools.map((t) => t.name);
-        expect(await names(bridge.client)).toContain("spicy3d_list_cloud_documents");
-        expect(await names(relay.client)).not.toContain("spicy3d_list_cloud_documents");
-        expect(await names(relay.client)).toContain("spicy3d_open_document");
-    });
-
     test("a save conflict opens the conflict UI once per document, never again while it waits", async () => {
         const { run, link, app, cloud } = setup();
         const document = doc(app, "doc-2", cloud, true);
@@ -673,12 +638,12 @@ describe("review fixes", () => {
         await expect(
             failing.connect({
                 start: async () => {
-                    throw new Error("bridge not running");
+                    throw new Error("relay not reachable");
                 },
                 send: async () => {},
                 close: async () => {},
             }),
-        ).rejects.toThrow("bridge not running");
+        ).rejects.toThrow("relay not reachable");
         expect(agentCloudListenerCount()).toBe(before);
 
         const { client } = await connect();
@@ -707,7 +672,6 @@ describe("review fixes", () => {
         show(app, doc(app, "mine", app.repositories.local, true));
         const { client } = await connect({
             cloudTools: buildCloudTools({ waitMs: 20 }),
-            connection: "relay",
         });
         const ask = (agent: string) =>
             client.callTool({

@@ -1,22 +1,14 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-// SDK-free like settings.ts: the panel observes this store without loading the MCP SDK.
+// SDK-free like settings.ts: the panel observes these stores without loading the MCP SDK.
 
 export type McpStatus = "connecting" | "connected" | "offline";
-export type McpConnectionStatus = McpStatus | "idle";
 
 export interface McpToolCallRecord {
     name: string;
     isError: boolean;
     time: number;
-}
-
-export interface McpStateSnapshot {
-    status: McpConnectionStatus;
-    /** The bridge the live session targets, token stripped; undefined while idle. */
-    bridge?: string;
-    calls: McpToolCallRecord[];
 }
 
 const MAX_CALLS = 8;
@@ -51,12 +43,3 @@ export class SnapshotStore<T extends { calls: McpToolCallRecord[] }> {
         this.update({ calls } as Partial<T>);
     }
 }
-
-/** The live bridge session as the UI sees it; written by the controller, read by panel and badge. */
-export class McpState extends SnapshotStore<McpStateSnapshot> {
-    constructor() {
-        super({ status: "idle", calls: [] });
-    }
-}
-
-export const mcpState = new McpState();

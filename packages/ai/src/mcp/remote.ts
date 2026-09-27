@@ -9,14 +9,7 @@ import { Logger } from "@spicy3d/core";
 import { ensureAgentBadge } from "./agentBadge";
 import { forgetPairingDecisions } from "./pairing";
 import { type RemoteMcpLink, type RemoteMcpStatus, remoteMcpState } from "./remoteState";
-import {
-    isWindowsClient,
-    loadMcpSettings,
-    type McpSettings,
-    resolveBridgeCommand,
-    saveMcpSettings,
-    splitCommand,
-} from "./settings";
+import { loadMcpSettings, type McpSettings, saveMcpSettings } from "./settings";
 
 export * from "./remoteState";
 
@@ -48,6 +41,14 @@ export function setRemoteMcpLink(link: RemoteMcpLink | undefined): void {
     else remoteMcpState.update({ status: "idle" });
 }
 
+/**
+ * Called by the cloud module while its server offers the relay but nobody is signed in, with what
+ * opens its sign-in dialog (the panel's Sign in button); `undefined` otherwise.
+ */
+export function setRemoteMcpSignIn(signIn: (() => void) | undefined): void {
+    if (remoteMcpState.current.signIn !== signIn) remoteMcpState.update({ signIn });
+}
+
 /** The panel's switch: connect now (and on later sign-ins) or leave and stay off. */
 export function setRemoteMcpEnabled(enabled: boolean): void {
     const settings: McpSettings = { ...loadMcpSettings(), remoteEnabled: enabled };
@@ -77,14 +78,14 @@ function connectRemote(link: RemoteMcpLink) {
 
 export const TOKEN_PLACEHOLDER = "<token>";
 
-/** The server's base address, as `spicy3d-mcp-bridge --server` takes it. */
-export function serverUrlOf(endpoint: string): string {
-    return endpoint.replace(/\/mcp\/?$/, "");
+/** The agent runs on the machine this browser runs on, so the browser's OS is the agent's. */
+export function isWindowsClient(): boolean {
+    return typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 }
 
 /**
- * Claude Code over Streamable HTTP: no bridge at all. The token comes from the `SPICY3D_TOKEN`
- * variable the shell expands, so it never lands in the shell history.
+ * Claude Code over Streamable HTTP. The token comes from the `SPICY3D_TOKEN` variable the shell
+ * expands, so it never lands in the shell history.
  */
 export function remoteClaudeCodeCommand(endpoint: string, windows = isWindowsClient()): string {
     const variable = windows ? "$env:SPICY3D_TOKEN" : "$SPICY3D_TOKEN";
@@ -97,32 +98,13 @@ export function remoteJsonConfig(endpoint: string, token = TOKEN_PLACEHOLDER): s
     return JSON.stringify({ mcpServers: { spicy3d: server } }, null, 2);
 }
 
-/** Clients that only start stdio servers: the bridge in `--server` mode, the token in its environment. */
-export function remoteStdioConfig(
-    endpoint: string,
-    settings: McpSettings,
-    appUrl: string,
-    token = TOKEN_PLACEHOLDER,
-): string {
-    const [command, ...args] = splitCommand(resolveBridgeCommand(settings, appUrl));
-    const server = {
-        command,
-        args: [...args, "--server", serverUrlOf(endpoint)],
-        env: { SPICY3D_TOKEN: token },
-    };
-    return JSON.stringify({ mcpServers: { spicy3d: server } }, null, 2);
-}
-
 /** Every config for `endpoint`, in the order the panel and the token dialog show them. */
 export function remoteClientConfigs(
     endpoint: string,
     token = TOKEN_PLACEHOLDER,
-    settings: McpSettings = loadMcpSettings(),
-    appUrl = `${location.origin}${location.pathname}`,
-): { kind: "claudeCode" | "http" | "stdio"; text: string }[] {
+): { kind: "claudeCode" | "http"; text: string }[] {
     return [
         { kind: "claudeCode", text: remoteClaudeCodeCommand(endpoint) },
         { kind: "http", text: remoteJsonConfig(endpoint, token) },
-        { kind: "stdio", text: remoteStdioConfig(endpoint, settings, appUrl, token) },
     ];
 }

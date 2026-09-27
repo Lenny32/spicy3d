@@ -7,5 +7,3 @@ coverage
 .clang-format
 CMakeUserPresets.json
 types
-public/downloads/
-dist-bridge/

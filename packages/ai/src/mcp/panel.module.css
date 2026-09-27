@@ -162,15 +162,6 @@
     display: none;
 }
 
-.warning {
-    font-size: 11px;
-    line-height: 1.5;
-    padding: 8px 10px;
-    border: 1px solid #c94040;
-    border-radius: 8px;
-    background: color-mix(in srgb, #c94040 10%, transparent);
-}
-
 .row {
     display: flex;
     gap: 6px;
@@ -190,14 +181,6 @@
 .row .field {
     flex: 1 1 auto;
     min-width: 0;
-}
-
-.fieldLabel {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: var(--foreground-muted-color);
-    font-size: 11px;
 }
 
 .checkbox {
@@ -262,57 +245,6 @@
 
 .primaryButton:hover {
     background: var(--hover-background-color);
-}
-
-.downloads {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-.download,
-.downloadPrimary {
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 11px;
-    color: var(--foreground-color);
-    text-decoration: none;
-}
-
-.downloadPrimary {
-    font-weight: 600;
-    border-color: var(--foreground-muted-color);
-}
-
-.download:hover,
-.downloadPrimary:hover {
-    background: var(--hover-background-color);
-}
-
-.modeChoice {
-    display: flex;
-    gap: 4px;
-    padding: 2px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    align-self: flex-start;
-}
-
-.modeButton {
-    border: none;
-    border-radius: 6px;
-    padding: 4px 10px;
-    background: none;
-    color: var(--foreground-muted-color);
-    cursor: pointer;
-}
-
-.modeButton[aria-pressed="true"] {
-    background: var(--control-background-color);
-    color: var(--foreground-color);
-    font-weight: 600;
 }
 
 .agentList {

@@ -20,7 +20,6 @@ describe("security-sensitive dependencies are pinned", () => {
         ["packages/ai/package.json", "@modelcontextprotocol/sdk"],
         ["packages/cloud/package.json", "openapi-fetch"],
         ["package.json", "openapi-typescript"],
-        ["packages/mcp-bridge/package.json", "ws"],
     ])("%s: %s", (file, name) => {
         const version = dependencies(file)[name];
         expect(version).toMatch(/^\d+\.\d+\.\d+$/);
