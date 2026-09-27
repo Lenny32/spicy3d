@@ -4,6 +4,7 @@
 export * from "./annotation";
 export * from "./childList";
 export * from "./component";
+export * from "./documentTimeline";
 export * from "./facebaseNode";
 export * from "./featureList";
 export * from "./folderNode";
