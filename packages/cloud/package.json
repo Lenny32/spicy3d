@@ -9,6 +9,6 @@
         "@spicy3d/element": "*"
     },
     "dependencies": {
-        "openapi-fetch": "^0.17.0"
+        "openapi-fetch": "0.17.0"
     }
 }
