@@ -7,6 +7,8 @@ import { describeUserAgent } from "./userAgent";
 
 const STORAGE_KEY = "cloud.device";
 const LAST_USER_KEY = "cloud.lastUser";
+/** A user not confirmed by the server for this long is not signed in again from the cache. */
+export const LAST_USER_MAX_AGE_MS = 30 * 24 * 3_600_000;
 
 /** The server keeps at most this many characters of a version's device name. */
 export const DEVICE_NAME_MAX_LENGTH = 100;
@@ -78,17 +80,23 @@ export class CloudDeviceSettings extends Observable {
      * The user last signed in on this browser, so the app starts signed in (their cached documents,
      * their pending saves) when the server can't be reached; forgotten on sign-out.
      */
-    get lastUser(): ApiSchema<"MeResponse"> | undefined {
+    lastUser(now = Date.now()): ApiSchema<"MeResponse"> | undefined {
         try {
-            const user = this.storage.value<ApiSchema<"MeResponse">>(LAST_USER_KEY, undefined);
-            return typeof user?.id === "string" ? user : undefined;
+            const stored = this.storage.value<{ user?: ApiSchema<"MeResponse">; confirmedAt?: number }>(
+                LAST_USER_KEY,
+                undefined,
+            );
+            const confirmedAt = stored?.confirmedAt;
+            if (typeof stored?.user?.id !== "string" || typeof confirmedAt !== "number") return undefined;
+            return now - confirmedAt <= LAST_USER_MAX_AGE_MS ? stored.user : undefined;
         } catch {
             return undefined;
         }
     }
 
-    rememberUser(user: ApiSchema<"MeResponse"> | undefined): void {
-        if (user) this.storage.setValue(LAST_USER_KEY, user);
+    /** The server just confirmed `user` (`undefined`: signed out, or the session is gone). */
+    rememberUser(user: ApiSchema<"MeResponse"> | undefined, now = Date.now()): void {
+        if (user) this.storage.setValue(LAST_USER_KEY, { user, confirmedAt: now });
         else this.storage.remove(LAST_USER_KEY);
     }
 

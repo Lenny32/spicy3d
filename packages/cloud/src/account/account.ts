@@ -148,18 +148,46 @@ export class Account extends Observable {
             return Result.ok(result.value.data);
         }
         if (isUnauthorized(result.error)) {
+            // No session any more (revoked, expired): never signed in again from the cache.
+            this.deviceSettings.rememberUser(undefined);
+            this.cachedSession = false;
             if (this.status === "signedIn") this.markExpired();
             else if (this.status !== "expired") this.setProperty("status", "signedOut");
             return Result.ok(undefined);
         }
-        // The server is out of reach at startup: the user last signed in here stays signed in, so
-        // their cached documents open and their pending saves wait (a 401 later asks to sign in).
-        const cached = this.deviceSettings.lastUser;
+        // The server is out of reach at startup: the user last confirmed here (within 30 days)
+        // stays signed in, so their cached documents open and their pending saves wait — until
+        // `confirmSession` asks the server once it can be reached.
+        const cached = this.deviceSettings.lastUser();
         if (result.error.kind === "offline" && this.status === "unknown" && cached) {
+            this.cachedSession = true;
             this.setProperty("user", cached);
             this.setProperty("status", "signedIn");
         }
         return Result.err(result.error);
+    }
+
+    /** Signed in from the cache at an offline start, not confirmed by the server yet. */
+    get isUnconfirmed(): boolean {
+        return this.cachedSession;
+    }
+
+    private cachedSession = false;
+    private confirming?: Promise<boolean>;
+
+    /**
+     * Resolves whether the session is confirmed: right away unless signed in from the cache, else
+     * after asking the server (`GET /api/me`). Offline: `false`, asked again next time. A 401 ends
+     * the cached session (expired: the re-login dialog). Nothing is pushed before it answers.
+     */
+    confirmSession(): Promise<boolean> {
+        if (!this.cachedSession) return Promise.resolve(this.isSignedIn);
+        this.confirming ??= this.refresh()
+            .then((result) => result.isOk && result.value !== undefined && this.isSignedIn)
+            .finally(() => {
+                this.confirming = undefined;
+            });
+        return this.confirming;
     }
 
     /**
@@ -379,6 +407,7 @@ export class Account extends Observable {
         const previous = this.user;
         if (previous && previous.id !== user.id) await this.finishSignOut("switchUser");
         this.deviceSettings.rememberUser(user);
+        this.cachedSession = false;
         this.setProperty("user", user);
         this.setProperty("status", "signedIn");
         this.settleReauthentication(true);
@@ -397,6 +426,7 @@ export class Account extends Observable {
     private async finishSignOut(reason: SignOutReason) {
         const wasSignedIn = this.user !== undefined;
         this.deviceSettings.rememberUser(undefined);
+        this.cachedSession = false;
         this.setProperty("user", undefined);
         this.setProperty("status", "signedOut");
         this.settleReauthentication(false);

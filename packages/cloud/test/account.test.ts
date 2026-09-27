@@ -8,6 +8,7 @@ import {
     CloudDeviceSettings,
     DEVICE_NAME_MAX_LENGTH,
     defaultDeviceName,
+    LAST_USER_MAX_AGE_MS,
 } from "../src/account/deviceSettings";
 import {
     accountOn,
@@ -78,7 +79,7 @@ describe("Account session state", () => {
         const server = new FakeServer().on("GET /api/me", json(200, USER));
         const first = accountOn(server);
         await first.refresh();
-        expect(first.deviceSettings.lastUser?.id).toBe(USER.id);
+        expect(first.deviceSettings.lastUser()?.id).toBe(USER.id);
         server.fetch.mockImplementation(async () => {
             throw new TypeError("Failed to fetch");
         });
@@ -90,7 +91,21 @@ describe("Account session state", () => {
         expect(account.status).toBe("signedIn");
         expect(account.user?.id).toBe(USER.id);
         await account.signOut();
-        expect(account.deviceSettings.lastUser).toBeUndefined();
+        expect(account.deviceSettings.lastUser()).toBeUndefined();
+    });
+
+    test("a cached user is not signed in again once 30 days old, nor after any 401", async () => {
+        const settings = accountOn(new FakeServer()).deviceSettings;
+        settings.rememberUser(USER, 1000);
+        expect(settings.lastUser(1000 + LAST_USER_MAX_AGE_MS)?.id).toBe(USER.id);
+        expect(settings.lastUser(1001 + LAST_USER_MAX_AGE_MS)).toBeUndefined();
+
+        const server = new FakeServer().on("GET /api/me", json(200, USER));
+        const account = accountOn(server);
+        await account.refresh();
+        server.on("GET /api/me", json(401, { status: 401, code: "unauthorized" }));
+        await account.refresh();
+        expect(account.deviceSettings.lastUser()).toBeUndefined();
     });
 
     test("status and user changes are observable", async () => {
