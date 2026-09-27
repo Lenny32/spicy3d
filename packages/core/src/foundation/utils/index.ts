@@ -5,3 +5,4 @@ export * from "./dateTime";
 export * from "./debounce";
 export * from "./download";
 export * from "./readFileAsync";
+export * from "./strings";

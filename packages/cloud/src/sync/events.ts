@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Logger } from "@spicy3d/core";
+import { Logger, trimTrailingSlashes } from "@spicy3d/core";
 import type { Account } from "../account/account";
 
 /**
@@ -55,7 +55,7 @@ const CLOSE_POLICY = 1008;
 
 /** The absolute WebSocket URL of `url` (`http(s)` → `ws(s)`). */
 export function eventsSocketUrl(url: string, baseUrl: string): string {
-    const resolved = new URL(url, `${baseUrl.replace(/\/+$/, "")}/`);
+    const resolved = new URL(url, `${trimTrailingSlashes(baseUrl)}/`);
     if (resolved.protocol === "http:") resolved.protocol = "ws:";
     else if (resolved.protocol === "https:") resolved.protocol = "wss:";
     return resolved.href;

@@ -192,7 +192,6 @@ async function setup(options: { ask?: UnsavedBeforeRestore; askAfter?: UnsavedBe
     return { server, docs, repository, app, history, open, v1, v2, loaded, opened, asked, stages };
 }
 
-const toasts = () => published.filter(([event]) => event === "showToast").map(([, args]) => args[0]);
 const banners = () =>
     published.filter(([event]) => event === "showBanner").map(([, args]) => args[0] as BannerOptions);
 

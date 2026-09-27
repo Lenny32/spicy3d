@@ -1,6 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { trimEndChars } from "./utils/strings";
+
 /** What a redacted value is replaced with. */
 export const REDACTED = "•••";
 
@@ -40,8 +42,8 @@ export function redactSecrets(text: string): string {
     return text
         .replace(URL_PATTERN, (match) => {
             // Punctuation ending a sentence ("…/f.step?sig=x: 403") is not part of the URL.
-            const trailing = /[.,:;!?]+$/.exec(match)?.[0] ?? "";
-            const url = match.slice(0, match.length - trailing.length);
+            const url = trimEndChars(match, ".,:;!?");
+            const trailing = match.slice(url.length);
             try {
                 return redactUrl(new URL(url)) + trailing;
             } catch {

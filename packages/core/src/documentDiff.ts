@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { type DocumentFormatError, DocumentMigrations } from "./documentFormat";
-import { Result } from "./foundation";
+import { Result, trimEndChars } from "./foundation";
 import { I18n, type I18nKeys } from "./i18n";
 import { diffViews } from "./merge/diff";
 import { DocumentView, payloadProperties, timelineProperty } from "./merge/documentView";
@@ -56,9 +56,9 @@ const ANGLE_FIELDS = new Set(["angle"]);
 /** A node name for display: names like `body.box1` are an i18n key plus a counter ("Box 1"). */
 export function displayNodeName(name: string): string {
     if (I18n.isI18nKey(name)) return I18n.translate(name);
-    const match = /^(.*?)(\d+)$/.exec(name);
-    if (match !== null && I18n.isI18nKey(match[1]))
-        return `${I18n.translate(match[1] as I18nKeys)} ${match[2]}`;
+    const key = trimEndChars(name, "0123456789");
+    if (key.length < name.length && I18n.isI18nKey(key))
+        return `${I18n.translate(key as I18nKeys)} ${name.slice(key.length)}`;
     return name;
 }
 

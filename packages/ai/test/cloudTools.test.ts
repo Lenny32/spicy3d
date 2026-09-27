@@ -567,10 +567,6 @@ describe("OpenConsent", () => {
 });
 
 describe("review fixes", () => {
-    function tool(name: string, handler: Tool["handler"]): Tool {
-        return { name, description: name, parameters: { type: "object", properties: {} }, handler };
-    }
-
     async function connect(options: Parameters<typeof createMcpServer>[0] = {}) {
         const server = createMcpServer({
             tools: [],

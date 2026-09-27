@@ -8,7 +8,6 @@ import {
     type MergeConflict,
     type MergeResult,
     mergeDocuments,
-    parseMergePath,
     resolveMerge,
     type Serialized,
 } from "@spicy3d/core";

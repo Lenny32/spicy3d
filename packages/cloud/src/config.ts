@@ -4,7 +4,7 @@
 // Runtime discovery of the server. Imports nothing but types beyond core, so the local-only path
 // (static hosting, no server) never loads the API client.
 
-import { Logger, ObjectStorage } from "@spicy3d/core";
+import { Logger, ObjectStorage, trimTrailingSlashes } from "@spicy3d/core";
 import type { ConfigResponse } from "./api";
 
 /**
@@ -53,7 +53,7 @@ function cacheOf(option: DiscoveryOptions["offlineCache"]): ObjectStorage | unde
 /** The folder of the page without trailing slash, so an app under `/sub/` finds `/sub/api`. */
 export function defaultBaseUrl(): string {
     const page = globalThis.document?.baseURI ?? globalThis.location?.href ?? "http://localhost/";
-    return new URL(".", page).href.replace(/\/+$/, "");
+    return trimTrailingSlashes(new URL(".", page).href);
 }
 
 /** Where `apiVersion` (`"1"`, `"2.1"`: the major counts) falls relative to `range`. */
@@ -92,7 +92,7 @@ function isConfig(value: unknown): value is ConfigResponse {
  * never an error, never a toast.
  */
 export async function discoverCloud(options: DiscoveryOptions = {}): Promise<CloudDiscovery> {
-    const baseUrl = (options.baseUrl ?? defaultBaseUrl()).replace(/\/+$/, "");
+    const baseUrl = trimTrailingSlashes(options.baseUrl ?? defaultBaseUrl());
     const fetchFn = options.fetch ?? ((request: Request) => globalThis.fetch(request));
     const request = new Request(`${baseUrl}/api/config`, {
         method: "GET",

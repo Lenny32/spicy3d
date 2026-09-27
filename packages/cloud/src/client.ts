@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Result } from "@spicy3d/core";
+import { Result, trimTrailingSlashes } from "@spicy3d/core";
 import createClient, { type Client } from "openapi-fetch";
 import type { paths } from "./api";
 import { defaultBaseUrl } from "./config";
@@ -83,7 +83,7 @@ export class CloudClient {
     readonly api: ApiClient;
 
     constructor(options: CloudClientOptions = {}) {
-        this.baseUrl = (options.baseUrl ?? defaultBaseUrl()).replace(/\/+$/, "");
+        this.baseUrl = trimTrailingSlashes(options.baseUrl ?? defaultBaseUrl());
         this.api = createClient<paths>({
             baseUrl: this.baseUrl,
             credentials: "same-origin",
