@@ -4,7 +4,7 @@
 // SDK-free: the prompt an agent's `spicy3d_open_document` waits for when the document the user is
 // looking at has unsaved changes (CLOUD-15).
 
-import { I18n, type I18nKeys, Logger } from "@spicy3d/core";
+import { I18n, type I18nKeys, Logger, redactSecrets } from "@spicy3d/core";
 import { button, div, span } from "@spicy3d/element";
 import style from "../mcp/panel.module.css";
 
@@ -115,7 +115,7 @@ export class OpenConsent {
         const pending: PendingQuestion = { key, caller, abort, answer: undefined as never };
         pending.answer = this.ask(question, abort.signal)
             .catch((err) => {
-                Logger.warn(`[mcp] open prompt failed: ${err}`);
+                Logger.warn(`[mcp] open prompt failed: ${redactSecrets(String(err))}`);
                 return "cancel" as const;
             })
             .then(async (choice) => {

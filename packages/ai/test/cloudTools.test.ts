@@ -13,6 +13,7 @@ import {
     type IDocument,
     type IDocumentRepository,
     type IView,
+    Logger,
     Result,
     type SaveConflict,
     type StoredDocumentInfo,
@@ -291,11 +292,20 @@ describe("spicy3d_open_document", () => {
         mine.save = rs.fn(async () => Result.err<DocumentRepositoryError>({ kind: "quota" }));
         show(app, mine);
 
-        const pending = run("spicy3d_open_document", { id: "doc-2" });
-        await prompt.answer("save");
+        const warn = rs.spyOn(Logger, "warn").mockImplementation(() => {});
+        try {
+            const pending = run("spicy3d_open_document", { id: "doc-2" });
+            await prompt.answer("save");
 
-        expect((await pending).error).toContain("that save did not go through");
-        expect(link.opened).toEqual([]);
+            expect((await pending).error).toContain("that save did not go through");
+            expect(link.opened).toEqual([]);
+            // The log names the document by id, never by its name (CLOUD-17).
+            const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+            expect(logged).toContain("saving mine before opening failed: quota");
+            expect(logged).not.toContain("Doc mine");
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     test("a version opens read-only through the history preview", async () => {
