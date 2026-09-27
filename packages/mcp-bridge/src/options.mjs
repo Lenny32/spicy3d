@@ -29,7 +29,8 @@ Options:
   -s, --server <url>         Relay to this Spicy3D server (e.g. https://spicy.lan) instead of
                              waiting for a page; needs a personal access token.  [env SPICY3D_SERVER]
                              The token comes from SPICY3D_TOKEN (Spicy3D: account settings > Access tokens).
-                             A server with an internal CA needs NODE_EXTRA_CA_CERTS=<ca.pem>.
+                             https only (http for localhost). A server with an internal CA
+                             needs NODE_EXTRA_CA_CERTS=<ca.pem>.
   -h, --help                 Show this help
   -v, --version              Show the version
 `;
@@ -67,9 +68,13 @@ export function parseOptions(argv, env) {
                 `--server cannot be combined with ${conflicting.map((f) => `--${f}`).join(", ")}`,
             );
         }
+        if (values.token !== undefined) {
+            throw new Error(
+                "--server takes the access token from SPICY3D_TOKEN only, not --token (the process list would show it)",
+            );
+        }
         const server = mcpEndpointFor(serverText);
-        // --token is accepted too, but the environment keeps it out of the process list.
-        const serverToken = (values.token ?? env["SPICY3D_TOKEN"] ?? "").trim();
+        const serverToken = (env["SPICY3D_TOKEN"] ?? "").trim();
         if (!values.help && !values.version && !serverToken) {
             throw new Error("--server needs a personal access token in SPICY3D_TOKEN");
         }

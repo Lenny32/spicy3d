@@ -40,6 +40,8 @@ interface Seen {
     method: string;
     headers: Record<string, string>;
     body?: Message;
+    redirect?: RequestRedirect;
+    signal?: AbortSignal | null;
 }
 
 /** A minimal Streamable HTTP server: sessions, JSON or SSE answers, and a switch to expire them. */
@@ -57,7 +59,7 @@ function fakeServer(options: { answerAs?: "json" | "sse"; status?: number } = {}
         );
         const body = init.body ? (JSON.parse(String(init.body)) as Message) : undefined;
         const method = init.method ?? "GET";
-        seen.push({ method, headers, body });
+        seen.push({ method, headers, body, redirect: init.redirect, signal: init.signal });
         if (options.status)
             return new Response(JSON.stringify({ title: "nope" }), { status: options.status });
         const session = headers["mcp-session-id"];
@@ -131,6 +133,17 @@ describe("mcpEndpointFor", () => {
         expect(mcpEndpointFor(server)).toBe(endpoint);
     });
 
+    test.each([
+        "http://127.0.0.1:5080",
+        "http://[::1]:5080/mcp",
+    ])("allows plain http to this machine: %s", (server) => {
+        expect(mcpEndpointFor(server)).toMatch(/^http:\/\/.*\/mcp$/);
+    });
+
+    test("refuses plain http to another host: the token would travel in clear", () => {
+        expect(() => mcpEndpointFor("http://spicy.lan")).toThrow("https");
+    });
+
     test.each(["ftp://spicy.lan", "not a url"])("refuses %s", (server) => {
         expect(() => mcpEndpointFor(server)).toThrow("--server");
     });
@@ -152,7 +165,31 @@ describe("readEventStream", () => {
     });
 });
 
+describe("readEventStream CRLF", () => {
+    test("a CRLF split across two chunks ends one line, not two", async () => {
+        const events: string[] = [];
+        await readEventStream(stream(["data: a\r", "\ndata: b\r", "\n\r", "\n"]), (data) =>
+            events.push(data),
+        );
+        expect(events).toEqual(["a\nb"]);
+    });
+});
+
 describe("RemoteProxy", () => {
+    test("never follows redirects (the token would go along), and bounds the DELETE on exit", async () => {
+        const { proxy, server } = setup(fakeServer({ answerAs: "json" }));
+        proxy.handleClientMessage(INIT);
+        proxy.handleClientMessage(INITIALIZED);
+        proxy.handleClientMessage({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+        await settle();
+        await proxy.close();
+
+        expect(server.seen.length).toBeGreaterThan(3);
+        for (const request of server.seen) expect(request.redirect).toBe("error");
+        const del = server.seen.find((s) => s.method === "DELETE");
+        expect(del?.signal).toBeInstanceOf(AbortSignal);
+    });
+
     test("opens the session with the token, then sends its id and protocol version", async () => {
         const { proxy, toClient, server } = setup();
         proxy.handleClientMessage(INIT);

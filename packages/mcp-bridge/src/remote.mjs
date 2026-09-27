@@ -19,6 +19,9 @@ export const REINIT_ID_PREFIX = "spicy3d-bridge-reinit-";
 export const SERVER_UNAVAILABLE = -32000;
 
 const MIN_STREAM_RETRY_MS = 1000;
+/** How long ending the session on exit may take. */
+const DELETE_TIMEOUT_MS = 3000;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const MAX_STREAM_RETRY_MS = 30_000;
 
 /** @param {Message} m */
@@ -38,6 +41,10 @@ export function mcpEndpointFor(server) {
     }
     if (url.protocol !== "https:" && url.protocol !== "http:") {
         throw new Error(`--server must be an http(s) address, got ${server}`);
+    }
+    // The token travels in every request: plain http only to this machine.
+    if (url.protocol === "http:" && !LOOPBACK_HOSTS.has(url.hostname)) {
+        throw new Error(`--server must be https (plain http only for localhost), got ${server}`);
     }
     url.search = "";
     url.hash = "";
@@ -80,6 +87,8 @@ export async function readEventStream(body, onEvent) {
         buffer += decoder.decode(value, { stream: true });
         let newline = buffer.search(/\r\n|\r|\n/);
         while (newline >= 0) {
+            // A CR ending the chunk may be the first half of a CRLF: wait for the next chunk.
+            if (buffer[newline] === "\r" && newline === buffer.length - 1) break;
             const width = buffer.startsWith("\r\n", newline) ? 2 : 1;
             line(buffer.slice(0, newline));
             buffer = buffer.slice(newline + width);
@@ -141,7 +150,12 @@ export class RemoteProxy {
         this.stream?.abort();
         if (!this.sessionId) return;
         try {
-            await this.fetch(this.options.endpoint, { method: "DELETE", headers: this.headers() });
+            await this.fetch(this.options.endpoint, {
+                method: "DELETE",
+                headers: this.headers(),
+                redirect: "error",
+                signal: AbortSignal.timeout(DELETE_TIMEOUT_MS),
+            });
         } catch {
             // The server drops idle sessions anyway.
         }
@@ -233,6 +247,8 @@ export class RemoteProxy {
             response = await this.fetch(this.options.endpoint, {
                 method: "POST",
                 headers: this.headers({ "Content-Type": "application/json" }),
+                // A redirect would hand the token to wherever it points.
+                redirect: "error",
                 body: JSON.stringify(message),
             });
         } catch (err) {
@@ -335,6 +351,7 @@ export class RemoteProxy {
                 const response = await this.fetch(this.options.endpoint, {
                     method: "GET",
                     headers: this.headers({ Accept: "text/event-stream" }),
+                    redirect: "error",
                     signal: controller.signal,
                 });
                 if (response.status === 405) {

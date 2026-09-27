@@ -70,7 +70,7 @@ When Spicy3D runs with a server that has remote MCP on (`/api/config.features.mc
 }
 ```
 
-The MCP panel (*Through the server*) and the last step of *Create access token* show this block filled in. The token comes from `SPICY3D_TOKEN` (`--token` works too but shows in the process list); `--server` takes the server's address or its `/mcp` endpoint and cannot be combined with the local flags. No port is opened. A session the server dropped (restart, idle expiry) is re-created silently; a revoked or expired token fails calls with a message saying so. With an internal CA, set `NODE_EXTRA_CA_CERTS=<ca.pem>`.
+The MCP panel (*Through the server*) and the last step of *Create access token* show this block filled in. The token comes from `SPICY3D_TOKEN` only (`--token` is refused in this mode: the process list would show it); `--server` takes the server's `https://` address or its `/mcp` endpoint (plain `http://` only for `localhost`), follows no redirects, and cannot be combined with the local flags. No port is opened; on exit (stdin closed, SIGTERM, SIGINT) the session is ended on the server, waiting at most 3 s. A session the server dropped (restart, idle expiry) is re-created silently; a revoked or expired token fails calls with a message saying so. With an internal CA, set `NODE_EXTRA_CA_CERTS=<ca.pem>`.
 
 ## Browsers
 

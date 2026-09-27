@@ -164,7 +164,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     mode.handleClientMessage(message);
 });
 
-// The MCP client owns our lifetime: when it closes stdin, we are done.
-process.stdin.on("end", () => {
+// The MCP client owns our lifetime: when it closes stdin or stops us, we are done — after ending
+// the server-side session (server mode; bounded by a timeout).
+let exiting = false;
+function shutdown() {
+    if (exiting) return;
+    exiting = true;
     void mode.close().finally(() => process.exit(0));
-});
+}
+process.stdin.on("end", shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

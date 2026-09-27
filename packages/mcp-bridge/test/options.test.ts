@@ -102,6 +102,8 @@ describe("parseOptions --server", () => {
         [["--server", "https://spicy.lan", "--port", "9000"], { SPICY3D_TOKEN: "t" }, "--port"],
         [["--server", "https://spicy.lan", "--no-token"], { SPICY3D_TOKEN: "t" }, "--no-token"],
         [["--server", "ftp://spicy.lan"], { SPICY3D_TOKEN: "t" }, "http(s)"],
+        [["--server", "http://spicy.lan"], { SPICY3D_TOKEN: "t" }, "https"],
+        [["--server", "https://spicy.lan", "--token", "spicy_pat_x"], {}, "SPICY3D_TOKEN only"],
     ])("rejects %j", (argv, env, message) => {
         expect(() => parseOptions(argv, env as Record<string, string>)).toThrow(message);
     });
