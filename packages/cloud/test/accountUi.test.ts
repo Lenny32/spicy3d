@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { formatDateTime, PubSub, parseUtc, TitleBar } from "@spicy3d/core";
+import { formatDateTime, formatRelative, PubSub, parseUtc, TitleBar } from "@spicy3d/core";
 import type { Account } from "../src/account/account";
 import type { ConfigResponse } from "../src/api";
 import { CloudConnection } from "../src/cloud";
@@ -514,9 +514,13 @@ describe("account settings", () => {
         const current = dialog.querySelector('[data-session-id="s1"]')!;
         expect(current.textContent).toContain("account.session.deviceFirefoxLinux");
         expect(current.textContent).toContain("account.session.current");
-        const lastSeen = formatDateTime(parseUtc(SESSION.lastSeenAt));
-        expect(lastSeen).not.toBe("");
-        expect(current.textContent).toContain(`account.session.lastSeen${lastSeen}`);
+        const lastSeenAt = parseUtc(SESSION.lastSeenAt);
+        const time = current.querySelector<HTMLElement>("[data-relative-time]");
+        expect(time).not.toBeNull();
+        expect(time!.textContent).toBe(formatRelative(lastSeenAt));
+        expect(time!.title).toBe(formatDateTime(lastSeenAt));
+        expect(time!.title).not.toBe("");
+        expect(current.textContent).toContain(`account.session.lastSeen${formatRelative(lastSeenAt)}`);
         expect(dialog.querySelector('[data-session-id="s2"]')!.textContent).toContain(
             "account.session.unknownDevice",
         );

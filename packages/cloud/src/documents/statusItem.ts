@@ -3,6 +3,7 @@
 
 import {
     AutosaveStatus,
+    formatDateTime,
     formatTime,
     I18n,
     type I18nKeys,
@@ -171,7 +172,11 @@ export class DocumentStatusItem extends HTMLElement {
                           title: I18n.translate("cloud.status.conflictHint"),
                           onclick: () => void resolve(open).finally(this.render),
                       })
-                    : span({ className: style.state, textContent: text });
+                    : span({
+                          className: style.state,
+                          textContent: text,
+                          title: autosavedAt !== undefined ? formatDateTime(autosavedAt) : "",
+                      });
             label.dataset["status"] = status;
             label.setAttribute("role", "status");
             children.push(label);

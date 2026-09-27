@@ -1,7 +1,16 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { download, formatDateTime, I18n, type I18nKeys, PubSub, parseUtc } from "@spicy3d/core";
+import {
+    download,
+    formatDateTime,
+    I18n,
+    type I18nKeys,
+    PubSub,
+    parseUtc,
+    relativeTimeParts,
+    watchRelativeTimes,
+} from "@spicy3d/core";
 import { button, div, h3, li, option, select, span, ul } from "@spicy3d/element";
 import type { AccessToken, AccountSession } from "../account/account";
 import { DEVICE_NAME_MAX_LENGTH, defaultDeviceName } from "../account/deviceSettings";
@@ -139,7 +148,11 @@ export function showAccountSettings(ctx: AccountUiContext): Modal {
             modal.close();
     };
     ctx.account.onPropertyChanged(onStatus);
-    modal.onClosed(() => ctx.account.removePropertyChanged(onStatus));
+    const stopRelativeTimes = watchRelativeTimes(modal.body);
+    modal.onClosed(() => {
+        ctx.account.removePropertyChanged(onStatus);
+        stopRelativeTimes();
+    });
     return modal.open();
 }
 
@@ -332,13 +345,13 @@ function sessionsSection(ctx: AccountUiContext, settings: () => Modal) {
             div(
                 {},
                 title,
-                span({
-                    className: style.muted,
-                    textContent: I18n.translate(
-                        "account.session.lastSeen{0}",
-                        formatServerTime(session.lastSeenAt),
+                span(
+                    { className: style.muted },
+                    ...relativeTimeParts(
+                        (time) => I18n.translate("account.session.lastSeen{0}", time),
+                        parseUtc(session.lastSeenAt),
                     ),
-                }),
+                ),
                 span({
                     className: style.muted,
                     textContent: I18n.translate(
@@ -400,18 +413,21 @@ function tokensSection(ctx: AccountUiContext) {
                     className: style.muted,
                     textContent: `${token.prefix}… · ${token.scopes.join(", ")}`,
                 }),
-                span({
-                    className: style.muted,
-                    textContent: [
-                        I18n.translate("account.token.createdAt{0}", formatServerTime(token.createdAt)),
-                        token.lastUsedAt
-                            ? I18n.translate("account.token.lastUsed{0}", formatServerTime(token.lastUsedAt))
-                            : I18n.translate("account.token.neverUsed"),
-                        token.expiresAt
-                            ? I18n.translate("account.token.expires{0}", formatServerTime(token.expiresAt))
-                            : I18n.translate("account.token.noExpiry"),
-                    ].join(" · "),
-                }),
+                span(
+                    { className: style.muted },
+                    I18n.translate("account.token.createdAt{0}", formatServerTime(token.createdAt)),
+                    " · ",
+                    ...(token.lastUsedAt
+                        ? relativeTimeParts(
+                              (time) => I18n.translate("account.token.lastUsed{0}", time),
+                              parseUtc(token.lastUsedAt),
+                          )
+                        : [I18n.translate("account.token.neverUsed")]),
+                    " · ",
+                    token.expiresAt
+                        ? I18n.translate("account.token.expires{0}", formatServerTime(token.expiresAt))
+                        : I18n.translate("account.token.noExpiry"),
+                ),
             ),
             smallButton("account.token.revoke", async () => {
                 const confirmed = await confirmModal(
