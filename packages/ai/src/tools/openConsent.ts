@@ -33,6 +33,8 @@ export const OPEN_WAIT_MS = 45_000;
 
 interface PendingQuestion {
     key: string;
+    /** The MCP session that asked: its question ends with it. */
+    caller?: string;
     abort: AbortController;
     answer: Promise<Exclude<OpenDecision, "waiting">>;
     decided?: { decision: Exclude<OpenDecision, "waiting">; at: number };
@@ -46,7 +48,8 @@ export interface OpenConsentOptions {
 /**
  * One question at a time, per page. The call that asked waits up to `waitMs`; unanswered, it
  * returns `waiting` and the question stays up, so the agent's retry (same document) waits for the
- * same answer instead of asking again. Asking about another document closes the first question.
+ * same answer instead of asking again. Asking about another document (or another session asking)
+ * closes the first question; so does the asking session ending ({@link forgetCaller}) or signing out.
  */
 export class OpenConsent {
     private pending?: PendingQuestion;
@@ -73,9 +76,10 @@ export class OpenConsent {
         saveFirst: () => Promise<boolean>,
         waitMs: number,
         signal?: AbortSignal,
+        caller?: string,
     ): Promise<OpenDecision> {
         let pending = this.pending;
-        if (pending && pending.key !== key) {
+        if (pending && (pending.key !== key || pending.caller !== caller)) {
             this.cancel();
             pending = undefined;
         }
@@ -83,10 +87,15 @@ export class OpenConsent {
             this.pending = undefined;
             pending = undefined;
         }
-        pending ??= this.start(key, question, saveFirst);
+        pending ??= this.start(key, caller, question, saveFirst);
         const decision = await waitFor(pending.answer, waitMs, signal);
         if (decision !== "waiting" && this.pending === pending) this.pending = undefined;
         return decision;
+    }
+
+    /** The session `caller` ended (disconnected, or the agent was disconnected): its question closes. */
+    forgetCaller(caller: string): void {
+        if (this.pending?.caller === caller) this.cancel();
     }
 
     /** Closes the question showing, as a cancel that nobody consumes. */
@@ -96,9 +105,14 @@ export class OpenConsent {
         pending?.abort.abort();
     }
 
-    private start(key: string, question: OpenQuestion, saveFirst: () => Promise<boolean>): PendingQuestion {
+    private start(
+        key: string,
+        caller: string | undefined,
+        question: OpenQuestion,
+        saveFirst: () => Promise<boolean>,
+    ): PendingQuestion {
         const abort = new AbortController();
-        const pending: PendingQuestion = { key, abort, answer: undefined as never };
+        const pending: PendingQuestion = { key, caller, abort, answer: undefined as never };
         pending.answer = this.ask(question, abort.signal)
             .catch((err) => {
                 Logger.warn(`[mcp] open prompt failed: ${err}`);

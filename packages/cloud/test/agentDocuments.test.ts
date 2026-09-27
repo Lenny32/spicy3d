@@ -90,7 +90,7 @@ describe("the agent's cloud link", () => {
 
         const outcome = await agentCloudLink()!.save(doc as unknown as IDocument, "Agent: wider");
 
-        expect(outcome).toEqual({ status: "saved", version: head().id });
+        expect(outcome).toEqual({ status: "saved", version: head().id, kind: "mcp", label: "Agent: wider" });
         expect(head()).toMatchObject({ kind: "mcp", label: "Agent: wider", parentIds: [parent] });
         expect(valuesOf(docs.content(head()))).toEqual({ w: "12" });
         expect(doc.isDirty).toBe(false);
@@ -105,11 +105,44 @@ describe("the agent's cloud link", () => {
 
         const outcome = await agentCloudLink()!.save(doc as unknown as IDocument, "offline edit");
 
-        expect(outcome).toEqual({ status: "pending", reason: "offline" });
+        expect(outcome).toEqual({ status: "pending", reason: "offline", kind: "mcp", label: "offline edit" });
         expect(head().id).toBe(before);
         a.network.down = false;
         await until(() => a.repository.stateOf("doc-1") === "saved", "pushed after reconnecting");
         expect(head()).toMatchObject({ kind: "mcp", label: "offline edit" });
+    });
+
+    test("offline, the user's later autosave joins the agent's save: pushed as the user's, unlabelled", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10" });
+        a.network.down = true;
+        doc.edit("w", "13");
+        const agents = await agentCloudLink()!.save(doc as unknown as IDocument, "Agent: 13");
+        expect(agents).toMatchObject({ status: "pending", kind: "mcp", label: "Agent: 13" });
+
+        doc.edit("w", "14");
+        await doc.save("auto");
+        a.network.down = false;
+        await until(() => a.repository.stateOf("doc-1") === "saved", "pushed after reconnecting");
+
+        expect(head().kind).toBe("auto");
+        expect(head().label).toBeNull();
+        expect(valuesOf(docs.content(head()))).toEqual({ w: "14" });
+    });
+
+    test("an agent's save reports what the server stored: the user's manual save joined it", async () => {
+        const a = await device();
+        const doc = await a.create("doc-1", { w: "10" });
+        a.network.down = true;
+        doc.edit("w", "11");
+        await doc.save("manual");
+        doc.edit("w", "12");
+        a.network.down = false;
+
+        const outcome = await agentCloudLink()!.save(doc as unknown as IDocument, "Agent: 12");
+
+        expect(outcome).toEqual({ status: "saved", version: head().id, kind: "manual" });
+        expect(head()).toMatchObject({ kind: "manual", label: null });
     });
 
     test("a change elsewhere that can't be merged is a conflict left to the user", async () => {

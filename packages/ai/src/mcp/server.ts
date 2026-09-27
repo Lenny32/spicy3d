@@ -18,11 +18,23 @@ import { buildSkillTool, MCP_SKILLS } from "../skills";
 import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
 import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
-import { buildCloudTools, documentStorageInfo } from "../tools/cloudTools";
+import {
+    buildCloudTools,
+    documentStorageInfo,
+    forgetCloudCaller,
+    LIST_CLOUD_DOCUMENTS_TOOL,
+} from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { documentSnapshot } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
+
+export type McpConnection = "bridge" | "relay";
+
+/** The relay names the MCP session of every request in `_meta` (pageTransport.ts `RELAY`). */
+const AGENT_META_KEY = "spicy3d/agent";
+
+let connections = 0;
 
 const DOCUMENT_URI = "spicy3d://document";
 const GUIDE_URI = "spicy3d://guide/usage";
@@ -36,7 +48,13 @@ export interface McpServerOptions {
      * `buildCloudTools()`. They follow the other tools, which the in-app assistant shares.
      */
     cloudTools?: Tool[];
-    /** Defaults to `buildMcpInstructions()`. */
+    /**
+     * What the client connects through: the local bridge (default) or the server's relay, which
+     * answers spicy3d_list_documents / spicy3d_document_history itself — the tab's own listing is
+     * hidden there, and the instructions name the tools the client really has.
+     */
+    connection?: McpConnection;
+    /** Defaults to `buildMcpInstructions(connection)`. */
     instructions?: string;
     /** Reported once per finished call, for the status badge. */
     onToolCall?: (name: string, isError: boolean) => void;
@@ -145,12 +163,15 @@ function readResource(uri: string, instructions: string): { mimeType: string; te
  * `session.ts` connects it to the local bridge over a WebSocket, tests use an in-memory pair.
  */
 export function createMcpServer(options: McpServerOptions = {}): Server {
-    const instructions = options.instructions ?? buildMcpInstructions();
+    const connection = options.connection ?? "bridge";
+    const instructions = options.instructions ?? buildMcpInstructions(connection);
     // The in-app registry's load_skill knows the in-app skills; MCP clients also get theirs.
     const registry =
         options.tools ?? buildTools().map((t) => (t.name === "load_skill" ? buildSkillTool(MCP_SKILLS) : t));
     const baseTools = [...registry, usageGuideTool(instructions)];
-    const cloudTools = options.cloudTools ?? buildCloudTools();
+    const cloudTools = (options.cloudTools ?? buildCloudTools()).filter(
+        (t) => connection === "bridge" || t.name !== LIST_CLOUD_DOCUMENTS_TOOL,
+    );
     const queue = options.queue ?? PAGE_QUEUE;
     const server = new Server(
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
@@ -171,14 +192,32 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         return agentCloudLink() ? [...tools, ...cloudTools] : tools;
     };
 
+    // The bridge carries one MCP session per connection; the relay names each request's session.
+    const connectionCaller = `connection-${++connections}`;
+    const callers = new Set<string>();
+    const callerOf = (meta: Record<string, unknown> | undefined): string => {
+        const agent = meta?.[AGENT_META_KEY] as { id?: unknown } | undefined;
+        return typeof agent?.id === "string" ? agent.id : connectionCaller;
+    };
+
     // Signing in or out adds or removes the cloud tools: the client is told to list them again.
-    const stopWatching = onAgentCloudChanged(() => {
-        if (!server.transport) {
-            stopWatching(); // this connection is over (a reconnect made a new server)
-            return;
-        }
-        void server.sendToolListChanged().catch(() => undefined);
-    });
+    // Watched only while connected: a server whose connect failed (a bridge not running yet,
+    // retried every few seconds) must not leave a listener behind.
+    let stopWatching: (() => void) | undefined;
+    const connect = server.connect.bind(server);
+    server.connect = async (transport) => {
+        await connect(transport);
+        stopWatching ??= onAgentCloudChanged(() => void server.sendToolListChanged().catch(() => undefined));
+        const closed = transport.onclose;
+        transport.onclose = () => {
+            stopWatching?.();
+            stopWatching = undefined;
+            // The sessions of this connection are gone: their open questions close.
+            for (const caller of callers) forgetCloudCaller(caller);
+            callers.clear();
+            closed?.();
+        };
+    };
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: currentTools().map((t) => ({
@@ -192,13 +231,17 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         const { name, arguments: args } = request.params;
         const tool = currentTools().find((t) => t.name === name);
         if (!tool) throw new McpError(ErrorCode.InvalidParams, `unknown tool "${name}"`);
+        const caller = callerOf(request.params._meta as Record<string, unknown> | undefined);
+        callers.add(caller);
         return queue.run(async () => {
             if (extra.signal.aborted) throw new McpError(ErrorCode.RequestTimeout, "cancelled");
             let result: CallToolResult;
             try {
                 const budget = options.imageByteBudget?.();
                 result = toCallToolResult(
-                    await withImageByteBudget(budget, () => tool.handler(args ?? {}, extra.signal)),
+                    await withImageByteBudget(budget, () =>
+                        tool.handler(args ?? {}, extra.signal, { caller }),
+                    ),
                 );
             } catch (err) {
                 result = toCallToolResult(JSON.stringify({ error: (err as Error).message }));

@@ -8,21 +8,35 @@
 
 import {
     type DocumentRepositoryError,
+    formatUtcIso,
     type IApplication,
     type IDocument,
     type IDocumentRepository,
     Logger,
     PubSub,
+    type SaveConflict,
 } from "@spicy3d/core";
-import type { Tool } from "../llm/types";
-import { type AgentCloudInfo, agentCloudLink } from "./cloudLink";
+import type { Tool, ToolCallContext } from "../llm/types";
+import { type AgentCloudInfo, agentCloudLink, onAgentCloudChanged } from "./cloudLink";
 import { getDocument } from "./documentContext";
 import { OPEN_WAIT_MS, OpenConsent } from "./openConsent";
 
 export const OPEN_DOCUMENT_TOOL = "spicy3d_open_document";
 export const NEW_DOCUMENT_TOOL = "spicy3d_new_document";
 export const SAVE_TOOL = "spicy3d_save";
-export const CLOUD_TOOL_NAMES = [OPEN_DOCUMENT_TOOL, NEW_DOCUMENT_TOOL, SAVE_TOOL] as const;
+/**
+ * The listing through the local bridge only: over the relay, the server answers
+ * spicy3d_list_documents itself (without a tab), so the tab's own listing is hidden there.
+ */
+export const LIST_CLOUD_DOCUMENTS_TOOL = "spicy3d_list_cloud_documents";
+export const CLOUD_TOOL_NAMES = [
+    OPEN_DOCUMENT_TOOL,
+    LIST_CLOUD_DOCUMENTS_TOOL,
+    NEW_DOCUMENT_TOOL,
+    SAVE_TOOL,
+] as const;
+const LIST_LIMIT_DEFAULT = 50;
+const LIST_LIMIT_MAX = 100;
 
 /** The server keeps labels up to this length (SpicySrv `label_too_long`). */
 export const LABEL_MAX_LENGTH = 200;
@@ -110,28 +124,48 @@ function parseLabel(value: unknown): { label?: string; error?: string } {
     return { label };
 }
 
-/** Hands a save conflict to the cloud's conflict UI, like the app's own Save command does. */
-function showConflict(app: IApplication, document: IDocument, conflict: Parameters<ConflictHandler>[1]) {
+/** Documents whose conflict UI an agent's save opened and that is still showing. */
+const conflictsShown = new Set<string>();
+
+function isInConflict(document: IDocument): boolean {
+    return agentCloudLink()?.describe(document)?.syncState === "conflict";
+}
+
+/**
+ * Hands a save conflict to the cloud's conflict UI, like the app's own Save command does — once: not
+ * when the document already waited in conflict before the save (the user has been told, the title
+ * bar shows it), nor while the UI an earlier save opened is still showing. Returns whether it opened.
+ */
+function showConflict(
+    app: IApplication,
+    document: IDocument,
+    conflict: SaveConflict,
+    wasInConflict: boolean,
+) {
+    if (wasInConflict || conflictsShown.has(document.id)) return false;
     const handler = app.repositories.conflictHandler;
     if (!handler) {
         PubSub.default.pub("showToast", "error.repository.conflict");
-        return;
+        return true;
     }
+    conflictsShown.add(document.id);
     // Not awaited: the user resolves it whenever they want; the agent is told it waits.
-    void handler(document, conflict).catch((err) => Logger.warn(`[mcp] conflict UI failed: ${err}`));
+    void handler(document, conflict)
+        .catch((err) => Logger.warn(`[mcp] conflict UI failed: ${err}`))
+        .finally(() => conflictsShown.delete(document.id));
+    return true;
 }
-
-type ConflictHandler = NonNullable<IApplication["repositories"]["conflictHandler"]>;
 
 /** The "save first" of the open prompt: a manual save of the document the user was looking at. */
 async function saveCurrent(app: IApplication, document: IDocument): Promise<boolean> {
+    const wasInConflict = isInConflict(document);
     const saved = await document.save("manual");
     if (!saved.isOk) {
         Logger.warn(`[mcp] saving ${document.name} before opening failed: ${saved.error.kind}`);
         return false;
     }
     if (saved.value.status === "conflict") {
-        showConflict(app, document, saved.value);
+        showConflict(app, document, saved.value, wasInConflict);
         return false;
     }
     return true;
@@ -153,9 +187,22 @@ export interface CloudToolOptions {
 
 const PAGE_CONSENT = new OpenConsent();
 
+// Signing out ends every question an agent asked, and forgets the conflict UIs it opened.
+onAgentCloudChanged(() => {
+    if (agentCloudLink()) return;
+    PAGE_CONSENT.cancel();
+    conflictsShown.clear();
+});
+
+/** The MCP session `caller` ended: the open question it asked (if any) closes. */
+export function forgetCloudCaller(caller: string): void {
+    PAGE_CONSENT.forgetCaller(caller);
+}
+
 async function openDocument(
     args: Record<string, unknown>,
     signal: AbortSignal | undefined,
+    context: ToolCallContext | undefined,
     consent: OpenConsent,
     waitMs: number,
 ): Promise<string> {
@@ -183,13 +230,15 @@ async function openDocument(
         );
     }
 
-    if (active && hasSavableChanges(active)) {
+    // A version opens as a separate read-only preview: the active document stays as it is.
+    if (!version && active && hasSavableChanges(active)) {
         const decision = await consent.request(
-            `${id}@${version ?? "head"}`,
+            id,
             { current: active.name, target: stored.name ?? id },
             () => saveCurrent(app, active),
             waitMs,
             signal,
+            context?.caller,
         );
         if (decision === "waiting") {
             return JSON.stringify({
@@ -254,6 +303,44 @@ async function newDocument(args: Record<string, unknown>): Promise<string> {
     });
 }
 
+async function listCloudDocuments(args: Record<string, unknown>): Promise<string> {
+    if (args["query"] !== undefined && typeof args["query"] !== "string")
+        return error("query must be a string");
+    const rawLimit = args["limit"];
+    if (rawLimit !== undefined && (typeof rawLimit !== "number" || !Number.isInteger(rawLimit))) {
+        return error("limit must be an integer");
+    }
+    const limit = Math.min(
+        Math.max((rawLimit as number | undefined) ?? LIST_LIMIT_DEFAULT, 1),
+        LIST_LIMIT_MAX,
+    );
+    const app = application();
+    const cloud = app?.repositories.cloud;
+    if (!app || !agentCloudLink() || !cloud) return error(NOT_SIGNED_IN);
+    const page = await cloud.list({ search: stringArg(args, "query"), limit });
+    if (!page.isOk) return error(describeRepositoryError(page.error));
+    const documents = page.value.items.map((meta) => ({
+        id: meta.id,
+        name: meta.name,
+        updatedAt: formatUtcIso(meta.updatedAt),
+        ...(meta.sizeBytes !== undefined && { sizeBytes: meta.sizeBytes }),
+        ...(meta.headVersion && { headVersionId: meta.headVersion }),
+        ...(meta.syncState && meta.syncState !== "synced" && { syncState: meta.syncState }),
+    }));
+    return JSON.stringify({ documents, ...(page.value.nextCursor && { more: true }) });
+}
+
+/** What the version became, when it isn't simply the agent's labelled one. */
+function savedAs(kind: string | undefined, asked: string | undefined, label: string | undefined) {
+    if (!kind) return {};
+    const result: Record<string, unknown> = { kind, ...(label && { label }) };
+    if (kind !== "mcp") {
+        result["note"] =
+            `The user's own save joined this one, so it is stored as a ${kind} version${asked ? " and your label was not kept" : ""}.`;
+    }
+    return result;
+}
+
 async function save(args: Record<string, unknown>): Promise<string> {
     const { label, error: labelError } = parseLabel(args["label"]);
     if (labelError) return error(labelError);
@@ -278,6 +365,7 @@ async function save(args: Record<string, unknown>): Promise<string> {
         });
     }
 
+    const wasInConflict = isInConflict(document);
     const outcome = await link.save(document, label);
     switch (outcome.status) {
         case "saved":
@@ -285,21 +373,26 @@ async function save(args: Record<string, unknown>): Promise<string> {
                 saved: true,
                 uploaded: true,
                 ...(outcome.version && { version: outcome.version }),
-                ...(label && { label }),
+                ...(outcome.kind ? savedAs(outcome.kind, label, outcome.label) : label && { label }),
                 document: describeDocument(document),
             });
         case "pending":
             return JSON.stringify({
                 saved: true,
                 uploaded: false,
+                ...savedAs(outcome.kind, label, outcome.label),
                 message:
-                    "Saved in this browser, but the tab is offline: the version is uploaded (as an agent save) once the connection is back.",
+                    "Saved in this browser, but the tab is offline: the version is uploaded once the connection is back.",
             });
-        case "conflict":
-            showConflict(app, document, outcome.conflict);
+        case "conflict": {
+            const shown = showConflict(app, document, outcome.conflict, wasInConflict);
+            const told = shown
+                ? "The user has been shown the conflict in the tab"
+                : "The user already has the conflict in front of them (the tab shows it)";
             return error(
-                "Conflict pending user resolution: this document was changed elsewhere meanwhile, and the changes could not be merged on their own. The user has been shown the conflict in the tab and decides how to resolve it; do not try to resolve it or work around it (no new document, no re-creating the edits). Your save is kept in this browser; call spicy3d_save again once the user says it is resolved.",
+                `Conflict pending user resolution: this document was changed elsewhere meanwhile, and the changes could not be merged on their own. ${told} and decides how to resolve it; do not try to resolve it or work around it (no new document, no re-creating the edits). Your save is kept in this browser; call spicy3d_save again once the user says it is resolved.`,
             );
+        }
         case "failed":
             return error(describeRepositoryError(outcome.error));
     }
@@ -313,7 +406,7 @@ export function buildCloudTools(options: CloudToolOptions = {}): Tool[] {
         {
             name: OPEN_DOCUMENT_TOOL,
             description:
-                "Open one of the user's cloud documents in their Spicy3D tab (id from spicy3d_list_documents), making it the document every other tool acts on; one already open is just brought to the front. With version (from spicy3d_document_history), opens that older version as a read-only preview instead. If the document the user has in front of them has unsaved changes, the user is asked first: the result can then be status waitingForUser (call again with the same arguments to keep waiting) or an error saying they declined.",
+                "Open one of the user's cloud documents in their Spicy3D tab (id from spicy3d_list_documents, or spicy3d_list_cloud_documents where that is listed), making it the document every other tool acts on; one already open is just brought to the front. With version (from spicy3d_document_history), opens that older version as a read-only preview instead. If the document the user has in front of them has unsaved changes, the user is asked first: the result can then be status waitingForUser (call again with the same arguments to keep waiting) or an error saying they declined.",
             parameters: {
                 type: "object",
                 properties: {
@@ -325,7 +418,20 @@ export function buildCloudTools(options: CloudToolOptions = {}): Tool[] {
                 },
                 required: ["id"],
             },
-            handler: (args, signal) => openDocument(args, signal, consent, waitMs),
+            handler: (args, signal, context) => openDocument(args, signal, context, consent, waitMs),
+        },
+        {
+            name: LIST_CLOUD_DOCUMENTS_TOOL,
+            description:
+                "List the user's cloud documents (id, name, last update in UTC, size), most recently updated first, as the tab sees them — the ids spicy3d_open_document takes.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "Only documents whose name contains this" },
+                    limit: { type: "integer", minimum: 1, maximum: LIST_LIMIT_MAX },
+                },
+            },
+            handler: (args) => listCloudDocuments(args),
         },
         {
             name: NEW_DOCUMENT_TOOL,

@@ -6,6 +6,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { rs } from "@rstest/core";
 import {
+    type DocumentListQuery,
+    type DocumentPage,
     type DocumentRepositoryError,
     type IApplication,
     type IDocument,
@@ -24,10 +26,16 @@ import {
     type AgentCloudInfo,
     type AgentSaveOutcome,
     agentCloudLink,
+    agentCloudListenerCount,
     type IAgentCloudLink,
     setAgentCloudLink,
 } from "../src/tools/cloudLink";
-import { buildCloudTools, CLOUD_TOOL_NAMES, LABEL_MAX_LENGTH } from "../src/tools/cloudTools";
+import {
+    buildCloudTools,
+    CLOUD_TOOL_NAMES,
+    forgetCloudCaller,
+    LABEL_MAX_LENGTH,
+} from "../src/tools/cloudTools";
 import { type AskOpen, type OpenChoice, OpenConsent } from "../src/tools/openConsent";
 
 /** The SpicySrv tools the relay answers itself (McpHandlers.ServerTools): never a tab tool's name. */
@@ -45,6 +53,22 @@ function cloudRepository(stored: Record<string, StoredDocumentInfo> = {}) {
     return {
         kind: "cloud",
         stat: rs.fn(async (id: string) => Result.ok<StoredDocumentInfo | undefined>(stored[id])),
+        list: rs.fn(async (_query?: DocumentListQuery) =>
+            Result.ok<DocumentPage>({
+                items: [
+                    {
+                        id: "doc-2",
+                        name: "Bracket",
+                        updatedAt: Date.UTC(2026, 8, 27, 13, 35, 49),
+                        location: "cloud",
+                        headVersion: "v7",
+                        sizeBytes: 1234,
+                        syncState: "synced",
+                    },
+                ],
+                nextCursor: "c2",
+            }),
+        ),
         isReadOnly: () => false,
     } as unknown as IDocumentRepository & {
         stat: ReturnType<typeof rs.fn<(id: string) => Promise<Result<StoredDocumentInfo | undefined>>>>;
@@ -152,6 +176,7 @@ describe("cloud tool names", () => {
     test("are the ticket's, and never one the server answers itself", () => {
         expect([...CLOUD_TOOL_NAMES]).toEqual([
             "spicy3d_open_document",
+            "spicy3d_list_cloud_documents",
             "spicy3d_new_document",
             "spicy3d_save",
         ]);
@@ -474,10 +499,15 @@ describe("the MCP server with the cloud tools", () => {
         expect(resources.map((r) => r.uri)).toContain("spicy3d://skill/cloud-documents");
         expect(SKILLS.map((s) => s.name)).not.toContain("cloud-documents");
         expect(MCP_SKILLS.map((s) => s.name)).toContain("cloud-documents");
-        const instructions = buildMcpInstructions();
-        expect(instructions).toContain("spicy3d_list_documents → spicy3d_open_document { id }");
-        expect(instructions).toContain("spicy3d_save { label }");
-        expect(instructions).toContain("cloud-documents");
+        const bridge = buildMcpInstructions("bridge");
+        expect(bridge).toContain("spicy3d_list_cloud_documents → spicy3d_open_document { id }");
+        expect(bridge).not.toContain("spicy3d_document_history");
+        expect(bridge).toContain("spicy3d_save { label }");
+        expect(bridge).toContain("cloud-documents");
+        const relay = buildMcpInstructions("relay");
+        expect(relay).toContain("spicy3d_list_documents → spicy3d_open_document { id }");
+        expect(relay).toContain("Let agents list documents and history");
+        expect(relay).not.toContain("spicy3d_list_cloud_documents");
     });
 
     test("the default registry's load_skill offers the cloud skill to MCP clients", async () => {
@@ -523,5 +553,175 @@ describe("OpenConsent", () => {
         await prompt.answer("cancel", 1);
         expect(await again).toBe("declined");
         expect(prompt.asked).toHaveLength(2);
+    });
+});
+
+describe("review fixes", () => {
+    function tool(name: string, handler: Tool["handler"]): Tool {
+        return { name, description: name, parameters: { type: "object", properties: {} }, handler };
+    }
+
+    async function connect(options: Parameters<typeof createMcpServer>[0] = {}) {
+        const server = createMcpServer({
+            tools: [],
+            instructions: "x",
+            queue: new SerialQueue(),
+            ...options,
+        });
+        const client = new Client({ name: "test", version: "1" });
+        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+        await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+        return { server, client };
+    }
+
+    const agentPrompt = () => document.querySelector("dialog[data-prompt='agentOpen']");
+
+    test("spicy3d_list_cloud_documents lists through the tab, in UTC; only the local bridge offers it", async () => {
+        const { run, cloud } = setup();
+
+        const result = await run("spicy3d_list_cloud_documents", { query: " Brack ", limit: 500 });
+
+        expect((cloud as unknown as { list: ReturnType<typeof rs.fn> }).list).toHaveBeenCalledWith({
+            search: "Brack",
+            limit: 100,
+        });
+        expect(result).toEqual({
+            documents: [
+                {
+                    id: "doc-2",
+                    name: "Bracket",
+                    updatedAt: "2026-09-27T13:35:49Z",
+                    sizeBytes: 1234,
+                    headVersionId: "v7",
+                },
+            ],
+            more: true,
+        });
+
+        const bridge = await connect({ connection: "bridge" });
+        const relay = await connect({ connection: "relay" });
+        const names = async (c: Client) => (await c.listTools()).tools.map((t) => t.name);
+        expect(await names(bridge.client)).toContain("spicy3d_list_cloud_documents");
+        expect(await names(relay.client)).not.toContain("spicy3d_list_cloud_documents");
+        expect(await names(relay.client)).toContain("spicy3d_open_document");
+    });
+
+    test("a save conflict opens the conflict UI once per document, never again while it waits", async () => {
+        const { run, link, app, cloud } = setup();
+        const document = doc(app, "doc-2", cloud, true);
+        show(app, document);
+        link.saveOutcome = { status: "conflict", conflict: { status: "conflict", headVersion: "v9" } };
+        let close!: () => void;
+        const handler = rs.fn(
+            (_document: IDocument, _conflict: SaveConflict) =>
+                new Promise<void>((resolve) => {
+                    close = resolve;
+                }),
+        );
+        app.repositories.conflictHandler = handler;
+
+        await run("spicy3d_save");
+        const second = await run("spicy3d_save");
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(second.error).toContain("already has the conflict in front of them");
+
+        // Closed without resolving; the document then waits in conflict: the next save opens none.
+        close();
+        await new Promise((r) => setTimeout(r, 0));
+        link.info = { syncState: "conflict", readOnly: false };
+        await run("spicy3d_save");
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        // Resolved, a new conflict later: shown again.
+        link.info = { syncState: "clean", readOnly: false };
+        await run("spicy3d_save");
+        expect(handler).toHaveBeenCalledTimes(2);
+    });
+
+    test("the result says what the version became when the user's own save joined it", async () => {
+        const { run, link, app, cloud } = setup();
+        show(app, doc(app, "doc-2", cloud, true));
+        link.saveOutcome = { status: "saved", version: "v3", kind: "manual" };
+
+        const result = await run("spicy3d_save", { label: "Agent: fillet" });
+
+        expect(result).toMatchObject({ saved: true, version: "v3", kind: "manual" });
+        expect(result.label).toBeUndefined();
+        expect(result.note).toContain("stored as a manual version and your label was not kept");
+    });
+
+    test("opening a version (a separate preview) does not ask about the unsaved changes", async () => {
+        const { run, link, app, prompt } = setup();
+        show(app, doc(app, "mine", app.repositories.local, true));
+
+        const result = await run("spicy3d_open_document", { id: "doc-2", version: "v1" });
+
+        expect(result.opened).toBe(true);
+        expect(prompt.asked).toEqual([]);
+        expect(link.opened).toEqual(["doc-2@v1"]);
+    });
+
+    test("no server leaks its sign-in listener: not before connecting, and not after the connection ends", async () => {
+        const before = agentCloudListenerCount();
+        const failing = createMcpServer({ tools: [], instructions: "x" });
+        await expect(
+            failing.connect({
+                start: async () => {
+                    throw new Error("bridge not running");
+                },
+                send: async () => {},
+                close: async () => {},
+            }),
+        ).rejects.toThrow("bridge not running");
+        expect(agentCloudListenerCount()).toBe(before);
+
+        const { client } = await connect();
+        expect(agentCloudListenerCount()).toBe(before + 1);
+        await client.close();
+        await rs.waitFor(() => expect(agentCloudListenerCount()).toBe(before));
+    });
+
+    test("the open question closes when the asking connection ends", async () => {
+        const { app } = setup();
+        show(app, doc(app, "mine", app.repositories.local, true));
+        const { client } = await connect({ cloudTools: buildCloudTools() });
+
+        const pending = client
+            .callTool({ name: "spicy3d_open_document", arguments: { id: "doc-2" } })
+            .catch((err: Error) => err);
+        await rs.waitFor(() => expect(agentPrompt()).not.toBeNull());
+        await client.close();
+
+        await rs.waitFor(() => expect(agentPrompt()).toBeNull());
+        expect(await pending).toBeInstanceOf(Error);
+    });
+
+    test("the relay's session that asked ends, or the user signs out: the question closes", async () => {
+        const { app, cloud } = setup();
+        show(app, doc(app, "mine", app.repositories.local, true));
+        const { client } = await connect({
+            cloudTools: buildCloudTools({ waitMs: 20 }),
+            connection: "relay",
+        });
+        const ask = (agent: string) =>
+            client.callTool({
+                name: "spicy3d_open_document",
+                arguments: { id: "doc-2" },
+                _meta: { "spicy3d/agent": { id: agent } },
+            });
+
+        const waiting = await ask("a1");
+        expect(JSON.parse((waiting.content as { text: string }[])[0].text).status).toBe("waitingForUser");
+        expect(agentPrompt()).not.toBeNull();
+        forgetCloudCaller("someone-else");
+        expect(agentPrompt()).not.toBeNull();
+        forgetCloudCaller("a1");
+        await rs.waitFor(() => expect(agentPrompt()).toBeNull());
+
+        await ask("a2");
+        expect(agentPrompt()).not.toBeNull();
+        setAgentCloudLink(undefined);
+        await rs.waitFor(() => expect(agentPrompt()).toBeNull());
+        setAgentCloudLink(new FakeLink(app, cloud));
     });
 });

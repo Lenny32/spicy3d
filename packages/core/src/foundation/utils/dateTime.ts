@@ -27,6 +27,15 @@ const ISO_WITH_ZONE =
  * `2026-02-30` as 2 March), which is never what the server meant. `NaN` rather than a `Result` so a
  * bad value flows through `formatDateTime` & co. as an empty string; test with `Number.isFinite`.
  */
+/**
+ * Epoch milliseconds as the UTC ISO 8601 string the server would send (`2026-09-27T13:35:49Z`), for
+ * machine readers such as an MCP client — never for display. `""` when not finite.
+ */
+export function formatUtcIso(epochMs: number): string {
+    if (!Number.isFinite(epochMs)) return "";
+    return new Date(epochMs).toISOString().replace(/\.000Z$/, "Z");
+}
+
 export function parseUtc(iso: string): number {
     if (typeof iso !== "string") return Number.NaN;
     const match = ISO_WITH_ZONE.exec(iso.trim());

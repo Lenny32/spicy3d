@@ -20,10 +20,13 @@ export interface AgentCloudInfo {
 
 /** How an agent's save ended once the sync had its go at it. */
 export type AgentSaveOutcome =
-    /** On the server; `version` is the new head. */
-    | { status: "saved"; version?: string }
-    /** Kept on this device; uploaded when the connection is back. */
-    | { status: "pending"; reason: "offline" }
+    /**
+     * On the server; `version` is the new head, `kind` / `label` what it was stored as (not `mcp`
+     * when the user's own save joined it; unknown when omitted).
+     */
+    | { status: "saved"; version?: string; kind?: string; label?: string }
+    /** Kept on this device; uploaded when the connection is back, as `kind` / `label`. */
+    | { status: "pending"; reason: "offline"; kind?: string; label?: string }
     /** Someone else saved meanwhile and the changes could not be merged on their own. */
     | { status: "conflict"; conflict: SaveConflict }
     | { status: "failed"; error: DocumentRepositoryError };
@@ -54,6 +57,11 @@ export function setAgentCloudLink(link: IAgentCloudLink | undefined): void {
 
 export function agentCloudLink(): IAgentCloudLink | undefined {
     return current;
+}
+
+/** How many listeners are registered (tests: servers must not leak theirs). */
+export function agentCloudListenerCount(): number {
+    return listeners.size;
 }
 
 /** Called whenever the link comes or goes (the MCP server announces a changed tool list). */

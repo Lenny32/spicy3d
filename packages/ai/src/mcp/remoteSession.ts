@@ -3,6 +3,7 @@
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Logger } from "@spicy3d/core";
+import { forgetCloudCaller } from "../tools/cloudTools";
 import { imageBudgetFor } from "../tools/imageEncoding";
 import {
     CLOSE_POLICY_VIOLATION,
@@ -66,7 +67,7 @@ export class RemoteMcpSession {
             onStatus: (status) => state.update({ status }),
             onToolCall: (name, isError) => state.recordCall(name, isError),
             createServer: options.createServer,
-            serverOptions: { imageByteBudget: () => this.imageBudget },
+            serverOptions: { connection: "relay", imageByteBudget: () => this.imageBudget },
             createTransport: (url) =>
                 new RelayTransport(new PageSocketTransport(url, options.createSocket), {
                     gate: this.gate,
@@ -106,6 +107,7 @@ export class RemoteMcpSession {
     /** "Disconnect agent": the relay ends that session; asking again if it comes back is right. */
     disconnectAgent(agentId: string): void {
         this.gate.forget(agentId);
+        forgetCloudCaller(agentId);
         const agents = this.options.state.current.agents.filter((a) => a.id !== agentId);
         this.options.state.update({ agents });
         void this.relay
@@ -130,6 +132,8 @@ export class RemoteMcpSession {
             if (!ids.has(previous.id) && this.gate.decisionOf(previous.id) === undefined) {
                 this.gate.forget(previous.id);
             }
+            // An ended session's open-document question has nobody left to answer to.
+            if (!ids.has(previous.id)) forgetCloudCaller(previous.id);
         }
         this.options.state.update({
             agents: agents.map((agent) => {
