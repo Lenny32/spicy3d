@@ -14,9 +14,11 @@ import {
 import { I18n } from "@spicy3d/core";
 import { buildMcpInstructions } from "../llm/prompt";
 import type { Tool, ToolResult } from "../llm/types";
-import { SKILLS } from "../skills";
+import { buildSkillTool, MCP_SKILLS } from "../skills";
 import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
+import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
+import { buildCloudTools, documentStorageInfo } from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { documentSnapshot } from "../tools/readTools";
 
@@ -29,6 +31,11 @@ const SKILL_URI_PREFIX = "spicy3d://skill/";
 export interface McpServerOptions {
     /** Defaults to the in-app assistant's registry, so both front ends expose the same tools. */
     tools?: Tool[];
+    /**
+     * Listed only while the cloud module lends its link (signed in); defaults to
+     * `buildCloudTools()`. They follow the other tools, which the in-app assistant shares.
+     */
+    cloudTools?: Tool[];
     /** Defaults to `buildMcpInstructions()`. */
     instructions?: string;
     /** Reported once per finished call, for the status badge. */
@@ -116,11 +123,18 @@ function usageGuideTool(instructions: string): Tool {
     };
 }
 
+/** The document snapshot plus where the document is stored and how far it is saved (`document`). */
+export function documentResource(): string {
+    const snapshot = JSON.parse(documentSnapshot()) as Record<string, unknown>;
+    const storage = documentStorageInfo();
+    return JSON.stringify(storage ? { ...snapshot, document: storage } : snapshot);
+}
+
 function readResource(uri: string, instructions: string): { mimeType: string; text: string } {
-    if (uri === DOCUMENT_URI) return { mimeType: "application/json", text: documentSnapshot() };
+    if (uri === DOCUMENT_URI) return { mimeType: "application/json", text: documentResource() };
     if (uri === GUIDE_URI) return { mimeType: "text/markdown", text: instructions };
     const skill = uri.startsWith(SKILL_URI_PREFIX)
-        ? SKILLS.find((s) => s.name === uri.slice(SKILL_URI_PREFIX.length))
+        ? MCP_SKILLS.find((s) => s.name === uri.slice(SKILL_URI_PREFIX.length))
         : undefined;
     if (skill) return { mimeType: "text/markdown", text: skill.content };
     throw new McpError(ErrorCode.InvalidParams, `unknown resource: ${uri}`);
@@ -132,7 +146,11 @@ function readResource(uri: string, instructions: string): { mimeType: string; te
  */
 export function createMcpServer(options: McpServerOptions = {}): Server {
     const instructions = options.instructions ?? buildMcpInstructions();
-    const baseTools = [...(options.tools ?? buildTools()), usageGuideTool(instructions)];
+    // The in-app registry's load_skill knows the in-app skills; MCP clients also get theirs.
+    const registry =
+        options.tools ?? buildTools().map((t) => (t.name === "load_skill" ? buildSkillTool(MCP_SKILLS) : t));
+    const baseTools = [...registry, usageGuideTool(instructions)];
+    const cloudTools = options.cloudTools ?? buildCloudTools();
     const queue = options.queue ?? PAGE_QUEUE;
     const server = new Server(
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
@@ -146,11 +164,21 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     /** ask_user only exists when the client can show a question; otherwise the model must not wait on it. */
     const currentTools = (): Tool[] => {
         const canAsk = server.getClientCapabilities()?.elicitation !== undefined;
-        return baseTools.flatMap((t) => {
+        const tools = baseTools.flatMap((t) => {
             if (t.name !== "ask_user") return [t];
             return canAsk ? [elicitingAskUser(t, server)] : [];
         });
+        return agentCloudLink() ? [...tools, ...cloudTools] : tools;
     };
+
+    // Signing in or out adds or removes the cloud tools: the client is told to list them again.
+    const stopWatching = onAgentCloudChanged(() => {
+        if (!server.transport) {
+            stopWatching(); // this connection is over (a reconnect made a new server)
+            return;
+        }
+        void server.sendToolListChanged().catch(() => undefined);
+    });
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: currentTools().map((t) => ({
@@ -194,7 +222,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
                 description: "How to use this server's tools (same text as the server instructions).",
                 mimeType: "text/markdown",
             },
-            ...SKILLS.map((s) => ({
+            ...MCP_SKILLS.map((s) => ({
                 uri: `${SKILL_URI_PREFIX}${s.name}`,
                 name: s.name,
                 description: s.description,

@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { SKILLS } from "../skills";
+import { MCP_SKILLS, SKILLS, type Skill } from "../skills";
 import { buildTools } from "../tools";
 import { EDIT_METHODS } from "../tools/capabilityEngine";
 import { documentSnapshot } from "../tools/readTools";
@@ -26,7 +26,20 @@ export function buildSystemPrompt(): SystemPrompt {
  * get_document_state when it needs the scene).
  */
 export function buildMcpInstructions(): string {
-    return [mcpIntroSection(), policySection(), rulesSection()].join("\n\n");
+    return [mcpIntroSection(), policySection(MCP_SKILLS), cloudSection(), rulesSection()].join("\n\n");
+}
+
+/**
+ * The cloud workflow (CLOUD-15). Instructions are sent once per session while the cloud tools
+ * come and go with the sign-in, so the section says when it applies.
+ */
+function cloudSection(): string {
+    return `Cloud documents (when spicy3d_open_document / spicy3d_save are listed: the user is signed in to Spicy3D cloud in the tab):
+- spicy3d_list_documents and spicy3d_document_history are answered by the server (no tab needed); the other spicy3d_* document tools act in the tab.
+- Workflow: spicy3d_list_documents → spicy3d_open_document { id } → inspect (spicy3d://document, get_document_state) → edit → select_nodes + fit_content + capture_screenshot to verify → spicy3d_save { label } with a short label of what changed. Load the cloud-documents skill for the details.
+- spicy3d_open_document may answer status waitingForUser (the user is asked about their unsaved changes): call it again with the same arguments, nothing else meanwhile. A declined open means stop and tell the user.
+- A version opened with spicy3d_open_document { id, version } is a read-only preview; it can't be saved.
+- spicy3d_save may answer "conflict pending user resolution": the user resolves it in the tab. Never resolve, merge or work around a conflict yourself.`;
 }
 
 function mcpIntroSection(): string {
@@ -77,9 +90,9 @@ function firstSentence(description: string): string {
 }
 
 /** Hand-written usage policy: what the tool schemas cannot say — when and in which order. */
-function policySection(): string {
+function policySection(skills: Skill[] = SKILLS): string {
     return `Usage policy:
-- Reference material: pull a skill with load_skill when its topic comes up (${SKILLS.map((s) => s.name).join(", ")}) instead of answering from memory.
+- Reference material: pull a skill with load_skill when its topic comes up (${skills.map((s) => s.name).join(", ")}) instead of answering from memory.
 - When the user does something themselves — how do I, where is, which hotkey: load_skill app-guide for the teaching prose, call get_ribbon for the tabs, groups and buttons as they are right now (their language, their profile's hotkeys), then teach the click path. Don't answer from memory, and don't do the operation for them instead of teaching it unless they ask.
 - run_program ops run in order; reference only earlier ops by id (refs persist across calls and re-resolve against the live scene). Referencing a node never deletes it, EXCEPT for edit-style methods whose result replaces their inputs: ${[...EDIT_METHODS].join(", ")} — the response's "removed" lists the nodes consumed this way; they no longer exist, so never hide, delete or reference them afterward.
 - After creating or modifying the model, show the result: select_nodes the affected nodes, then fit_content, then capture_screenshot to verify before reporting done.

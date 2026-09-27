@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { appGuide } from "./appGuide";
+import { cloudDocuments } from "./cloudDocuments";
 import { errorRecovery } from "./errorRecovery";
 import { modelingApi } from "./modelingApi";
 import { modelingRecipes } from "./modelingRecipes";
@@ -24,3 +25,6 @@ export const SKILLS: Skill[] = [
     errorRecovery,
     parametricModeling,
 ];
+
+/** What MCP clients can load: the same, plus the cloud workflow (their cloud tools). */
+export const MCP_SKILLS: Skill[] = [...SKILLS, cloudDocuments];
