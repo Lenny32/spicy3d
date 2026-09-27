@@ -14,7 +14,6 @@ import {
     ShapeTypes,
     type XYZ,
 } from "@spicy3d/core";
-import type { SketchNode } from "../sketch/sketchNode";
 import { trackedBoolean } from "./boolean";
 import { findSketch } from "./extrude";
 import {
@@ -28,7 +27,6 @@ import { mapOperationIds } from "./operationIds";
 import { resolveProfiles } from "./profileBuilder";
 import { captureProfileRef } from "./profileRef";
 import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher";
-import { fuseProfiles } from "./sweepGeometry";
 
 /**
  * Emboss / deboss: raises (or recesses) the region of a body's faces that a sketch's profiles
@@ -37,13 +35,14 @@ import { fuseProfiles } from "./sweepGeometry";
  * flat-topped prism like an extrude.
  *
  * The kernel steps, all on the host's local space:
- * 1. every profile is swept through the whole body along the sketch normal (both ways);
- * 2. each target face is intersected with each prism, giving the face patches under the
+ * 1. every profile is swept through the whole body along the sketch normal (both ways) — or,
+ *    for a target face on a plane parallel to the sketch, simply moved onto that plane;
+ * 2. each target face is intersected with each prism (or moved profile), giving the face patches under the
  *    profile — only patches facing the sketch plane are kept (a profile over a cylinder's side
  *    face must not also emboss its far side);
  * 3. each patch is thickened by `depth` along its outward normal (`makeThickSolidBySimple`),
  *    outwards for emboss, inwards for deboss;
- * 4. the thickened patches are fused to (emboss) or cut from (deboss) the chain input, on the
+ * 4. the thickened patches, as one compound, are fused to (emboss) or cut from (deboss) the chain input, on the
  *    tracked path when available so the body's own face/edge ids survive.
  *
  * Target faces are stored like press-pull source faces (`ProfileRef`s captured in world
@@ -77,24 +76,24 @@ const embossHandler: FeatureHandler<EmbossFeatureData> = {
         if (!depth.isOk) return Result.err(depth.error);
         if (!(depth.value > 0)) return Result.err("Emboss depth must be positive");
 
-        const tool = buildEmbossTool(feature, context, input, depth.value);
-        if (!tool.isOk) return Result.err(tool.error);
+        const tools = buildEmbossTools(feature, context, input, depth.value);
+        if (!tools.isOk) return Result.err(tools.error);
         try {
-            return combineWithInput(feature, context, input, tool.value);
+            return combineWithInput(feature, context, input, tools.value);
         } finally {
             // The thickened patches are an intermediate input — the kernel reads them eagerly.
-            tool.value.dispose();
+            tools.value.forEach((x) => x.dispose());
         }
     },
 };
 
-/** The thickened face patches under the profiles, fused into one tool shape (host local space). */
-function buildEmbossTool(
+/** The thickened face patches under the profiles, one solid each (host local space). */
+function buildEmbossTools(
     feature: EmbossFeatureData,
     context: FeatureContext,
     input: IShape,
     depth: number,
-): Result<IShape> {
+): Result<IShape[]> {
     const sketch = findSketch(context.document, feature.sketchId);
     if (sketch === undefined) return Result.err("Sketch not found");
     const profiles = resolveProfiles(sketch, feature.profiles);
@@ -105,28 +104,41 @@ function buildEmbossTool(
     if (!targets.isOk) return Result.err(targets.error);
 
     const hostInvert = context.host.worldTransform().invert() ?? Matrix4.identity();
+    const normal = hostInvert.ofVector(sketch.plane.normal).normalize();
+    if (normal === undefined) return Result.err("Emboss sketch plane has no normal");
+    const origin = hostInvert.ofPoint(sketch.plane.origin);
     const owned: IShape[] = [];
     const pieces: IShape[] = [];
     try {
-        const prisms = throughPrisms(
-            sketch,
+        const local = localProfiles(
             profiles.value.map(({ face }) => face),
             hostInvert,
-            input,
             owned,
         );
-        if (!prisms.isOk) return Result.err(prisms.error);
-        const origin = hostInvert.ofPoint(sketch.plane.origin);
-        const normal = hostInvert.ofVector(sketch.plane.normal);
+        let prisms: Result<IShape[]> | undefined;
         for (const face of targets.value) {
-            for (const prism of prisms.value) {
-                const thickened = thickenPatches(
-                    face,
-                    prism,
-                    origin,
-                    normal,
-                    feature.deboss ? -depth : depth,
-                );
+            // A plane parallel to the sketch clips a copy of each profile moved onto it — a
+            // coplanar common, an order of magnitude cheaper than cutting the face by a prism.
+            const plane = parallelPlane(face, origin, normal);
+            let clips: IShape[];
+            if (plane === undefined) {
+                prisms ??= throughPrisms(local, normal, input, owned);
+                if (!prisms.isOk) {
+                    pieces.forEach((x) => x.dispose());
+                    return Result.err(prisms.error);
+                }
+                clips = prisms.value;
+            } else {
+                clips = local.map((x) => {
+                    const moved = x.transformedMul(translation(normal.multiply(plane.offset))) as IFace;
+                    // A coplanar common keeps the tool's side: the patch must face like the target.
+                    if (moved.normal(0, 0)[1].dot(plane.normal) < 0) moved.reserve();
+                    return moved;
+                });
+                owned.push(...clips);
+            }
+            for (const clip of clips) {
+                const thickened = thickenPatches(face, clip, origin, normal, feature.deboss ? -depth : depth);
                 if (!thickened.isOk) {
                     pieces.forEach((x) => x.dispose());
                     return Result.err(thickened.error);
@@ -138,9 +150,10 @@ function buildEmbossTool(
         owned.forEach((x) => x.dispose());
     }
     if (pieces.length === 0) return Result.err("Emboss profiles do not project onto the selected faces");
-    const fused = fuseProfiles(pieces);
-    if (!fused.isOk) pieces.forEach((x) => x.dispose());
-    return fused;
+    // Not fused among themselves first: they go to the boolean with the chain input as separate
+    // tools (one compound would be a self-interfering argument), and a separate fuse of a text's
+    // letters costs more than every other step together.
+    return Result.ok(pieces);
 }
 
 /**
@@ -185,27 +198,34 @@ export function captureEmbossFaceRef(face: IFace, id?: string, splitPiece?: bool
     return captureProfileRef(face, id, splitPiece, face.surface().isPlanar());
 }
 
+/** The profile faces in the host's local space (moved copies are added to `owned`). */
+function localProfiles(profiles: IFace[], hostInvert: Matrix4, owned: IShape[]): IFace[] {
+    if (hostInvert.equals(Matrix4.identity())) return profiles;
+    return profiles.map((face) => {
+        const moved = face.transformedMul(hostInvert) as IFace;
+        owned.push(moved);
+        return moved;
+    });
+}
+
+/**
+ * For a planar `face` parallel to the sketch: the signed distance along `normal` from the
+ * sketch plane to the face's plane, and the face's unit normal; undefined otherwise.
+ */
+function parallelPlane(face: IFace, origin: XYZ, normal: XYZ): { offset: number; normal: XYZ } | undefined {
+    if (!face.surface().isPlanar()) return undefined;
+    const [point, faceNormal] = face.normal(0, 0);
+    const unit = faceNormal.normalize();
+    if (unit === undefined || Math.abs(unit.dot(normal)) < Math.cos(Precision.Angle)) return undefined;
+    return { offset: point.sub(origin).dot(normal), normal: unit };
+}
+
 /**
  * Each profile swept straight through the body along the sketch normal: started beyond the
  * body on one side and swept past it on the other, so every face region under the profile is
  * inside the prism whatever side of the body the sketch lies on.
  */
-function throughPrisms(
-    sketch: SketchNode,
-    profiles: IFace[],
-    hostInvert: Matrix4,
-    input: IShape,
-    owned: IShape[],
-): Result<IShape[]> {
-    const normal = hostInvert.ofVector(sketch.plane.normal).normalize();
-    if (normal === undefined) return Result.err("Emboss sketch plane has no normal");
-    const identity = hostInvert.equals(Matrix4.identity());
-    const local = profiles.map((face) => {
-        if (identity) return face;
-        const moved = face.transformedMul(hostInvert) as IFace;
-        owned.push(moved);
-        return moved;
-    });
+function throughPrisms(local: IFace[], normal: XYZ, input: IShape, owned: IShape[]): Result<IShape[]> {
     // Nothing of the body is farther from the sketch plane than the diagonal of the box
     // holding both.
     const box = local.reduce((acc, x) => BoundingBox.combine(acc, x.boundingBox())!, input.boundingBox());
@@ -227,18 +247,19 @@ function translation(vec: XYZ): Matrix4 {
 }
 
 /**
- * The patches of `face` inside `prism` that face the sketch plane, each thickened by
+ * The patches of `face` inside `clip` (a through-prism, or a profile copy on `face`'s plane)
+ * that face the sketch plane, each thickened by
  * `thickness` along its outward normal (negative = into the body). Returned shapes are owned
  * by the caller.
  */
 function thickenPatches(
     face: IFace,
-    prism: IShape,
+    clip: IShape,
     origin: XYZ,
     normal: XYZ,
     thickness: number,
 ): Result<IShape[]> {
-    const common = shapeFactory.booleanCommon([face], [prism]);
+    const common = shapeFactory.booleanCommon([face], [clip]);
     if (!common.isOk) return Result.err(common.error);
     const pieces: IShape[] = [];
     try {
@@ -275,32 +296,32 @@ function facesSketch(patch: IFace, origin: XYZ, normal: XYZ): boolean {
 }
 
 /**
- * Fuses (emboss) or cuts (deboss) the tool with the chain input. The tracked path keeps the
+ * Fuses (emboss) or cuts (deboss) the tools with the chain input. The tracked path keeps the
  * input's face/edge ids; the tool's sub-shapes get positional feature-scoped ids (new geometry).
  */
 function combineWithInput(
     feature: EmbossFeatureData,
     context: FeatureContext,
     input: IShape,
-    tool: IShape,
+    tools: IShape[],
 ): Result<IShape> {
     const operation = feature.deboss === true ? "cut" : "fuse";
     const tracking = context.tracking;
     const tracked = trackedBoolean(operation);
     if (tracking === undefined || tracked === undefined) {
         return operation === "cut"
-            ? shapeFactory.booleanCut([input], [tool])
-            : shapeFactory.booleanFuse([input], [tool], true);
+            ? shapeFactory.booleanCut([input], tools)
+            : shapeFactory.booleanFuse([input], tools, true);
     }
-    const result = tracked([input], [tool]);
+    const result = tracked([input], tools);
     if (!result.isOk) return Result.err(result.error);
-    const toolFaceIds = (tool.findSubShapes(ShapeTypes.face) as IFace[]).map(
-        (_, index) => `${feature.id}:tool:f${index}`,
-    );
-    const toolEdgeIds = (tool.findSubShapes(ShapeTypes.edge) as IEdge[]).map(
-        (_, index) => `${feature.id}:tool:e${index}`,
-    );
-    const { edgeMap, faceMap } = completeTrackedHistory([input, tool], result.value);
+    const toolFaceIds = tools
+        .flatMap((tool) => tool.findSubShapes(ShapeTypes.face) as IFace[])
+        .map((_, index) => `${feature.id}:tool:f${index}`);
+    const toolEdgeIds = tools
+        .flatMap((tool) => tool.findSubShapes(ShapeTypes.edge) as IEdge[])
+        .map((_, index) => `${feature.id}:tool:e${index}`);
+    const { edgeMap, faceMap } = completeTrackedHistory([input, ...tools], result.value);
     tracking.outputFaceIds = mapOperationIds(
         feature.id,
         input,
