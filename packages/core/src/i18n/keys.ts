@@ -1143,6 +1143,9 @@ export const I18N_KEYS = [
     "diff.removed{0}",
     "diff.renamed{0}{1}",
     "error.repository.readOnlyPreview",
+    "cloud.history.keepMineAsCopy",
+    "cloud.history.restoredOnTop{0}{1}",
+    "cloud.history.unsavedAfter{0}",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

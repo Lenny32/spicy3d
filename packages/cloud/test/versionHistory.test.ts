@@ -82,6 +82,9 @@ class FakeDocument {
     closed: CloseDocumentOptions[] = [];
     saves: SaveKind[] = [];
     version?: string;
+    /** The undo position (`history.position()`): a new object = an edit. */
+    position: object = {};
+    readonly history = { position: () => this.position };
     constructor(
         readonly application: IApplication,
         readonly id: string,
@@ -120,7 +123,7 @@ class FakeDocument {
 const V1 = [node("box", "Box 1", { dx: 10 })];
 const V2 = [node("box", "Box 1", { dx: 15 }), node("sketch", "Sketch 1")];
 
-async function setup(options: { ask?: UnsavedBeforeRestore } = {}) {
+async function setup(options: { ask?: UnsavedBeforeRestore; askAfter?: UnsavedBeforeRestore } = {}) {
     const server = new FakeServer();
     const account = await signedInAccount(server);
     account.deviceSettings.deviceName = "Desk – Firefox";
@@ -155,7 +158,7 @@ async function setup(options: { ask?: UnsavedBeforeRestore } = {}) {
     const add = (id: string, name: string, repo: IDocumentRepository, data: Serialized) => {
         const doc = new FakeDocument(app, id, name, repo, data);
         app.documents.add(doc as unknown as IDocument);
-        app.activeView = { document: doc } as unknown as IView;
+        app.activeView = { document: doc, toImage: () => undefined } as unknown as IView;
         return doc;
     };
     app.loadDocument = async (data, source) => {
@@ -173,18 +176,20 @@ async function setup(options: { ask?: UnsavedBeforeRestore } = {}) {
     open.version = v2.id;
 
     const asked: string[] = [];
+    const stages: string[] = [];
     const history = new VersionHistory({
         app,
         repository,
         documentId: "doc-1",
         name: () => "Bracket",
-        askUnsaved: async (name) => {
+        askUnsaved: async (name, stage) => {
             asked.push(name);
-            return options.ask ?? "cancel";
+            stages.push(stage);
+            return (stage === "after" ? options.askAfter : options.ask) ?? "cancel";
         },
     });
     server.requests.length = 0;
-    return { server, docs, repository, app, history, open, v1, v2, loaded, opened, asked };
+    return { server, docs, repository, app, history, open, v1, v2, loaded, opened, asked, stages };
 }
 
 const toasts = () => published.filter(([event]) => event === "showToast").map(([, args]) => args[0]);
@@ -401,6 +406,57 @@ describe("panel", () => {
         expect(headRow.textContent).toContain("cloud.history.current");
     });
 
+    test("a list shorter than the panel loads on until it fills or ends — bounded, no recursion", async () => {
+        const ctx = await setup();
+        for (let i = 0; i < 5; i++) ctx.docs.addVersion("doc-1", { kind: "manual" });
+        const panel = new VersionHistoryPanel({
+            history: ctx.history,
+            retention: CONFIG.storage.autosaveRetention,
+            onClose: () => {},
+            pageSize: 2,
+        });
+        const list = panel.querySelector<HTMLElement>("[data-list]")!;
+        // Laid out, and always shorter than the panel (a real browser with a tall panel).
+        Object.defineProperty(list, "clientHeight", { configurable: true, get: () => 500 });
+        Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => 100 });
+        ctx.server.requests.length = 0;
+
+        document.body.append(panel); // starts the first load
+        await rs.waitFor(() => expect(panel.hasMore).toBe(false));
+
+        // 7 versions, 2 per page: exactly 4 requests.
+        expect(ctx.server.calls).toEqual(Array(4).fill("GET /api/documents/doc-1/versions"));
+        expect(panel.loaded).toHaveLength(7);
+        panel.remove();
+    });
+
+    test("a reload during a load: the stale load neither ends the new one nor duplicates rows", async () => {
+        const ctx = await setup();
+        const panel = new VersionHistoryPanel({
+            history: ctx.history,
+            retention: CONFIG.storage.autosaveRetention,
+            onClose: () => {},
+        });
+        const gates: (() => void)[] = [];
+        const listVersions = ctx.repository.listVersions.bind(ctx.repository);
+        const list = rs.spyOn(ctx.repository, "listVersions").mockImplementation(async (id, query) => {
+            await new Promise<void>((resolve) => gates.push(resolve));
+            return listVersions(id, query);
+        });
+
+        const stale = panel.loadMore();
+        void panel.reload();
+        expect(list).toHaveBeenCalledTimes(2);
+        gates[0]();
+        await stale;
+        void panel.loadMore(); // the reload's load still runs: shared, no third request
+        expect(list).toHaveBeenCalledTimes(2);
+        gates[1]();
+        await rs.waitFor(() => expect(panel.loaded).toHaveLength(2));
+
+        expect(new Set(panel.loaded.map((v) => v.id)).size).toBe(2);
+    });
+
     test("pin and unpin", async () => {
         const { panel, docs, server } = await panelWith();
         const auto = docs.addVersion("doc-1");
@@ -510,7 +566,8 @@ describe("restore", () => {
 
         expect(restored.isOk).toBe(true);
         const head = docs.head("doc-1")!;
-        expect(restored.isOk && restored.value?.id).toBe(head.id);
+        expect(restored.isOk && restored.value?.version.id).toBe(head.id);
+        expect(restored.isOk && restored.value?.onTopOf).toBeUndefined();
         expect(head).toMatchObject({
             kind: "restore",
             parentIds: [v2.id],
@@ -538,13 +595,22 @@ describe("restore", () => {
         server.on("POST /api/documents/doc-1/versions", (request) => {
             if (!first) return server.fallback!(request);
             first = false;
-            return problem(409, "version_conflict", { headVersionId: elsewhere.id });
+            return problem(409, "version_conflict", {
+                headVersionId: elsewhere.id,
+                headDeviceName: elsewhere.deviceName,
+                headCreatedAt: elsewhere.createdAt,
+            });
         });
 
-        const restored = await history.restore(v1);
+        const restored = await history.restoreAndReport(v1);
 
-        expect(restored.isOk).toBe(true);
+        expect(restored).toBe(true);
         expect(docs.head("doc-1")).toMatchObject({ kind: "restore", parentIds: [elsewhere.id] });
+        // Not silent: the user learns it went on top of another device's newer save.
+        expect(published).toContainEqual([
+            "showToast",
+            ["cloud.history.restoredOnTop{0}{1}", "Laptop – Chrome", expect.any(String)],
+        ]);
         const keys = server.requests
             .filter((r) => r.method === "POST")
             .map((r) => r.headers["idempotency-key"]);
@@ -583,6 +649,56 @@ describe("restore", () => {
         expect(open.closed).toEqual([{ discardChanges: true }]);
     });
 
+    test("a second restore while one runs (a double click) shares it: one new version, one reopen", async () => {
+        const { history, v1, docs, opened, open } = await setup();
+        const first = history.restore(v1);
+        // No buttons on the banner meanwhile.
+        const second = history.restore(v1);
+
+        expect(second).toBe(first);
+        const [a, b] = await Promise.all([first, second]);
+        expect(a).toBe(b);
+        expect(docs.documents.get("doc-1")!.versions.filter((v) => v.kind === "restore")).toHaveLength(1);
+        expect(opened).toEqual(["doc-1"]);
+        expect(open.closed).toEqual([{ discardChanges: true }]);
+    });
+
+    test("the preview banner offers no buttons while a restore runs", async () => {
+        const { history, v1, v2 } = await setup();
+        await history.showPreview(v1);
+        published.length = 0;
+
+        const restoring = history.restore(v2);
+        const during = banners().at(-1)!;
+        await restoring;
+
+        expect(during.id).toBe(PREVIEW_BANNER_ID);
+        expect(during.actions).toEqual([]);
+    });
+
+    test.each([
+        ["saveFirst", 1, false],
+        ["discard", 0, false],
+        ["cancel", 0, true],
+    ] as const)("edited again while restoring (%s): asked again, never dropped silently", async (choice, copies, keptOpen) => {
+        const { history, v1, open, repository, docs, stages, opened } = await setup({ askAfter: choice });
+        const restoreVersion = repository.restoreVersion.bind(repository);
+        rs.spyOn(repository, "restoreVersion").mockImplementation(async (id, version) => {
+            const restored = await restoreVersion(id, version);
+            open.isDirty = true;
+            open.position = {}; // an edit while the restore ran
+            return restored;
+        });
+
+        const restored = await history.restore(v1);
+
+        expect(restored.isOk).toBe(true);
+        expect(stages).toEqual(["after"]);
+        expect([...docs.documents.keys()].filter((id) => id !== "doc-1")).toHaveLength(copies);
+        expect(open.closed).toEqual(keptOpen ? [] : [{ discardChanges: true }]);
+        expect(opened).toEqual(keptOpen ? [] : ["doc-1"]);
+    });
+
     test("refused while another tab edits the document", async () => {
         const { history, v1, repository, docs } = await setup();
         (repository.options as { editGuard?: { isReadOnly: () => boolean } }).editGuard = {
@@ -593,6 +709,38 @@ describe("restore", () => {
 
         expect(!restored.isOk && restored.error.message).toBe("cloud.history.restoreReadOnly");
         expect(docs.documents.get("doc-1")!.versions).toHaveLength(2);
+    });
+});
+
+describe("preview races", () => {
+    test("a newer preview wins: the older one, still loading, is closed and reports nothing", async () => {
+        const { history, v1, v2, app } = await setup();
+
+        const [older, newer] = await Promise.all([history.showPreview(v1), history.showPreview(v2)]);
+
+        expect(!older.isOk && older.error.cancelled).toBe(true);
+        expect(newer.isOk).toBe(true);
+        const previews = [...app.documents].filter((x) => previewOf(x));
+        expect(previews).toHaveLength(1);
+        expect(previewOf(previews[0])!.version.id).toBe(v2.id);
+        expect(history.previewed?.id).toBe(v2.id);
+    });
+
+    test("the history closing while a preview loads: the loaded document is closed, the banner hidden", async () => {
+        const { history, v1, app, repository } = await setup();
+        const loadVersion = repository.loadVersion.bind(repository);
+        rs.spyOn(repository, "loadVersion").mockImplementation(async (version) => {
+            const data = await loadVersion(version);
+            history.dispose();
+            return data;
+        });
+
+        const shown = await history.showPreview(v1);
+
+        expect(!shown.isOk && shown.error.cancelled).toBe(true);
+        expect([...app.documents].filter((x) => previewOf(x))).toEqual([]);
+        expect(published.filter(([e]) => e === "showBanner")).toEqual([]);
+        expect(published).toContainEqual(["hideBanner", [PREVIEW_BANNER_ID]]);
     });
 });
 
@@ -647,6 +795,7 @@ describe("copies and compare", () => {
         const current = await history.compareWithCurrent(v1, v2);
         expect(current.isOk && current.value.map((c) => [c.kind, c.target])).toEqual([
             ["renamed", "box"],
+            ["modified", "box"],
             ["added", "sketch"],
         ]);
     });

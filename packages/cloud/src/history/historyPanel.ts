@@ -163,16 +163,22 @@ export class VersionHistoryPanel extends HTMLElement {
      */
     loadMore(): Promise<void> {
         if (this.complete) return Promise.resolve();
-        this.loading ??= this.loadPages().finally(() => {
-            this.loading = undefined;
-            this.render();
-        });
+        if (!this.loading) {
+            const generation = this.generation;
+            const loading: Promise<void> = this.loadPages(generation).finally(() => {
+                // A reload meanwhile started a newer load: that one is the current load now.
+                if (this.loading === loading) this.loading = undefined;
+                if (generation !== this.generation) return;
+                this.render();
+                void this.fillIfNeeded();
+            });
+            this.loading = loading;
+        }
         this.render();
         return this.loading;
     }
 
-    private async loadPages(): Promise<void> {
-        const generation = this.generation;
+    private async loadPages(generation: number): Promise<void> {
         const before = this.visibleCount();
         for (let page = 0; page < MAX_PAGES_PER_LOAD && !this.complete; page++) {
             const result = await this.history.repository.listVersions(this.history.documentId, {
@@ -186,7 +192,8 @@ export class VersionHistoryPanel extends HTMLElement {
                 break;
             }
             this.error = undefined;
-            this.versions.push(...result.value.items);
+            const known = new Set(this.versions.map((x) => x.id));
+            this.versions.push(...result.value.items.filter((x) => !known.has(x.id)));
             this.nextCursor = result.value.nextCursor;
             this.complete = this.nextCursor === undefined;
             if (this.visibleCount() > before) break;
@@ -202,11 +209,26 @@ export class VersionHistoryPanel extends HTMLElement {
         if (scrollTop + clientHeight >= scrollHeight - SCROLL_MARGIN_PX) void this.loadMore();
     }
 
-    /** A list shorter than the panel can't be scrolled: load on until it fills (or ends). */
+    private filling = false;
+
+    /**
+     * A list shorter than the panel can't be scrolled: load on until it fills (or ends). Runs once
+     * a load settled (never from `render`, which a load itself calls), one fill at a time.
+     */
     private async fillIfNeeded() {
-        if (this.list.clientHeight === 0) return; // not laid out (hidden, or tests)
-        while (!this.complete && this.list.scrollHeight <= this.list.clientHeight && !this.error) {
-            await this.loadMore();
+        if (this.filling || this.loading) return;
+        this.filling = true;
+        try {
+            while (
+                !this.complete &&
+                !this.error &&
+                this.list.clientHeight > 0 && // not laid out (hidden, or tests)
+                this.list.scrollHeight <= this.list.clientHeight
+            ) {
+                await this.loadMore();
+            }
+        } finally {
+            this.filling = false;
         }
     }
 
@@ -228,7 +250,6 @@ export class VersionHistoryPanel extends HTMLElement {
             }),
         );
         this.renderFooter(groups.length === 0);
-        void this.fillIfNeeded();
     }
 
     private renderFooter(empty: boolean) {
@@ -401,7 +422,9 @@ export class VersionHistoryPanel extends HTMLElement {
 
     private async report<T>(result: Promise<Result<T, HistoryFailure>>): Promise<Result<T, HistoryFailure>> {
         const settled = await result;
-        if (!settled.isOk) PubSub.default.pub("showToast", "cloud.history.failed{0}", settled.error.message);
+        if (!settled.isOk && !settled.error.cancelled) {
+            PubSub.default.pub("showToast", "cloud.history.failed{0}", settled.error.message);
+        }
         return settled;
     }
 

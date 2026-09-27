@@ -1211,5 +1211,10 @@ export default {
         "diff.renamed{0}{1}": "{0} renamed to {1}",
         "error.repository.readOnlyPreview":
             "This is an older version from the history, never saved: restore it, or save it as a new document",
+        "cloud.history.keepMineAsCopy": "Keep mine as a copy",
+        "cloud.history.restoredOnTop{0}{1}":
+            "Restored on top of a newer save from {0} ({1}): that save stays in the history",
+        "cloud.history.unsavedAfter{0}":
+            "“{0}” was changed while the version was being restored. Keep those changes as a copy, or discard them?",
     },
 } satisfies Locale;

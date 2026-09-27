@@ -57,6 +57,15 @@ export interface VersionUpdate {
     pinned?: boolean;
 }
 
+/**
+ * A restore's new head. `onTopOf`: another save moved the head between reading it and restoring, so
+ * the restore went on top of that newer save (nothing is lost, but the user should know).
+ */
+export interface RestoredVersion {
+    version: CloudVersion;
+    onTopOf?: { deviceName?: string; createdAt?: number };
+}
+
 /** Restoring retries this many times when another save moved the head in between. */
 const RESTORE_ATTEMPTS = 3;
 
@@ -654,9 +663,10 @@ export class CloudDocumentRepository implements IDocumentRepository {
     async restoreVersion(
         id: string,
         version: CloudVersion,
-    ): Promise<Result<CloudVersion, DocumentRepositoryError>> {
+    ): Promise<Result<RestoredVersion, DocumentRepositoryError>> {
         if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
         if (this.isReadOnly(id)) return Result.err({ kind: "readOnly" });
+        let onTopOf: RestoredVersion["onTopOf"];
         let blobs: string[];
         try {
             blobs = manifestBlobRefs(await this.manifest(version));
@@ -691,12 +701,17 @@ export class CloudDocumentRepository implements IDocumentRepository {
             );
             if (result.isOk) {
                 if (version.thumbnailSha256) this.thumbnailShas.set(id, version.thumbnailSha256);
-                return Result.ok(result.value.data);
+                const restored: RestoredVersion = { version: result.value.data };
+                if (onTopOf) restored.onTopOf = onTopOf;
+                return Result.ok(restored);
             }
             const error = result.error;
             if (problemCode(error) !== "version_conflict" || error.kind !== "problem") {
                 return Result.err(toRepositoryError(error, id));
             }
+            onTopOf = {};
+            if (error.problem.headDeviceName) onTopOf.deviceName = error.problem.headDeviceName;
+            if (error.problem.headCreatedAt) onTopOf.createdAt = parseUtc(error.problem.headCreatedAt);
             const next = error.problem.headVersionId;
             head = next ? Result.ok(next) : await this.headVersion(id);
         }

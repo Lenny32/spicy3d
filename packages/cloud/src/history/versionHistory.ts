@@ -18,9 +18,15 @@ import {
     Result,
     repositoryErrorMessage,
     type Serialized,
+    saveDocumentCopy,
 } from "@spicy3d/core";
 import { div } from "@spicy3d/element";
-import type { CloudDocumentRepository, CloudVersion, VersionUpdate } from "../documents/repository";
+import type {
+    CloudDocumentRepository,
+    CloudVersion,
+    RestoredVersion,
+    VersionUpdate,
+} from "../documents/repository";
 import style from "../ui/account.module.css";
 import { Modal } from "../ui/modal";
 import { versionTime } from "./historyModel";
@@ -28,13 +34,24 @@ import { previewOf, VersionPreviewRepository } from "./previewRepository";
 
 export const PREVIEW_BANNER_ID = "cloud.history.preview";
 
+/** A done restore: the new head, and the newer save it went on top of, if another got in first. */
+export type RestoredOutcome = RestoredVersion;
+
 /** Why a history action did not happen; `message` is already translated for a toast or the panel. */
 export interface HistoryFailure {
     message: string;
+    /** Superseded (a newer preview started, the history closed): nothing to report. */
+    cancelled?: boolean;
 }
 
 /** What to do with unsaved changes of the open document before restoring a version. */
 export type UnsavedBeforeRestore = "saveFirst" | "discard" | "cancel";
+
+/**
+ * When the open document is asked about: `before` the restore (save mine first = a version of
+ * its own under the restore), or `after` it (edited while restoring: save mine first = a copy).
+ */
+export type RestoreStage = "before" | "after";
 
 export interface VersionHistoryOptions {
     app: IApplication;
@@ -43,7 +60,7 @@ export interface VersionHistoryOptions {
     /** The document's name (the open one's, which may be renamed meanwhile). */
     name: () => string;
     /** Asked before a restore when the open document has unsaved changes (replaced in tests). */
-    askUnsaved?: (name: string) => Promise<UnsavedBeforeRestore>;
+    askUnsaved?: (name: string, stage: RestoreStage) => Promise<UnsavedBeforeRestore>;
 }
 
 function failure(key: I18nKeys, ...args: unknown[]): HistoryFailure {
@@ -64,14 +81,20 @@ export function needsNewerApp(version: CloudVersion): boolean {
  * "Restore" met unsaved changes in this tab: save them first (a version of their own, so nothing
  * is lost), discard them, or cancel.
  */
-export function askUnsavedBeforeRestore(name: string): Promise<UnsavedBeforeRestore> {
+export function askUnsavedBeforeRestore(
+    name: string,
+    stage: RestoreStage = "before",
+): Promise<UnsavedBeforeRestore> {
     return new Promise((resolve) => {
         new Modal({
             title: "cloud.history.unsavedTitle",
             content: [
                 div({
                     className: style.muted,
-                    textContent: I18n.translate("cloud.history.unsaved{0}", name),
+                    textContent: I18n.translate(
+                        stage === "before" ? "cloud.history.unsaved{0}" : "cloud.history.unsavedAfter{0}",
+                        name,
+                    ),
                 }),
             ],
             onCancel: () => resolve("cancel"),
@@ -79,7 +102,8 @@ export function askUnsavedBeforeRestore(name: string): Promise<UnsavedBeforeRest
                 { label: "common.cancel" },
                 { label: "cloud.history.discardMine", kind: "danger", run: () => void resolve("discard") },
                 {
-                    label: "cloud.history.saveMineFirst",
+                    label:
+                        stage === "before" ? "cloud.history.saveMineFirst" : "cloud.history.keepMineAsCopy",
                     kind: "primary",
                     submit: true,
                     run: () => void resolve("saveFirst"),
@@ -106,6 +130,10 @@ export function askUnsavedBeforeRestore(name: string): Promise<UnsavedBeforeRest
 export class VersionHistory {
     private preview?: IDocument;
     private disposed = false;
+    /** Bumped by every preview request: an older one still loading gives way. */
+    private previewToken = 0;
+    /** The restore running: asking again (a double click) shares it. */
+    private restoring?: Promise<Result<RestoredOutcome | undefined, HistoryFailure>>;
     /**
      * Told when the history changed (`restored`: a new head) or the preview did (`preview`), e.g.
      * by the banner's buttons: the panel reloads or re-renders.
@@ -150,6 +178,7 @@ export class VersionHistory {
         this.disposed = true;
         PubSub.default.remove("activeViewChanged", this.updateBanner);
         PubSub.default.remove("documentClosed", this.onDocumentClosed);
+        this.previewToken++;
         PubSub.default.pub("hideBanner", PREVIEW_BANNER_ID);
     }
 
@@ -173,13 +202,24 @@ export class VersionHistory {
 
     /** Opens `version` read-only (replacing a preview already open); resolves the preview. */
     async showPreview(version: CloudVersion): Promise<Result<IDocument, HistoryFailure>> {
+        const token = ++this.previewToken;
+        const superseded = () => this.disposed || token !== this.previewToken;
+        const cancelled: HistoryFailure = { message: "", cancelled: true };
         const data = await this.content(version);
+        if (superseded()) return Result.err(cancelled);
         if (!data.isOk) return Result.err(data.error);
         await this.closePreview();
+        if (superseded()) return Result.err(cancelled);
         const document = await this.app.loadDocument(
             { ...data.value, id: Id.generate(), name: this.versionName(version) },
             { repository: new VersionPreviewRepository(this.documentId, version), version: version.id },
         );
+        if (superseded()) {
+            // A newer preview (or the panel closing) came first: this one is no longer wanted.
+            if (document && this.app.documents.has(document)) await document.close({ discardChanges: true });
+            if (!this.preview) PubSub.default.pub("hideBanner", PREVIEW_BANNER_ID);
+            return Result.err(cancelled);
+        }
         // `Document.load` reported why (a migration failed…).
         if (!document) return Result.err(failure("cloud.history.previewFailed"));
         this.preview = document;
@@ -218,10 +258,13 @@ export class VersionHistory {
             message: "cloud.history.viewing{0}",
             args: [formatDateTime(versionTime(version))],
             dismissible: false,
-            actions: [
-                { label: "cloud.history.restore", run: () => void this.restoreAndReport(version) },
-                { label: "cloud.history.backToLatest", run: () => void this.backToLatest() },
-            ],
+            // While a restore runs, no buttons: a second click can't start another one.
+            actions: this.restoring
+                ? []
+                : [
+                      { label: "cloud.history.restore", run: () => void this.restoreAndReport(version) },
+                      { label: "cloud.history.backToLatest", run: () => void this.backToLatest() },
+                  ],
         });
     };
 
@@ -240,20 +283,38 @@ export class VersionHistory {
      * (`undefined`, nothing done). Afterwards the preview closes and the document is reopened at
      * the new head.
      */
-    async restore(version: CloudVersion): Promise<Result<CloudVersion | undefined, HistoryFailure>> {
+    restore(version: CloudVersion): Promise<Result<RestoredOutcome | undefined, HistoryFailure>> {
+        if (!this.restoring) {
+            const restoring = this.restoreOnce(version).finally(() => {
+                if (this.restoring === restoring) this.restoring = undefined;
+                this.updateBanner();
+            });
+            this.restoring = restoring;
+            this.updateBanner();
+        }
+        return this.restoring;
+    }
+
+    private async restoreOnce(
+        version: CloudVersion,
+    ): Promise<Result<RestoredOutcome | undefined, HistoryFailure>> {
         if (needsNewerApp(version)) return Result.err(failure("cloud.history.needsUpdate"));
         if (this.repository.isReadOnly(this.documentId)) {
             return Result.err(failure("cloud.history.restoreReadOnly"));
         }
+        const ask = this.options.askUnsaved ?? askUnsavedBeforeRestore;
         const open = this.openDocument();
+        // The undo position the user decided about: edits after it are asked about once more.
+        let decided: object | undefined;
         if (open) {
             await open.settled();
+            decided = open.history.position();
             if (open.isDirty) {
-                const ask = this.options.askUnsaved ?? askUnsavedBeforeRestore;
-                const choice = await ask(open.name);
+                const choice = await ask(open.name, "before");
                 if (choice === "cancel") return Result.ok(undefined);
                 if (choice === "saveFirst") {
                     const saved = await open.save("manual");
+                    decided = open.history.position();
                     if (!saved.isOk) return Result.err(repositoryFailure(saved.error));
                     if (saved.value.status === "conflict") {
                         await this.app.repositories.conflictHandler?.(open, saved.value);
@@ -268,7 +329,27 @@ export class VersionHistory {
 
         await this.closePreview();
         const current = this.openDocument();
-        if (current) await current.close({ discardChanges: true });
+        if (current) {
+            // Edited again while the restore ran: those edits are asked about too, never dropped silently.
+            await current.settled();
+            if (current.isDirty && (current !== open || current.history.position() !== decided)) {
+                const choice = await ask(current.name, "after");
+                if (choice === "cancel") {
+                    // Keeps this tab's copy open as it is; its next save meets the new head (conflict dialog).
+                    this.onChanged?.("restored");
+                    return Result.ok(restored.value);
+                }
+                if (choice === "saveFirst") {
+                    const name = I18n.translate("cloud.conflict.copyName{0}", current.name);
+                    const copy = await saveDocumentCopy(this.app, current, this.repository, name);
+                    if (!copy.isOk) {
+                        this.onChanged?.("restored");
+                        return Result.err(repositoryFailure(copy.error));
+                    }
+                }
+            }
+            await current.close({ discardChanges: true });
+        }
         await this.app.openDocument(this.documentId, this.repository);
         this.onChanged?.("restored");
         return Result.ok(restored.value);
@@ -282,7 +363,23 @@ export class VersionHistory {
             return false;
         }
         if (!restored.value) return false;
-        PubSub.default.pub("showToast", "cloud.history.restored{0}", formatDateTime(versionTime(version)));
+        const onTopOf = restored.value.onTopOf;
+        if (onTopOf) {
+            PubSub.default.pub(
+                "showToast",
+                "cloud.history.restoredOnTop{0}{1}",
+                onTopOf.deviceName || I18n.translate("cloud.conflict.unknownDevice"),
+                onTopOf.createdAt !== undefined && Number.isFinite(onTopOf.createdAt)
+                    ? formatDateTime(onTopOf.createdAt)
+                    : I18n.translate("cloud.conflict.unknownTime"),
+            );
+        } else {
+            PubSub.default.pub(
+                "showToast",
+                "cloud.history.restored{0}",
+                formatDateTime(versionTime(version)),
+            );
+        }
         return true;
     }
 
