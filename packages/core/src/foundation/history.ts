@@ -84,10 +84,13 @@ export class History implements IDisposable {
             () => {
                 const record = this._undos.pop();
                 if (!record) return;
-
-                record.undo();
-                this._redos.push(record);
-                this.onChanged.emit();
+                // The position moved with the pop: listeners (isDirty) hear it even if undo throws.
+                try {
+                    record.undo();
+                    this._redos.push(record);
+                } finally {
+                    this.onChanged.emit();
+                }
             },
             () => {
                 this.#isUndoing = false;
@@ -101,10 +104,12 @@ export class History implements IDisposable {
             () => {
                 const record = this._redos.pop();
                 if (!record) return;
-
-                record.redo();
-                this._undos.push(record);
-                this.onChanged.emit();
+                try {
+                    record.redo();
+                    this._undos.push(record);
+                } finally {
+                    this.onChanged.emit();
+                }
             },
             () => {
                 this.#isRedoing = false;

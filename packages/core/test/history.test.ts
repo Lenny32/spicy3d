@@ -84,6 +84,43 @@ describe("History", () => {
         const record = (obj: { val: number }, from: number) =>
             new PropertyHistoryRecord(obj, "val", from, from + 1);
 
+        const failing = (fails: "undo" | "redo"): IHistoryRecord => ({
+            name: "failing",
+            undo: () => {
+                if (fails === "undo") throw new Error("boom");
+            },
+            redo: () => {
+                throw new Error("boom");
+            },
+            dispose: () => {},
+        });
+
+        test("an undo that throws still reports the moved position", () => {
+            const history = new History();
+            history.add(failing("undo"));
+            const before = history.position();
+            const changed = rs.fn();
+            history.onChanged.sub(changed);
+
+            expect(() => history.undo()).toThrow("boom");
+
+            expect(changed).toHaveBeenCalledTimes(1);
+            expect(history.position()).not.toBe(before);
+        });
+
+        test("a redo that throws still reports the change", () => {
+            const history = new History();
+            history.add(failing("redo"));
+            history.undo();
+            const changed = rs.fn();
+            history.onChanged.sub(changed);
+
+            expect(() => history.redo()).toThrow("boom");
+
+            expect(changed).toHaveBeenCalledTimes(1);
+            expect(history.redoCount()).toBe(0);
+        });
+
         test("returns to the same token after undo and redo", () => {
             const obj = { val: 0 };
             const history = new History();
