@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rs } from "@rstest/core";
-import { Logger } from "@spicy3d/core";
+import { Logger, ObjectStorage } from "@spicy3d/core";
 import { checkApiVersion, discoverCloud, SUPPORTED_API_VERSIONS } from "../src/config";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -115,6 +115,64 @@ describe("discoverCloud", () => {
         const { discovery } = discoverWith(() => Response.json(config));
 
         expect(await discovery).toEqual({ status: "incompatible", config, compatibility });
+    });
+});
+
+describe("offline start", () => {
+    const cache = () => new ObjectStorage("spicy3d-test", `config-${Math.random()}`);
+    const offline = () => {
+        throw new TypeError("Failed to fetch");
+    };
+
+    test("the last config starts the cloud offline when the server is out of reach", async () => {
+        const storage = cache();
+        const online = rs.fn(async () => Response.json(CONFIG));
+        await discoverCloud({ baseUrl: BASE, fetch: online, offlineCache: storage });
+
+        const discovery = await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => offline(),
+            offlineCache: storage,
+        });
+
+        expect(discovery).toEqual({ status: "ready", config: CONFIG, offline: true });
+    });
+
+    test("without a cached config, or without the option, unreachable stays dormant", async () => {
+        expect(
+            await discoverCloud({ baseUrl: BASE, fetch: async () => offline(), offlineCache: cache() }),
+        ).toEqual({
+            status: "dormant",
+        });
+        const storage = cache();
+        await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => Response.json(CONFIG),
+            offlineCache: storage,
+        });
+        expect(await discoverCloud({ baseUrl: BASE, fetch: async () => offline() })).toEqual({
+            status: "dormant",
+        });
+    });
+
+    test.each([
+        ["no Spicy3D server answers", () => Response.json({ hello: "world" })],
+        ["404", () => new Response("", { status: 404 })],
+        ["an incompatible server", () => Response.json({ ...CONFIG, apiVersion: "2" })],
+    ])("%s: the cached config is forgotten", async (_case, answer) => {
+        const storage = cache();
+        await discoverCloud({
+            baseUrl: BASE,
+            fetch: async () => Response.json(CONFIG),
+            offlineCache: storage,
+        });
+        await discoverCloud({ baseUrl: BASE, fetch: async () => answer(), offlineCache: storage });
+
+        expect(
+            await discoverCloud({ baseUrl: BASE, fetch: async () => offline(), offlineCache: storage }),
+        ).toEqual({
+            status: "dormant",
+        });
     });
 });
 

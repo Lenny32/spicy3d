@@ -152,6 +152,13 @@ export class Account extends Observable {
             else if (this.status !== "expired") this.setProperty("status", "signedOut");
             return Result.ok(undefined);
         }
+        // The server is out of reach at startup: the user last signed in here stays signed in, so
+        // their cached documents open and their pending saves wait (a 401 later asks to sign in).
+        const cached = this.deviceSettings.lastUser;
+        if (result.error.kind === "offline" && this.status === "unknown" && cached) {
+            this.setProperty("user", cached);
+            this.setProperty("status", "signedIn");
+        }
         return Result.err(result.error);
     }
 
@@ -371,6 +378,7 @@ export class Account extends Observable {
     private async setSignedIn(user: AccountUser) {
         const previous = this.user;
         if (previous && previous.id !== user.id) await this.finishSignOut("switchUser");
+        this.deviceSettings.rememberUser(user);
         this.setProperty("user", user);
         this.setProperty("status", "signedIn");
         this.settleReauthentication(true);
@@ -388,6 +396,7 @@ export class Account extends Observable {
 
     private async finishSignOut(reason: SignOutReason) {
         const wasSignedIn = this.user !== undefined;
+        this.deviceSettings.rememberUser(undefined);
         this.setProperty("user", undefined);
         this.setProperty("status", "signedOut");
         this.settleReauthentication(false);

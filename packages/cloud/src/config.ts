@@ -4,7 +4,7 @@
 // Runtime discovery of the server. Imports nothing but types beyond core, so the local-only path
 // (static hosting, no server) never loads the API client.
 
-import { Logger } from "@spicy3d/core";
+import { Logger, ObjectStorage } from "@spicy3d/core";
 import type { ConfigResponse } from "./api";
 
 /**
@@ -27,13 +27,27 @@ export type CloudDiscovery =
           config: ConfigResponse;
           compatibility: Exclude<ApiCompatibility, "compatible">;
       }
-    | { status: "ready"; config: ConfigResponse };
+    /** `offline`: the server is out of reach, `config` is the one it answered last time. */
+    | { status: "ready"; config: ConfigResponse; offline?: boolean };
 
 export interface DiscoveryOptions {
     /** See `CloudClientOptions.baseUrl`; defaults to the folder the app is served from. */
     baseUrl?: string;
     fetch?: (request: Request) => Promise<Response>;
     signal?: AbortSignal;
+    /**
+     * Remembers the server's config (`localStorage`, `cloud.config`), so the cloud starts when the
+     * server is out of reach (a LAN server down, the network gone): cached documents and pending
+     * saves stay usable. `true` = `ObjectStorage.default`.
+     */
+    offlineCache?: boolean | ObjectStorage;
+}
+
+const CONFIG_CACHE_KEY = "cloud.config";
+
+function cacheOf(option: DiscoveryOptions["offlineCache"]): ObjectStorage | undefined {
+    if (!option) return undefined;
+    return option === true ? ObjectStorage.default : option;
 }
 
 /** The folder of the page without trailing slash, so an app under `/sub/` finds `/sub/api`. */
@@ -88,15 +102,26 @@ export async function discoverCloud(options: DiscoveryOptions = {}): Promise<Clo
         signal: options.signal,
     });
 
+    const cache = cacheOf(options.offlineCache);
     let config: unknown;
+    let response: Response;
     try {
-        const response = await fetchFn(request);
-        if (!response.ok) return dormant(`${request.url} answered ${response.status}`);
+        response = await fetchFn(request);
+    } catch {
+        const cached = readCachedConfig(cache);
+        if (cached && checkApiVersion(String(cached.apiVersion)) === "compatible") {
+            Logger.info(`[cloud] ${request.url} is unreachable; starting offline with the last config`);
+            return { status: "ready", config: cached, offline: true };
+        }
+        return dormant(`${request.url} is unreachable`);
+    }
+    try {
+        if (!response.ok) return dormant(`${request.url} answered ${response.status}`, cache);
         config = JSON.parse(await response.text());
     } catch {
-        return dormant(`${request.url} is unreachable or not JSON`);
+        return dormant(`${request.url} is not JSON`, cache);
     }
-    if (!isConfig(config)) return dormant(`${request.url} is not a Spicy3D server`);
+    if (!isConfig(config)) return dormant(`${request.url} is not a Spicy3D server`, cache);
 
     const compatibility = checkApiVersion(String(config.apiVersion));
     if (compatibility !== "compatible") {
@@ -104,12 +129,25 @@ export async function discoverCloud(options: DiscoveryOptions = {}): Promise<Clo
             `[cloud] server API ${config.apiVersion} is outside the supported range ` +
                 `${SUPPORTED_API_VERSIONS.min}–${SUPPORTED_API_VERSIONS.max}`,
         );
+        cache?.remove(CONFIG_CACHE_KEY);
         return { status: "incompatible", config, compatibility };
     }
+    cache?.setValue(CONFIG_CACHE_KEY, config);
     return { status: "ready", config };
 }
 
-function dormant(reason: string): CloudDiscovery {
+function readCachedConfig(cache: ObjectStorage | undefined): ConfigResponse | undefined {
+    try {
+        const config = cache?.value<unknown>(CONFIG_CACHE_KEY, undefined);
+        return isConfig(config) ? config : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** A definite answer that no Spicy3D server is here also forgets the one cached. */
+function dormant(reason: string, cache?: ObjectStorage): CloudDiscovery {
     Logger.info(`[cloud] no server (${reason}); local-only`);
+    cache?.remove(CONFIG_CACHE_KEY);
     return { status: "dormant" };
 }

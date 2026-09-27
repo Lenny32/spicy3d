@@ -274,7 +274,7 @@ describe("AppBuilder", () => {
 
             await (builder as any).runStarted(fakeApp);
 
-            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
+            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test", offlineCache: true }]);
             expect(cloudMock.startCalls).toEqual([]);
             expect(cloudMock.accountUiCalls).toEqual([]);
             expect(cloudMock.documentsCalls).toEqual([]);
@@ -290,7 +290,7 @@ describe("AppBuilder", () => {
 
             await (builder as any).runStarted(fakeApp);
 
-            expect(cloudMock.discoverCalls).toEqual([{}]);
+            expect(cloudMock.discoverCalls).toEqual([{ offlineCache: true }]);
             expect(cloudMock.startCalls).toEqual([[discovery, {}]]);
             expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, undefined]]);
             expect(cloudMock.documentsCalls).toEqual([[{ connection: discovery }, fakeApp]]);
@@ -306,7 +306,7 @@ describe("AppBuilder", () => {
 
             await (builder as any).runStarted(fakeApp);
 
-            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test" }]);
+            expect(cloudMock.discoverCalls).toEqual([{ baseUrl: "https://spicy.test", offlineCache: true }]);
             expect(cloudMock.startCalls).toEqual([[discovery, { baseUrl: "https://spicy.test" }]]);
             expect(cloudMock.accountUiCalls).toEqual([[{ connection: discovery }, accountLink]]);
         });

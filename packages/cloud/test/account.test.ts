@@ -3,7 +3,7 @@
 
 import { rs } from "@rstest/core";
 import { ObjectStorage } from "@spicy3d/core";
-import { type Account, exportFileName, type SignOutEvent } from "../src/account/account";
+import { Account, exportFileName, type SignOutEvent } from "../src/account/account";
 import {
     CloudDeviceSettings,
     DEVICE_NAME_MAX_LENGTH,
@@ -72,6 +72,25 @@ describe("Account session state", () => {
         expect(result.isOk).toBe(false);
         expect(result.error).toEqual({ kind: "offline" });
         expect(account.status).toBe("unknown");
+    });
+
+    test("offline at startup, the user last signed in here stays signed in; signing out forgets them", async () => {
+        const server = new FakeServer().on("GET /api/me", json(200, USER));
+        const first = accountOn(server);
+        await first.refresh();
+        expect(first.deviceSettings.lastUser?.id).toBe(USER.id);
+        server.fetch.mockImplementation(async () => {
+            throw new TypeError("Failed to fetch");
+        });
+        const account = new Account(server.client(), first.deviceSettings);
+
+        const result = await account.refresh();
+
+        expect(result.isOk).toBe(false);
+        expect(account.status).toBe("signedIn");
+        expect(account.user?.id).toBe(USER.id);
+        await account.signOut();
+        expect(account.deviceSettings.lastUser).toBeUndefined();
     });
 
     test("status and user changes are observable", async () => {

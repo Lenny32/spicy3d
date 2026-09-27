@@ -152,7 +152,8 @@ export class AppBuilder {
         this._started.push(async (app) => {
             const { discoverCloud } = await import("@spicy3d/cloud/src/config");
             const { accountLink, ...connection } = options;
-            const discovery = await discoverCloud(connection);
+            // Offline, the config the server gave last time starts the cloud (cached documents, pending saves).
+            const discovery = await discoverCloud({ ...connection, offlineCache: true });
             if (discovery.status === "dormant") {
                 if (accountLink) Logger.warn("[cloud] opened with an account link, but no server answers");
                 return;

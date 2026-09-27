@@ -2,9 +2,11 @@
 // See LICENSE file in the project root for full license information.
 
 import { type DocumentLocation, ObjectStorage, Observable } from "@spicy3d/core";
+import type { ApiSchema } from "../api";
 import { describeUserAgent } from "./userAgent";
 
 const STORAGE_KEY = "cloud.device";
+const LAST_USER_KEY = "cloud.lastUser";
 
 /** The server keeps at most this many characters of a version's device name. */
 export const DEVICE_NAME_MAX_LENGTH = 100;
@@ -70,6 +72,24 @@ export class CloudDeviceSettings extends Observable {
     }
     set newDocumentLocation(value: DocumentLocation) {
         this.setProperty("newDocumentLocation", value, () => this.write());
+    }
+
+    /**
+     * The user last signed in on this browser, so the app starts signed in (their cached documents,
+     * their pending saves) when the server can't be reached; forgotten on sign-out.
+     */
+    get lastUser(): ApiSchema<"MeResponse"> | undefined {
+        try {
+            const user = this.storage.value<ApiSchema<"MeResponse">>(LAST_USER_KEY, undefined);
+            return typeof user?.id === "string" ? user : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    rememberUser(user: ApiSchema<"MeResponse"> | undefined): void {
+        if (user) this.storage.setValue(LAST_USER_KEY, user);
+        else this.storage.remove(LAST_USER_KEY);
     }
 
     private read(): StoredDeviceSettings {
