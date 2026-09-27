@@ -287,11 +287,11 @@ describe("PluginManager", () => {
 
             const loadPluginSpy = rs.spyOn(manager as any, "loadPluginFromUrl").mockResolvedValue(undefined);
 
-            await manager.loadFromUrl("https://localhost/plugin/");
+            await manager.loadFromUrl("https://localhost/plugins/demo/");
 
             expect(loadPluginSpy).toHaveBeenCalledWith(
                 "demo-plugin",
-                "https://localhost/plugin/",
+                "https://localhost/plugins/demo/",
                 "index.js",
                 undefined,
             );
@@ -308,7 +308,7 @@ describe("PluginManager", () => {
 
             const loadPluginSpy = rs.spyOn(manager as any, "loadPluginFromUrl").mockResolvedValue(undefined);
 
-            await manager.loadFromUrl("https://localhost/plugin/");
+            await manager.loadFromUrl("https://localhost/plugins/demo/");
 
             expect(loadPluginSpy).not.toHaveBeenCalled();
             loadPluginSpy.mockRestore();

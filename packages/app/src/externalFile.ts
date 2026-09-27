@@ -1,7 +1,15 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ExternalContentPolicy, I18n, Logger, PubSub, redactUrl } from "@spicy3d/core";
+import {
+    appFolderUrl,
+    ExternalContentPolicy,
+    I18n,
+    Logger,
+    PLUGIN_FILE_EXTENSION,
+    PubSub,
+    redactUrl,
+} from "@spicy3d/core";
 import { div, hr } from "@spicy3d/element";
 
 /**
@@ -34,4 +42,24 @@ export async function approveExternalFile(raw: string): Promise<URL | undefined>
         );
     });
     return confirmed ? url : undefined;
+}
+
+/** The decoded last path segment of `url` (`%2E` and the like included): what the file is called. */
+export function urlFileName(url: URL): string {
+    const last = url.pathname.substring(url.pathname.lastIndexOf("/") + 1);
+    try {
+        return decodeURIComponent(last);
+    } catch {
+        return last;
+    }
+}
+
+/** Whether `raw` names a `.spicyplugin` (by its path, decoded; never by its query). */
+export function isPluginUrl(raw: string): boolean {
+    try {
+        const url = new URL(raw, appFolderUrl());
+        return urlFileName(url).toLowerCase().endsWith(PLUGIN_FILE_EXTENSION);
+    } catch {
+        return false;
+    }
 }

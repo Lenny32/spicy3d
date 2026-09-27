@@ -215,6 +215,43 @@ describe("PluginManager untrusted domains (isolated)", () => {
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 
+    test.each([
+        "/api/blobs/ab12?x=.spicyplugin",
+        "/api/blobs/ab12.spicyplugin",
+        "/models/x.spicyplugin",
+    ])("same origin but outside plugins/ (%s): asks like any other origin", async (path) => {
+        expect(location.origin).toMatch(/^https?:\/\//);
+        const manager = createManager();
+        const loadRemoteSpy = rs.spyOn(manager as any, "loadFromRemoteFile").mockResolvedValue(undefined);
+        try {
+            await manager.loadFromUrl(new URL(path, location.href).href);
+
+            expect(loadRemoteSpy).not.toHaveBeenCalled();
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(dialogButtons(dialogArgs).map((b) => b.content)).toEqual([
+                "common.dontTrust",
+                "common.trust",
+            ]);
+        } finally {
+            loadRemoteSpy.mockRestore();
+        }
+    });
+
+    test("a .spicyplugin is recognized by its path, not by a query ending in .spicyplugin", async () => {
+        const manager = createManager();
+        const fromFile = rs.spyOn(manager, "loadFromFile").mockResolvedValue(undefined);
+        const fromFolder = rs.spyOn(manager as any, "readManifestFromUrl").mockResolvedValue(undefined);
+        try {
+            await (manager as any).loadFromRemoteFile("https://p.example.com/plugins/x/?name=.spicyplugin");
+
+            expect(fromFile).not.toHaveBeenCalled();
+            expect(fromFolder).toHaveBeenCalledTimes(1);
+        } finally {
+            fromFile.mockRestore();
+            fromFolder.mockRestore();
+        }
+    });
+
     test("a non-http plugin URL is refused without a prompt", async () => {
         const manager = createManager();
         const toasts: unknown[][] = [];

@@ -36,7 +36,7 @@ import {
 } from "@spicy3d/core";
 import { Document } from "./document";
 import { type DocumentFileEntry, openDocumentFile } from "./documentFiles";
-import { approveExternalFile } from "./externalFile";
+import { approveExternalFile, isPluginUrl, urlFileName } from "./externalFile";
 import { HeadlessDocumentEvaluator } from "./mergeEvaluator";
 import { PluginManager } from "./pluginManager";
 import { LocalDocumentRepository } from "./repositories";
@@ -284,15 +284,19 @@ export class Application extends Observable implements IApplication {
     /**
      * Opens the file at `url` (`?url=` / `?model=`): the app's own origin and the deployment's
      * allowlist at once, any other origin only once the user confirms (`approveExternalFile`).
-     * Cross-origin requests carry no cookies.
+     * Cross-origin requests carry no cookies. A `.spicyplugin` is code, not a file: it goes through
+     * the plugin rules (`PluginManager.loadFromUrl`), never through this prompt.
      */
     async loadFileFromUrl(url: string): Promise<void> {
         return Promise.try(async () => {
+            if (isPluginUrl(url)) {
+                await this.pluginManager.loadFromUrl(url);
+                return;
+            }
             const approved = await approveExternalFile(url);
             if (!approved) return;
-            const filename = decodeURIComponent(
-                approved.pathname.substring(approved.pathname.lastIndexOf("/") + 1),
-            );
+            const filename = urlFileName(approved);
+            if (filename.toLowerCase().endsWith(PLUGIN_FILE_EXTENSION)) return; // never imported as a file
             if (!filename || !filename.includes(".")) {
                 throw new Error(`No file name in url: ${redactUrl(approved)}`);
             }

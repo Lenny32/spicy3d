@@ -420,10 +420,12 @@ describe("Application", () => {
     // ==========================================================================
     describe("loadFileFromUrl", () => {
         let originalFetch: typeof fetch;
+        let originalImport: typeof sharedApp.dataExchange.import;
         let errorSpy: ReturnType<typeof rs.spyOn>;
 
         beforeEach(() => {
             originalFetch = globalThis.fetch;
+            originalImport = sharedApp.dataExchange.import;
             // example.com is allowlisted by the deployment: opened without asking.
             DeploymentConfig.set({ security: { fileOrigins: ["https://example.com"] } });
             if (!(Promise as any).try) {
@@ -435,6 +437,7 @@ describe("Application", () => {
 
         afterEach(() => {
             globalThis.fetch = originalFetch;
+            sharedApp.dataExchange.import = originalImport;
             errorSpy.mockRestore();
             DeploymentConfig.reset();
             PubSub.default.removeAll("showDialog");
@@ -459,10 +462,7 @@ describe("Application", () => {
             });
 
             const loading = sharedApp.loadFileFromUrl("https://evil.example.net/files/model.step?sig=secret");
-            await Promise.resolve();
-            await Promise.resolve();
-
-            expect(dialogs).toHaveLength(1);
+            await rs.waitFor(() => expect(dialogs).toHaveLength(1));
             expect(fetchSpy).not.toHaveBeenCalled();
             const origin = dialogs[0].content.querySelector("[data-origin]") as HTMLElement | null;
             expect(origin).not.toBeNull();
@@ -485,14 +485,50 @@ describe("Application", () => {
             });
 
             const loading = sharedApp.loadFileFromUrl("https://other.example.org/model.step");
-            await Promise.resolve();
-            await Promise.resolve();
-            expect(buttons).toHaveLength(2);
+            await rs.waitFor(() => expect(buttons).toHaveLength(2));
             await buttons[0].onclick!();
             await loading;
 
             expect(fetchSpy).not.toHaveBeenCalled();
             expect(sharedApp.documents.size).toBe(0);
+        });
+
+        test.each([
+            "https://example.com/x.spicyplugin",
+            "https://example.com/x.SpicyPlugin?download=1",
+            "https://example.com/x%2Espicyplugin",
+            // Same origin: still a plugin, not a file.
+            "/plugins/x.spicyplugin",
+        ])("%s is a plugin: it goes through the plugin rules, never the file prompt or import", async (url) => {
+            const fetchSpy = okFetch();
+            const importSpy = rs.fn(async (_document: IDocument, _files: File[] | FileList) => {});
+            sharedApp.dataExchange.import = importSpy;
+            const dialog = rs.fn();
+            PubSub.default.sub("showDialog", dialog);
+            const pluginSpy = rs
+                .spyOn(sharedApp.pluginManager, "loadFromUrl")
+                .mockImplementation(async (_url: string) => {});
+            try {
+                await sharedApp.loadFileFromUrl(url);
+
+                expect(pluginSpy).toHaveBeenCalledWith(url);
+                expect(fetchSpy).not.toHaveBeenCalled();
+                expect(dialog).not.toHaveBeenCalled();
+                expect(importSpy).not.toHaveBeenCalled();
+            } finally {
+                pluginSpy.mockRestore();
+            }
+        });
+
+        test("a .spicyplugin from a link on another origin ends in the plugin trust prompt", async () => {
+            const fetchSpy = okFetch();
+            const dialogs: string[] = [];
+            PubSub.default.sub("showDialog", (title) => dialogs.push(title));
+
+            await sharedApp.loadFileFromUrl("https://evil.example.net/x.spicyplugin");
+
+            expect(dialogs).toEqual(["common.warning"]);
+            expect(fetchSpy).not.toHaveBeenCalled();
         });
 
         test.each([

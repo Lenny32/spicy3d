@@ -20,6 +20,7 @@ import {
 } from "@spicy3d/core";
 import { div, hr, p, toBase64Img } from "@spicy3d/element";
 import type JSZip from "jszip";
+import { isPluginUrl } from "./externalFile";
 import { linkPluginModules, type PluginModuleSource } from "./pluginModules";
 
 /** Origins the user refused in this page. */
@@ -51,10 +52,10 @@ export class PluginManager implements IPluginManager {
     }
 
     private async loadFromRemoteFile(url: string) {
-        if (url.endsWith(".spicyplugin")) {
+        if (isPluginUrl(url)) {
             const response = await fetch(url);
             if (!response.ok) {
-                alert(`Failed to fetch plugin from ${url}: ${response.statusText}`);
+                alert(`Failed to fetch plugin from ${redactUrl(url)}: ${response.statusText}`);
                 return;
             }
 
