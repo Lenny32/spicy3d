@@ -11,7 +11,8 @@ const mcpBridgeDownloadUrl =
     `https://github.com/Lenny32/spicy3d/releases/download/${packages.version}/`;
 
 export default defineConfig({
-    exclude: ["**/cpp/**"],
+    // Agent worktrees (`.claude/worktrees/`) are other checkouts of the repository.
+    exclude: ["**/cpp/**", "**/.claude/**"],
     coverage: {
         exclude: ["**/wasm/lib/**", "**/test-utils/**"],
     },
