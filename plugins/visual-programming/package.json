@@ -1,13 +1,13 @@
 {
     "name": "visual-programming",
     "version": "1.0.0",
-    "description": "Visual programming plugin for Chili3D",
+    "description": "Visual programming plugin for Spicy3D",
     "main": "extension.js",
     "type": "module",
     "scripts": {
         "build": "rspack build",
         "preview": "npm run build && echo 'Debug URL: http://localhost:8080?plugin=http://localhost:8686' && npx servitsy -p 8686 --cors",
-        "package": "npm run build && node ../scripts/package-plugin.mjs dist/visual-programming.chiliplugin manifest.json icons dist"
+        "package": "npm run build && node ../scripts/package-plugin.mjs dist/visual-programming.spicyplugin manifest.json icons dist"
     },
     "dependencies": {
         "@retejs/lit-plugin": "^2.0.7",
@@ -24,10 +24,10 @@
         "rete-render-utils": "^2.0.3"
     },
     "keywords": [
-        "chili3d",
+        "spicy3d",
         "plugin",
         "visual-programming",
         "node-editor"
     ],
-    "author": "Chili3D Team"
+    "author": "Spicy3D Team"
 }

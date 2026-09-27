@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Material, Matrix4, PhongMaterial, PhysicalMaterial, XYZ } from "@chili3d/core";
-import { TestDocument } from "@chili3d/core/test-utils";
+import { Material, Matrix4, PhongMaterial, PhysicalMaterial, XYZ } from "@spicy3d/core";
+import { TestDocument } from "@spicy3d/core/test-utils";
 import {
     Box3,
     BufferAttribute,

@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IDocument, IVisual, IVisualObject, Matrix4, VisualNode } from "@chili3d/core";
-import { VisualStates } from "@chili3d/core";
-import { createMockVisual } from "@chili3d/core/test-utils";
+import type { IDocument, IVisual, IVisualObject, Matrix4, VisualNode } from "@spicy3d/core";
+import { VisualStates } from "@spicy3d/core";
+import { createMockVisual } from "@spicy3d/core/test-utils";
 import { Group, MeshBasicMaterial, Object3D, Scene } from "three";
 import { ThreeVisualContext } from "../src/threeVisualContext";
 import { createTestGeometryNode } from "./mocks";

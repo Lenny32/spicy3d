@@ -1,13 +1,13 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Plane, ShapeTypes } from "@chili3d/core";
-import { createMockDocument } from "@chili3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@chili3d/wasm";
 import { rs } from "@rstest/core";
+import { Plane, ShapeTypes } from "@spicy3d/core";
+import { createMockDocument } from "@spicy3d/core/test-utils";
+import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { sketchProfiles } from "../../src/features/profileBuilder";
 import { addPolygon } from "../../src/sketch/commands/sketchPolygon";
 import { shapeEntityIds } from "../../src/sketch/sketchModel";
@@ -18,7 +18,7 @@ import "./setup";
 beforeAll(async () => {
     await initWasm({
         wasmBinary: readFileSync(
-            path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../wasm/lib/chili-wasm.wasm"),
+            path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../wasm/lib/spicy-wasm.wasm"),
         ),
     });
     rs.stubGlobal("shapeFactory", new ShapeFactory());

@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { command, GetOrSelectNodeStep, I18n, MultistepCommand, PubSub, ShapeNode } from "@chili3d/core";
-import { div, span } from "@chili3d/element";
+import { command, GetOrSelectNodeStep, I18n, MultistepCommand, PubSub, ShapeNode } from "@spicy3d/core";
+import { div, span } from "@spicy3d/element";
 import style from "./checkShape.module.css";
 
 type FaceCheckItem = { index: number; isValid: boolean; status: string[] };

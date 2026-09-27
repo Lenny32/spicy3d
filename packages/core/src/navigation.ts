@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { Config } from "./config";
 
-export const Navigation3DTypes = ["Chili3d", "Revit", "Blender", "Creo", "Solidworks", "Fusion360"] as const;
+export const Navigation3DTypes = ["Spicy3D", "Revit", "Blender", "Creo", "Solidworks", "Fusion360"] as const;
 
 export type Navigation3DType = (typeof Navigation3DTypes)[number];
 
@@ -28,7 +28,7 @@ export class Navigation3D {
         rotate: string;
     } {
         const functionKey = {
-            ["Chili3d"]: {
+            ["Spicy3D"]: {
                 pan: "Middle",
                 rotate: "Shift+Middle",
             },

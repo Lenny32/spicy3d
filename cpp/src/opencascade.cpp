@@ -1,5 +1,5 @@
-// Part of the Chili3d Project, under the LGPL-3.0 License.
-// See LICENSE-chili-wasm.text file in the project root for full license information.
+// Part of the Spicy3D Project, derived from Chili3D, under the LGPL-3.0 License.
+// See LICENSE-spicy-wasm.txt file in the project root for full license information.
 
 #include <emscripten/bind.h>
 

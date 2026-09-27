@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 /**
- * chili3d-mcp-bridge: an MCP stdio server whose tools run in the user's Chili3D browser tab.
+ * spicy3d-mcp-bridge: an MCP stdio server whose tools run in the user's Spicy3D browser tab.
  *
  * stdout carries MCP messages only (newline-delimited JSON-RPC); every log line goes to stderr.
  *
- * Options and environment variables: see USAGE in options.mjs (`chili3d-mcp-bridge --help`).
+ * Options and environment variables: see USAGE in options.mjs (`spicy3d-mcp-bridge --help`).
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -26,7 +26,7 @@ let options;
 try {
     options = parseOptions(process.argv.slice(2), process.env);
 } catch (err) {
-    process.stderr.write(`chili3d-mcp-bridge: ${err.message}\n\n${USAGE}`);
+    process.stderr.write(`spicy3d-mcp-bridge: ${err.message}\n\n${USAGE}`);
     process.exit(2);
 }
 if (options.help) {
@@ -41,7 +41,7 @@ if (options.version) {
 const { appUrl, port, noToken, allowedOrigins } = options;
 const token = noToken ? "" : options.token || randomBytes(16).toString("hex");
 
-const log = (/** @type {string} */ text) => process.stderr.write(`[chili3d-bridge] ${text}\n`);
+const log = (/** @type {string} */ text) => process.stderr.write(`[spicy3d-bridge] ${text}\n`);
 const link = pairingUrl(appUrl, port, token);
 
 const core = new BridgeCore({
@@ -91,7 +91,7 @@ wss.on("listening", () => {
     if (noToken)
         log("WARNING: running without a pairing token; any program on this machine can drive the tab");
     log(`accepting pages from: ${[...allowedOrigins].join(", ")}`);
-    log(`open Chili3D with: ${link}`);
+    log(`open Spicy3D with: ${link}`);
 });
 
 wss.on("connection", (socket) => {

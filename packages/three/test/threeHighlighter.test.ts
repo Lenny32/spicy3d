@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { EdgeMeshData, FaceMeshData } from "@chili3d/core";
-import { ShapeTypes, VisualStates, VisualStateUtils } from "@chili3d/core";
+import type { EdgeMeshData, FaceMeshData } from "@spicy3d/core";
+import { ShapeTypes, VisualStates, VisualStateUtils } from "@spicy3d/core";
 import type { Mesh } from "three";
 import type { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import type { IHighlightable } from "../src/highlightable";

@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Transaction } from "@chili3d/core";
-import type { ParametricOp, ProgramResult } from "@chili3d/parametric";
+import { Transaction } from "@spicy3d/core";
+import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
 import { requireDocument } from "./documentContext";
 
@@ -12,10 +12,10 @@ import { requireDocument } from "./documentContext";
  * would pull the whole parametric chunk — and with it the wasm-backed constraint solver —
  * into the resident prompt path.
  */
-let parametricModule: Promise<typeof import("@chili3d/parametric")> | undefined;
+let parametricModule: Promise<typeof import("@spicy3d/parametric")> | undefined;
 
-function loadParametric(): Promise<typeof import("@chili3d/parametric")> {
-    parametricModule ??= import("@chili3d/parametric");
+function loadParametric(): Promise<typeof import("@spicy3d/parametric")> {
+    parametricModule ??= import("@spicy3d/parametric");
     return parametricModule;
 }
 

@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { Config } from "../src/config";
@@ -6,8 +6,8 @@ import { Navigation3D, Navigation3DTypes } from "../src/navigation";
 import { mockLocalStorage } from "../test-utils";
 
 describe("Navigation3DTypes", () => {
-    test("should contain Chili3d", () => {
-        expect(Navigation3DTypes).toContain("Chili3d");
+    test("should contain Spicy3D", () => {
+        expect(Navigation3DTypes).toContain("Spicy3D");
     });
 
     test("should contain Revit", () => {
@@ -100,16 +100,16 @@ describe("Navigation3D.navigationKeyMap", () => {
         Config.instance.init("config");
     });
 
-    describe("Chili3d", () => {
+    describe("Spicy3D", () => {
         test("should return Middle for pan", () => {
             Config.instance.init("testNavigation");
-            Config.instance.navigation3D = "Chili3d";
+            Config.instance.navigation3D = "Spicy3D";
             expect(Navigation3D.navigationKeyMap().pan).toBe("Middle");
         });
 
         test("should return Shift+Middle for rotate", () => {
             Config.instance.init("testNavigation");
-            Config.instance.navigation3D = "Chili3d";
+            Config.instance.navigation3D = "Spicy3D";
             expect(Navigation3D.navigationKeyMap().rotate).toBe("Shift+Middle");
         });
     });

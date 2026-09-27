@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -157,9 +157,13 @@ describe("createIcon", () => {
         expect(useEl.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#icon-box");
     });
 
-    test("should create SVG element for svg type", () => {
-        const el = createIcon({ type: "svg", value: "<svg><circle/></svg>" });
-        expect(el.tagName).toBe("svg");
+    test("should render svg type as an img data URL so plugin markup cannot run scripts", () => {
+        const markup = '<svg onload="alert(1)"><circle/></svg>';
+        const el = createIcon({ type: "svg", value: markup });
+        expect(el.tagName).toBe("IMG");
+        expect((el as HTMLImageElement).src).toBe(
+            `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`,
+        );
     });
 
     test("should create img for png type", () => {
@@ -185,7 +189,7 @@ describe("createIcon", () => {
         const el = createIcon({ type: "unknown", value: "data" } as any);
         expect(el.tagName).toBe("svg");
         const useEl = el.children[0] as SVGUseElement;
-        expect(useEl.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#icon-chili");
+        expect(useEl.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#icon-spicy");
     });
 });
 

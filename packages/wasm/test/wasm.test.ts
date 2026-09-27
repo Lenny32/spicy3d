@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { Matrix4, XYZ } from "@chili3d/core";
-import type { Geom_Plane } from "../lib/chili-wasm";
+import { Matrix4, XYZ } from "@spicy3d/core";
+import type { Geom_Plane } from "../lib/spicy-wasm";
 import { convertFromMatrix, fromPln } from "../src/helper";
 import { testAx3 } from "./helpers";
 import "./setup";
@@ -134,7 +134,7 @@ test("should fuse a box with its mirror copy across a box face", () => {
 
 test("initWasm can be called repeatedly and the module stays functional", async () => {
     const { initWasm } = await import("../src/wasm");
-    const wasmBinary = readFileSync(path.resolve(import.meta.dirname, "..", "lib", "chili-wasm.wasm"));
+    const wasmBinary = readFileSync(path.resolve(import.meta.dirname, "..", "lib", "spicy-wasm.wasm"));
     const first = await initWasm({ wasmBinary });
     const second = await initWasm({ wasmBinary });
     expect(first).toBeDefined();

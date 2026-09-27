@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Binding, type IDocument, Localize, type Property, Transaction } from "@chili3d/core";
-import { div, input, span } from "@chili3d/element";
+import { Binding, type IDocument, Localize, type Property, Transaction } from "@spicy3d/core";
+import { div, input, span } from "@spicy3d/element";
 import commonStyle from "./common.module.css";
 import { PropertyBase } from "./propertyBase";
 
@@ -36,4 +36,4 @@ export class CheckProperty extends PropertyBase {
     }
 }
 
-customElements.define("chili-check-property", CheckProperty);
+customElements.define("spicy-check-property", CheckProperty);

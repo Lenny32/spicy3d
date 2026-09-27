@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
@@ -14,7 +14,7 @@ rs.mock("../src/toast/toast.module.css", () => ({
 // Mock I18n
 import "./_helpers/mockCoreI18n";
 
-// Mock @chili3d/element
+// Mock @spicy3d/element
 import "./_helpers/mockElement";
 
 import { Toast } from "../src/toast";

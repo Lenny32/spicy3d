@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -25,7 +25,7 @@ import {
     type TrackedShape,
     type XYZ,
     type XYZLike,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import type {
     IntVector,
     RegionsResult,
@@ -35,7 +35,7 @@ import type {
     TopoDS_Face,
     TopoDS_Shape,
     TrackedShapeResult,
-} from "../lib/chili-wasm";
+} from "../lib/spicy-wasm";
 import { OccCurve } from "./curve";
 import { convertFromContinuity, getJoinType, getOffsetMode } from "./helper";
 import { OccEdge, OccShape } from "./shape";

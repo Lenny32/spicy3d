@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { describe, expect, test } from "@rstest/core";
@@ -36,8 +36,8 @@ const pubSubRecorder = rs.hoisted(() => {
 });
 
 // Mock core
-rs.mock("@chili3d/core", () => {
-    const actual = rs.hoisted(() => require("@chili3d/core"));
+rs.mock("@spicy3d/core", () => {
+    const actual = rs.hoisted(() => require("@spicy3d/core"));
     const { I18nMock, LocalizeMock, BindingMock, TransactionMock } = rs.hoisted(() =>
         require("./_helpers/coreMocks"),
     );
@@ -127,7 +127,7 @@ describe("ProjectView", () => {
 
         test("should render header and items panel", () => {
             const pv = new ProjectView({ className: "test-panel" });
-            const toolbar = pv.querySelector("chili-toolbar");
+            const toolbar = pv.querySelector("spicy-toolbar");
             expect(toolbar).not.toBeNull();
         });
     });

@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { parseArgs } from "node:util";
@@ -6,20 +6,20 @@ import { parseArgs } from "node:util";
 export const DEFAULT_APP_URL = "http://localhost:8080/";
 export const DEFAULT_PORT = 7777;
 
-export const USAGE = `Usage: chili3d-mcp-bridge [options]
+export const USAGE = `Usage: spicy3d-mcp-bridge [options]
 
-MCP stdio server whose tools run in your Chili3D browser tab. Your MCP client
-(Claude Code, Claude Desktop, Cursor, ...) starts it; the Chili3D page connects
+MCP stdio server whose tools run in your Spicy3D browser tab. Your MCP client
+(Claude Code, Claude Desktop, Cursor, ...) starts it; the Spicy3D page connects
 to it from the MCP panel. Copy the ready-made command from that panel.
 
 Options:
-  -u, --app-url <url>        Address of the Chili3D page, e.g. https://cad.example.com/
-                             Only pages from this origin may connect.   [env CHILI3D_APP_URL, default ${DEFAULT_APP_URL}]
-  -p, --port <n>             WebSocket port on 127.0.0.1                [env CHILI3D_BRIDGE_PORT, default ${DEFAULT_PORT}]
-  -t, --token <secret>       Pairing token shown in the MCP panel       [env CHILI3D_BRIDGE_TOKEN, default random]
+  -u, --app-url <url>        Address of the Spicy3D page, e.g. https://cad.example.com/
+                             Only pages from this origin may connect.   [env SPICY3D_APP_URL, default ${DEFAULT_APP_URL}]
+  -p, --port <n>             WebSocket port on 127.0.0.1                [env SPICY3D_BRIDGE_PORT, default ${DEFAULT_PORT}]
+  -t, --token <secret>       Pairing token shown in the MCP panel       [env SPICY3D_BRIDGE_TOKEN, default random]
       --no-token             Accept the page without a token. INSECURE: any program
-                             on this machine can then drive the tab.    [env CHILI3D_BRIDGE_NO_TOKEN=1]
-      --allow-origin <url>   Also accept pages from this origin (repeatable) [env CHILI3D_ALLOWED_ORIGINS, comma-separated]
+                             on this machine can then drive the tab.    [env SPICY3D_BRIDGE_NO_TOKEN=1]
+      --allow-origin <url>   Also accept pages from this origin (repeatable) [env SPICY3D_ALLOWED_ORIGINS, comma-separated]
   -h, --help                 Show this help
   -v, --version              Show the version
 `;
@@ -45,7 +45,7 @@ export function parseOptions(argv, env) {
         },
     });
 
-    const appUrlText = values["app-url"] ?? env["CHILI3D_APP_URL"] ?? DEFAULT_APP_URL;
+    const appUrlText = values["app-url"] ?? env["SPICY3D_APP_URL"] ?? DEFAULT_APP_URL;
     let appUrl;
     try {
         appUrl = new URL(appUrlText);
@@ -56,21 +56,21 @@ export function parseOptions(argv, env) {
         throw new Error(`--app-url must be an http(s) address, got ${appUrlText}`);
     }
 
-    const portText = values.port ?? env["CHILI3D_BRIDGE_PORT"] ?? String(DEFAULT_PORT);
+    const portText = values.port ?? env["SPICY3D_BRIDGE_PORT"] ?? String(DEFAULT_PORT);
     const port = Number(portText);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
         throw new Error(`--port must be an integer between 1 and 65535, got ${portText}`);
     }
 
-    const noToken = values["no-token"] === true || env["CHILI3D_BRIDGE_NO_TOKEN"] === "1";
-    const token = noToken ? "" : (values.token ?? env["CHILI3D_BRIDGE_TOKEN"] ?? "");
+    const noToken = values["no-token"] === true || env["SPICY3D_BRIDGE_NO_TOKEN"] === "1";
+    const token = noToken ? "" : (values.token ?? env["SPICY3D_BRIDGE_TOKEN"] ?? "");
     if (values.token !== undefined && values["no-token"]) {
         throw new Error("--token and --no-token cannot be used together");
     }
 
     const extraOrigins = [
         ...(values["allow-origin"] ?? []),
-        ...(env["CHILI3D_ALLOWED_ORIGINS"] ?? "").split(","),
+        ...(env["SPICY3D_ALLOWED_ORIGINS"] ?? "").split(","),
     ]
         .map((o) => o.trim())
         .filter(Boolean)

@@ -1,18 +1,18 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EditableShapeNode, type IDocument, ShapeTypes, XYZ } from "@chili3d/core";
-import { createMockVisualWithDocument, TestDocument } from "@chili3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@chili3d/wasm";
+import { EditableShapeNode, type IDocument, ShapeTypes, XYZ } from "@spicy3d/core";
+import { createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
+import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { WireNode } from "../../../src/bodys/wire";
 import { ConvertToWire } from "../../../src/commands/create/converter";
 import { SelectionManager } from "../../../src/selectionManager";
 
 const WASM_BINARY = readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../wasm/lib/chili-wasm.wasm"),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../wasm/lib/spicy-wasm.wasm"),
 );
 
 let restoreApp: () => void;

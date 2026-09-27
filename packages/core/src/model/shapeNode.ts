@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { VisualConfig } from "../config";
 import type { IDocument } from "../document";
 import { type IEqualityComparer, Logger, PubSub, Result } from "../foundation";
-import { I18n, type I18nKeys } from "../i18n";
+import type { I18nKeys } from "../i18n";
 import { Matrix4 } from "../math";
 import { property } from "../property";
 import { serializable, serialize } from "../serialize";

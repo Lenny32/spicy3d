@@ -1,13 +1,13 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 // Reproduction for "redo after a consumed boolean reports: null is not a valid
 // TopoDS_Shape" — the derived `shape` property is recorded in history, so redo
 // re-applies a stale snapshot whose wasm shape cache eviction already disposed.
 
-import { Plane, Transaction } from "@chili3d/core";
-import { createMockApplication, TestDocument } from "@chili3d/core/test-utils";
-import { ShapeFactory } from "@chili3d/wasm";
+import { Plane, Transaction } from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
+import { ShapeFactory } from "@spicy3d/wasm";
 import "../../parametric/src/features"; // registers all feature handlers
 import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../../parametric/src/sketch";

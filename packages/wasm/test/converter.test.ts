@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ShapeTypes, XYZ } from "@chili3d/core";
-import { MockShape } from "@chili3d/core/test-utils";
+import { ShapeTypes, XYZ } from "@spicy3d/core";
+import { MockShape } from "@spicy3d/core/test-utils";
 import type { OccShapeConverter } from "../src/converter";
 import type { ShapeFactory } from "../src/factory";
 import type { OccSolid } from "../src/shape";
@@ -178,7 +178,7 @@ describe("STL conversion", () => {
         const text = new TextDecoder().decode(result.value);
         expect(text.startsWith("solid")).toBe(true);
         expect(text).toContain("facet normal");
-        expect(text.trimEnd().endsWith("endsolid chili3d")).toBe(true);
+        expect(text.trimEnd().endsWith("endsolid spicy3d")).toBe(true);
     });
 
     test("ASCII STL uses the provided solid name", () => {

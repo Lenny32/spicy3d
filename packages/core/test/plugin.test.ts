@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { createMockApplication } from "@chili3d/core/test-utils";
+import { createMockApplication } from "@spicy3d/core/test-utils";
 import {
     type IPluginManager,
     type Locale,
@@ -23,7 +23,7 @@ describe("plugin module", () => {
 
 describe("PLUGIN_FILE_EXTENSION", () => {
     test("should define the plugin archive extension", () => {
-        expect(PLUGIN_FILE_EXTENSION).toBe(".chiliplugin");
+        expect(PLUGIN_FILE_EXTENSION).toBe(".spicyplugin");
     });
 });
 
@@ -81,7 +81,7 @@ describe("PluginManifest", () => {
             author: { name: "Jane Doe", url: "https://example.com" },
             description: "A plugin with every field set",
             icon: "assets/icon.svg",
-            engines: { chili3d: ">=0.6.0" },
+            engines: { spicy3d: ">=0.6.0" },
             dependencies: { "other-plugin": ">=1.0.0" },
             css: ["base.css", "theme.css"],
             importmap: "importmap.json",
@@ -116,7 +116,7 @@ describe("IPluginManager contract", () => {
     /**
      * Minimal in-memory implementation used to exercise the interface exactly as
      * `core/src/application.ts` consumes it (`IApplication.pluginManager`). The
-     * concrete loader lives in @chili3d/app (PluginManager); here we only pin
+     * concrete loader lives in @spicy3d/app (PluginManager); here we only pin
      * down the state-management semantics the interface promises.
      */
     class MemoryPluginManager implements IPluginManager {

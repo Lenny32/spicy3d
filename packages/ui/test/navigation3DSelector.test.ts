@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 // biome-ignore assist/source/organizeImports: import order is load-bearing — the core-mock helper must load before core value imports and the module under test
@@ -9,13 +9,13 @@ import "./_helpers/mockElement";
 import { configStub } from "./_helpers/mockCoreConfig";
 
 // Core value imports must come AFTER the mock helper — importing them earlier
-// would load the real "@chili3d/core" before the mock registers.
-import { Navigation3DTypes } from "@chili3d/core";
+// would load the real "@spicy3d/core" before the mock registers.
+import { Navigation3DTypes } from "@spicy3d/core";
 import { Navigation3DSelector } from "../src/home/navigation3DSelector";
 
 describe("Navigation3DSelector", () => {
     beforeEach(() => {
-        configStub.navigation3D = "Chili3d";
+        configStub.navigation3D = "Spicy3D";
     });
 
     function getOnChange(selector: HTMLElement) {

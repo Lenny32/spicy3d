@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ConstructionNode, XYZ } from "@chili3d/core";
-import { createMockApplication, TestDocument } from "@chili3d/core/test-utils";
 import { rs } from "@rstest/core";
+import { ConstructionNode, XYZ } from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { ThreeGeometry } from "../src/threeGeometry";
 import { createThreeMockVisualContext } from "./mocks";

@@ -1,12 +1,12 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IApplication, IWindow } from "@chili3d/core";
-import { mockLocalStorage } from "@chili3d/core/test-utils";
-import { ThreeVisulFactory } from "@chili3d/three";
-import { MainWindow } from "@chili3d/ui";
-import { OccShapeProvider } from "@chili3d/wasm";
 import { rs } from "@rstest/core";
+import type { IApplication, IWindow } from "@spicy3d/core";
+import { mockLocalStorage } from "@spicy3d/core/test-utils";
+import { ThreeVisulFactory } from "@spicy3d/three";
+import { MainWindow } from "@spicy3d/ui";
+import { OccShapeProvider } from "@spicy3d/wasm";
 import { AppBuilder } from "../src/appBuilder";
 import { DefaultDataExchange } from "../src/defaultDataExchange";
 import { DefaultRibbon } from "../src/ribbon";
@@ -20,20 +20,20 @@ import { DefaultRibbon } from "../src/ribbon";
 const wasmMock = rs.hoisted(() => ({ initWasmCalls: 0 }));
 const uiMock = rs.hoisted(() => ({ mainWindowArgs: [] as unknown[][] }));
 
-rs.mock("@chili3d/wasm", () => ({
+rs.mock("@spicy3d/wasm", () => ({
     initWasm: async () => {
         wasmMock.initWasmCalls++;
     },
     OccShapeProvider: class OccShapeProvider {},
 }));
 
-rs.mock("@chili3d/three", () => ({
+rs.mock("@spicy3d/three", () => ({
     ThreeVisulFactory: class ThreeVisulFactory {
         constructor(readonly handler: unknown) {}
     },
 }));
 
-rs.mock("@chili3d/ui", () => ({
+rs.mock("@spicy3d/ui", () => ({
     MainWindow: class MainWindow {
         constructor(...args: unknown[]) {
             uiMock.mainWindowArgs.push(args);

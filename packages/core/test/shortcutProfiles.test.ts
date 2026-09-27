@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -211,7 +211,7 @@ describe("shortcutMaps", () => {
     });
 
     test("should return only the global map for a profile without contexts", () => {
-        expect(shortcutMaps(ShortcutProfiles.Chili3d)).toEqual([ShortcutProfiles.Chili3d.global]);
+        expect(shortcutMaps(ShortcutProfiles.Spicy3D)).toEqual([ShortcutProfiles.Spicy3D.global]);
     });
 });
 
@@ -226,8 +226,8 @@ describe("getShortcutText", () => {
     });
 
     test("should be empty for an unbound command", () => {
-        expect(getShortcutText("sketch.line", "Chili3d")).toBe("");
-        expect(getShortcutKeys("sketch.line", "Chili3d")).toEqual([]);
+        expect(getShortcutText("sketch.line", "Spicy3D")).toBe("");
+        expect(getShortcutKeys("sketch.line", "Spicy3D")).toEqual([]);
     });
 });
 

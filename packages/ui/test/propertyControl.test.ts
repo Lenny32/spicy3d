@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type I18nKeys, type IDocument, type ModelManager, Texture } from "@chili3d/core";
-import { createMockDocument } from "@chili3d/core/test-utils";
 import { describe, expect, test } from "@rstest/core";
+import { type I18nKeys, type IDocument, type ModelManager, Texture } from "@spicy3d/core";
+import { createMockDocument } from "@spicy3d/core/test-utils";
 import { basicPropertyControl } from "../src/property/basicPropertyControl";
 import { CheckProperty } from "../src/property/check";
 import { ColorProperty } from "../src/property/colorProperty";

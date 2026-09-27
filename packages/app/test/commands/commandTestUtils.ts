@@ -1,6 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+// `rs` is provided as a global by Rstest, but import explicitly for clarity.
+import { rs } from "@rstest/core";
 import {
     FolderNode,
     type IApplication,
@@ -19,10 +21,7 @@ import {
     type VisualNode,
     type VisualShapeData,
     XYZ,
-} from "@chili3d/core";
-
-// `rs` is provided as a global by Rstest, but import explicitly for clarity.
-import { rs } from "@rstest/core";
+} from "@spicy3d/core";
 
 /**
  * Helpers for driving geometry-create / measure commands without the WASM
@@ -256,7 +255,7 @@ export function makeParent(opts: Partial<TrackingParent> = {}): TrackingParent {
  * (or a configurable result) for the few methods modify commands touch.
  *
  * Deliberately NOT replaced by the shared `MockShape` from
- * `@chili3d/core/test-utils` — the behaviors the command tests rely on differ:
+ * `@spicy3d/core/test-utils` — the behaviors the command tests rely on differ:
  * - default `shapeType` here is `ShapeTypes.shape` (0); `MockShape` defaults to `compound`;
  * - `transformed`/`transformedMul` return `this` and record into `calls` (asserted in
  *   split/repair/transform tests); `MockShape` returns new instances without tracking;

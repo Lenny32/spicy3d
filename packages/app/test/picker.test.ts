@@ -1,13 +1,13 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { I18nKeys, IDocument, IEventHandler, IPicker, IVisual, VisualShapeData } from "@chili3d/core";
-import { AsyncController, PubSub, ShapeTypes, VisualStates } from "@chili3d/core";
+import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import type { I18nKeys, IDocument, IEventHandler, IPicker, IVisual, VisualShapeData } from "@spicy3d/core";
+import { AsyncController, PubSub, ShapeTypes, VisualStates } from "@spicy3d/core";
 import {
     createMockDocument,
     createMockVisualWithDocument as createMockVisual,
-} from "@chili3d/core/test-utils";
-import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+} from "@spicy3d/core/test-utils";
 import { Picker } from "../src/picker";
 
 function createMockHandler(): IEventHandler {

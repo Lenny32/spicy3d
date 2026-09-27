@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type I18nKeys, type IApplication, Localize, PubSub } from "@chili3d/core";
-import { button, div, li, span, ul } from "@chili3d/element";
+import { type I18nKeys, type IApplication, Localize, PubSub } from "@spicy3d/core";
+import { button, div, li, span, ul } from "@spicy3d/element";
 import style from "./macro.module.css";
 import { MacroEditor } from "./macroEditor";
 import { runMacro } from "./macroRunner";

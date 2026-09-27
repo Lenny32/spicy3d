@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { EdgeMeshData, FaceMeshData, IDisposable, IShape, VertexMeshData } from "@chili3d/core";
+import type { EdgeMeshData, FaceMeshData, IDisposable, IShape, VertexMeshData } from "@spicy3d/core";
 import { ClassicPreset } from "rete";
 import type { Control, Socket } from "rete/_types/presets/classic";
 import { flatTree } from "../../tree";

@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { GeometryType, IGeometry, Matrix4 } from "@chili3d/core";
-import type { Geom_Geometry, Handle_Geom_Geometry } from "../lib/chili-wasm";
+import type { GeometryType, IGeometry, Matrix4 } from "@spicy3d/core";
+import type { Geom_Geometry, Handle_Geom_Geometry } from "../lib/spicy-wasm";
 import { convertFromMatrix } from "./helper";
 
 export abstract class OccGeometry implements IGeometry {

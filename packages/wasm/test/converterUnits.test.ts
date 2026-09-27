@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { EditableShapeNode, type INode, type INodeLinkedList, type LengthUnit } from "@chili3d/core";
-import { createMockDocument } from "@chili3d/core/test-utils";
+import { EditableShapeNode, type INode, type INodeLinkedList, type LengthUnit } from "@spicy3d/core";
+import { createMockDocument } from "@spicy3d/core/test-utils";
 import type { OccShapeConverter } from "../src/converter";
 import type { ShapeFactory } from "../src/factory";
 import { createBox, createTestConverter, createTestFactory } from "./helpers";

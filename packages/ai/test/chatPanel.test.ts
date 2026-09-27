@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDocument, PubSub } from "@chili3d/core";
-import { createMockDocument, mockLocalStorage } from "@chili3d/core/test-utils";
 import { rs } from "@rstest/core";
+import { type IDocument, PubSub } from "@spicy3d/core";
+import { createMockDocument, mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ChatPanel } from "../src/chatPanel";
 import {
     readConversations,
@@ -492,7 +492,7 @@ describe("ChatPanel", () => {
         expect(loadConfig()?.apiKey).toBe("sk-test");
         expect(anyPanel.configured).toBe(true);
         // The key must stay out of persistent storage
-        expect(localStorage.getItem("chili3d.app.ai.config")).not.toContain("sk-test");
+        expect(localStorage.getItem("spicy3d.app.ai.config")).not.toContain("sk-test");
     });
 
     test("cancel closes the settings overlay without persisting", () => {
@@ -564,7 +564,7 @@ describe("ChatPanel", () => {
 
         expect(loadConfig()?.apiKey).toBe("sk-session");
         expect(anyPanel.configured).toBe(true);
-        expect(localStorage.getItem("chili3d.app.ai.config")).not.toContain("sk-session");
+        expect(localStorage.getItem("spicy3d.app.ai.config")).not.toContain("sk-session");
     });
 
     test("enter inserts a newline, ctrl+enter sends", async () => {

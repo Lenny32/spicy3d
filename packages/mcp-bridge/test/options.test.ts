@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { DEFAULT_APP_URL, DEFAULT_PORT, parseOptions } from "../src/options.mjs";
@@ -32,9 +32,9 @@ describe("parseOptions", () => {
 
     test("flags win over environment variables", () => {
         const env = {
-            CHILI3D_APP_URL: "https://env.example/",
-            CHILI3D_BRIDGE_PORT: "8000",
-            CHILI3D_BRIDGE_TOKEN: "env",
+            SPICY3D_APP_URL: "https://env.example/",
+            SPICY3D_BRIDGE_PORT: "8000",
+            SPICY3D_BRIDGE_TOKEN: "env",
         };
 
         expect(parseOptions(["-u", "https://flag.example/"], env)).toMatchObject({
@@ -45,18 +45,18 @@ describe("parseOptions", () => {
     });
 
     test("no-token mode clears the token", () => {
-        expect(parseOptions(["--no-token"], { CHILI3D_BRIDGE_TOKEN: "x" })).toMatchObject({
+        expect(parseOptions(["--no-token"], { SPICY3D_BRIDGE_TOKEN: "x" })).toMatchObject({
             noToken: true,
             token: "",
         });
-        expect(parseOptions([], { CHILI3D_BRIDGE_NO_TOKEN: "1" })).toMatchObject({ noToken: true });
+        expect(parseOptions([], { SPICY3D_BRIDGE_NO_TOKEN: "1" })).toMatchObject({ noToken: true });
     });
 
     test("adds extra origins from flags and the environment", () => {
         const options = parseOptions(
             ["--allow-origin", "https://a.example/x", "--allow-origin", "https://b.example"],
             {
-                CHILI3D_ALLOWED_ORIGINS: "https://c.example, ",
+                SPICY3D_ALLOWED_ORIGINS: "https://c.example, ",
             },
         );
 

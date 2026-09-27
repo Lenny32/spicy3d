@@ -1,11 +1,11 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { AppGuideStore, Config, I18n, type Locale } from "@chili3d/core";
+import { AppGuideStore, Config, I18n, type Locale } from "@spicy3d/core";
 import { appGuide, resolveCommandRefs } from "../src/skills/appGuide";
 
 afterEach(() => {
-    Config.instance.navigation3D = "Chili3d";
+    Config.instance.navigation3D = "Spicy3D";
     // Other suites register sections and overrides; read the built-in manual, not theirs.
     AppGuideStore.clearBase();
 });
@@ -51,7 +51,7 @@ describe("appGuide manual", () => {
     test("reports every navigation profile's pan and rotate buttons", () => {
         const guide = appGuide.content;
 
-        expect(guide).toContain("- Chili3d: pan = middle-drag, rotate = Shift + middle-drag");
+        expect(guide).toContain("- Spicy3D: pan = middle-drag, rotate = Shift + middle-drag");
         expect(guide).toContain("- Blender: pan = Shift + middle-drag, rotate = middle-drag");
         expect(guide).toContain("- Solidworks: pan = Ctrl + middle-drag, rotate = middle-drag");
     });

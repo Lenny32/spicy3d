@@ -1,8 +1,8 @@
 cmake_minimum_required (VERSION 3.30)
 
-project (chili-wasm)
+project (spicy-wasm)
 set (CMAKE_CXX_STANDARD 17)
-set (TARGET chili-wasm)
+set (TARGET spicy-wasm)
 set (CMAKE_CONFIGURATION_TYPES Debug;Release)
 set (CMAKE_NINJA_FORCE_RESPONSE_FILE 1 CACHE INTERNAL "")
 
@@ -50,23 +50,23 @@ list (APPEND OcctIncludeDirs ${CMAKE_CURRENT_BINARY_DIR}/include)
 
 file (GLOB OcctSourceFiles ${OcctSourceFolders})
 
-set (ChiliWasmSourcesFolder src)
+set (SpicyWasmSourcesFolder src)
 file (GLOB
-    ChiliWasmSourceFiles CONFIGURE_DEPENDS
-    ${ChiliWasmSourcesFolder}/*.hpp
-    ${ChiliWasmSourcesFolder}/*.cpp
+    SpicyWasmSourceFiles CONFIGURE_DEPENDS
+    ${SpicyWasmSourcesFolder}/*.hpp
+    ${SpicyWasmSourcesFolder}/*.cpp
 )
-source_group ("Sources" FILES ${ChiliWasmSourceFiles})
+source_group ("Sources" FILES ${SpicyWasmSourceFiles})
 source_group ("OCCT" FILES ${OcctSourceFiles})
 
 if (${EMSCRIPTEN})
 
     # Local incremental verification only: this archive must come from the same
     # OCCT source revision and Emscripten release flags as this build. Official
-    # builds leave CHILI_PREBUILT_OCCT unset and compile OCCT from source.
-    if (CHILI_PREBUILT_OCCT)
+    # builds leave SPICY_PREBUILT_OCCT unset and compile OCCT from source.
+    if (SPICY_PREBUILT_OCCT)
         add_library(occt STATIC IMPORTED)
-        set_target_properties(occt PROPERTIES IMPORTED_LOCATION "${CHILI_PREBUILT_OCCT}")
+        set_target_properties(occt PROPERTIES IMPORTED_LOCATION "${SPICY_PREBUILT_OCCT}")
         target_include_directories(occt INTERFACE ${OcctIncludeDirs})
         target_compile_definitions(occt INTERFACE OCCT_NO_PLUGINS)
     else()
@@ -80,7 +80,7 @@ if (${EMSCRIPTEN})
         )
     endif()
 
-    add_executable (${TARGET} ${ChiliWasmSourceFiles})
+    add_executable (${TARGET} ${SpicyWasmSourceFiles})
     target_include_directories (${TARGET} PUBLIC ${OcctIncludeDirs})
     target_compile_options (${TARGET} PUBLIC
         $<$<CONFIG:Release>:-Oz>

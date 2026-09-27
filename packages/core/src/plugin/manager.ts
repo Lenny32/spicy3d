@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import type { Plugin } from "./plugin";
@@ -13,7 +13,7 @@ export interface IPluginManager {
     loadFromFile(pluginFile: File): Promise<void>;
     /**
      * Load plugins from a url,
-     * if the url is a zip file, it will be loaded as a plugin, eg: https://example.com/plugin1.chiliplugin
+     * if the url is a zip file, it will be loaded as a plugin, eg: https://example.com/plugin1.spicyplugin
      * if the url is a directory, it will be loaded as a plugin folder, eg: https://example.com/plugin1, the plugin folder must have a manifest.json file inside,
      * @param pluginUrl the plugin url
      */

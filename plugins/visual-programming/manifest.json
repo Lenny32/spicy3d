@@ -1,13 +1,13 @@
 {
     "name": "Visual Programming Plugin",
     "version": "1.0.0",
-    "description": "A Grasshopper-style visual programming plugin for Chili3D",
+    "description": "A Grasshopper-style visual programming plugin for Spicy3D",
     "main": "dist/main.js",
     "css": "dist/main.css",
     "author": {
-        "name": "Chili3D Team"
+        "name": "Spicy3D Team"
     },
     "engines": {
-        "chili3d": ">=0.6"
+        "spicy3d": ">=0.0.1"
     }
 }

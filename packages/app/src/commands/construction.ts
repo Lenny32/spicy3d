@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -30,7 +30,7 @@ import {
     setActiveConstructionPlane,
     Transaction,
     XYZ,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import style from "./construction.module.css";
 
 function tr(text: string): string {
@@ -286,7 +286,7 @@ class ConstructionSession {
                     field.values[0] === "true" ? true : field.values[0] === "false" ? false : field.values[0];
             }
         }
-        this.root.className = `chili-construction-editor ${style.root}`;
+        this.root.className = `spicy-construction-editor ${style.root}`;
         const header = document.createElement("strong");
         header.textContent = title;
         this.root.append(header);
@@ -561,7 +561,7 @@ class ConstructionSession {
                                     const contact = captureFacePointRef(
                                         this.model,
                                         selected.owner.node,
-                                        selected.shape as import("@chili3d/core").IFace,
+                                        selected.shape as import("@spicy3d/core").IFace,
                                         pointPick.point,
                                     );
                                     if (contact.isOk) ref = contact.value;

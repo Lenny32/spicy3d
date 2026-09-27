@@ -1,8 +1,8 @@
 {
-    "name": "chili3d",
-    "version": "0.7.1",
+    "name": "spicy3d",
+    "version": "0.0.1",
     "description": "",
-    "documentVersion": "0.7.1",
+    "documentVersion": 1,
     "author": "仙阁",
     "type": "module",
     "scripts": {

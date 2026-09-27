@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { beforeEach, describe, expect, test } from "@rstest/core";
@@ -17,7 +17,7 @@ rs.mock("../src/statusbar/snapConfig", () => ({
     SnapConfig: class {},
 }));
 
-// McpStatusIndicator pulls in @chili3d/ai; it has its own test file (mcpStatus.test.ts).
+// McpStatusIndicator pulls in @spicy3d/ai; it has its own test file (mcpStatus.test.ts).
 rs.mock("../src/statusbar/mcpStatus", () => ({
     McpStatusIndicator: class {},
 }));
@@ -42,8 +42,8 @@ const configChanged = rs.hoisted(() => {
     };
 });
 
-rs.mock("@chili3d/core", () => {
-    const actual = rs.hoisted(() => require("@chili3d/core"));
+rs.mock("@spicy3d/core", () => {
+    const actual = rs.hoisted(() => require("@spicy3d/core"));
     return {
         ...actual,
         Config: { instance: configChanged.instance },
@@ -58,7 +58,7 @@ rs.mock("@chili3d/core", () => {
 // Mock element helpers
 import "./_helpers/mockElement";
 
-import type { I18nKeys } from "@chili3d/core";
+import type { I18nKeys } from "@spicy3d/core";
 import { Statusbar } from "../src/statusbar/statusbar";
 import { mustQuery } from "./_helpers/domHelpers";
 

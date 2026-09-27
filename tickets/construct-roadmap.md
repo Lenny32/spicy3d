@@ -1,6 +1,6 @@
 # Construct Panel Enhancement Roadmap
 
-Expand Chili3D's Construct panel from working-plane controls to persistent, associative reference geometry. Status: planned.
+Expand Spicy3D's Construct panel from working-plane controls to persistent, associative reference geometry. Status: planned.
 
 ## Current State
 

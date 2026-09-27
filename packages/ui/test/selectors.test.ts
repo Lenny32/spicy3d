@@ -1,15 +1,14 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Config, I18n, type Navigation3DType, Navigation3DTypes } from "@chili3d/core";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import { Config, I18n, type Navigation3DType, Navigation3DTypes } from "@spicy3d/core";
 import { LanguageSelector } from "../src/home/languageSelector";
 import { Navigation3DSelector } from "../src/home/navigation3DSelector";
 import { ThemeSelector } from "../src/home/themeSelector";
 
 describe("LanguageSelector", () => {
     let originalLanguage: string;
-    let originalLanguages: ReturnType<typeof I18n.getLanguages>;
 
     beforeEach(() => {
         originalLanguage = Config.instance.language;

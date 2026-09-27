@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 //@ts-expect-error
@@ -11,8 +11,8 @@ import {
     type IApplication,
     Localize,
     PubSub,
-} from "@chili3d/core";
-import { div, input, label } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div, input, label } from "@spicy3d/element";
 import style from "./macro.module.css";
 import { runMacro } from "./macroRunner";
 import type { MacroDefinition, MacroStorage } from "./macroStorage";
@@ -28,7 +28,7 @@ const DefaultCode = `// Available variables:
 
 // Example: Create a simple box
 
-// const { Plane, EditableShapeNode } = Chili3dCore;
+// const { Plane, EditableShapeNode } = Spicy3DCore;
 // const { document, cameraController } = app.activeView;
 // 
 // const box = shapeFactory.box(Plane.XY, 1000, 1000, 1000);

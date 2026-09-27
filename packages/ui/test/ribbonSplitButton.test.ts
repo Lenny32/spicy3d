@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { CommandKeys, PushButton, SplitButton } from "@chili3d/core";
-import { CommandStore, PubSub } from "@chili3d/core";
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
+import type { CommandKeys, PushButton, SplitButton } from "@spicy3d/core";
+import { CommandStore, PubSub } from "@spicy3d/core";
 
 // CSS modules under test
 rs.mock("../src/ribbon/ribbonButton.module.css", () => ({

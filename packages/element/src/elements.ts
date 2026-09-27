@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type CommandIcon, Localize } from "@chili3d/core";
+import { type CommandIcon, Localize } from "@spicy3d/core";
 import { Collection, type CollectionProps } from "./collection";
 import type { HTMLProps } from "./htmlProps";
 import { setProperties } from "./utils";
@@ -13,7 +13,8 @@ export function createIcon(icon: CommandIcon): Element {
 
     switch (icon.type) {
         case "svg":
-            return createSvgElement(icon.value);
+            // Plugin-supplied markup is untrusted: rendered as an image, SVG cannot run scripts or event handlers.
+            return img({ src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon.value)}` });
         case "png": {
             const base64 = uint8ArrayToBase64(icon.value);
             const dataUrl = `data:image/png;base64,${base64}`;
@@ -24,7 +25,7 @@ export function createIcon(icon: CommandIcon): Element {
         case "path":
             throw new Error("Plugin icon is not supported, please transform it to other icon type");
         default:
-            return svg({ icon: "icon-chili" });
+            return svg({ icon: "icon-spicy" });
     }
 }
 
@@ -34,12 +35,6 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
         binary += String.fromCharCode(bytes[i]);
     }
     return btoa(binary);
-}
-
-function createSvgElement(svgString: string): SVGSVGElement {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgString, "image/svg+xml");
-    return doc.documentElement as unknown as SVGSVGElement;
 }
 
 export function createElement<K extends keyof HTMLElementTagNameMap>(tag: K) {

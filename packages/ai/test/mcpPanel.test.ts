@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { createMcpPanel } from "../src/mcp/panel";
@@ -31,8 +31,8 @@ describe("McpPanel", () => {
         const [command, json] = codeBlocks(panel);
 
         expect(token).toMatch(/^[0-9a-f]{32}$/);
-        expect(command).toContain(`CHILI3D_BRIDGE_TOKEN=${token}`);
-        expect(JSON.parse(json).mcpServers.chili3d.env.CHILI3D_BRIDGE_TOKEN).toBe(token);
+        expect(command).toContain(`SPICY3D_BRIDGE_TOKEN=${token}`);
+        expect(JSON.parse(json).mcpServers.spicy3d.env.SPICY3D_BRIDGE_TOKEN).toBe(token);
     });
 
     test("turning the token off saves it, warns, and switches the bridge to no-token mode", () => {
@@ -52,7 +52,7 @@ describe("McpPanel", () => {
         expect(warning?.style.display).toBe("");
         const [command] = codeBlocks(panel);
         expect(command).toContain("--no-token");
-        expect(command).not.toContain("CHILI3D_BRIDGE_TOKEN");
+        expect(command).not.toContain("SPICY3D_BRIDGE_TOKEN");
     });
 
     test("reflects the live connection state and recent calls", () => {

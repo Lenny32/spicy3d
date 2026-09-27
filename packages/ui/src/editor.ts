@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { createMcpPanel, type McpPanel } from "@chili3d/ai";
+import { createMcpPanel, type McpPanel } from "@spicy3d/ai";
 import {
     type IApplication,
     type ICommand,
@@ -9,8 +9,8 @@ import {
     type Material,
     PubSub,
     type Ribbon,
-} from "@chili3d/core";
-import { div } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div } from "@spicy3d/element";
 import { CommandSearch } from "./commandSearch";
 import style from "./editor.module.css";
 import { FloatPanel } from "./floatPanel";
@@ -269,4 +269,4 @@ export class Editor extends HTMLElement {
     };
 }
 
-customElements.define("chili-editor", Editor);
+customElements.define("spicy-editor", Editor);

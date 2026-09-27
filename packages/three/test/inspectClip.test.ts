@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IApplication, type IView, Plane, XYZ } from "@chili3d/core";
-import { createMockVisual, TestDocument } from "@chili3d/core/test-utils";
+import { type IApplication, type IView, Plane, XYZ } from "@spicy3d/core";
+import { createMockVisual, TestDocument } from "@spicy3d/core/test-utils";
 import { Scene, Plane as ThreePlane, Vector3 } from "three";
 import { ThreeVisualContext } from "../src/threeVisualContext";
 

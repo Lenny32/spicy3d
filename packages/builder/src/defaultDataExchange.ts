@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -18,7 +18,7 @@ import {
     Result,
     ShapeNode,
     type VisualNode,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 
 /** STEP and IGES record their unit; the mesh formats and BREP are bare coordinates. */
 const EMBEDDED_UNIT_FORMATS = new Set([".step", ".iges"]);

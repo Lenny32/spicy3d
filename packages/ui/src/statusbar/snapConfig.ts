@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -8,8 +8,8 @@ import {
     type ObjectSnapType,
     ObjectSnapTypes,
     ObjectSnapTypeUtils,
-} from "@chili3d/core";
-import { div, input, label } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div, input, label } from "@spicy3d/element";
 import style from "./snapConfig.module.css";
 
 const SnapTypes: Array<{
@@ -108,4 +108,4 @@ export class SnapConfig extends HTMLElement {
     }
 }
 
-customElements.define("chili-snap-config", SnapConfig);
+customElements.define("spicy-snap-config", SnapConfig);

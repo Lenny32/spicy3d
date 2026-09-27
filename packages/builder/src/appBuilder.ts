@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Application, CommandService, HotkeyService, ShowPropertyEventHandler } from "@chili3d/app";
+import { Application, CommandService, HotkeyService, ShowPropertyEventHandler } from "@spicy3d/app";
 import {
     Config,
     Constants,
@@ -15,7 +15,7 @@ import {
     type IWindow,
     type Locale,
     Logger,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import { DefaultDataExchange } from "./defaultDataExchange";
 import {
     DefaultRibbon,
@@ -42,8 +42,8 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing api");
 
-            (globalThis as any).Chili3dCore = await import("@chili3d/core");
-            (globalThis as any).Chili3dElement = await import("@chili3d/element");
+            (globalThis as any).Spicy3DCore = await import("@spicy3d/core");
+            (globalThis as any).Spicy3DElement = await import("@spicy3d/element");
         });
     }
 
@@ -56,7 +56,7 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing i18n");
 
-            const i18n = await import("@chili3d/i18n");
+            const i18n = await import("@spicy3d/i18n");
             for (const key of Object.keys(i18n)) {
                 I18n.addLanguage((i18n as { [key: string]: Locale })[key]);
             }
@@ -67,7 +67,7 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing IndexedDBStorage");
 
-            const db = await import("@chili3d/storage");
+            const db = await import("@spicy3d/storage");
             this._storage = new db.IndexedDBStorage();
             await this._storage.createDBIfNeeded(Constants.DBName, [
                 Constants.DocumentTable,
@@ -81,7 +81,7 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing wasm occ");
 
-            const wasm = await import("@chili3d/wasm");
+            const wasm = await import("@spicy3d/wasm");
             await wasm.initWasm();
             this._shapeProvider = new wasm.OccShapeProvider();
         });
@@ -94,7 +94,7 @@ export class AppBuilder {
 
             // registers sketch/feature commands, the SketchNode/ParametricBodyNode
             // serializers, and exposes the sketch ribbon contributions
-            const parametric = await import("@chili3d/parametric");
+            const parametric = await import("@spicy3d/parametric");
             await parametric.initPlaneGcs();
             // Sketch last so `sketch.create` lands in front of the feature commands.
             this._ribbonExtras.push(...ParametricRibbonProfiles, ...parametric.SketchRibbonProfiles);
@@ -106,7 +106,7 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing three");
 
-            const three = await import("@chili3d/three");
+            const three = await import("@spicy3d/three");
             this._visualFactory = new three.ThreeVisulFactory((d) => new ShowPropertyEventHandler(d));
         });
         return this;
@@ -116,7 +116,7 @@ export class AppBuilder {
         this._inits.push(async () => {
             Logger.info("initializing MainWindow");
 
-            const ui = await import("@chili3d/ui");
+            const ui = await import("@spicy3d/ui");
             const app = document.getElementById("app") as HTMLElement;
             this._window = new ui.MainWindow(await this.getRibbonTabs(), "iconfont.js", app);
         });

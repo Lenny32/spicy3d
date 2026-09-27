@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Logger } from "@chili3d/core";
 import { rs } from "@rstest/core";
+import { Logger } from "@spicy3d/core";
 import { IndexedDBStorage } from "../src/indexedDBStorage";
 import { installFakeIndexedDB } from "./fakeIndexedDB";
 

@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { I18n, type Locale, Localize } from "../src/i18n/i18n";
@@ -140,7 +140,7 @@ describe("I18n", () => {
             const element = document.createElement("div");
             I18n.set(element, "textContent", "common.cancel");
             expect(element.textContent).toBe("Cancel");
-            expect(element.dataset["chili18n"]).toBe("common.cancel_:_textContent");
+            expect(element.dataset["spicy18n"]).toBe("common.cancel_:_textContent");
         });
 
         test("should set title on element", () => {
@@ -150,7 +150,7 @@ describe("I18n", () => {
             const element = document.createElement("div");
             I18n.set(element, "title", "common.confirm");
             expect(element.title).toBe("Confirm");
-            expect(element.dataset["chili18n"]).toBe("common.confirm_:_title");
+            expect(element.dataset["spicy18n"]).toBe("common.confirm_:_title");
         });
 
         test("should store args in WeakMap", () => {
@@ -177,7 +177,7 @@ describe("I18n", () => {
             expect(I18n.currentLanguage()).toBe("en");
         });
 
-        test("should update all elements with data-chili18n", () => {
+        test("should update all elements with data-spicy18n", () => {
             I18n.addLanguage(mockLocaleEn);
             I18n.addLanguage(mockLocaleZh);
             const element1 = document.createElement("div");

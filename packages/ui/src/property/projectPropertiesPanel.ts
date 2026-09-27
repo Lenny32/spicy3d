@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -8,8 +8,8 @@ import {
     LENGTH_UNITS_LIST,
     Localize,
     Transaction,
-} from "@chili3d/core";
-import { div, label, option, select, span } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div, label, option, select, span } from "@spicy3d/element";
 import commonStyle from "./common.module.css";
 import style from "./projectPropertiesPanel.module.css";
 
@@ -72,4 +72,4 @@ export class ProjectPropertiesPanel extends HTMLElement {
     }
 }
 
-customElements.define("chili-project-properties", ProjectPropertiesPanel);
+customElements.define("spicy-project-properties", ProjectPropertiesPanel);

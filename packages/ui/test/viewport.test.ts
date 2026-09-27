@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IView } from "@chili3d/core";
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
+import type { IView } from "@spicy3d/core";
 
 rs.mock("../src/viewport/viewport.module.css", () => ({
     root: "vp-root",
@@ -26,8 +26,8 @@ const pubSubRecorder = rs.hoisted(() => {
 
 // Mock core — the hoisted `actual` snapshots core mid-initialization, so every
 // runtime value the Viewport touches (PubSub, Binding, ViewModes, ...) is stubbed.
-rs.mock("@chili3d/core", () => {
-    const actual = rs.hoisted(() => require("@chili3d/core"));
+rs.mock("@spicy3d/core", () => {
+    const actual = rs.hoisted(() => require("@spicy3d/core"));
     const { BindingMock, LocalizeMock } = rs.hoisted(() => require("./_helpers/coreMocks"));
     return {
         ...actual,

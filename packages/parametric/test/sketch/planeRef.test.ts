@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { rs } from "@rstest/core";
 import {
     EditableShapeNode,
     type IFace,
@@ -12,9 +13,8 @@ import {
     Serializer,
     ShapeTypes,
     XYZ,
-} from "@chili3d/core";
-import { createMockApplication, TestDocument } from "@chili3d/core/test-utils";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
 import type { FeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { captureFaceRef, type PlaneFaceRef, planeOfFace, resolveFacePlane } from "../../src/sketch/planeRef";

@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type I18nKeys, Localize } from "@chili3d/core";
-import { a, button, div, input, label, span, svg } from "@chili3d/element";
+import { I18n, type I18nKeys, Localize } from "@spicy3d/core";
+import { a, button, div, input, label, span, svg } from "@spicy3d/element";
 import style from "./panel.module.css";
 import {
     BRIDGE_PLATFORMS,
@@ -80,7 +80,7 @@ export class McpPanel extends HTMLElement {
             { className: style.header },
             div(
                 { className: style.title },
-                svg({ className: style.titleIcon, icon: "icon-chili" }),
+                svg({ className: style.titleIcon, icon: "icon-spicy" }),
                 span({ textContent: new Localize("mcp.title") }),
             ),
             this.headerButtons,
@@ -386,7 +386,7 @@ export class McpPanel extends HTMLElement {
     }
 }
 
-customElements.define("chili-mcp-panel", McpPanel);
+customElements.define("spicy-mcp-panel", McpPanel);
 
 export function createMcpPanel(): McpPanel {
     return new McpPanel();

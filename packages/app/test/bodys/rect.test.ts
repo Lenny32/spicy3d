@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IDocument, XYZLike } from "@chili3d/core";
-import { Plane, Result, XYZ } from "@chili3d/core";
-import { createMockDocument } from "@chili3d/core/test-utils";
 import { beforeEach, describe, expect, rs, test } from "@rstest/core";
+import type { IDocument, XYZLike } from "@spicy3d/core";
+import { Plane, Result, XYZ } from "@spicy3d/core";
+import { createMockDocument } from "@spicy3d/core/test-utils";
 import { RectNode } from "../../src/bodys/rect";
 import { createMockShape, createMockWireShape, setupShapeFactoryMock } from "./_utils";
 

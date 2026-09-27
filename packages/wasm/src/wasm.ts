@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import MainModuleFactory, { type MainModule } from "../lib/chili-wasm";
+import MainModuleFactory, { type MainModule } from "../lib/spicy-wasm";
 
 declare global {
     var wasm: MainModule;
@@ -9,7 +9,7 @@ declare global {
 
 export interface InitWasmOptions {
     /**
-     * Raw bytes of `chili-wasm.wasm`. Required when running under Node (e.g. the
+     * Raw bytes of `spicy-wasm.wasm`. Required when running under Node (e.g. the
      * MCP server or integration tests), where the Emscripten glue cannot `fetch`
      * the binary. Omit in the browser — Emscripten loads the `.wasm` itself.
      */

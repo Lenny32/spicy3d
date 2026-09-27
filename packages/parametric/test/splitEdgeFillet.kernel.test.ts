@@ -1,12 +1,12 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IEdge, type IFace, Plane, ShapeTypes, XYZ } from "@chili3d/core";
-import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@chili3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@chili3d/wasm";
+import { type IEdge, type IFace, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
+import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureProfileRef } from "../src/features/profileRef";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
@@ -16,7 +16,7 @@ import { SketchNode } from "../src/sketch/sketchNode";
 import "./sketch/setup";
 
 const WASM_BINARY = readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/chili-wasm.wasm"),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
 );
 
 beforeAll(async () => {

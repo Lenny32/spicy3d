@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { readFileSync } from "node:fs";
@@ -20,12 +20,12 @@ import {
     resolveConstructionRef,
     ShapeTypes,
     XYZ,
-} from "@chili3d/core";
-import { createMockApplication, TestDocument } from "@chili3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@chili3d/wasm";
+} from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
+import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 
 const WASM_BINARY = readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/chili-wasm.wasm"),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
 );
 let factory: ShapeFactory;
 beforeAll(async () => {
@@ -63,7 +63,7 @@ describe("strict construction reference resolution", () => {
             .findSubShapes(ShapeTypes.vertex)
             .find(
                 (item) =>
-                    (item as import("@chili3d/core").IVertex).point().distanceTo(xyz(10, 20, 30)) < 1e-6,
+                    (item as import("@spicy3d/core").IVertex).point().distanceTo(xyz(10, 20, 30)) < 1e-6,
             );
         expect(vertex).not.toBeUndefined();
         const captured = captureConstructionRef(doc, node, vertex!);

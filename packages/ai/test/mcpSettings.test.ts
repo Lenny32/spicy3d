@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -40,7 +40,7 @@ function settings(patch: Partial<McpSettings> = {}): McpSettings {
         token: "abc123",
         runner: "node",
         executablePath: "",
-        bridgeCommand: "npx -y @chili3d/mcp-bridge",
+        bridgeCommand: "npx -y @spicy3d/mcp-bridge",
         autoConnect: false,
         ...patch,
     };
@@ -86,7 +86,7 @@ describe("mcp settings", () => {
     });
 
     test("passes the token as an environment variable, and nothing without one", () => {
-        expect(bridgeEnv(settings())).toEqual({ CHILI3D_BRIDGE_TOKEN: "abc123" });
+        expect(bridgeEnv(settings())).toEqual({ SPICY3D_BRIDGE_TOKEN: "abc123" });
         expect(bridgeEnv(settings({ requireToken: false }))).toEqual({});
     });
 
@@ -118,7 +118,7 @@ describe("mcp settings", () => {
 
     test("builds a claude mcp add command that fetches the bridge from npm", () => {
         expect(claudeCodeCommand(settings(), APP)).toBe(
-            "claude mcp add chili3d -e CHILI3D_BRIDGE_TOKEN=abc123 -- npx -y @chili3d/mcp-bridge --app-url https://cad.example.com/",
+            "claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=abc123 -- npx -y @spicy3d/mcp-bridge --app-url https://cad.example.com/",
         );
         const local = settings({ bridgeCommand: 'node "C:\\My Tools\\cli.mjs"' });
         expect(asWindows(() => claudeCodeCommand(local, APP))).toContain(
@@ -129,22 +129,22 @@ describe("mcp settings", () => {
     test("builds a JSON config clients can paste as is", () => {
         expect(JSON.parse(mcpJsonConfig(settings(), APP))).toEqual({
             mcpServers: {
-                chili3d: {
+                spicy3d: {
                     command: "npx",
-                    args: ["-y", "@chili3d/mcp-bridge", "--app-url", APP],
-                    env: { CHILI3D_BRIDGE_TOKEN: "abc123" },
+                    args: ["-y", "@spicy3d/mcp-bridge", "--app-url", APP],
+                    env: { SPICY3D_BRIDGE_TOKEN: "abc123" },
                 },
             },
         });
-        expect(JSON.parse(mcpJsonConfig(settings({ requireToken: false }), APP)).mcpServers.chili3d).toEqual({
+        expect(JSON.parse(mcpJsonConfig(settings({ requireToken: false }), APP)).mcpServers.spicy3d).toEqual({
             command: "npx",
-            args: ["-y", "@chili3d/mcp-bridge", "--app-url", APP, "--no-token"],
+            args: ["-y", "@spicy3d/mcp-bridge", "--app-url", APP, "--no-token"],
         });
     });
 
     test("an old saved bridgePath is dropped in favour of the npm command", () => {
         localStorage.setItem(
-            "chili3d.app.mcp.settings",
+            "spicy3d.app.mcp.settings",
             JSON.stringify({ port: 7777, requireToken: true, token: "t", bridgePath: "/x/cli.mjs" }),
         );
 
@@ -163,7 +163,7 @@ describe("mcp settings", () => {
         const command = claudeCodeCommand(settings({ bridgeCommand: "" }), "https://cad.example.com/app/");
 
         expect(command).toBe(
-            `claude mcp add chili3d -e CHILI3D_BRIDGE_TOKEN=abc123 -- npx -y --package=https://cad.example.com/app/mcp/chili3d-mcp-bridge-${__APP_VERSION__}.tgz chili3d-mcp-bridge --app-url https://cad.example.com/app/`,
+            `claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=abc123 -- npx -y --package=https://cad.example.com/app/mcp/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz spicy3d-mcp-bridge --app-url https://cad.example.com/app/`,
         );
     });
 
@@ -172,7 +172,7 @@ describe("mcp settings", () => {
         rs.spyOn(navigator, "userAgent", "get").mockReturnValue(windowsUA);
         try {
             expect(
-                JSON.parse(mcpJsonConfig(settings({ bridgeCommand: "" }), APP)).mcpServers.chili3d.command,
+                JSON.parse(mcpJsonConfig(settings({ bridgeCommand: "" }), APP)).mcpServers.spicy3d.command,
             ).toBe("cmd");
             expect(claudeCodeCommand(settings({ bridgeCommand: "" }), APP)).toContain(
                 "-- cmd /c npx -y --package=",
@@ -187,7 +187,7 @@ describe("mcp settings", () => {
 
     test("a customized command from before the executables keeps the Node.js runner", () => {
         localStorage.setItem(
-            "chili3d.app.mcp.settings",
+            "spicy3d.app.mcp.settings",
             JSON.stringify({ port: 7777, requireToken: true, token: "t", bridgeCommand: "node /x/cli.mjs" }),
         );
 
@@ -197,17 +197,17 @@ describe("mcp settings", () => {
     test("the executable runner launches the saved path directly, spaces and all", () => {
         const exe = settings({
             runner: "executable",
-            executablePath: "C:\\My Tools\\chili3d-mcp-bridge-windows-x64.exe",
+            executablePath: "C:\\My Tools\\spicy3d-mcp-bridge-windows-x64.exe",
         });
 
         expect(isCommandComplete(exe)).toBe(true);
-        expect(JSON.parse(mcpJsonConfig(exe, APP)).mcpServers.chili3d).toEqual({
-            command: "C:\\My Tools\\chili3d-mcp-bridge-windows-x64.exe",
+        expect(JSON.parse(mcpJsonConfig(exe, APP)).mcpServers.spicy3d).toEqual({
+            command: "C:\\My Tools\\spicy3d-mcp-bridge-windows-x64.exe",
             args: ["--app-url", APP],
-            env: { CHILI3D_BRIDGE_TOKEN: "abc123" },
+            env: { SPICY3D_BRIDGE_TOKEN: "abc123" },
         });
         expect(asWindows(() => claudeCodeCommand(exe, APP))).toBe(
-            'claude mcp add chili3d -e CHILI3D_BRIDGE_TOKEN=abc123 -- "C:\\My Tools\\chili3d-mcp-bridge-windows-x64.exe" --app-url https://cad.example.com/',
+            'claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=abc123 -- "C:\\My Tools\\spicy3d-mcp-bridge-windows-x64.exe" --app-url https://cad.example.com/',
         );
     });
 
@@ -215,7 +215,7 @@ describe("mcp settings", () => {
         const exe = settings({ runner: "executable", executablePath: "" });
 
         expect(isCommandComplete(exe)).toBe(false);
-        expect(claudeCodeCommand(exe, APP)).toContain("/path/to/chili3d-mcp-bridge");
+        expect(claudeCodeCommand(exe, APP)).toContain("/path/to/spicy3d-mcp-bridge");
     });
 
     test("links each platform's executable under the build-time release URL", () => {
@@ -223,11 +223,11 @@ describe("mcp settings", () => {
 
         expect(urls).toHaveLength(5);
         for (const url of urls) expect(url.startsWith(__MCP_BRIDGE_DOWNLOAD_URL__)).toBe(true);
-        expect(urls).toContain(`${__MCP_BRIDGE_DOWNLOAD_URL__}chili3d-mcp-bridge-windows-x64.exe`);
+        expect(urls).toContain(`${__MCP_BRIDGE_DOWNLOAD_URL__}spicy3d-mcp-bridge-windows-x64.exe`);
     });
 
     test("the earlier npm default is read back as 'follow this site'", () => {
-        saveMcpSettings(settings({ bridgeCommand: "npx -y @chili3d/mcp-bridge" }));
+        saveMcpSettings(settings({ bridgeCommand: "npx -y @spicy3d/mcp-bridge" }));
 
         expect(loadMcpSettings().bridgeCommand).toBe("");
     });

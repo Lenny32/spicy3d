@@ -1,6 +1,6 @@
 {
-    "name": "@chili3d/core",
-    "version": "0.7.1",
+    "name": "@spicy3d/core",
+    "version": "0.0.1",
     "description": "",
     "main": "src/index.ts",
     "devDependencies": {}

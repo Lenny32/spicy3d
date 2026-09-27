@@ -1,0 +1,10 @@
+Spicy3D
+Copyright (C) Spicy3D contributors
+
+Spicy3D is derived from Chili3D by Xiange Chen and contributors,
+licensed under AGPL-3.0 (https://github.com/xiangechen/chili3d).
+The code inherited from Chili3D stays under the copyright of its authors.
+
+Spicy3D is licensed under the GNU Affero General Public License v3.0,
+see LICENSE. The C++ WebAssembly module in cpp/ is licensed under the
+GNU Lesser General Public License v3.0, see cpp/LICENSE-spicy-wasm.txt.

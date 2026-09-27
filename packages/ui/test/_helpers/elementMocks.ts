@@ -1,14 +1,14 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-// Shared factory implementations for the `@chili3d/element` mocks used by UI tests.
+// Shared factory implementations for the `@spicy3d/element` mocks used by UI tests.
 // Test files import `mockElement` (default) or `mockElementRealEvents` BEFORE
 // importing the module under test; those modules register the hoisted
-// `rs.mock("@chili3d/element", ...)` call at module scope and delegate the factory
+// `rs.mock("@spicy3d/element", ...)` call at module scope and delegate the factory
 // implementation here (`rs.mock` factories must stay sync — rstest does not await
 // async factories — so this helper is loaded via `rs.hoisted`):
 //
-//     rs.mock("@chili3d/element", () => {
+//     rs.mock("@spicy3d/element", () => {
 //         const { createElementMocks } = rs.hoisted(() => require("./elementMocks"));
 //         return createElementMocks();
 //     });
@@ -110,10 +110,10 @@ function createSvg(props: any): SVGElement {
 }
 
 // Mock for `createIcon`: string icons become an <svg> carrying the icon name in an
-// `icon` attribute (mirrors `createSvg`), non-string icons fall back to "icon-chili".
+// `icon` attribute (mirrors `createSvg`), non-string icons fall back to "icon-spicy".
 // biome-ignore lint/suspicious/noExplicitAny: test mock for icon factory
 function createIconMock(icon: any): SVGElement {
-    return createSvg({ icon: typeof icon === "string" ? icon : "icon-chili" });
+    return createSvg({ icon: typeof icon === "string" ? icon : "icon-spicy" });
 }
 
 // Mock for `setSVGIcon`: updates the `icon` attribute so tests can assert icon swaps.
@@ -141,8 +141,8 @@ class MockExpander extends HTMLElement {
 }
 
 // happy-dom rejects `new` on unregistered HTMLElement subclasses ("Illegal constructor").
-if (typeof customElements !== "undefined" && !customElements.get("chili-mock-expander")) {
-    customElements.define("chili-mock-expander", MockExpander);
+if (typeof customElements !== "undefined" && !customElements.get("spicy-mock-expander")) {
+    customElements.define("spicy-mock-expander", MockExpander);
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: test mock for collection factory
@@ -166,7 +166,7 @@ function createCollection(opts: any): HTMLElement {
 }
 
 /**
- * Returns the full mocked `@chili3d/element` module namespace. Test files may pick
+ * Returns the full mocked `@spicy3d/element` module namespace. Test files may pick
  * only the entries they need or override individual entries afterwards.
  */
 export function createElementMocks(options: ElementMockOptions = {}) {

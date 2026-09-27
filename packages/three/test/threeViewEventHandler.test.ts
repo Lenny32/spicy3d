@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { ICameraController } from "@chili3d/core";
-import { Config, type Navigation3DType } from "@chili3d/core";
-import { createHandlerMockView, createPointerEvent } from "@chili3d/core/test-utils";
+import type { ICameraController } from "@spicy3d/core";
+import { Config, type Navigation3DType } from "@spicy3d/core";
+import { createHandlerMockView, createPointerEvent } from "@spicy3d/core/test-utils";
 import { ThreeViewHandler } from "../src/threeViewEventHandler";
 
 /**

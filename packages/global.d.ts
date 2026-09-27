@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 declare module "*.module.css" {
@@ -42,7 +42,7 @@ declare namespace jest {
 }
 
 declare var __APP_VERSION__: string;
-declare var __DOCUMENT_VERSION__: string;
+declare var __DOCUMENT_VERSION__: number;
 declare var __IS_PRODUCTION__: boolean;
-/** Folder URL (ending in "/") holding the chili3d-mcp-bridge-<platform> release executables. */
+/** Folder URL (ending in "/") holding the spicy3d-mcp-bridge-<platform> release executables. */
 declare var __MCP_BRIDGE_DOWNLOAD_URL__: string;

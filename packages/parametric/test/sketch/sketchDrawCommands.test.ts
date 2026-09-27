@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Plane, PubSub, XYZ } from "@chili3d/core";
 import { rs } from "@rstest/core";
+import { Plane, PubSub, XYZ } from "@spicy3d/core";
 import { SketchArcCommand } from "../../src/sketch/commands/sketchArc";
 import { SketchCircleCommand } from "../../src/sketch/commands/sketchCircle";
 import { SketchEllipseCommand } from "../../src/sketch/commands/sketchEllipse";

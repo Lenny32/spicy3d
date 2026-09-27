@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 // Probe: pin down the kernel's behavior for crossing sketches, which the parametric
@@ -8,7 +8,7 @@
 // entity-id set is not a unique region identity, and (3) the region order is not stable
 // when the circles swap sides, so the index is not a stable identity either.
 
-import { BoundingBox, type IEdge, Plane, ShapeTypes, XYZ } from "@chili3d/core";
+import { BoundingBox, type IEdge, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
 import type { ShapeFactory } from "../src/factory";
 import { createTestFactory, unwrapOk } from "./helpers";
 import "./setup";

@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { Config } from "../config";
@@ -51,7 +51,7 @@ export function formatShortcutKey(key: string): string {
     return keys.join(" then ");
 }
 
-export const Chili3dShortcuts: ShortcutMap = {
+export const Spicy3DShortcuts: ShortcutMap = {
     // System
     "doc.save": "ctrl+s",
     "doc.open": "ctrl+o",
@@ -86,10 +86,10 @@ export const Chili3dShortcuts: ShortcutMap = {
     "modify.fillet": "shift+f",
 };
 
-export const DefaultShortcuts: ShortcutMap = Chili3dShortcuts;
+export const DefaultShortcuts: ShortcutMap = Spicy3DShortcuts;
 
 export const RevitShortcuts: ShortcutMap = {
-    ...Chili3dShortcuts,
+    ...Spicy3DShortcuts,
     "modify.move": "m+v", // MV
     "modify.rotate": "r+o", // RO
     "modify.trim": "t+r", // TR
@@ -145,7 +145,7 @@ export const Fusion360SketchShortcuts: ShortcutMap = {
 };
 
 export const ShortcutProfiles: Record<Navigation3DType, ShortcutProfile> = {
-    Chili3d: { global: Chili3dShortcuts },
+    Spicy3D: { global: Spicy3DShortcuts },
     Revit: { global: RevitShortcuts },
     Blender: { global: BlenderShortcuts },
     Creo: { global: CreoShortcuts },

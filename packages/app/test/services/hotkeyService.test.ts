@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { CommandKeys, IApplication, IView } from "@chili3d/core";
-import { Config, type Navigation3DType, PubSub } from "@chili3d/core";
-import { createMockApplication } from "@chili3d/core/test-utils";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import type { CommandKeys, IApplication, IView } from "@spicy3d/core";
+import { Config, type Navigation3DType, PubSub } from "@spicy3d/core";
+import { createMockApplication } from "@spicy3d/core/test-utils";
 import { type HotkeyMap, HotkeyService, normalizeShortcut } from "../../src/services/hotkeyService";
 
 describe("HotkeyService", () => {
@@ -85,7 +85,7 @@ describe("HotkeyService", () => {
 
     describe("getCommand", () => {
         // The shortcut profile loads defaults on construction. Use a key
-        // that is NOT in the default Chili3d profile to test undefined return.
+        // that is NOT in the default Spicy3D profile to test undefined return.
         test("should return undefined for unmapped keys", () => {
             // "F23" is not in any shortcut profile
             const result = service.getCommand({ key: "f23" });

@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { describe, expect, rs, test } from "@rstest/core";
 import {
     type IApplication,
     type IEdge,
@@ -11,9 +12,8 @@ import {
     SelectShapeStep,
     type SnapResult,
     XYZ,
-} from "@chili3d/core";
-import { createMockApplication, createMockDocument } from "@chili3d/core/test-utils";
-import { describe, expect, rs, test } from "@rstest/core";
+} from "@spicy3d/core";
+import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import {
     AlignToPlane,
     FromSection,
@@ -277,7 +277,7 @@ describe("FromSection", () => {
             const restoreTx = stubTransactionRun();
             try {
                 const cmd = new FromSection();
-                const { doc } = wireCommand(cmd);
+                wireCommand(cmd);
                 (cmd as any)._application = { activeView: undefined };
 
                 const curve = {

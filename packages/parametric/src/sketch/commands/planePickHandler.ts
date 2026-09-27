@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -18,7 +18,7 @@ import {
     type VisualShapeData,
     VisualStates,
     XYZ,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 
 /** Sketch planes returned on a datum pick, oriented Z-up (see `sketchPlaneOfFace`). */
 const DATUM_PLANES = [Plane.XY, Plane.YZ, Plane.ZX];

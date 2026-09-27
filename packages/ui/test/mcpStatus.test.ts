@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { afterEach, describe, expect, test } from "@rstest/core";
@@ -8,14 +8,14 @@ rs.mock("../src/statusbar/mcpStatus.module.css", () => ({
     dot: "mcp-dot",
 }));
 
-// Only the SDK-free state store is needed; the panel half of @chili3d/ai stays out.
+// Only the SDK-free state store is needed; the panel half of @spicy3d/ai stays out.
 const aiState = rs.hoisted(() => {
-    const { McpState } = require("@chili3d/ai/src/mcp/state");
+    const { McpState } = require("@spicy3d/ai/src/mcp/state");
     return { mcpState: new McpState() };
 });
-rs.mock("@chili3d/ai", () => aiState);
+rs.mock("@spicy3d/ai", () => aiState);
 
-import { I18n, PubSub } from "@chili3d/core";
+import { I18n, PubSub } from "@spicy3d/core";
 import { McpStatusIndicator } from "../src/statusbar/mcpStatus";
 
 describe("McpStatusIndicator", () => {

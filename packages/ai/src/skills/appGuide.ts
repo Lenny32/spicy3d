@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -12,7 +12,7 @@ import {
     Navigation3DTypes,
     ShortcutProfiles,
     shortcutMaps,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import type { Skill } from "./types";
 
 /** Command keys the manual may reference; a `{key}` outside this set stays literal (and is a bug). */
@@ -67,7 +67,7 @@ function navigationProfiles(): string {
     }).join("\n");
 }
 
-const INTRO = `Chili3D app guide — how to operate the application itself.
+const INTRO = `Spicy3D app guide — how to operate the application itself.
 
 Use this document to TEACH. The user is sitting in front of the app and can click along, so answer with the actual path: the tab, the group, the button, the hotkey, the click sequence. Every command named below carries the label the user's own language gives it and the hotkey their navigation profile binds — so name the button in their language, and lean on the tab, the group and the hotkey to disambiguate, since those are language-independent.
 
@@ -175,7 +175,7 @@ function buildAppGuideDoc(): string {
 export const appGuide: Skill = {
     name: "app-guide",
     description:
-        'How to operate the Chili3D app itself: where every command lives (ribbon tabs and groups, toolbars, hotkeys), viewport navigation and selection, the model tree and property panel, sketch mode, parametric features, file operations and settings — load it to answer any "how do I…" or "where is…" question',
+        'How to operate the Spicy3D app itself: where every command lives (ribbon tabs and groups, toolbars, hotkeys), viewport navigation and selection, the model tree and property panel, sketch mode, parametric features, file operations and settings — load it to answer any "how do I…" or "where is…" question',
     get content() {
         return buildAppGuideDoc();
     },

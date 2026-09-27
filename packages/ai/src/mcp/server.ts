@@ -1,7 +1,6 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n } from "@chili3d/core";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
     CallToolRequestSchema,
@@ -12,6 +11,7 @@ import {
     McpError,
     ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { I18n } from "@spicy3d/core";
 import { buildMcpInstructions } from "../llm/prompt";
 import type { Tool, ToolResult } from "../llm/types";
 import { SKILLS } from "../skills";
@@ -19,11 +19,11 @@ import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
 import { documentSnapshot } from "../tools/readTools";
 
-export const MCP_SERVER_NAME = "chili3d";
+export const MCP_SERVER_NAME = "spicy3d";
 
-const DOCUMENT_URI = "chili3d://document";
-const GUIDE_URI = "chili3d://guide/usage";
-const SKILL_URI_PREFIX = "chili3d://skill/";
+const DOCUMENT_URI = "spicy3d://document";
+const GUIDE_URI = "spicy3d://guide/usage";
+const SKILL_URI_PREFIX = "spicy3d://skill/";
 
 export interface McpServerOptions {
     /** Defaults to the in-app assistant's registry, so both front ends expose the same tools. */

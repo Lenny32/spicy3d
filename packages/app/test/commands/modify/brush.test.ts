@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { EditableShapeNode, type IDocument, type IShape, Result, ShapeTypes, XYZ } from "@chili3d/core";
 import { describe, expect, rs, test } from "@rstest/core";
+import { EditableShapeNode, type IDocument, type IShape, Result, ShapeTypes, XYZ } from "@spicy3d/core";
 import { AddBrushCommand, ClearBrushCommand, RemoveBrushCommand } from "../../../src/commands/modify/brush";
 import {
     ensureGlobalStubApp,

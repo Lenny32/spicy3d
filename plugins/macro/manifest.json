@@ -1,13 +1,13 @@
 {
     "name": "Macro Plugin",
     "version": "1.0.0",
-    "description": "A macro plugin for Chili3D that allows users to create, edit and run macros",
+    "description": "A macro plugin for Spicy3D that allows users to create, edit and run macros",
     "main": "dist/main.js",
     "css": "dist/main.css",
     "author": {
-        "name": "Chili3D Team"
+        "name": "Spicy3D Team"
     },
     "engines": {
-        "chili3d": ">=0.6"
+        "spicy3d": ">=0.0.1"
     }
 }

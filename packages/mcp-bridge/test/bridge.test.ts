@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { BridgeCore, CONNECT_TOOL, pairingUrl, REPLAY_ID_PREFIX, TAB_UNAVAILABLE } from "../src/bridge.mjs";
@@ -67,7 +67,7 @@ describe("BridgeCore without a tab", () => {
                 result: expect.objectContaining({
                     protocolVersion: "2025-06-18",
                     capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
-                    serverInfo: { name: "chili3d", version: "9.9.9" },
+                    serverInfo: { name: "spicy3d", version: "9.9.9" },
                 }),
             },
         ]);

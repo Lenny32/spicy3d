@@ -1,6 +1,6 @@
 // Macro Command - Entry point that opens the macro manager
 
-import { command, type IApplication, type ICommand } from "@chili3d/core";
+import { command, type IApplication, type ICommand } from "@spicy3d/core";
 import { MacroManager } from "../macro/macroManager";
 
 @command({

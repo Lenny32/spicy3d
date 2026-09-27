@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 /**
@@ -16,8 +16,8 @@ export type PluginAuthor =
  * Engine requirements type
  */
 export type PluginEngines = {
-    /** Chili3D version requirement (semver range, e.g., ">=0.6.0") */
-    chili3d?: string;
+    /** Spicy3D version requirement (semver range, e.g., ">=0.6.0") */
+    spicy3d?: string;
 };
 
 /**

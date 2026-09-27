@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDocument, type IView, Localize, PubSub } from "@chili3d/core";
-import { div, span } from "@chili3d/element";
+import { type IDocument, type IView, Localize, PubSub } from "@spicy3d/core";
+import { div, span } from "@spicy3d/element";
 import style from "./projectView.module.css";
 import { ToolBar } from "./toolBar";
 import { Tree } from "./tree";
@@ -74,4 +74,4 @@ export class ProjectView extends HTMLElement {
     };
 }
 
-customElements.define("chili-project-view", ProjectView);
+customElements.define("spicy-project-view", ProjectView);

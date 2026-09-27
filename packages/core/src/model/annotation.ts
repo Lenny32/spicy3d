@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "../document";
@@ -6,7 +6,6 @@ import { Id } from "../foundation";
 import type { I18nKeys } from "../i18n";
 import { BoundingBox, type XYZ } from "../math";
 import { serializable, serialize } from "../serialize";
-import { Node } from "./node";
 import { VisualNode } from "./visualNode";
 
 export const AnnotationTypes = ["dimension", "text", "refInfiniteLine", "refSegment"] as const;

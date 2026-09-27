@@ -1,9 +1,9 @@
 {
-    "name": "@chili3d/i18n",
-    "version": "0.7.1",
+    "name": "@spicy3d/i18n",
+    "version": "0.0.1",
     "description": "",
     "main": "src/index.ts",
     "devDependencies": {
-        "@chili3d/core": "*"
+        "@spicy3d/core": "*"
     }
 }

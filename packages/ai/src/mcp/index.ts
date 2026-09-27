@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 // The lazily loaded half of MCP support: everything here pulls in the SDK. Import it with a
 // dynamic import() only — settings.ts, state.ts and the panel are the eager, SDK-free half.
 
-import { Logger } from "@chili3d/core";
+import { Logger } from "@spicy3d/core";
 import { McpSession } from "./session";
 import { parseBridgeUrl } from "./settings";
 import { mcpState } from "./state";

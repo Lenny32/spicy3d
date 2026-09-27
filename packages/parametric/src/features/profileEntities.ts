@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IEdge, type IFace, type IShape, type ISubShape, ShapeTypes } from "@chili3d/core";
+import { type IEdge, type IFace, type IShape, type ISubShape, ShapeTypes } from "@spicy3d/core";
 import type { SketchNode } from "../sketch/sketchNode";
 import { INCIDENCE_TOLERANCE } from "./refGeometry";
 
@@ -39,7 +39,7 @@ import { INCIDENCE_TOLERANCE } from "./refGeometry";
  */
 export function reportMissingEntityId(sketch: SketchNode, what: string): void {
     console.warn(
-        `[chili3d] profile entity loss: ${what} (sketch ${sketch.id}) — the profile identity degrades to geometric matching. Please report this scenario.`,
+        `[spicy3d] profile entity loss: ${what} (sketch ${sketch.id}) — the profile identity degrades to geometric matching. Please report this scenario.`,
     );
 }
 

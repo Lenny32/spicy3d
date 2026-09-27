@@ -1,24 +1,24 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ObjectStorage } from "@chili3d/core";
+import { ObjectStorage } from "@spicy3d/core";
 
 // Nothing in this module may import the MCP SDK: the panel and the startup check load it eagerly,
 // and the SDK is a sizeable chunk that only a live bridge session needs.
 
 export const DEFAULT_BRIDGE_PORT = 7777;
 /** Where every deployment serves its own bridge package (see scripts/pack-mcp-bridge.mjs). */
-export const BRIDGE_TARBALL_PATH = `mcp/chili3d-mcp-bridge-${__APP_VERSION__}.tgz`;
+export const BRIDGE_TARBALL_PATH = `mcp/spicy3d-mcp-bridge-${__APP_VERSION__}.tgz`;
 
 /** An earlier default, before the bridge was served by the site: treated as "use the default". */
-const LEGACY_DEFAULT_COMMAND = "npx -y @chili3d/mcp-bridge";
+const LEGACY_DEFAULT_COMMAND = "npx -y @spicy3d/mcp-bridge";
 
 /**
  * How the agent starts the bridge by default: npx fetches the package this very site serves, so
  * nobody needs the source, an npm account or a publication — and a fork's site serves its own.
  */
 export function defaultBridgeCommand(appUrl: string, windows = isWindowsClient()): string {
-    const npx = `npx -y --package=${new URL(BRIDGE_TARBALL_PATH, appUrl)} chili3d-mcp-bridge`;
+    const npx = `npx -y --package=${new URL(BRIDGE_TARBALL_PATH, appUrl)} spicy3d-mcp-bridge`;
     // MCP clients on native Windows spawn without a shell, and npx is a .cmd script there.
     return windows ? `cmd /c ${npx}` : npx;
 }
@@ -39,11 +39,11 @@ export interface BridgePlatform {
 
 /** The release executables, as built by scripts/build-mcp-bridge-binaries.mjs. */
 export const BRIDGE_PLATFORMS: BridgePlatform[] = [
-    { id: "windows-x64", label: "Windows (x64)", file: "chili3d-mcp-bridge-windows-x64.exe" },
-    { id: "macos-arm64", label: "macOS (Apple silicon)", file: "chili3d-mcp-bridge-macos-arm64" },
-    { id: "macos-x64", label: "macOS (Intel)", file: "chili3d-mcp-bridge-macos-x64" },
-    { id: "linux-x64", label: "Linux (x64)", file: "chili3d-mcp-bridge-linux-x64" },
-    { id: "linux-arm64", label: "Linux (arm64)", file: "chili3d-mcp-bridge-linux-arm64" },
+    { id: "windows-x64", label: "Windows (x64)", file: "spicy3d-mcp-bridge-windows-x64.exe" },
+    { id: "macos-arm64", label: "macOS (Apple silicon)", file: "spicy3d-mcp-bridge-macos-arm64" },
+    { id: "macos-x64", label: "macOS (Intel)", file: "spicy3d-mcp-bridge-macos-x64" },
+    { id: "linux-x64", label: "Linux (x64)", file: "spicy3d-mcp-bridge-linux-x64" },
+    { id: "linux-arm64", label: "Linux (arm64)", file: "spicy3d-mcp-bridge-linux-arm64" },
 ];
 
 export function bridgeDownloadUrl(platform: BridgePlatform): string {
@@ -68,7 +68,7 @@ export function platformsForThisBrowser(): BridgePlatform[] {
 
 /** Stands in for the executable's location in the snippets until the user types the real one. */
 export function executablePlaceholder(windows = isWindowsClient()): string {
-    return windows ? "C:\\path\\to\\chili3d-mcp-bridge-windows-x64.exe" : "/path/to/chili3d-mcp-bridge";
+    return windows ? "C:\\path\\to\\spicy3d-mcp-bridge-windows-x64.exe" : "/path/to/spicy3d-mcp-bridge";
 }
 
 export interface McpSettings {
@@ -181,7 +181,7 @@ export function bridgeArgs(settings: McpSettings, appUrl: string): string[] {
  * in the process list other users of the machine can read.
  */
 export function bridgeEnv(settings: McpSettings): Record<string, string> {
-    return settings.requireToken ? { CHILI3D_BRIDGE_TOKEN: settings.token } : {};
+    return settings.requireToken ? { SPICY3D_BRIDGE_TOKEN: settings.token } : {};
 }
 
 /** Split a command line on spaces, keeping "double-quoted parts" together. */
@@ -238,7 +238,7 @@ export function claudeCodeCommand(settings: McpSettings, appUrl: string): string
         ...splitCommand(resolveBridgeCommand(settings, appUrl)),
         ...bridgeArgs(settings, appUrl),
     ];
-    return ["claude mcp add chili3d", ...env, "--", ...command.map((arg) => shellArg(arg))].join(" ");
+    return ["claude mcp add spicy3d", ...env, "--", ...command.map((arg) => shellArg(arg))].join(" ");
 }
 
 export function mcpJsonConfig(settings: McpSettings, appUrl: string): string {
@@ -249,7 +249,7 @@ export function mcpJsonConfig(settings: McpSettings, appUrl: string): string {
         args: [...args, ...bridgeArgs(settings, appUrl)],
         ...(Object.keys(env).length > 0 && { env }),
     };
-    return JSON.stringify({ mcpServers: { chili3d: server } }, null, 2);
+    return JSON.stringify({ mcpServers: { spicy3d: server } }, null, 2);
 }
 
 /** Whether this page is served from this machine; a hosted page meets extra browser checks. */

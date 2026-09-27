@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -20,8 +20,8 @@ import {
     Transaction,
     toMillimetres,
     VisualNode,
-} from "@chili3d/core";
-import { button, div, Expander, input, label } from "@chili3d/element";
+} from "@spicy3d/core";
+import { button, div, Expander, input, label } from "@spicy3d/element";
 import { propertyControl } from "./complexPropertyUtils";
 import { FeatureListProperty } from "./featureListProperty";
 import { MatrixProperty } from "./matrixProperty";
@@ -231,4 +231,4 @@ export class PropertyView extends HTMLElement {
     }
 }
 
-customElements.define("chili-property-view", PropertyView);
+customElements.define("spicy-property-view", PropertyView);

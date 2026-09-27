@@ -1,5 +1,5 @@
 services:
-  chili3d:
+  spicy3d:
     build:
       dockerfile: Dockerfile
     restart: unless-stopped

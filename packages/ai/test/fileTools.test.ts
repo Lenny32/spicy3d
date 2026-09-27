@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { VisualNode } from "@chili3d/core";
-import { createMockApplication, createMockDocument } from "@chili3d/core/test-utils";
 import { rs } from "@rstest/core";
+import { VisualNode } from "@spicy3d/core";
+import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { buildFileTools } from "../src/tools/fileTools";
 
 function visualNode(id: string, name: string) {

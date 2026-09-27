@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Binding, type IDocument, Localize, type Property, PubSub, Transaction } from "@chili3d/core";
-import { ColorConverter, div, input, label } from "@chili3d/element";
+import { Binding, type IDocument, Localize, type Property, PubSub, Transaction } from "@spicy3d/core";
+import { ColorConverter, div, input, label } from "@spicy3d/element";
 import colorStyle from "./colorPorperty.module.css";
 import commonStyle from "./common.module.css";
 import { PropertyBase } from "./propertyBase";
@@ -60,4 +60,4 @@ export class ColorProperty extends PropertyBase {
     };
 }
 
-customElements.define("chili-color-property", ColorProperty);
+customElements.define("spicy-color-property", ColorProperty);

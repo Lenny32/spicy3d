@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type IDocument, Material, Transaction, type XYZLike } from "@chili3d/core";
+import { I18n, type IDocument, Material, Transaction, type XYZLike } from "@spicy3d/core";
 import type { Tool, ToolResult } from "../llm/types";
 import { getDocument } from "./documentContext";
 

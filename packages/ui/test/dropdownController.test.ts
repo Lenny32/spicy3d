@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { CommandKeys, PushButton } from "@chili3d/core";
-import { CommandStore, PubSub } from "@chili3d/core";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import type { CommandKeys, PushButton } from "@spicy3d/core";
+import { CommandStore, PubSub } from "@spicy3d/core";
 import { createDropdownItem, DropdownController, getItemData } from "../src/ribbon/dropdownController";
 
 function makePushButton(overrides: Partial<PushButton> & { command: CommandKeys }): PushButton {

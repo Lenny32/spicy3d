@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -18,8 +18,8 @@ import {
     type Ribbon,
     type RibbonGroup,
     type RibbonTab,
-} from "@chili3d/core";
-import { a, collection, createIcon, div, label, span, svg } from "@chili3d/element";
+} from "@spicy3d/core";
+import { a, collection, createIcon, div, label, span, svg } from "@spicy3d/element";
 import style from "./ribbon.module.css";
 import { RibbonPushButton } from "./ribbonButton";
 import { RibbonGroupElement } from "./ribbonGroup";
@@ -93,8 +93,8 @@ export class RibbonUI extends HTMLElement {
             { className: style.left },
             div(
                 { className: style.appIcon, onclick: () => PubSub.default.pub("displayHome", true) },
-                svg({ className: style.icon, icon: "icon-chili" }),
-                span({ id: "appName", textContent: `Chili3D - v${__APP_VERSION__}` }),
+                svg({ className: style.icon, icon: "icon-spicy" }),
+                span({ id: "appName", textContent: `Spicy3D - v${__APP_VERSION__}` }),
             ),
             div(
                 { className: style.ribbonTitlePanel },
@@ -182,7 +182,7 @@ export class RibbonUI extends HTMLElement {
         return div(
             { className: style.right },
             a(
-                { href: "https://github.com/lenny32/chili3d", target: "_blank" },
+                { href: "https://github.com/Lenny32/spicy3d", target: "_blank" },
                 svg({ title: "Github", className: style.icon, icon: "icon-github" }),
             ),
         );
@@ -229,4 +229,4 @@ export class RibbonUI extends HTMLElement {
     };
 }
 
-customElements.define("chili-ribbon", RibbonUI);
+customElements.define("spicy-ribbon", RibbonUI);

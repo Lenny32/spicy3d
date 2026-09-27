@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -18,7 +18,7 @@ import {
     type VisualNode,
     type VisualShapeData,
     VisualStates,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 
 export class Picker implements IPicker {
     constructor(readonly document: IDocument) {}

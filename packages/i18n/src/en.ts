@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { Locale } from "@chili3d/core";
+import type { Locale } from "@spicy3d/core";
 
 export default {
     display: "English",
@@ -15,7 +15,7 @@ export default {
         "ai.baseURL": "Base URL",
         "ai.cancel": "Cancel",
         "ai.copy": "Copy",
-        "ai.emptyAsk": "Or ask how to use Chili3D — e.g. “how do I chamfer an edge?”",
+        "ai.emptyAsk": "Or ask how to use Spicy3D — e.g. “how do I chamfer an edge?”",
         "ai.emptyExample": "e.g. create a 10×20×5 box, then fillet 2mm",
         "ai.emptyHint": "Create and edit 3D models with natural language",
         "ai.emptyTitle": "AI Modeling Assistant",
@@ -548,9 +548,10 @@ export default {
             "{0} files carry no unit. Coordinates are written in {1}: the importing application must read the file as {1}.",
         "file.unitInfo.fixed{0}{1}": "{0} always uses {1}: coordinates are converted to {1}.",
         "helix.pitch": "Pitch",
+        "home.basedOn": "Based on Chili3D",
         "home.recent": "Recent Projects",
         "home.recent.empty": "No recent documents yet. Create or open a document to get started.",
-        "home.welcome": "Welcome to chili3d",
+        "home.welcome": "Welcome to Spicy3D",
         "home.welcome.subtitle": "Design and model in 3D, right in your browser.",
         "items.header": "Items",
         "items.tool.delete": "Delete",
@@ -580,7 +581,7 @@ export default {
         "material.texture.wrapS": "Wrap S",
         "material.texture.wrapT": "Wrap T",
         "mcp.appUrl": "This page's address (the bridge only accepts pages from it)",
-        "mcp.autoConnect": "Connect automatically when Chili3D opens",
+        "mcp.autoConnect": "Connect automatically when Spicy3D opens",
         "mcp.bridgeAt": "Bridge: {0}",
         "mcp.bridgeCommand": "Command (change it only for a fork or a local build)",
         "mcp.bridgeHint":
@@ -588,7 +589,7 @@ export default {
         "mcp.claudeCode": "Claude Code: run in a terminal",
         "mcp.connect": "Connect",
         "mcp.connectHint":
-            "Restart your agent (or reload its MCP servers), then press Connect above. The agent sees the Chili3D tools as soon as this tab is connected. Keep the tab open while it works.",
+            "Restart your agent (or reload its MCP servers), then press Connect above. The agent sees the Spicy3D tools as soon as this tab is connected. Keep the tab open while it works.",
         "mcp.copied": "Copied",
         "mcp.copy": "Copy",
         "mcp.disconnect": "Disconnect",

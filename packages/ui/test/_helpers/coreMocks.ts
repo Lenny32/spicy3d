@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-// Shared stubs for the `@chili3d/core` mocks used by UI tests.
+// Shared stubs for the `@spicy3d/core` mocks used by UI tests.
 // Test files import one of the sibling `mockCore*.ts` modules (e.g. `mockCoreI18n`,
 // `mockCoreProperty`, `mockCorePubSub`) BEFORE importing the module under test;
-// each of those registers its `rs.mock("@chili3d/core", ...)` at module scope and
+// each of those registers its `rs.mock("@spicy3d/core", ...)` at module scope and
 // composes the stubs below (`rs.mock` factories must stay sync — rstest does not
 // await async factories — so these helpers are loaded via `rs.hoisted`).
 //
@@ -139,7 +139,7 @@ export class ObservableCollectionMock<T = any> {
 }
 
 /**
- * The project-unit exports, resolved lazily. A hoisted `require("@chili3d/core")` can snapshot
+ * The project-unit exports, resolved lazily. A hoisted `require("@spicy3d/core")` can snapshot
  * core before its `units` module has run, which would spread `undefined` over these; deferring
  * the lookup to the first call reads the fully loaded modules instead.
  */

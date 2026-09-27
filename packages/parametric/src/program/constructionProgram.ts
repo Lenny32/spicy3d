@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -19,7 +19,7 @@ import {
     ShapeTypes,
     validateConstructionDefinition,
     XYZ,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 
 /**
  * Construction geometry (reference planes, axes, points and coordinate systems) for a
@@ -232,7 +232,7 @@ export function describeConstructionGeometry(geometry: ConstructionGeometry): Re
 export function resolveConstructionPlaneRef(
     host: ConstructionProgramHost,
     spec: { construction: unknown; member?: "XY" | "YZ" | "ZX" },
-): { ref: ConstructionRef; plane: import("@chili3d/core").Plane } {
+): { ref: ConstructionRef; plane: import("@spicy3d/core").Plane } {
     const ref = datumRef(host, spec.construction, spec.member ?? "XY");
     const resolved = resolveConstructionRef(host.document, ref);
     if (!resolved.isOk) throw new Error(resolved.error);

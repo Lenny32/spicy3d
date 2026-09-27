@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { FaceMeshData } from "@chili3d/core";
+import type { FaceMeshData } from "@spicy3d/core";
 import { BufferGeometry, Mesh, MeshLambertMaterial, Points, PointsMaterial } from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";

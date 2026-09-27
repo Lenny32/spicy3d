@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -20,8 +20,8 @@ import {
     Transaction,
     type UnitSpec,
     unitSpecEquals,
-} from "@chili3d/core";
-import { div, input, span, svg } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div, input, span, svg } from "@spicy3d/element";
 import { showDialog } from "../dialog";
 import commonStyle from "./common.module.css";
 import style from "./featureListProperty.module.css";
@@ -468,4 +468,4 @@ export class FeatureListProperty extends HTMLElement {
     }
 }
 
-customElements.define("chili-feature-list", FeatureListProperty);
+customElements.define("spicy-feature-list", FeatureListProperty);

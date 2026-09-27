@@ -1,13 +1,13 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ConstructionNode, type IView, SelectNodeStep, XYZ } from "@chili3d/core";
-import { createMockApplication, createMockSelection, TestDocument } from "@chili3d/core/test-utils";
 import { rs } from "@rstest/core";
+import { ConstructionNode, type IView, SelectNodeStep, XYZ } from "@spicy3d/core";
+import { createMockApplication, createMockSelection, TestDocument } from "@spicy3d/core/test-utils";
 import { EditConstructionCommand, OffsetPlaneCommand, UcsCommand } from "../src/commands/construction";
 
 afterEach(() => {
-    document.querySelectorAll(".chili-construction-editor").forEach((element) => element.remove());
+    document.querySelectorAll(".spicy-construction-editor").forEach((element) => element.remove());
     rs.restoreAllMocks();
 });
 
@@ -21,7 +21,7 @@ function setup() {
 }
 
 function panel(): HTMLElement {
-    const root = document.querySelector<HTMLElement>(".chili-construction-editor");
+    const root = document.querySelector<HTMLElement>(".spicy-construction-editor");
     expect(root).not.toBeNull();
     return root!;
 }
@@ -71,7 +71,7 @@ describe("construction command forms", () => {
         expect(cancelObserved).toHaveBeenCalledTimes(1);
         expect(doc.history.undoCount()).toBe(beforeHistory);
         expect(doc.modelManager.findNode((node) => node instanceof ConstructionNode)).toBeUndefined();
-        expect(document.querySelector(".chili-construction-editor")).toBeNull();
+        expect(document.querySelector(".spicy-construction-editor")).toBeNull();
     });
 
     test("default zero offset previews and commits a referenced document object", async () => {
@@ -95,7 +95,7 @@ describe("construction command forms", () => {
         });
         expect(node.geometry.isOk).toBe(true);
         expect(remove).toHaveBeenCalledTimes(1);
-        expect(document.querySelector(".chili-construction-editor")).toBeNull();
+        expect(document.querySelector(".spicy-construction-editor")).toBeNull();
     });
 
     test("numeric changes update the preview and cancellation leaves model and history untouched", async () => {
@@ -180,7 +180,7 @@ describe("construction command forms", () => {
         expect(toPointRow!.parentElement!.querySelector("small")?.textContent).toBe("Fixed point");
         button("Apply").click();
         await completion;
-        expect(document.querySelector(".chili-construction-editor")).toBeNull();
+        expect(document.querySelector(".spicy-construction-editor")).toBeNull();
         expect(node.definition).toMatchObject({ kind, position: { kind: "to-point", point: toPoint } });
         expect(node.definition).not.toHaveProperty("toPoint");
         const geometry = node.geometry.unchecked()!;

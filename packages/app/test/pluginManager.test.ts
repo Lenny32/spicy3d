@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { rs } from "@rstest/core";
 import {
     AppGuideStore,
     CommandStore,
@@ -11,8 +12,7 @@ import {
     type Plugin,
     type PluginManifest,
     PubSub,
-} from "@chili3d/core";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core";
 import { PluginManager } from "../src/pluginManager";
 
 // `describe`, `test`, `expect`, `beforeEach`, `afterEach` are provided as
@@ -332,7 +332,7 @@ describe("PluginManager", () => {
                 name: "p",
                 version: "1.0.0",
                 main: "x.js",
-                engines: { chili3d: ">=99.0.0" },
+                engines: { spicy3d: ">=99.0.0" },
             });
             expect(ok).toBe(false);
         });
@@ -558,7 +558,7 @@ describe("PluginManager", () => {
     });
 
     describe("loadFromRemoteFile (private)", () => {
-        test("should handle .chiliplugin files via fetch + loadFromFile", async () => {
+        test("should handle .spicyplugin files via fetch + loadFromFile", async () => {
             const { manager } = createManager();
             const loadFromFileSpy = rs.spyOn(manager, "loadFromFile").mockResolvedValue(undefined);
             globalThis.fetch = rs.fn().mockResolvedValue({
@@ -566,13 +566,13 @@ describe("PluginManager", () => {
                 arrayBuffer: async () => new ArrayBuffer(0),
             }) as any;
 
-            await (manager as any).loadFromRemoteFile("https://cdn.example.com/plugin.chiliplugin");
+            await (manager as any).loadFromRemoteFile("https://cdn.example.com/plugin.spicyplugin");
 
             expect(loadFromFileSpy).toHaveBeenCalled();
             loadFromFileSpy.mockRestore();
         });
 
-        test("should alert when fetch fails for .chiliplugin", async () => {
+        test("should alert when fetch fails for .spicyplugin", async () => {
             const { manager } = createManager();
             const alertSpy = rs.fn();
             globalThis.alert = alertSpy;
@@ -581,7 +581,7 @@ describe("PluginManager", () => {
                 statusText: "Not Found",
             }) as any;
 
-            await (manager as any).loadFromRemoteFile("https://cdn.example.com/plugin.chiliplugin");
+            await (manager as any).loadFromRemoteFile("https://cdn.example.com/plugin.spicyplugin");
 
             expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch plugin"));
         });

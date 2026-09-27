@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Config, Dimensions, Matrix4, type Plane, Precision, VisualConfig, XYZ } from "@chili3d/core";
 import { afterAll, beforeAll, describe, expect, test } from "@rstest/core";
+import { Config, Dimensions, Matrix4, type Plane, VisualConfig, XYZ } from "@spicy3d/core";
 import { Rotate } from "../../../src/commands/modify/rotate";
 import {
     ensureGlobalStubApp,

@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { Loading } from "../src/loading";
@@ -15,7 +15,7 @@ describe("Loading custom element", () => {
     });
 
     test("should be defined as a custom element", () => {
-        expect(customElements.get("chili-loading")).toBe(Loading);
+        expect(customElements.get("spicy-loading")).toBe(Loading);
     });
 
     test("should create an instance", () => {

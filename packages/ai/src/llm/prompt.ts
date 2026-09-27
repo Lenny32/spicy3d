@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { SKILLS } from "../skills";
@@ -22,7 +22,7 @@ export function buildSystemPrompt(): SystemPrompt {
 
 /**
  * The same guidance for an external MCP client: no tool index (the client lists the tools itself)
- * and no document snapshot (the client reads the `chili3d://document` resource or calls
+ * and no document snapshot (the client reads the `spicy3d://document` resource or calls
  * get_document_state when it needs the scene).
  */
 export function buildMcpInstructions(): string {
@@ -30,13 +30,13 @@ export function buildMcpInstructions(): string {
 }
 
 function mcpIntroSection(): string {
-    return `This server drives the user's open Chili3D tab (a parametric CAD in the browser): every tool acts on the live document the user is looking at, and every change lands on its undo stack.
+    return `This server drives the user's open Spicy3D tab (a parametric CAD in the browser): every tool acts on the live document the user is looking at, and every change lands on its undo stack.
 
 ${transformOpSentence()}`;
 }
 
 function introSection(): string {
-    return `You are the AI assistant for Chili3D (a parametric CAD). Help the user create and edit 3D models in the browser.
+    return `You are the AI assistant for Spicy3D (a parametric CAD). Help the user create and edit 3D models in the browser.
 
 ${transformOpSentence()}`;
 }

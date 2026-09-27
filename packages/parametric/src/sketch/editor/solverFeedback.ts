@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { documentLengthUnit, PubSub } from "@chili3d/core";
+import { documentLengthUnit, PubSub } from "@spicy3d/core";
 import { ConstraintKind, isStructuralConstraint } from "../sketchModel";
 import type { SolveOutcome } from "../solver";
 import { analyzeConstraints, applyDimensions, suggestDimensions } from "./constraintAnalyzer";

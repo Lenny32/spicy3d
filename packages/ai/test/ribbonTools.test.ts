@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { rs } from "@rstest/core";
 import {
     type CommandKeys,
     CommandStore,
@@ -13,8 +14,7 @@ import {
     type RibbonGroupKeys,
     RibbonTab,
     type RibbonTabKeys,
-} from "@chili3d/core";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core";
 import { buildRibbonTools } from "../src/tools/ribbonTools";
 
 function getTool(name: string) {
@@ -50,7 +50,7 @@ function stubApp(ribbon: Ribbon | undefined) {
 
 afterEach(() => {
     rs.unstubAllGlobals();
-    Config.instance.navigation3D = "Chili3d";
+    Config.instance.navigation3D = "Spicy3D";
     CommandStore.unregisterCommand("modify.thickSolid");
 });
 

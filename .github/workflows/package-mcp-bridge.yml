@@ -1,6 +1,6 @@
 name: Package MCP bridge
 
-# Standalone chili3d-mcp-bridge executables: users download one file and point their MCP client at
+# Standalone spicy3d-mcp-bridge executables: users download one file and point their MCP client at
 # it, with no Node.js and no checkout.
 #
 # - Called by deploy.yml (the CD) on every deploy: builds and verifies them only (run artifact).
@@ -98,7 +98,7 @@ jobs:
             - uses: actions/upload-artifact@v4
               with:
                   name: build-${{ matrix.name }}
-                  path: dist-bridge/chili3d-mcp-bridge-*
+                  path: dist-bridge/spicy3d-mcp-bridge-*
                   if-no-files-found: error
 
     verify:
@@ -108,11 +108,11 @@ jobs:
             fail-fast: true
             matrix:
                 include:
-                    - { target: windows-x64, os: windows-latest, file: chili3d-mcp-bridge-windows-x64.exe }
-                    - { target: linux-x64, os: ubuntu-latest, file: chili3d-mcp-bridge-linux-x64 }
-                    - { target: linux-arm64, os: ubuntu-24.04-arm, file: chili3d-mcp-bridge-linux-arm64 }
-                    - { target: macos-x64, os: macos-15-intel, file: chili3d-mcp-bridge-macos-x64 }
-                    - { target: macos-arm64, os: macos-latest, file: chili3d-mcp-bridge-macos-arm64 }
+                    - { target: windows-x64, os: windows-latest, file: spicy3d-mcp-bridge-windows-x64.exe }
+                    - { target: linux-x64, os: ubuntu-latest, file: spicy3d-mcp-bridge-linux-x64 }
+                    - { target: linux-arm64, os: ubuntu-24.04-arm, file: spicy3d-mcp-bridge-linux-arm64 }
+                    - { target: macos-x64, os: macos-15-intel, file: spicy3d-mcp-bridge-macos-x64 }
+                    - { target: macos-arm64, os: macos-latest, file: spicy3d-mcp-bridge-macos-arm64 }
         runs-on: ${{ matrix.os }}
         defaults:
             run:
@@ -139,7 +139,7 @@ jobs:
                   init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
                   reply=$( (echo "$init"; sleep 3) | "bin/${{ matrix.file }}" --app-url https://ci.example/ --port 7777 --token ci | head -n 1)
                   echo "$reply"
-                  echo "$reply" | grep -q '"serverInfo":{"name":"chili3d"'
+                  echo "$reply" | grep -q '"serverInfo":{"name":"spicy3d"'
 
     package:
         name: Package ${{ inputs.version }}
@@ -157,14 +157,14 @@ jobs:
             - name: Checksums
               run: |
                   count=0
-                  for f in release/chili3d-mcp-bridge-*; do [[ "$f" == *.tgz ]] || count=$((count + 1)); done
+                  for f in release/spicy3d-mcp-bridge-*; do [[ "$f" == *.tgz ]] || count=$((count + 1)); done
                   test "$count" -eq 5
-                  cd release && sha256sum chili3d-mcp-bridge-* > SHA256SUMS && cat SHA256SUMS
+                  cd release && sha256sum spicy3d-mcp-bridge-* > SHA256SUMS && cat SHA256SUMS
 
             # Always available from the run's summary page, whatever "publish" says.
             - uses: actions/upload-artifact@v4
               with:
-                  name: chili3d-mcp-bridge-${{ env.VERSION }}
+                  name: spicy3d-mcp-bridge-${{ env.VERSION }}
                   path: release/
                   if-no-files-found: error
 

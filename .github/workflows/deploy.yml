@@ -68,7 +68,7 @@ jobs:
             - name: Check output
               run: |
                   test -f dist/index.html
-                  ls dist/mcp/chili3d-mcp-bridge-*.tgz
+                  ls dist/mcp/spicy3d-mcp-bridge-*.tgz
                   ls dist/*.wasm
 
             - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

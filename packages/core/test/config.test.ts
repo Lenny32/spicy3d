@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { ObjectSnapTypes } from "../src";
@@ -181,7 +181,7 @@ describe("Config", () => {
                 language: "en-US",
                 navigation3D: "TestNav",
             };
-            localStorageMock["chili3d.app.testRead"] = JSON.stringify(testData);
+            localStorageMock["spicy3d.app.testRead"] = JSON.stringify(testData);
 
             Config.instance.readFromStorage();
             expect(Config.instance.language).toBe("en-US");
@@ -191,7 +191,7 @@ describe("Config", () => {
 
         test("should handle empty storage", () => {
             Config.instance.init("config");
-            localStorageMock["chili3d.app.config"] = "{}";
+            localStorageMock["spicy3d.app.config"] = "{}";
 
             Config.instance.readFromStorage();
             expect(Config.instance.language).not.toBeNull();
@@ -205,7 +205,7 @@ describe("Config", () => {
 
             Config.instance.saveToStorage();
 
-            const stored = localStorageMock["chili3d.app.testSave"];
+            const stored = localStorageMock["spicy3d.app.testSave"];
             expect(stored).not.toBeNull();
             const parsed = JSON.parse(stored);
             expect(parsed.language).toBe("fr-FR");

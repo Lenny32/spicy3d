@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -12,7 +12,7 @@ import {
     Ribbon,
     RibbonTab,
     type RibbonTabProfile,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import { showDialog } from "./dialog";
 import { Editor } from "./editor";
 import { showFloatPanel } from "./floatPanel";
@@ -151,4 +151,4 @@ export class MainWindow extends HTMLElement implements IWindow {
     };
 }
 
-customElements.define("chili3d-main-window", MainWindow);
+customElements.define("spicy3d-main-window", MainWindow);

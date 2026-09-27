@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { bridgeUrlFor, loadMcpSettings } from "@chili3d/ai";
-import { AppBuilder } from "@chili3d/builder";
-import { type IApplication, Logger } from "@chili3d/core";
+import { bridgeUrlFor, loadMcpSettings } from "@spicy3d/ai";
+import { AppBuilder } from "@spicy3d/builder";
+import { type IApplication, Logger } from "@spicy3d/core";
 import { Loading } from "./loading";
 import { parseStartupParams } from "./startupParams";
 
@@ -17,7 +17,7 @@ async function handleApplicaionBuilt(app: IApplication) {
     const mcpSettings = loadMcpSettings();
     if (mcpUrl || mcpSettings.autoConnect) {
         // Loaded on demand: the MCP SDK is a sizeable chunk only bridge sessions need.
-        import("@chili3d/ai/src/mcp")
+        import("@spicy3d/ai/src/mcp")
             .then((mcp) => mcp.connectMcpBridge(mcpUrl ?? bridgeUrlFor(mcpSettings)))
             .catch((err) => Logger.error(`[mcp] failed to start: ${err}`));
     }

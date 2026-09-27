@@ -5,10 +5,10 @@ import packages from "./package.json" with { type: "json" };
 
 const configDir = import.meta.dirname;
 // Where the MCP panel links the standalone bridge executables. Forks and self-hosters that publish
-// their own releases set CHILI3D_BRIDGE_DOWNLOAD_URL (a folder URL ending in "/") at build time.
+// their own releases set SPICY3D_BRIDGE_DOWNLOAD_URL (a folder URL ending in "/") at build time.
 const mcpBridgeDownloadUrl =
-    process.env["CHILI3D_BRIDGE_DOWNLOAD_URL"] ??
-    `https://github.com/lenny32/chili3d/releases/download/${packages.version}/`;
+    process.env["SPICY3D_BRIDGE_DOWNLOAD_URL"] ??
+    `https://github.com/Lenny32/spicy3d/releases/download/${packages.version}/`;
 
 export default defineConfig({
     exclude: ["**/cpp/**"],

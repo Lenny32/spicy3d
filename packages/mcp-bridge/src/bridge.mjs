@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 /**
@@ -8,7 +8,7 @@
  * JSON-RPC between the MCP client (stdio) and the tab (WebSocket), plus three things a plain pipe
  * cannot do:
  * - answer the client while no tab is connected, so the client does not fail at startup and the
- *   model can hand the user the pairing link (the `chili3d_connect` tool);
+ *   model can hand the user the pairing link (the `spicy3d_connect` tool);
  * - replay the client's `initialize` handshake to a tab that connects (or reconnects) later;
  * - fail requests that were in flight when the tab went away, instead of leaving them hanging.
  *
@@ -16,8 +16,8 @@
  * @typedef {{ send(message: Message): void, close(code?: number, reason?: string): void }} TabPeer
  */
 
-export const CONNECT_TOOL = "chili3d_connect";
-export const REPLAY_ID_PREFIX = "chili3d-bridge-init-";
+export const CONNECT_TOOL = "spicy3d_connect";
+export const REPLAY_ID_PREFIX = "spicy3d-bridge-init-";
 
 /** JSON-RPC server error the bridge uses for "no tab to answer this". */
 export const TAB_UNAVAILABLE = -32000;
@@ -33,7 +33,7 @@ const isNotification = (m) => typeof m.method === "string" && (m.id === undefine
 const idKey = (id) => JSON.stringify(id);
 
 /**
- * The link that opens Chili3D paired with this bridge.
+ * The link that opens Spicy3D paired with this bridge.
  * @param {string} appUrl
  * @param {number} port
  * @param {string} token
@@ -100,7 +100,7 @@ export class BridgeCore {
     attachTab(tab) {
         const previous = this.tab;
         if (previous) {
-            this.detachTab(previous, "a newer Chili3D tab connected");
+            this.detachTab(previous, "a newer Spicy3D tab connected");
             previous.close(4000, "replaced by a newer tab");
         }
         this.tab = tab;
@@ -151,7 +151,7 @@ export class BridgeCore {
      * @param {TabPeer} tab
      * @param {string} [reason]
      */
-    detachTab(tab, reason = "the Chili3D tab disconnected") {
+    detachTab(tab, reason = "the Spicy3D tab disconnected") {
         if (tab !== this.tab) return;
         this.tab = undefined;
         this.tabInitialized = false;
@@ -179,7 +179,7 @@ export class BridgeCore {
     }
 
     reconnectHint() {
-        return `Ask the user to open Chili3D, open the MCP panel and press Connect (or to open this link in their browser: ${this.options.pairingUrl}).`;
+        return `Ask the user to open Spicy3D, open the MCP panel and press Connect (or to open this link in their browser: ${this.options.pairingUrl}).`;
     }
 
     /**
@@ -207,8 +207,8 @@ export class BridgeCore {
             case "tools/call": {
                 const isConnect = request.params?.name === CONNECT_TOOL;
                 const text = isConnect
-                    ? `No Chili3D tab is connected yet. ${this.reconnectHint()}\nOnce it loads, the Chili3D tools appear in the tool list.`
-                    : `No Chili3D tab is connected. ${this.reconnectHint()}`;
+                    ? `No Spicy3D tab is connected yet. ${this.reconnectHint()}\nOnce it loads, the Spicy3D tools appear in the tool list.`
+                    : `No Spicy3D tab is connected. ${this.reconnectHint()}`;
                 return reply({ content: [{ type: "text", text }], ...(!isConnect && { isError: true }) });
             }
             default:
@@ -217,7 +217,7 @@ export class BridgeCore {
                     id: request.id,
                     error: {
                         code: TAB_UNAVAILABLE,
-                        message: `No Chili3D tab is connected. ${this.reconnectHint()}`,
+                        message: `No Spicy3D tab is connected. ${this.reconnectHint()}`,
                     },
                 };
         }
@@ -232,8 +232,8 @@ export class BridgeCore {
         return {
             protocolVersion,
             capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
-            serverInfo: { name: "chili3d", version: this.options.version ?? "0.0.0" },
-            instructions: `This server drives the user's open Chili3D tab (a browser CAD). No tab is connected yet: call ${CONNECT_TOOL} to get the link the user must open. Once the tab connects, the modeling tools appear; call get_usage_guide before the first modeling call.`,
+            serverInfo: { name: "spicy3d", version: this.options.version ?? "0.0.0" },
+            instructions: `This server drives the user's open Spicy3D tab (a browser CAD). No tab is connected yet: call ${CONNECT_TOOL} to get the link the user must open. Once the tab connects, the modeling tools appear; call get_usage_guide before the first modeling call.`,
         };
     }
 
@@ -241,7 +241,7 @@ export class BridgeCore {
         return {
             name: CONNECT_TOOL,
             description:
-                "Get the link that opens Chili3D in the user's browser, paired with this server. Call it when the user wants to model in Chili3D and no Chili3D tools are listed yet.",
+                "Get the link that opens Spicy3D in the user's browser, paired with this server. Call it when the user wants to model in Spicy3D and no Spicy3D tools are listed yet.",
             inputSchema: { type: "object", properties: {} },
         };
     }

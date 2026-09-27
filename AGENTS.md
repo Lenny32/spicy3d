@@ -1,4 +1,4 @@
-# Chili3D coding guidelines
+# Spicy3D coding guidelines
 
 ## Build & Test
 
@@ -32,14 +32,14 @@ web ──> builder ──> app ──> core
 - **`element`** — Custom reactive DOM elements (radio groups, expanders, data converters)
 - **`ui`** — App chrome: main window, ribbon, property panels, project tree, dialogs, toast, status bar
 - **`app`** — `Application`, body nodes (`bodys/`), command implementations, `CommandService`, `HotkeyService`
-- **`builder`** — `AppBuilder` fluent chain (`.useIndexedDB().useWasmOcc().useParametric().useThree().useUI().build()`), default ribbon layout; `mergeRibbonProfiles` merges module contributions (`SketchRibbonProfiles` from `@chili3d/parametric`, `ParametricRibbonProfiles`) into `DefaultRibbon`
+- **`builder`** — `AppBuilder` fluent chain (`.useIndexedDB().useWasmOcc().useParametric().useThree().useUI().build()`), default ribbon layout; `mergeRibbonProfiles` merges module contributions (`SketchRibbonProfiles` from `@spicy3d/parametric`, `ParametricRibbonProfiles`) into `DefaultRibbon`
 - **`i18n`** / **`storage`** / **`web`** — Locale data (en) / IndexedDB persistence / entry point (loading screen, `?plugin=`/`?url=`/`?model=`/`?mcp=` params)
 
-Import via workspace names (`import { ... } from "@chili3d/core"`); one root `tsconfig.json` covers all packages.
+Import via workspace names (`import { ... } from "@spicy3d/core"`); one root `tsconfig.json` covers all packages.
 
 ## C++ WASM (`cpp/`)
 
-OCCT v8.0.0 → `chili-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (shape creation; the tracked ops report per-output history twice — single-valued `faceMap`/`edgeMap` keeping the first ancestor, plus flat (out, in) `faceAncestors`/`edgeAncestors` pairs keeping every derivation so boolean-merged faces record all their inputs), `shape.cpp` (topology traversal), `converter.cpp` (STEP/IGES/BREP/STL), `mesher.cpp` (B-rep → mesh), `geometry.cpp` (curve/surface queries). The Release build sets `-sDISABLE_EXCEPTION_CATCHING=1`, so any OCCT raise aborts the whole module and C++ try/catch is ineffective — the query files (`shape.cpp`/`mesher.cpp`/`geometry.cpp`) guard degenerate and null-geometry paths preventively (`IsGeometric`/`IsNull`/`IsDone` prechecks; `Edge::curve` reports degenerate edges through a JS-level throw, which still works with catching disabled), and the tracked sweep ops report cap faces through a separate `capFaces` channel on the tracked result (`LastShape()` of the sweep; empty when it coincides with `FirstShape()`, e.g. a 360° revolve). Output: `packages/wasm/lib/chili-wasm.{wasm,js,d.ts}`. C++ style: WebKit (clang-format); license LGPL-3.0 (TS is AGPL-3.0).
+OCCT v8.0.0 → `spicy-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (shape creation; the tracked ops report per-output history twice — single-valued `faceMap`/`edgeMap` keeping the first ancestor, plus flat (out, in) `faceAncestors`/`edgeAncestors` pairs keeping every derivation so boolean-merged faces record all their inputs), `shape.cpp` (topology traversal), `converter.cpp` (STEP/IGES/BREP/STL), `mesher.cpp` (B-rep → mesh), `geometry.cpp` (curve/surface queries). The Release build sets `-sDISABLE_EXCEPTION_CATCHING=1`, so any OCCT raise aborts the whole module and C++ try/catch is ineffective — the query files (`shape.cpp`/`mesher.cpp`/`geometry.cpp`) guard degenerate and null-geometry paths preventively (`IsGeometric`/`IsNull`/`IsDone` prechecks; `Edge::curve` reports degenerate edges through a JS-level throw, which still works with catching disabled), and the tracked sweep ops report cap faces through a separate `capFaces` channel on the tracked result (`LastShape()` of the sweep; empty when it coincides with `FirstShape()`, e.g. a 360° revolve). Output: `packages/wasm/lib/spicy-wasm.{wasm,js,d.ts}`. C++ style: WebKit (clang-format); license LGPL-3.0 (TS is AGPL-3.0).
 
 ## Key Patterns
 
@@ -52,12 +52,12 @@ OCCT v8.0.0 → `chili-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (sha
 - **Undo/redo** — `Transaction` records snapshots, `History` keeps the stack; commands create transactions automatically.
 - **Plugins** — Loaded from URLs or `?plugin=`; manager in `core/src/plugin/` + `app/src/pluginManager.ts`; examples in `plugins/`.
 - **Global singleton** — `getCurrentApplication()` (from `core`) instead of DI threading.
-- **MCP server** — runs *in the browser page* (`packages/ai/src/mcp/`): an SDK `Server` over the same `buildTools()` registry as the old chat panel. The ribbon's MCP button opens `McpPanel` (setup steps, token, generated client config, Connect); `settings.ts`/`state.ts`/`panel.ts` must stay SDK-free, and the SDK half (`mcp/index.ts`) is loaded with a dynamic `import()` on Connect, on `?mcp=ws://127.0.0.1:<port>/…` or on auto-connect. `packages/mcp-bridge` is the stdio process the MCP client launches, with no checkout needed: a standalone executable per OS attached to each release by `.github/workflows/package-mcp-bridge.yml` (Node.js SEA built from one runner by `scripts/build-mcp-bridge-binaries.mjs`: esbuild bundle + postject into each platform's official Node binary; download base baked in at build time as `__MCP_BRIDGE_DOWNLOAD_URL__`, overridable with `CHILI3D_BRIDGE_DOWNLOAD_URL`), or `npx --package=<site>/mcp/chili3d-mcp-bridge-<version>.tgz` (the tarball `scripts/pack-mcp-bridge.mjs` puts in `public/mcp/` on dev/build); `--app-url` sets the one accepted page origin; it relays JSON-RPC to the page over WebSocket (Origin + optional token checked), exposes a `chili3d_connect` tool while no page is connected, and replays the `initialize` handshake to pages that connect later. Tool calls are serialized (`SerialQueue`) because `run_program` refs chain across calls. Units: millimetres; angles: degrees.
+- **MCP server** — runs *in the browser page* (`packages/ai/src/mcp/`): an SDK `Server` over the same `buildTools()` registry as the old chat panel. The ribbon's MCP button opens `McpPanel` (setup steps, token, generated client config, Connect); `settings.ts`/`state.ts`/`panel.ts` must stay SDK-free, and the SDK half (`mcp/index.ts`) is loaded with a dynamic `import()` on Connect, on `?mcp=ws://127.0.0.1:<port>/…` or on auto-connect. `packages/mcp-bridge` is the stdio process the MCP client launches, with no checkout needed: a standalone executable per OS attached to each release by `.github/workflows/package-mcp-bridge.yml` (Node.js SEA built from one runner by `scripts/build-mcp-bridge-binaries.mjs`: esbuild bundle + postject into each platform's official Node binary; download base baked in at build time as `__MCP_BRIDGE_DOWNLOAD_URL__`, overridable with `SPICY3D_BRIDGE_DOWNLOAD_URL`), or `npx --package=<site>/mcp/spicy3d-mcp-bridge-<version>.tgz` (the tarball `scripts/pack-mcp-bridge.mjs` puts in `public/mcp/` on dev/build); `--app-url` sets the one accepted page origin; it relays JSON-RPC to the page over WebSocket (Origin + optional token checked), exposes a `spicy3d_connect` tool while no page is connected, and replays the `initialize` handshake to pages that connect later. Tool calls are serialized (`SerialQueue`) because `run_program` refs chain across calls. Units: millimetres; angles: degrees.
 
 ## Testing
 
 - Rstest (not Jest/Vitest) + Happy-DOM; root `rstest.config.ts`, globals enabled (`describe`, `test`, `expect`); tests in `packages/*/test/`; legacy decorators enabled.
-- Reuse shared mocks from `@chili3d/core/test-utils` (`TestDocument`, `createMockDocument`, `createMockApplication`, `createMockVisual`, ...) instead of per-package copies; package-specific facades (e.g. `packages/ui/test/_helpers/`) extend them. `initializeI18n()` runs automatically via rstest `setupFiles` — never call it in test files.
+- Reuse shared mocks from `@spicy3d/core/test-utils` (`TestDocument`, `createMockDocument`, `createMockApplication`, `createMockVisual`, ...) instead of per-package copies; package-specific facades (e.g. `packages/ui/test/_helpers/`) extend them. `initializeI18n()` runs automatically via rstest `setupFiles` — never call it in test files.
 - Assertions must execute: none hidden in event callbacks (unless the callback is also asserted to fire), no tautologies (`x === true || x === false`), no `if (x) expect(...)` — assert the precondition, then the behavior; `await` every promise whose `.then` asserts.
 - Assert behavior, not absence of crashes: bare `not.toThrow()` / `toBeDefined()` is a smell; `querySelector` results need `not.toBeNull()`.
 - Restore global monkeypatches (`PubSub.default.pub`, `globalThis.fetch`, ...) in `finally`/`afterEach`, or use `rs.stubGlobal` + `rs.unstubAllGlobals()`.
@@ -71,7 +71,7 @@ OCCT v8.0.0 → `chili-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (sha
 - Every TS file starts with the AGPL-3.0 header:
 
 ```ts
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 ```
 

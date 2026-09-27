@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { formatLength, type LengthUnit } from "@chili3d/core";
+import { formatLength, type LengthUnit } from "@spicy3d/core";
 import { ConstraintKind, entityRadius, type SketchConstraintData, type SketchData } from "../sketchModel";
 import type { SketchSolver } from "../solver";
 import { centerRef, lineRefs } from "../solverEntities";

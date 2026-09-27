@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -9,8 +9,8 @@ import {
     type IView,
     Localize,
     PubSub,
-} from "@chili3d/core";
-import { button, div, form, img, input, option, select, span, svg, textarea } from "@chili3d/element";
+} from "@spicy3d/core";
+import { button, div, form, img, input, option, select, span, svg, textarea } from "@spicy3d/element";
 import { marked, type Tokens } from "marked";
 import style from "./chatPanel.module.css";
 import {
@@ -236,7 +236,7 @@ export class ChatPanel extends HTMLElement {
     private createTitle(): HTMLElement {
         this.titleEl = div(
             { className: style.title },
-            svg({ className: style.titleIcon, icon: "icon-chili" }),
+            svg({ className: style.titleIcon, icon: "icon-spicy" }),
             span({ textContent: new Localize("ai.title") }),
         );
         return this.titleEl;
@@ -318,7 +318,7 @@ export class ChatPanel extends HTMLElement {
     private createEmptyState(): HTMLElement {
         return div(
             { className: style.emptyState },
-            svg({ className: style.emptyIcon, icon: "icon-chili" }),
+            svg({ className: style.emptyIcon, icon: "icon-spicy" }),
             div({ className: style.emptyTitle, textContent: new Localize("ai.emptyTitle") }),
             div({ className: style.emptyHint, textContent: new Localize("ai.emptyHint") }),
             div({ className: style.emptyHint, textContent: new Localize("ai.emptyExample") }),
@@ -1213,7 +1213,7 @@ function activeDocument(): IDocument | undefined {
     }
 }
 
-customElements.define("chili-ai-chat", ChatPanel);
+customElements.define("spicy-ai-chat", ChatPanel);
 
 export function createChatPanel(): ChatPanel {
     return new ChatPanel();

@@ -1,24 +1,24 @@
-# @chili3d/mcp-bridge
+# @spicy3d/mcp-bridge
 
-Lets any MCP client (Claude Code, Claude Desktop, Cursor, …) drive Chili3D open in your browser, whether Chili3D runs on your machine or on a server.
+Lets any MCP client (Claude Code, Claude Desktop, Cursor, …) drive Spicy3D open in your browser, whether Spicy3D runs on your machine or on a server.
 
-The MCP server runs **inside the Chili3D page**, over the same tools as the in-app assistant, so your document never leaves the browser. A web page cannot accept connections, so this bridge is the small stdio program your MCP client starts: it relays JSON-RPC to the page over a WebSocket on `127.0.0.1`.
+The MCP server runs **inside the Spicy3D page**, over the same tools as the in-app assistant, so your document never leaves the browser. A web page cannot accept connections, so this bridge is the small stdio program your MCP client starts: it relays JSON-RPC to the page over a WebSocket on `127.0.0.1`.
 
 ```
-MCP client ──stdio──> chili3d-mcp-bridge ──ws://127.0.0.1:7777──> Chili3D page (any host, e.g. https://cad.example.com)
+MCP client ──stdio──> spicy3d-mcp-bridge ──ws://127.0.0.1:7777──> Spicy3D page (any host, e.g. https://cad.example.com)
 ```
 
 Nothing to clone or build. Get the bridge either way:
 
-- **Standalone executable** (nothing else to install): download it for your platform from the [release](https://github.com/lenny32/chili3d/releases) matching your Chili3D version. The MCP panel links the right files.
-- **Node.js 20+**: `npx` fetches the bridge package that every Chili3D site serves at `mcp/chili3d-mcp-bridge-<version>.tgz`, or from npm once published.
+- **Standalone executable** (nothing else to install): download it for your platform from the [release](https://github.com/Lenny32/spicy3d/releases) matching your Spicy3D version. The MCP panel links the right files.
+- **Node.js 20+**: `npx` fetches the bridge package that every Spicy3D site serves at `mcp/spicy3d-mcp-bridge-<version>.tgz`, or from npm once published.
 
 ## Setup
 
-1. Open Chili3D and click **MCP** in the ribbon. The panel generates a pairing token, links the executable for your OS, and, once you enter where you saved it, shows the exact command for this page:
+1. Open Spicy3D and click **MCP** in the ribbon. The panel generates a pairing token, links the executable for your OS, and, once you enter where you saved it, shows the exact command for this page:
 
    ```bash
-   claude mcp add chili3d -e CHILI3D_BRIDGE_TOKEN=<token> -- "C:\Tools\chili3d-mcp-bridge-windows-x64.exe" --app-url https://cad.example.com/
+   claude mcp add spicy3d -e SPICY3D_BRIDGE_TOKEN=<token> -- "C:\Tools\spicy3d-mcp-bridge-windows-x64.exe" --app-url https://cad.example.com/
    ```
 
    or the JSON block for Claude Desktop, Cursor and other clients:
@@ -26,10 +26,10 @@ Nothing to clone or build. Get the bridge either way:
    ```json
    {
        "mcpServers": {
-           "chili3d": {
-               "command": "/Users/me/chili3d-mcp-bridge-macos-arm64",
+           "spicy3d": {
+               "command": "/Users/me/spicy3d-mcp-bridge-macos-arm64",
                "args": ["--app-url", "https://cad.example.com/"],
-               "env": { "CHILI3D_BRIDGE_TOKEN": "<token>" }
+               "env": { "SPICY3D_BRIDGE_TOKEN": "<token>" }
            }
        }
    }
@@ -39,7 +39,7 @@ Nothing to clone or build. Get the bridge either way:
 
 2. Restart the client (or reload its MCP servers), then press **Connect** in the panel. Tick *Connect automatically* to skip this next time.
 
-Until a page connects, the client sees a single tool, `chili3d_connect`, which tells the model how to get you connected.
+Until a page connects, the client sees a single tool, `spicy3d_connect`, which tells the model how to get you connected.
 
 ## Options
 
@@ -47,11 +47,11 @@ Flags win over environment variables.
 
 | Flag | Environment | Default | |
 |---|---|---|---|
-| `-u, --app-url <url>` | `CHILI3D_APP_URL` | `http://localhost:8080/` | Address of the Chili3D page. Only pages from this origin may connect, so a self-hosted instance or fork sets its own URL here |
-| `-p, --port <n>` | `CHILI3D_BRIDGE_PORT` | `7777` | WebSocket port, bound to `127.0.0.1` only |
-| `-t, --token <secret>` | `CHILI3D_BRIDGE_TOKEN` | random | Pairing token from the MCP panel. Prefer the environment variable, which stays out of the process list |
-| `--no-token` | `CHILI3D_BRIDGE_NO_TOKEN=1` | off | Accept the page without a token (see Security) |
-| `--allow-origin <url>` | `CHILI3D_ALLOWED_ORIGINS` (comma-separated) | — | Also accept pages from these origins |
+| `-u, --app-url <url>` | `SPICY3D_APP_URL` | `http://localhost:8080/` | Address of the Spicy3D page. Only pages from this origin may connect, so a self-hosted instance or fork sets its own URL here |
+| `-p, --port <n>` | `SPICY3D_BRIDGE_PORT` | `7777` | WebSocket port, bound to `127.0.0.1` only |
+| `-t, --token <secret>` | `SPICY3D_BRIDGE_TOKEN` | random | Pairing token from the MCP panel. Prefer the environment variable, which stays out of the process list |
+| `--no-token` | `SPICY3D_BRIDGE_NO_TOKEN=1` | off | Accept the page without a token (see Security) |
+| `--allow-origin <url>` | `SPICY3D_ALLOWED_ORIGINS` (comma-separated) | — | Also accept pages from these origins |
 
 ## Browsers
 
@@ -76,8 +76,8 @@ Chrome, Edge and Firefox connect from both local and hosted pages. When the page
 - **Deploy**: the `Deploy` workflow (`.github/workflows/deploy.yml`, push to `main` or manual run) calls it to build and verify the files as a run artifact only, next to the site it deploys.
 - **Manual run**: *Actions > Package MCP bridge > Run workflow* (or `gh workflow run package-mcp-bridge.yml --ref feature/x -f version=0.7.2-rc.1 -f publish=artifact-only`). Pick the branch or tag to build ("Use workflow from"), the version to stamp, and whether to only keep a run artifact, or publish a prerelease or release (created at the built commit). The button appears once the workflow is on the default branch.
 
-The panel links `https://github.com/lenny32/chili3d/releases/download/<version>/`; a fork that publishes its own releases builds the site with `CHILI3D_BRIDGE_DOWNLOAD_URL=<its folder URL>/`.
+The panel links `https://github.com/Lenny32/spicy3d/releases/download/<version>/`; a fork that publishes its own releases builds the site with `SPICY3D_BRIDGE_DOWNLOAD_URL=<its folder URL>/`.
 
 ## Developing
 
-From a checkout, point the panel's *Bridge command* at your copy: `node /path/to/chili3d/packages/mcp-bridge/src/cli.mjs`.
+From a checkout, point the panel's *Bridge command* at your copy: `node /path/to/spicy3d/packages/mcp-bridge/src/cli.mjs`.

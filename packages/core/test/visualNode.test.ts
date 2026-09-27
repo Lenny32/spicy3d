@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { type I18nKeys, Matrix4, VisualNode } from "../src";
@@ -103,7 +103,7 @@ describe("VisualNode", () => {
             expect(calls.length).toBeGreaterThanOrEqual(1);
             const lastCall = calls[calls.length - 1];
             expect(lastCall.node).toBe(visualNode);
-            expect(lastCall.visible).toBe(true && true);
+            expect(lastCall.visible).toBe(true);
 
             // Restore original function
             document.visual.context.setVisible = originalSetVisible;

@@ -1,10 +1,10 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-// test-utils must load BEFORE the core-mock helper so the real core module is
-// fully cached by the time `rs.mock("@chili3d/core")` registers.
-import { createMockDocument } from "@chili3d/core/test-utils";
 import { describe, expect, rs, test } from "@rstest/core";
+// test-utils must load BEFORE the core-mock helper so the real core module is
+// fully cached by the time `rs.mock("@spicy3d/core")` registers.
+import { createMockDocument } from "@spicy3d/core/test-utils";
 
 // ============================================================
 // Mocks setup — must come before imports of the module under test
@@ -46,7 +46,7 @@ rs.mock("../src/property/matrixProperty", () => ({
 }));
 
 // Now import the module under test
-import { type INode, Node } from "@chili3d/core";
+import { type INode, Node } from "@spicy3d/core";
 import { PropertyView } from "../src/property/propertyView";
 import { mustQuery } from "./_helpers/domHelpers";
 
@@ -69,7 +69,7 @@ function expandRows(list: Element) {
 
 /** Opens the first row's "⋯" menu and returns it (appended to document.body). */
 function openMoreMenu(pv: PropertyView): HTMLElement {
-    const more = pv.querySelector('chili-feature-list svg[icon="icon-ellipsis-vertical"]');
+    const more = pv.querySelector('spicy-feature-list svg[icon="icon-ellipsis-vertical"]');
     expect(more).not.toBeNull();
     (more as unknown as { _onclick: (e: MouseEvent) => void })._onclick({
         stopPropagation: () => {},
@@ -176,7 +176,7 @@ describe("PropertyView", () => {
 
             handler!(doc, [node as INode]);
 
-            const list = pv.querySelector("chili-feature-list");
+            const list = pv.querySelector("spicy-feature-list");
             expect(list).not.toBeNull();
             expect(list!.querySelector("svg")).not.toBeNull();
             expandRows(list!);
@@ -201,7 +201,7 @@ describe("PropertyView", () => {
             node.removePropertyChanged = () => {};
             handler!(doc, [node as INode]);
 
-            const list = pv.querySelector("chili-feature-list")!;
+            const list = pv.querySelector("spicy-feature-list")!;
             expandRows(list);
             const box = list.querySelector("input") as HTMLInputElement;
             expect(box).not.toBeNull();
@@ -231,8 +231,8 @@ describe("PropertyView", () => {
 
             handler!(doc, [node as INode]);
 
-            expect(pv.querySelector('chili-feature-list svg[icon="icon-prism"]')).not.toBeNull();
-            const list = pv.querySelector("chili-feature-list")!;
+            expect(pv.querySelector('spicy-feature-list svg[icon="icon-prism"]')).not.toBeNull();
+            const list = pv.querySelector("spicy-feature-list")!;
             expandRows(list);
             const box = list.querySelector("input") as HTMLInputElement;
             expect(box.value).toBe("480.7612");
@@ -245,7 +245,7 @@ describe("PropertyView", () => {
 
             handler!(doc, [new TestNode() as unknown as INode]);
 
-            expect(pv.querySelector("chili-feature-list")).toBeNull();
+            expect(pv.querySelector("spicy-feature-list")).toBeNull();
         });
 
         test("should render a reselect menu entry that triggers reselectShapes", () => {
@@ -292,7 +292,7 @@ describe("PropertyView", () => {
 
             handler!(doc, [node as INode]);
 
-            const list = pv.querySelector("chili-feature-list");
+            const list = pv.querySelector("spicy-feature-list");
             expect(list).not.toBeNull();
             expect(list!.textContent).toContain("Edge not found after rebuild");
         });

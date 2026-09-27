@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -10,8 +10,8 @@ import {
     ObservableCollection,
     PubSub,
     type RecentDocumentDTO,
-} from "@chili3d/core";
-import { a, button, collection, div, img, label, span, svg } from "@chili3d/element";
+} from "@spicy3d/core";
+import { a, button, collection, div, img, label, span, svg } from "@spicy3d/element";
 import style from "./home.module.css";
 import { LanguageSelector } from "./languageSelector";
 import { Navigation3DSelector } from "./navigation3DSelector";
@@ -79,10 +79,10 @@ export class Home extends HTMLElement {
     private logoSection() {
         return div(
             { className: style.logo },
-            svg({ icon: "icon-chili" }),
+            svg({ icon: "icon-spicy" }),
             div(
                 { className: style.logoText },
-                span({ className: style.wordmark, textContent: "CHILI3D" }),
+                span({ className: style.wordmark, textContent: "SPICY3D" }),
                 span({ className: style.version, textContent: `v${__APP_VERSION__}` }),
             ),
         );
@@ -155,12 +155,21 @@ export class Home extends HTMLElement {
             a(
                 {
                     className: style.socialItem,
-                    href: "https://github.com/lenny32/chili3d",
+                    href: "https://github.com/Lenny32/spicy3d",
                     target: "_blank",
                     rel: "noopener noreferrer",
                 },
                 svg({ icon: "icon-github" }),
                 label({ textContent: "GitHub" }),
+            ),
+            a(
+                {
+                    className: style.socialItem,
+                    href: "https://github.com/xiangechen/chili3d",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                },
+                label({ textContent: new Localize("home.basedOn") }),
             ),
         );
     }
@@ -258,4 +267,4 @@ export class Home extends HTMLElement {
     }
 }
 
-customElements.define("chili-home", Home);
+customElements.define("spicy-home", Home);

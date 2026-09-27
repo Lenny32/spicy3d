@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type FloatPanelOptions, PubSub, type VariableData, type VariableType } from "@chili3d/core";
-import { TestDocument } from "@chili3d/core/test-utils";
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
+import { type FloatPanelOptions, PubSub, type VariableData, type VariableType } from "@spicy3d/core";
+import { TestDocument } from "@spicy3d/core/test-utils";
 import { mustQuery } from "./_helpers/domHelpers";
 
 // Must load before the module under test — see the helpers' own comments.

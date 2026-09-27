@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type I18nKeys, type INode, NodeUtils, PubSub } from "@chili3d/core";
-import { a, svg } from "@chili3d/element";
+import { I18n, type I18nKeys, type INode, NodeUtils, PubSub } from "@spicy3d/core";
+import { a, svg } from "@spicy3d/element";
 import type { ProjectView } from "./projectView";
 import style from "./toolBar.module.css";
 import type { Tree } from "./tree";
@@ -70,4 +70,4 @@ export class ToolBar extends HTMLElement {
     }
 }
 
-customElements.define("chili-toolbar", ToolBar);
+customElements.define("spicy-toolbar", ToolBar);

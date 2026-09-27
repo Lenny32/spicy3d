@@ -1,11 +1,11 @@
 {
-    "name": "@chili3d/parametric",
-    "version": "0.7.0",
+    "name": "@spicy3d/parametric",
+    "version": "0.0.1",
     "description": "Parametric feature-list bodies (extrude/revolve from sketches, then fillet/chamfer etc.)",
     "main": "src/index.ts",
     "type": "module",
     "devDependencies": {
-        "@chili3d/core": "*"
+        "@spicy3d/core": "*"
     },
     "dependencies": {
         "@salusoft89/planegcs": "1.2.0"

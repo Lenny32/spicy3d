@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { EditableShapeNode, XYZ } from "@chili3d/core";
 import { afterAll, beforeAll, describe, expect, test } from "@rstest/core";
+import { EditableShapeNode, XYZ } from "@spicy3d/core";
 import { BezierCommand } from "../../../src/commands/create/bezier";
 import { ensureGlobalStubApp, pointStepResult, seedStepDatas, wireCommand } from "../commandTestUtils";
 

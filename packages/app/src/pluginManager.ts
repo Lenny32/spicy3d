@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -14,8 +14,8 @@ import {
     type Plugin,
     type PluginManifest,
     PubSub,
-} from "@chili3d/core";
-import { div, hr, toBase64Img } from "@chili3d/element";
+} from "@spicy3d/core";
+import { div, hr, toBase64Img } from "@spicy3d/element";
 import type JSZip from "jszip";
 
 const untrustedDomains: string[] = [];
@@ -38,7 +38,7 @@ export class PluginManager implements IPluginManager {
     }
 
     private async loadFromRemoteFile(url: string) {
-        if (url.endsWith(".chiliplugin")) {
+        if (url.endsWith(".spicyplugin")) {
             const response = await fetch(url);
             if (!response.ok) {
                 alert(`Failed to fetch plugin from ${url}: ${response.statusText}`);
@@ -47,7 +47,7 @@ export class PluginManager implements IPluginManager {
 
             const arrayBuffer = await response.arrayBuffer();
             const blob = new Blob([arrayBuffer], { type: "application/zip" });
-            const file = new File([blob], "plugin.chiliplugin");
+            const file = new File([blob], "plugin.spicyplugin");
 
             await this.loadFromFile(file);
         } else {
@@ -300,10 +300,10 @@ export class PluginManager implements IPluginManager {
         if (manifest.version && !this.isValidSemver(manifest.version)) {
             errors.push("Invalid version format (expected semver like 1.0.0)");
         }
-        if (manifest.engines?.chili3d) {
+        if (manifest.engines?.spicy3d) {
             const currentVersion = __APP_VERSION__;
-            if (!this.satisfiesVersion(currentVersion, manifest.engines.chili3d)) {
-                errors.push(`Chili3D version ${currentVersion} does not satisfy ${manifest.engines.chili3d}`);
+            if (!this.satisfiesVersion(currentVersion, manifest.engines.spicy3d)) {
+                errors.push(`Spicy3D version ${currentVersion} does not satisfy ${manifest.engines.spicy3d}`);
             }
         }
 

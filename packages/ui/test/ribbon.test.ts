@@ -1,9 +1,9 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { CommandKeys, IApplication, PushButton, Ribbon } from "@chili3d/core";
-import { CommandStore, PubSub, RibbonGroup, RibbonTab } from "@chili3d/core";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import type { CommandKeys, IApplication, PushButton, Ribbon } from "@spicy3d/core";
+import { CommandStore, PubSub, RibbonGroup, RibbonTab } from "@spicy3d/core";
 
 // CSS modules under test (plus those of the ribbon buttons pulled in transitively)
 rs.mock("../src/ribbon/ribbon.module.css", () => ({
@@ -153,13 +153,13 @@ describe("RibbonUI", () => {
         expect(ui.querySelector(".r-title-bar")).not.toBeNull();
 
         const appName = mustQuery(ui, "#appName");
-        expect(appName.textContent).toContain("Chili3D - v");
+        expect(appName.textContent).toContain("Spicy3D - v");
     });
 
     test("should render github link", () => {
         const { ui } = createRibbonUI();
         const link = mustQuery(ui, "a");
-        expect(link.getAttribute("href")).toBe("https://github.com/lenny32/chili3d");
+        expect(link.getAttribute("href")).toBe("https://github.com/Lenny32/spicy3d");
     });
 
     test("should render ribbon groups for each tab", () => {

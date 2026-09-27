@@ -1,11 +1,12 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Localize, PathBinding } from "@chili3d/core";
+import { Localize, PathBinding } from "@spicy3d/core";
 import type { HTMLProps } from "./htmlProps";
 
 export function setProperties<T extends { [K: string]: any }>(left: T, prop: HTMLProps<T>) {
     for (const key in prop) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
         const value = prop[key];
         if (value instanceof Localize && (key === "textContent" || key === "title")) {
             value.set(left, key);

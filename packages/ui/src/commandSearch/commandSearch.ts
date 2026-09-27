@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type CommandKeys, CommandStore, I18n, type I18nKeys, PubSub } from "@chili3d/core";
-import { div, input } from "@chili3d/element";
+import { type CommandKeys, CommandStore, I18n, type I18nKeys, PubSub } from "@spicy3d/core";
+import { div, input } from "@spicy3d/element";
 import { createDropdownItem } from "../ribbon/dropdownController";
 import style from "./commandSearch.module.css";
 
@@ -147,4 +147,4 @@ export class CommandSearch extends HTMLElement {
     };
 }
 
-customElements.define("chili-command-search", CommandSearch);
+customElements.define("spicy-command-search", CommandSearch);

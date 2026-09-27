@@ -1,11 +1,11 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IDocument, LengthUnit, Property } from "@chili3d/core";
 import { describe, expect, test } from "@rstest/core";
+import type { IDocument, LengthUnit, Property } from "@spicy3d/core";
 
 // test-utils must load BEFORE the core-mock helper so the real core module is
-// fully cached by the time `rs.mock("@chili3d/core")` registers.
+// fully cached by the time `rs.mock("@spicy3d/core")` registers.
 import { createMockDocument } from "./_helpers/propertyTestHelpers";
 
 import "./_helpers/cssMocks";

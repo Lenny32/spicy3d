@@ -1,11 +1,11 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IDocument, INode, INodeLinkedList, NodeRecord } from "@chili3d/core";
-// test-utils must load BEFORE the core-mock helper so the real core module is
-// fully cached by the time `rs.mock("@chili3d/core")` registers.
-import { createMockDocument, type MockDocumentOverrides } from "@chili3d/core/test-utils";
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
+import type { IDocument, INode, INodeLinkedList, NodeRecord } from "@spicy3d/core";
+// test-utils must load BEFORE the core-mock helper so the real core module is
+// fully cached by the time `rs.mock("@spicy3d/core")` registers.
+import { createMockDocument, type MockDocumentOverrides } from "@spicy3d/core/test-utils";
 
 // CSS modules under test
 rs.mock("../src/project/tree/tree.module.css", () => ({
@@ -45,8 +45,8 @@ import "./_helpers/mockCoreTree";
 import "./_helpers/mockElement";
 
 // Core value imports must come AFTER the mock helper — importing them earlier would
-// load the real "@chili3d/core" before the mock registers.
-import { NodeSelectionHandler, VisualNode } from "@chili3d/core";
+// load the real "@spicy3d/core" before the mock registers.
+import { NodeSelectionHandler, VisualNode } from "@spicy3d/core";
 import { Tree } from "../src/project/tree/tree";
 import { TreeGroup } from "../src/project/tree/treeItemGroup";
 import { TreeModel } from "../src/project/tree/treeModel";
@@ -80,20 +80,6 @@ class MockNode {
 // prototype chain at runtime instead of extending it, because tsc still sees the
 // real VisualNode type (with required constructor args and accessors).
 Object.setPrototypeOf(MockNode.prototype, VisualNode.prototype);
-
-/** A parametric-body-like node: linked list plus the real feature-list contract. */
-class MockBodyNode extends MockNode {
-    featureItems() {
-        return [];
-    }
-    setFeatureParameter() {}
-    removeFeature() {}
-}
-
-function withId(node: MockNode, id: string) {
-    (node as unknown as { id: string }).id = id;
-    return node;
-}
 
 type NodeObserver = (records: NodeRecord[]) => void;
 

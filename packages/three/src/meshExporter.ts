@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IMeshExporter, type MeshExportOptions, Result, type VisualNode } from "@chili3d/core";
+import { type IMeshExporter, type MeshExportOptions, Result, type VisualNode } from "@spicy3d/core";
 import { Group, Matrix4, Mesh, Object3D } from "three";
 import { OBJExporter } from "three/examples/jsm/exporters/OBJExporter.js";
 import { PLYExporter } from "three/examples/jsm/exporters/PLYExporter.js";

@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { XYZ, XYZLike } from "@chili3d/core";
+import type { XYZ, XYZLike } from "@spicy3d/core";
 
 /**
  * The geometry vocabulary and tolerances the package's layers share: the plain-data
@@ -12,7 +12,7 @@ import type { XYZ, XYZLike } from "@chili3d/core";
  *
  * - The vector a ref stores is core's `XYZLike`, not a type of our own: it is three
  *   numbers, `EdgeRef`/`ProfileRef`/`FaceFingerprint`/`PlaneFaceRef` all store it, and
- *   every reader of those files already has `@chili3d/core` in hand. `plainVec` is the
+ *   every reader of those files already has `@spicy3d/core` in hand. `plainVec` is the
  *   boundary that produces one, and it is not a cast — see its note. `edgeRef.ts` and
  *   `profileRef.ts` previously carried byte-identical copies of the vector type, `vec3`
  *   and `distance`; neither hosts the other's primitives now.

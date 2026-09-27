@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ObservableCollection } from "@chili3d/core";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
+import { ObservableCollection } from "@spicy3d/core";
 import { Collection } from "../src/collection";
 
 describe("Collection", () => {
@@ -330,7 +330,7 @@ describe("Collection", () => {
 
     describe("customElements.define", () => {
         test("should define custom element", () => {
-            expect(customElements.get("chili-collection")).toBe(Collection);
+            expect(customElements.get("spicy-collection")).toBe(Collection);
         });
     });
 });

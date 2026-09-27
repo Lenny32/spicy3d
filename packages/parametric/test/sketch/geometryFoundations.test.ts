@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Plane } from "@chili3d/core";
+import { Plane } from "@spicy3d/core";
 import { ellipseParams } from "../../src/sketch/commands/sketchEllipse";
 import { addPolygon, polygonVertices } from "../../src/sketch/commands/sketchPolygon";
 import { ConstraintKind, ellipsePoint, shapeEntityIds } from "../../src/sketch/sketchModel";

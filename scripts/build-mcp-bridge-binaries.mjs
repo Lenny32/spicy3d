@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 /**
- * Build standalone chili3d-mcp-bridge executables (no Node.js needed on the user's machine) for
+ * Build standalone spicy3d-mcp-bridge executables (no Node.js needed on the user's machine) for
  * every release platform into dist-bridge/, as Node.js single executable applications:
  *
  *   1. esbuild bundles the bridge and `ws` into one CommonJS file (what SEA runs);
@@ -90,7 +90,7 @@ const shasums = await fetchText(`https://nodejs.org/dist/${process.version}/SHAS
 const sums = [];
 for (const name of targets) {
     const target = TARGETS[name];
-    const file = `chili3d-mcp-bridge-${name}${target.ext}`;
+    const file = `spicy3d-mcp-bridge-${name}${target.ext}`;
     const output = path.join(outDir, file);
     const macos = name.startsWith("macos");
     writeFileSync(output, await nodeBinary(target));

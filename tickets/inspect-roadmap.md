@@ -1,6 +1,6 @@
 # Inspect Panel Enhancement Roadmap
 
-Expand Chili3D's measurement and shape-checking tools with persistent visual, geometry, manufacturing, and assembly analyses. Status: planned. Comparison baseline: 2026-09-24.
+Expand Spicy3D's measurement and shape-checking tools with persistent visual, geometry, manufacturing, and assembly analyses. Status: planned. Comparison baseline: 2026-09-24.
 
 ## Current State
 

@@ -1,7 +1,7 @@
-// Demo Plugin for Chili3D
+// Demo Plugin for Spicy3D
 // This plugin demonstrates the plugin system capabilities
 
-import type { CommandKeys, Plugin } from "@chili3d/core";
+import type { CommandKeys, Plugin } from "@spicy3d/core";
 
 import { HelloWorldCommand } from "./commands/hello";
 

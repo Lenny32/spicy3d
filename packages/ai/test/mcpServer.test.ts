@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -178,13 +178,13 @@ describe("createMcpServer", () => {
 
         const { resources } = await client.listResources();
         const skill = SKILLS[0];
-        const read = await client.readResource({ uri: `chili3d://skill/${skill.name}` });
-        const guide = await client.readResource({ uri: "chili3d://guide/usage" });
+        const read = await client.readResource({ uri: `spicy3d://skill/${skill.name}` });
+        const guide = await client.readResource({ uri: "spicy3d://guide/usage" });
 
-        expect(resources.map((r) => r.uri)).toContain("chili3d://document");
-        expect(resources.map((r) => r.uri)).toContain(`chili3d://skill/${skill.name}`);
+        expect(resources.map((r) => r.uri)).toContain("spicy3d://document");
+        expect(resources.map((r) => r.uri)).toContain(`spicy3d://skill/${skill.name}`);
         expect(read.contents[0]).toMatchObject({ mimeType: "text/markdown", text: skill.content });
         expect(guide.contents[0]).toMatchObject({ text: "be careful" });
-        await expect(client.readResource({ uri: "chili3d://nope" })).rejects.toThrow("unknown resource");
+        await expect(client.readResource({ uri: "spicy3d://nope" })).rejects.toThrow("unknown resource");
     });
 });

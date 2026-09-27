@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { createMockApplication, TestDocument } from "@chili3d/core/test-utils";
 import { rs } from "@rstest/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
 import { buildVariableTools } from "../src/tools/variableTools";
 
 const tool = () => buildVariableTools().find((candidate) => candidate.name === "document_variables")!;

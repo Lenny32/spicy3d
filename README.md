@@ -1,4 +1,4 @@
-# chili3d (Lenny32 fork)
+# Spicy3D
 
 A 3D CAD application that runs in the browser. OpenCascade (OCCT) is compiled to WebAssembly for the modeling kernel and Three.js does the rendering, so there is nothing to install.
 
@@ -6,7 +6,7 @@ A 3D CAD application that runs in the browser. OpenCascade (OCCT) is compiled to
 
 ## About this fork
 
-This repository started as a fork of [xiangechen/chili3d](https://github.com/xiangechen/chili3d). It is no longer kept in sync with upstream: we are taking it in our own direction, and changes are not sent back. Expect the two to drift further apart over time.
+Spicy3D is derived from Chili3D by Xiange Chen and contributors, licensed under AGPL-3.0. It started as a fork of [xiangechen/chili3d](https://github.com/xiangechen/chili3d). It is no longer kept in sync with upstream: we are taking it in our own direction, and changes are not sent back. Expect the two to drift further apart over time.
 
 If you want the original project, its website ([chili3d.com](https://chili3d.com)), its releases or its author, go upstream. Please don't report issues from this fork there.
 
@@ -40,8 +40,8 @@ Most of this comes from upstream.
 You need Node.js and npm.
 
 ```bash
-git clone https://github.com/lenny32/chili3d.git
-cd chili3d
+git clone https://github.com/Lenny32/spicy3d.git
+cd spicy3d
 npm install
 npm run dev     # http://localhost:8080
 ```
@@ -84,7 +84,7 @@ Issues and pull requests are welcome on this repository. Branch from `develop` a
 
 ## License
 
-AGPL-3.0, see [LICENSE](LICENSE). The C++ code in `cpp/` is LGPL-3.0.
+AGPL-3.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). The C++ code in `cpp/` is LGPL-3.0 ([cpp/LICENSE-spicy-wasm.txt](cpp/LICENSE-spicy-wasm.txt)).
 
 The code inherited from upstream stays under the copyright of its authors. Commercial licensing of that code is handled by the upstream author, not by this fork.
 

@@ -1,14 +1,14 @@
 {
-    "name": "@chili3d/builder",
-    "version": "0.7.1",
+    "name": "@spicy3d/builder",
+    "version": "0.0.1",
     "description": "",
     "main": "src/index.ts",
     "devDependencies": {
-        "@chili3d/app": "*",
-        "@chili3d/i18n": "*",
-        "@chili3d/parametric": "*",
-        "@chili3d/three": "*",
-        "@chili3d/ui": "*",
-        "@chili3d/wasm": "*"
+        "@spicy3d/app": "*",
+        "@spicy3d/i18n": "*",
+        "@spicy3d/parametric": "*",
+        "@spicy3d/three": "*",
+        "@spicy3d/ui": "*",
+        "@spicy3d/wasm": "*"
     }
 }

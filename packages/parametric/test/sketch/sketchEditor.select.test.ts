@@ -1,14 +1,14 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type ICameraController, Plane, Result, VisualConfig, XYZ } from "@chili3d/core";
+import { rs } from "@rstest/core";
+import { type ICameraController, Plane, Result, VisualConfig, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
     createMockVisualWithDocument,
     TestDocument,
-} from "@chili3d/core/test-utils";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core/test-utils";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import type { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
 import { ConstraintKind } from "../../src/sketch/sketchModel";
@@ -177,7 +177,7 @@ describe("SketchEditor entity selection", () => {
     });
 
     test("Escape clears the selection first and exits on the second press", () => {
-        const { app, doc, view, restoreFactory } = setup();
+        const { doc, view, restoreFactory } = setup();
         try {
             const node = new SketchNode({ document: doc, plane: Plane.XY });
             const editor = SketchEditor.enter(node);

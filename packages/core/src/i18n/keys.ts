@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 export const I18N_KEYS = [
@@ -538,6 +538,7 @@ export const I18N_KEYS = [
     "file.unitInfo.none{0}{1}",
     "file.unitInfo.fixed{0}{1}",
     "helix.pitch",
+    "home.basedOn",
     "home.recent",
     "home.recent.empty",
     "home.welcome",

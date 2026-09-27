@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -7,7 +7,7 @@ import {
     type IApplication,
     type IView,
     PubSub,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import { Cursor } from "../cursor";
 import style from "./layoutViewport.module.css";
 import { Viewport } from "./viewport";
@@ -72,4 +72,4 @@ export class LayoutViewport extends HTMLElement {
     };
 }
 
-customElements.define("chili-viewport", LayoutViewport);
+customElements.define("spicy-viewport", LayoutViewport);

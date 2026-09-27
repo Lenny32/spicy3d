@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -21,7 +21,7 @@ import {
     type UnitSpec,
     unitSpecEquals,
     type XYZ,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import type { ParametricBodyNode } from "../../parametricBodyNode";
 import type { GeometryEdit } from "../geometryEditing";
 import type { SketchClipboard } from "../sketchModel";
@@ -39,7 +39,7 @@ import { computeSketchRollback, rollbackRestoreOrder } from "../sketchRollback";
 import { SketchSolver, type SolveOutcome } from "../solver";
 import type { SketchTransform } from "../utilityOperations";
 import * as datumPrompt from "./datumPrompt";
-import { type DimensionAnchor, toDisplayDatum, toStorageDatum } from "./dimensionLayout";
+import { type DimensionAnchor, toDisplayDatum } from "./dimensionLayout";
 import { SketchAnnotationManager } from "./sketchAnnotations";
 import { SketchEventHandler } from "./sketchEventHandler";
 import { SolverFeedback } from "./solverFeedback";

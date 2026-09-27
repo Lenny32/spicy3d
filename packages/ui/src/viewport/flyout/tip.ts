@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { MessageType } from "@chili3d/core";
+import type { MessageType } from "@spicy3d/core";
 import style from "./tip.module.css";
 
 export class Tip extends HTMLElement {
@@ -42,4 +42,4 @@ export class Tip extends HTMLElement {
     }
 }
 
-customElements.define("chili-tip", Tip);
+customElements.define("spicy-tip", Tip);

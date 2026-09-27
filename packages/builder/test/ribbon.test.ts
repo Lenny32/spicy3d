@@ -1,8 +1,8 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18N_KEYS, type RibbonTabProfile } from "@chili3d/core";
-import { SketchRibbonProfiles } from "@chili3d/parametric";
+import { I18N_KEYS, type RibbonTabProfile } from "@spicy3d/core";
+import { SketchRibbonProfiles } from "@spicy3d/parametric";
 import { DefaultRibbon, mergeRibbonProfiles, ParametricRibbonProfiles } from "../src/ribbon";
 
 /** The order `AppBuilder.useParametric` applies the extras in. */

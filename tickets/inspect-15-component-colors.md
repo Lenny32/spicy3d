@@ -8,7 +8,7 @@ Status: planned. Priority: P2.
 
 ## Scope
 
-- Define Chili3D component identity explicitly using existing node/group semantics; document differences from an assembly component model.
+- Define Spicy3D component identity explicitly using existing node/group semantics; document differences from an assembly component model.
 - Assign stable distinguishable colors and coordinated tree indicators without changing stored materials.
 - Provide an Inspect toggle and resolve shortcut conflicts before adding a binding.
 - Define behavior for nested groups, ungrouped bodies, new nodes, and other active analysis overrides.

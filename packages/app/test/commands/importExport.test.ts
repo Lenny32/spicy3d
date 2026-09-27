@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { describe, expect, rs, test } from "@rstest/core";
 import {
     AsyncController,
     CancelableCommand,
@@ -10,9 +11,8 @@ import {
     PubSub,
     SelectNodeStep,
     setCurrentApplication,
-} from "@chili3d/core";
-import { createMockApplication, createMockDocument } from "@chili3d/core/test-utils";
-import { describe, expect, rs, test } from "@rstest/core";
+} from "@spicy3d/core";
+import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { Export, Import } from "../../src/commands/importExport";
 
 // Ensure a mock application is set (Export constructor calls getCurrentApplication)

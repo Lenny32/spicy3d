@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IApplication } from "@chili3d/core";
+import type { IApplication } from "@spicy3d/core";
 
 export interface MacroDefinition {
     id: string;
@@ -11,7 +11,7 @@ export interface MacroDefinition {
     updatedAt: number;
 }
 
-const MACRO_DB = "chili3d-macros";
+const MACRO_DB = "spicy3d-macros";
 const MACRO_TABLE = "macros";
 
 function generateId(): string {

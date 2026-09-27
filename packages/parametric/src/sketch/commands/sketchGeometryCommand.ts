@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { AsyncController, MeshDataUtils, PubSub, Result, VisualConfig } from "@chili3d/core";
+import { AsyncController, MeshDataUtils, PubSub, Result, VisualConfig } from "@spicy3d/core";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { entityDistance, sketchEntityMesh } from "../editor/sketchEventHandler";
 import {

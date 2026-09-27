@@ -1,6 +1,6 @@
-# Chili3D Demo Plugin
+# Spicy3D Demo Plugin
 
-A demonstration plugin for Chili3D showing the capabilities of the plugin system.
+A demonstration plugin for Spicy3D showing the capabilities of the plugin system.
 
 ## Features
 
@@ -36,7 +36,7 @@ npm install
 npm run build
 ```
 
-3. Package the plugin (creates .chiliplugin file):
+3. Package the plugin (creates .spicyplugin file):
 ```bash
 npm run package
 ```
@@ -45,4 +45,4 @@ The packaging script is cross-platform and works on both Windows (PowerShell) an
 
 ## Installation
 
-Drag and drop the `.chiliplugin` file into Chili3D.
+Drag and drop the `.spicyplugin` file into Spicy3D.

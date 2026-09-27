@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -46,7 +46,7 @@ import {
     VisualConfig,
     type XYZ,
     type XYZLike,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import type {
     EdgeMeshData as OccEdgeMeshData,
     FaceMeshData as OccFaceMeshData,
@@ -59,7 +59,7 @@ import type {
     TopoDS_Solid,
     TopoDS_Vertex,
     TopoDS_Wire,
-} from "../lib/chili-wasm";
+} from "../lib/spicy-wasm";
 import { OccCurve, OccTrimmedCurve } from "./curve";
 import {
     convertFromMatrix,

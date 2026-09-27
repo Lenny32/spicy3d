@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -11,8 +11,8 @@ import {
     type Property,
     PubSub,
     Transaction,
-} from "@chili3d/core";
-import { button, ColorConverter, collection, div, span, UrlStringConverter } from "@chili3d/element";
+} from "@spicy3d/core";
+import { button, ColorConverter, collection, div, span, UrlStringConverter } from "@spicy3d/element";
 import style from "./materialProperty.module.css";
 import { PropertyBase } from "./propertyBase";
 
@@ -83,4 +83,4 @@ export class MaterialProperty extends PropertyBase {
     }
 }
 
-customElements.define("chili-material-property", MaterialProperty);
+customElements.define("spicy-material-property", MaterialProperty);

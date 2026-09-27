@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { rs } from "@rstest/core";
 import {
     BoundingBox,
     type IEdge,
@@ -10,9 +11,8 @@ import {
     type ShapeType,
     ShapeTypes,
     XYZ,
-} from "@chili3d/core";
-import { nearestOnCircle, nearestOnSegment } from "@chili3d/core/test-utils";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core";
+import { nearestOnCircle, nearestOnSegment } from "@spicy3d/core/test-utils";
 import { allProfiles, resolveProfiles, sketchProfiles } from "../src/features/profileBuilder";
 import { captureProfileRef } from "../src/features/profileRef";
 import type { SketchNode } from "../src/sketch";

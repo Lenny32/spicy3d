@@ -1,4 +1,4 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
 import {
@@ -30,7 +30,7 @@ import {
     Transaction,
     type VisualShapeData,
     XYZ,
-} from "@chili3d/core";
+} from "@spicy3d/core";
 import type { BooleanOperation, ExtrudeFeatureData } from "../features/feature";
 import { reportSilentIdLoss } from "../features/idDiagnostics";
 import { allProfiles, sketchProfiles } from "../features/profileBuilder";

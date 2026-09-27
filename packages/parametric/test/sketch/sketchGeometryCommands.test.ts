@@ -1,14 +1,14 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type ICameraController, Plane, Result, type ShapeMeshData, XYZ } from "@chili3d/core";
+import { rs } from "@rstest/core";
+import { type ICameraController, Plane, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
     createMockVisualWithDocument,
     TestDocument,
-} from "@chili3d/core/test-utils";
-import { rs } from "@rstest/core";
+} from "@spicy3d/core/test-utils";
 import { SketchCopyCommand } from "../../src/sketch/commands/sketchCopy";
 import { SketchExtendCommand } from "../../src/sketch/commands/sketchExtend";
 import { SketchMirrorCommand } from "../../src/sketch/commands/sketchMirror";

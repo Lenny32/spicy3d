@@ -2,7 +2,7 @@
 
 For inspection and analysis tools, see the [Inspect Panel Enhancement Roadmap](inspect-roadmap.md), covering the shared foundation and 17 Fusion feature gaps (INSPECT-00 through INSPECT-17).
 
-Incremental plan to expand Chili3D sketch capabilities to match Fusion 360 functionality.
+Incremental plan to expand Spicy3D sketch capabilities to match Fusion 360 functionality.
 
 For 3D construction planes, axes, points, and coordinate systems, see the separate [Construct Panel Enhancement Roadmap](construct-roadmap.md), covering tickets CONSTRUCT-01 through CONSTRUCT-07.
 

@@ -1,6 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { describe, expect, rs, test } from "@rstest/core";
 import {
     type IApplication,
     type IShape,
@@ -8,8 +9,7 @@ import {
     Result,
     ShapeTypes,
     type VisualShapeData,
-} from "@chili3d/core";
-import { describe, expect, rs, test } from "@rstest/core";
+} from "@spicy3d/core";
 import { RemoveFaceCommand } from "../../../src/commands/modify/removeFeature";
 import {
     makeParent,

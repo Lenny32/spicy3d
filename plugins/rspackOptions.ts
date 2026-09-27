@@ -18,8 +18,8 @@ export function commonRspackOptions(overrides?: RspackOptions): RspackOptions {
         },
         externals: [
             {
-                "@chili3d/core": "Chili3dCore",
-                "@chili3d/element": "Chili3dElement",
+                "@spicy3d/core": "Spicy3DCore",
+                "@spicy3d/element": "Spicy3DElement",
             },
         ],
         externalsType: "assign",

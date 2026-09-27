@@ -1,7 +1,7 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { SelectableItems } from "@chili3d/core";
+import type { SelectableItems } from "@spicy3d/core";
 import { div, input, label } from "./elements";
 import style from "./radioGroup.module.css";
 
@@ -51,4 +51,4 @@ export class RadioGroup extends HTMLElement {
     };
 }
 
-customElements.define("chili-radios", RadioGroup);
+customElements.define("spicy-radios", RadioGroup);

@@ -1,6 +1,6 @@
 import { module1_function1 } from "module1";
 
-const { CommandStore, PubSub } = Chili3dCore;
+const { CommandStore, PubSub } = Spicy3DCore;
 
 class HelloWorldJSCommand {
     async execute(app) {

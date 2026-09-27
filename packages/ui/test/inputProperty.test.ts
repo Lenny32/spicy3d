@@ -1,11 +1,11 @@
-// Part of the Chili3d Project, under the AGPL-3.0 License.
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { I18nKeys, Property } from "@chili3d/core";
 import { describe, expect, rs, test } from "@rstest/core";
+import type { I18nKeys, Property } from "@spicy3d/core";
 
 // test-utils must load BEFORE the core-mock helper so the real core module is
-// fully cached by the time `rs.mock("@chili3d/core")` registers.
+// fully cached by the time `rs.mock("@spicy3d/core")` registers.
 import { createMockDocument, expectEmptyObjectsThrow } from "./_helpers/propertyTestHelpers";
 
 // Shared mocks: CSS modules, element helpers, core services
@@ -14,8 +14,8 @@ import "./_helpers/mockElement";
 import "./_helpers/mockCoreProperty";
 
 // Core value imports must come AFTER the mock helper — importing them earlier
-// would load the real "@chili3d/core" before the mock registers.
-import { Result } from "@chili3d/core";
+// would load the real "@spicy3d/core" before the mock registers.
+import { Result } from "@spicy3d/core";
 import { InputProperty } from "../src/property/input";
 import { mustQuery } from "./_helpers/domHelpers";
 
