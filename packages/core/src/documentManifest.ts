@@ -17,9 +17,11 @@ const LITERAL_KEY = "$literal";
 
 /**
  * How a blob's bytes decode: absent = UTF-8 text (the value was a string), `float32`/`uint32` = the
- * little-endian bytes of a typed array's `buffer`, `json` = a JSON array of numbers.
+ * little-endian bytes of a `Float32Array`/`Uint32Array`'s `buffer`, `float64` = the little-endian
+ * doubles of any other array of numbers (exact: `-0`, `NaN` and `±Infinity` survive, and a
+ * `Float16Array` fits). `json` (a JSON array) is only read: early manifests used it.
  */
-export type BlobEncoding = "float32" | "uint32" | "json";
+export type BlobEncoding = "float32" | "uint32" | "float64" | "json";
 
 export interface BlobRef {
     [BLOB_REF_KEY]: string;
@@ -78,7 +80,7 @@ export function isBlobRef(value: unknown): value is BlobRef {
 function encodeNumbers(values: number[], as: BlobEncoding): Uint8Array {
     if (as === "float32") return new Uint8Array(new Float32Array(values).buffer);
     if (as === "uint32") return new Uint8Array(new Uint32Array(values).buffer);
-    return encoder.encode(JSON.stringify(values));
+    return new Uint8Array(new Float64Array(values).buffer);
 }
 
 /**
@@ -106,7 +108,8 @@ export async function splitManifest(
         }
         if (Array.isArray(value)) {
             if (value.length >= minArray && isNumberArray(value)) {
-                return toBlob(encodeNumbers(value, typedArray ?? "json"), typedArray ?? "json");
+                const as = typedArray ?? "float64";
+                return toBlob(encodeNumbers(value, as), as);
             }
             const items: unknown[] = [];
             for (const item of value) items.push(await visit(item));
@@ -155,11 +158,15 @@ function decodeBlob(bytes: Uint8Array, as: BlobEncoding | undefined): unknown {
     const buffer = bytes.slice().buffer;
     if (as === "float32") return Array.from(new Float32Array(buffer));
     if (as === "uint32") return Array.from(new Uint32Array(buffer));
+    if (as === "float64") return Array.from(new Float64Array(buffer));
     const text = decoder.decode(bytes);
     if (as === "json") {
+        // JSON wrote NaN and ±Infinity as null; NaN is the closest reading.
         const parsed: unknown = JSON.parse(text);
-        if (!isNumberArray(parsed)) throw new Error("a json blob is not an array of numbers");
-        return parsed;
+        if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "number" || x === null)) {
+            throw new Error("a json blob is not an array of numbers");
+        }
+        return parsed.map((x) => (x === null ? Number.NaN : x));
     }
     return text;
 }

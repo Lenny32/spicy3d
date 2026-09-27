@@ -65,7 +65,7 @@ describe("splitManifest", () => {
         expect(children[2].mesh.small.buffer).toEqual([1, 2, 3]);
         expect((manifest["userData"] as any).samples).toEqual({
             [BLOB_REF_KEY]: expect.any(String),
-            $as: "json",
+            $as: "float64",
         });
         expect((manifest["userData"] as any).note).toBe("short");
         expect(manifest["name"]).toBe("Bracket");
@@ -139,6 +139,34 @@ describe("assembleManifest", () => {
 
         expect(manifestBlobRefs(manifest)).not.toContain("not a reference");
         expect(assembleManifest(manifest, (sha) => blobs.get(sha)).value).toEqual(original);
+    });
+
+    test("large plain number arrays keep -0, NaN and ±Infinity exactly", async () => {
+        const values = Array.from({ length: 2000 }, (_, i) => i / 7);
+        values[1] = -0;
+        values[2] = Number.NaN;
+        values[3] = Number.POSITIVE_INFINITY;
+        values[4] = Number.NEGATIVE_INFINITY;
+        const original = {
+            ...sampleDocument(),
+            userData: { values, half: { __cla$$__: "Float16Array", buffer: values.slice(0, 1500) } },
+        } as Serialized;
+        const { manifest, blobs } = await splitManifest(original);
+
+        expect((manifest["userData"] as any).half.buffer.$as).toBe("float64");
+        const assembled = assembleManifest(JSON.parse(JSON.stringify(manifest)), (sha) => blobs.get(sha));
+        const back = (assembled.value!["userData"] as any).values as number[];
+        expect(Object.is(back[1], -0)).toBe(true);
+        expect(back.slice(2, 5)).toEqual([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]);
+        expect(assembled.value).toEqual(original);
+    });
+
+    test("json number blobs of early manifests still load (null reads as NaN)", () => {
+        const assembled = assembleManifest({ x: { $blob: "a", $as: "json" } }, () =>
+            encoder.encode("[1,null,2.5]"),
+        );
+
+        expect(assembled.value).toEqual({ x: [1, Number.NaN, 2.5] });
     });
 
     test("reports the first missing blob", async () => {
