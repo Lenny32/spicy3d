@@ -37,7 +37,8 @@ in the bundle. What stays relaxed, and what would remove it:
 `connect-src` has **no `https:` wildcard**: a plugin or an injected script cannot post documents to
 an arbitrary host. The assistant's LLM endpoints, and hosts `?url=` opens files from, are added by
 the operator in `SPICY3D_CONNECT_ORIGINS` (https/wss origins, validated at container start like
-`SPICY3D_PLUGIN_ORIGINS`; `docs/deployment.md`).
+`SPICY3D_PLUGIN_ORIGINS`: the whole value may only hold origin characters and single spaces, since
+it goes into the header verbatim; `docs/deployment.md`, `dockerOrigins.test.ts`).
 
 ## Plugins
 
@@ -45,9 +46,12 @@ A plugin is JavaScript running with the page's rights, the cloud session include
 `ExternalContentPolicy` (core) decides, `PluginManager.loadFromUrl` applies it to `?plugin=`, the
 plugin manager and the default `plugins/` folder:
 
-- **The app's own origin** (the default plugins) and **the deployment's allowlist**
+- **The app's own `plugins/` folder** (the default plugins) and **the deployment's allowlist**
   (`deployment.json` → `security.pluginOrigins`, e.g. `https://plugins.example.lan`,
-  `https://*.example.com`) load at once.
+  `https://*.example.com` — a wildcard needs two labels after `*.`) load at once. The rest of the
+  app's own origin is not trusted for code: the server's paths (`/api`, `/ws`, `/mcp`, also under
+  the app's folder) hold what users upload, so `?plugin=/api/blobs/…` asks like a foreign origin.
+  A plugin archive is recognized by its decoded path (`….spicyplugin`), never by its query.
 - **Anything else asks first**, naming the full origin (scheme and port included) and saying that
   a plugin runs with the app's rights. While a cloud session may exist — signed in, expired, or the
   server not asked yet at startup — the prompt adds that the plugin could read, change and delete the
@@ -64,9 +68,11 @@ The image's CSP is the second fence: a cross-origin plugin also needs its origin
 
 ## Files from a link (`?url=` / `?model=`)
 
-`Application.loadFileFromUrl` never fetches another host silently: the app's own origin and
-`security.fileOrigins` open at once, any other http(s) origin only after the user confirms a prompt
-naming it (every time), anything else is refused. The request carries no cookies cross-origin
+`Application.loadFileFromUrl` never fetches another host silently: files under the app's folder
+(not the server's `/api`, `/ws`, `/mcp`) and `security.fileOrigins` open at once, any other http(s)
+URL only after the user confirms a prompt naming its origin (every time), anything else is refused.
+A `.spicyplugin` link is code, not a file: it goes through the plugin rules above
+(`PluginManager.loadFromUrl`), never through this prompt or the import. The request carries no cookies cross-origin
 (`credentials: "same-origin"`), and the logged URL has its query removed.
 
 ## CSRF
