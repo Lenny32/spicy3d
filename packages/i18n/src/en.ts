@@ -1133,5 +1133,16 @@ export default {
         "cloud.signedOut.title": "Signed out",
         "cloud.signedOut.unsaved{0}":
             "“{0}” is a cloud document of the account that signed out, and it has unsaved changes. It will close: keep the changes as a copy on this device, or download them as a .spicy file first.",
+        "autosave.setting": "Autosave",
+        "autosave.interval.off": "Off",
+        "autosave.interval.minutes{0}": "Every {0} min",
+        "autosave.status.autosaved{0}": "Autosaved {0}",
+        "autosave.file.toggle": "Autosave to file",
+        "autosave.file.toggleHint": "Write autosaves back to the .spicy file this document was opened from",
+        "autosave.file.denied": "No permission to write to the file: autosave to file stays off",
+        "account.settings.autosave": "Autosave",
+        "account.settings.autosaveHint":
+            "How often changed documents are saved on their own. It applies on every device you sign in on.",
+        "cloud.status.conflictHint": "A newer version was saved elsewhere: click to resolve",
     },
 } satisfies Locale;

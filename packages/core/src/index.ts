@@ -3,6 +3,7 @@
 
 export * from "./analysis";
 export * from "./application";
+export * from "./autosave";
 export * from "./command";
 export * from "./config";
 export * from "./constants";

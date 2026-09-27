@@ -128,6 +128,11 @@ export interface IDocumentRepository {
      * cloud also counts a document in the trash. Without it, callers fall back to `load`.
      */
     stat?(id: string): Promise<Result<StoredDocumentInfo | undefined, DocumentRepositoryError>>;
+    /**
+     * Whether this tab may only show the document (the cloud: another tab edits it), so saving it
+     * would answer `readOnly`; autosave skips it. Without it, every document is writable.
+     */
+    isReadOnly?(id: string): boolean;
 }
 
 /** See `IDocumentRepository.stat`. */

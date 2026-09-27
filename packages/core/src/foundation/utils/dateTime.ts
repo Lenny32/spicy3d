@@ -35,3 +35,11 @@ export function formatDateTime(epochMs: number, options: DateTimeFormatOptions =
         timeZone: options.timeZone,
     }).format(epochMs);
 }
+
+/** The time only, in the browser's locale and time zone, e.g. "14:05"; empty for an invalid time. */
+export function formatTime(epochMs: number, options: DateTimeFormatOptions = {}): string {
+    if (!Number.isFinite(epochMs)) return "";
+    return new Intl.DateTimeFormat(options.locale, { timeStyle: "short", timeZone: options.timeZone }).format(
+        epochMs,
+    );
+}

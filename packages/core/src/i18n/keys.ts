@@ -1073,6 +1073,16 @@ export const I18N_KEYS = [
     "cloud.signedOut.discard",
     "cloud.signedOut.title",
     "cloud.signedOut.unsaved{0}",
+    "autosave.setting",
+    "autosave.interval.off",
+    "autosave.interval.minutes{0}",
+    "autosave.status.autosaved{0}",
+    "autosave.file.toggle",
+    "autosave.file.toggleHint",
+    "autosave.file.denied",
+    "account.settings.autosave",
+    "account.settings.autosaveHint",
+    "cloud.status.conflictHint",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];
