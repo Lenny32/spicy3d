@@ -855,10 +855,15 @@ export class StructuralMerge {
         const nodePath = (id: string) => joinPath("node", id);
         const labelOf = (id: string) => nodeLabel(O.byId.get(id) ?? T.byId.get(id) ?? B.byId.get(id), id);
         const scopeOf = (id: string): Scope => ({ section: Section.Nodes, nodeId: id, label: labelOf(id) });
+        const rank = (id: string) =>
+            B.index.get(id) ?? B.nodes.length + (O.index.get(id) ?? O.nodes.length + (T.index.get(id) ?? 0));
         const grown = (side: DocumentView, id: string) =>
             side.childrenOf(id).some((child) => !B.byId.has(child) || B.parentOf(child) !== id);
+        // a new parent is a modification (sibling order is not): a delete never silently beats a move
         const modified = (side: DocumentView, id: string) =>
-            !this.nodeEquals(B.byId.get(id), side.byId.get(id)) || grown(side, id);
+            !this.nodeEquals(B.byId.get(id), side.byId.get(id)) ||
+            side.parentOf(id) !== B.parentOf(id) ||
+            grown(side, id);
 
         // 1. Presence.
         const present = new Set<string>();
@@ -983,7 +988,11 @@ export class StructuralMerge {
                 parentFrom.set(id, inO ? "ours" : "theirs");
             }
         }
-        // A parent that is gone: ours' parent, else theirs', else base's; none → the node goes with it.
+        // A parent that is gone: ours' parent, else theirs', else base's. None left: a node only one
+        // side has (added under a node the other deleted — that deletion's delete-vs-modify reports
+        // it) goes with it; a node both sides kept is never dropped — the parent chain of the side
+        // chosen at `node/<id>/parent` (ours by default) comes back with it, reported as a `move`.
+        const moveConflicts = new Set<string>();
         let changed = true;
         while (changed) {
             changed = false;
@@ -999,10 +1008,39 @@ export class StructuralMerge {
                 if (fallback !== undefined) {
                     parent.set(id, fallback[1]!);
                     parentFrom.set(id, fallback[0]);
-                } else {
-                    present.delete(id);
-                    changed = true;
+                    continue;
                 }
+                changed = true;
+                const kept = keeper.has(id) || (O.byId.has(id) && T.byId.has(id));
+                if (!kept) {
+                    present.delete(id);
+                    continue;
+                }
+                const path = joinPath(nodePath(id), "parent");
+                const [pb, po, pt] = [B.parentOf(id), O.parentOf(id), T.parentOf(id)];
+                if (!moveConflicts.has(path) && !this.conflicts.some((c) => c.conflict.path === path)) {
+                    moveConflicts.add(path);
+                    this.push(this.makeConflict("move", path, [pb, po, pt], [labelOf(id)]), scopeOf(id));
+                }
+                const wanted = this.choices.get(path) === "theirs" ? "theirs" : "ours";
+                const side: SideName = view(wanted).byId.has(id)
+                    ? wanted
+                    : wanted === "ours"
+                      ? "theirs"
+                      : "ours";
+                // bring the chosen side's chain back, down from its first ancestor still present
+                let child = id;
+                let up: string | undefined = view(side).parentOf(id);
+                while (up !== undefined && up !== root && !present.has(up) && view(side).byId.has(up)) {
+                    present.add(up);
+                    keeper.set(up, side);
+                    parent.set(child, up);
+                    parentFrom.set(child, side);
+                    child = up;
+                    up = view(side).parentOf(up);
+                }
+                parent.set(child, up !== undefined && present.has(up) ? up : root);
+                parentFrom.set(child, side);
             }
         }
         this.breakCycles(root, ids, present, parent, parentFrom, labelOf, scopeOf);
@@ -1028,6 +1066,14 @@ export class StructuralMerge {
                 children,
                 { timeline: false },
             ).order;
+            // children no side has under this parent (a cycle broken to a fallback parent): last, in
+            // base, then ours', then theirs' pre-order
+            if (sorted.length < children.size) {
+                const emitted = new Set(sorted);
+                sorted.push(
+                    ...[...children].filter((c) => !emitted.has(c)).sort((a, c) => rank(a) - rank(c)),
+                );
+            }
             for (let i = sorted.length - 1; i >= 0; i--) stack.push(sorted[i]);
         }
 
@@ -1081,32 +1127,53 @@ export class StructuralMerge {
             }
             return undefined;
         };
-        for (let guard = 0; guard <= ids.length; guard++) {
+        // The node to revert: theirs' moves first, then ours', then the rest; a resolution's choice last.
+        const preference = (id: string) => {
+            const from = parentFrom.get(id);
+            return from === "theirs" ? 0 : from === "ours" ? 1 : from === "resolved" ? 3 : 2;
+        };
+        const reported = new Set<string>();
+        for (let guard = 0; guard <= ids.length + 1; guard++) {
             const cycle = findCycle();
             if (cycle === undefined) return;
-            const theirsMoved = cycle
-                .filter((id) => parentFrom.get(id) === "theirs")
-                .sort((a, c) => rank(a) - rank(c));
-            const node = theirsMoved[0] ?? [...cycle].sort((a, c) => rank(a) - rank(c))[0];
+            const inCycle = new Set(cycle);
+            const ordered = [...cycle].sort((a, c) => preference(a) - preference(c) || rank(a) - rank(c));
+            const node = ordered[0];
             const [pb, po, pt] = [B.parentOf(node), O.parentOf(node), T.parentOf(node)];
             const path = joinPath("node", node, "parent");
-            this.push(
-                this.makeConflict("cycle", path, [pb, po, pt], [labelOf(node), labelOf(parent.get(node)!)]),
-                scopeOf(node),
-            );
-            const fallback = (candidate: string | undefined) =>
-                candidate !== undefined && present.has(candidate) ? candidate : root;
-            if (this.choices.get(path) === "theirs" && theirsMoved.length > 0) {
-                // theirs' move stays; ours' moves in the cycle go back to theirs' parents
+            if (!reported.has(path)) {
+                reported.add(path);
+                this.push(
+                    this.makeConflict(
+                        "cycle",
+                        path,
+                        [pb, po, pt],
+                        [labelOf(node), labelOf(parent.get(node)!)],
+                    ),
+                    scopeOf(node),
+                );
+            }
+            /** A parent that breaks this cycle: present and outside it (the root always is). */
+            const outside = (...candidates: (string | undefined)[]) =>
+                candidates.find((c) => c !== undefined && present.has(c) && !inCycle.has(c)) ?? root;
+            const others = cycle.filter((id) => id !== node && parentFrom.get(id) === "ours");
+            if (
+                this.choices.get(path) === "theirs" &&
+                parentFrom.get(node) === "theirs" &&
+                others.length > 0
+            ) {
+                // theirs' move stays; ours' moves in the cycle go back to theirs' (or base's) parents
                 parentFrom.set(node, "resolved");
-                for (const other of cycle) {
-                    if (other === node || parentFrom.get(other) !== "ours") continue;
-                    parent.set(other, fallback(T.byId.has(other) ? T.parentOf(other) : B.parentOf(other)));
+                for (const other of others) {
+                    parent.set(
+                        other,
+                        outside(T.byId.has(other) ? T.parentOf(other) : undefined, B.parentOf(other)),
+                    );
                     parentFrom.set(other, "resolved");
                 }
             } else {
-                parent.set(node, fallback(O.byId.has(node) ? po : pb));
-                parentFrom.set(node, "ours");
+                parent.set(node, outside(O.byId.has(node) ? po : undefined, pt, pb));
+                parentFrom.set(node, "both");
             }
         }
     }

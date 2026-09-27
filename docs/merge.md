@@ -178,9 +178,10 @@ it, the edited node when this device edited what the other deleted — so an unr
 "mine plus every non-conflicting change of theirs". (Fixtures `delete-node-vs-modify` and
 `delete-node-vs-modify-theirs-deleted`.)
 
-A node is **modified** when any of its properties or payloads changed (not only its position among
-siblings), or when the other side **added a node under it** or **moved a node into it** (its subtree
-grew). Deleting a node deletes its subtree; a modified descendant makes its own `delete-vs-modify`
+A node is **modified** when any of its properties or payloads changed, when it **moved to another
+parent** (a delete never silently beats a move — fixture `delete-node-vs-move`; a new position among
+the same siblings is not a modification), or when the other side **added a node under it** or **moved
+a node into it** (its subtree grew). Deleting a node deletes its subtree; a modified descendant makes its own `delete-vs-modify`
 (on the descendant). A node **kept** against the other side's deletion (ours by default, theirs when
 chosen) is kept with its subtree as the keeping side has it — except descendants a resolution deletes —
 and with every ancestor the other side deleted with it, all with the keeping side's content. References *to* a deleted node from the other side's changes (a
@@ -304,17 +305,24 @@ ids (`trackedId`, `incidentEdgeIds`) must resolve and whose `featureIndex` is a
 
 - `parentId` is merged three-way: both moved one node to different parents → `move` conflict at
   `node/<id>/parent` (merged: ours). A parent that is gone falls back to ours' parent, else theirs',
-  else base's; a node with none left goes with its parent (a node added under a node the other side
-  deleted — that deletion's `delete-vs-modify` reports it).
+  else base's. With none left, a node only one side has (added under a node the other side deleted —
+  that deletion's `delete-vs-modify` reports it) goes with its parent; a node **both sides kept is
+  never dropped**: the parent chain of the side chosen at `node/<id>/parent` (ours by default) comes
+  back with it (the other side had deleted it), reported as a `move` there (fixture
+  `tree-kept-node-parents-gone`).
 - A node moved into a node the other side deleted: that is a modification of the deleted node →
   `delete-vs-modify` at the deleted node; merged: the deletion, the moved node at ours' parent.
 - **Cycles.** Moves fine on their own can close a cycle together (ours: A into B; theirs: B into A).
-  After applying parent changes, while a cycle exists: **one** node goes back to ours' parent — the
-  first in base pre-order of the cycle's nodes whose merged parent came from theirs — and one `cycle`
-  conflict is reported for it at `node/<id>/parent` (values: its parent on each side; args: its name
-  and the name of the node it was to go into); then the tree is checked again. One conflict per
-  reverted node, never a revert without one (fixture `tree-move-two-cycles`). Ours' tree alone is
-  acyclic, so this terminates. `theirs` applies theirs' move and reverts ours' moves in that cycle.
+  After applying parent changes, while a cycle exists: **one** node is reverted — the first in base
+  pre-order of the cycle's nodes whose merged parent came from theirs, else from ours, else any, a
+  parent a resolution chose last — to the first of ours', theirs', base's parents that is present and
+  outside the cycle (else the root), and one `cycle` conflict is reported for it at `node/<id>/parent`
+  (values: its parent on each side; args: its name and the name of the node it was to go into); then
+  the tree is checked again. Every revert leaves its cycle, so this terminates; one conflict per
+  reverted node, never a revert without one (fixtures `tree-move-two-cycles`,
+  `tree-cycle-into-deleted-parent`). `theirs` on a node theirs moved keeps that move and reverts ours'
+  moves in that cycle. A child no side has under its merged parent (a cycle broken to the root) is
+  placed after its siblings, in base, then ours', then theirs' pre-order.
 - Sibling order: each parent's children are a `stable` list (fixture `both-add-nodes`: both
   appended, ours first).
 - The root node (the first) is never moved or deleted.
@@ -456,7 +464,11 @@ Conflicts are ordered: document fields, variables, acts, materials, components, 
 pre-order (inside a node: properties in rule order, then payload items in merged list order; a node
 the merge deleted comes after its nearest preceding node in base pre-order), then `rebuild-failure`s in
 the same node order. `merged` always holds the first choice; `resolveMerge(result, choices)` re-merges
-with the user's choices (re-applied by path) and lists what is left.
+with the user's choices (re-applied by path) and lists what is left. Choices accumulate:
+`MergeResult.resolutions` are the choices applied so far and `resolved` the conflicts they answered; a
+later `resolveMerge` keeps them (a new choice for the same path replaces the old one) and accepts a
+path from `conflicts` or `resolved` — so a conflict a resolution created (a cycle, a new dangling
+reference) is resolved without undoing the first.
 
 ### Paths
 
@@ -803,6 +815,9 @@ fail (they do). `loadMergeFixtures()` (core test-utils) is how CLOUD-12 and CLOU
 | `construction-anchor-remap` | — (`featureIndex` 2 → 3) |
 | `tree-move-two-cycles` | `cycle` × 2 |
 | `rebuild-failure-thin-wall` | `rebuild-failure` (validation pass) |
+| `delete-node-vs-move` | `delete-vs-modify` (a move is a modification) |
+| `tree-kept-node-parents-gone` | `move` (ours' parent restored), `delete-vs-modify` |
+| `tree-cycle-into-deleted-parent` | `cycle` (reverted to the root, subtree kept) |
 
 `rebuild-failure` needs the kernel: `rebuild-failure-thin-wall` stores it with `args: [label]` only
 (the second argument is the kernel's message); `parametric/test/mergeValidation.kernel.test.ts` checks

@@ -390,3 +390,139 @@ describe("assembled documents and cloud manifests", () => {
         );
     });
 });
+
+// ------------------------------------------------------------------ Trees: nothing lost, edits land
+
+/** Parent maps edited like a user would: moves (also out of folders the other side deletes, and into each other), deletes, adds, renames. */
+function treeDoc(parents: Map<string, string>, names: Map<string, string>): Serialized {
+    const kids = new Map<string, string[]>();
+    for (const [id, parent] of parents) kids.set(parent, [...(kids.get(parent) ?? []), id]);
+    const list: Json[] = [{ __cla$$__: "FolderNode", id: ROOT, name: "T", visible: true }];
+    const walk = (id: string) => {
+        for (const child of kids.get(id) ?? []) {
+            list.push({
+                __cla$$__: "FolderNode",
+                id: child,
+                name: names.get(child) ?? child,
+                visible: true,
+                parentId: id,
+            });
+            walk(child);
+        }
+    };
+    walk(ROOT);
+    return {
+        __cla$$__: "Document",
+        formatVersion: 1,
+        moduleVersions: {},
+        id: "tree",
+        name: "T",
+        models: { nodes: list, materials: [], components: [] },
+        variables: [],
+        settings: {},
+        acts: [],
+        userData: {},
+    } as unknown as Serialized;
+}
+
+interface TreeState {
+    parents: Map<string, string>;
+    names: Map<string, string>;
+}
+
+function treeEdit(state: TreeState, seed: number, tag: string): TreeState {
+    const r = random(seed);
+    const parents = new Map(state.parents);
+    const names = new Map(state.names);
+    const inside = (id: string) => {
+        const set = new Set([id]);
+        let grew = true;
+        while (grew) {
+            grew = false;
+            for (const [k, p] of parents) {
+                if (set.has(p) && !set.has(k)) {
+                    set.add(k);
+                    grew = true;
+                }
+            }
+        }
+        return set;
+    };
+    for (let step = 0; step < 1 + r.int(4); step++) {
+        const ids = [...parents.keys()];
+        const id = r.pick(ids);
+        const action = r.int(4);
+        if (action === 0 && id) {
+            const target = r.pick([ROOT, ...ids]);
+            if (!inside(id).has(target)) {
+                parents.delete(id);
+                parents.set(id, target);
+            }
+        } else if (action === 1 && id) {
+            for (const gone of inside(id)) parents.delete(gone);
+        } else if (action === 2) {
+            parents.set(`${tag}${step}`, r.pick([ROOT, ...ids]));
+        } else if (id) {
+            names.set(id, `${id}-${tag}`);
+        }
+    }
+    return { parents, names };
+}
+
+describe("tree merges (fast-check)", () => {
+    const TREE_RUNS = { numRuns: 400 };
+
+    test("a node both sides kept is never lost; unconflicted moves, renames and deletes land", () => {
+        fc.assert(
+            fc.property(fc.nat(), fc.nat(), fc.nat(), (seed, oursSeed, theirsSeed) => {
+                const r = random(seed);
+                const parents = new Map<string, string>();
+                for (let i = 0; i < 6; i++) parents.set(`n${i}`, r.pick([ROOT, ...parents.keys()]));
+                const base: TreeState = { parents, names: new Map() };
+                const [o, t] = [treeEdit(base, oursSeed, "o"), treeEdit(base, theirsSeed, "t")];
+                const result = merged(
+                    treeDoc(base.parents, base.names),
+                    treeDoc(o.parents, o.names),
+                    treeDoc(t.parents, t.names),
+                );
+                const out = new Map((nodes(result.merged as Json) as Json[]).map((n) => [n["id"], n]));
+                const conflictOn = (id: string, ...tail: string[]) =>
+                    result.conflicts.some((c) => c.path === ["node", id, ...tail].join("/"));
+                for (const id of new Set([
+                    ...base.parents.keys(),
+                    ...o.parents.keys(),
+                    ...t.parents.keys(),
+                ])) {
+                    const inO = o.parents.has(id);
+                    const inT = t.parents.has(id);
+                    if (inO && inT) expect(out.has(id)).toBe(true);
+                    if (!out.has(id) || conflictOn(id) || conflictOn(id, "parent")) continue;
+                    // a parent changed on one side only lands (unless that parent is gone)
+                    const [pb, po, pt] = [base.parents.get(id), o.parents.get(id), t.parents.get(id)];
+                    const moved =
+                        inO && inT && po !== pb && pt === pb
+                            ? po
+                            : inO && inT && pt !== pb && po === pb
+                              ? pt
+                              : undefined;
+                    if (moved !== undefined && out.has(moved)) expect(out.get(id)!["parentId"]).toBe(moved);
+                    const [nb, no, nt] = [base.names.get(id), o.names.get(id), t.names.get(id)];
+                    if (!conflictOn(id, "prop", "name") && inO && inT && no !== nb && nt === nb) {
+                        expect(out.get(id)!["name"]).toBe(no);
+                    }
+                }
+                for (const id of base.parents.keys()) {
+                    // deleted on one side, untouched on the other: gone (or a conflict says why not)
+                    const untouched = (s: TreeState) =>
+                        s.parents.get(id) === base.parents.get(id) && s.names.get(id) === base.names.get(id);
+                    const deletedOnce =
+                        (!o.parents.has(id) && untouched(t)) || (!t.parents.has(id) && untouched(o));
+                    if (deletedOnce && !result.conflicts.some((c) => c.path.startsWith("node/"))) {
+                        expect(out.has(id)).toBe(false);
+                    }
+                }
+            }),
+            TREE_RUNS,
+        );
+    });
+});

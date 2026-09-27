@@ -277,6 +277,102 @@ const OURS_LINE_ID = 734_251_950_211;
 const THEIRS_LINE_ID = 91_827_364_555;
 
 const CASES: Record<string, CaseBuilder> = {
+    "delete-node-vs-move": () => {
+        const base = sharedBase();
+        const ours = edit(base, (d) => removeNode(d, BOX));
+        return {
+            description:
+                "This device deleted the box, the other moved it into Folder A: a move is a modification — delete-vs-modify, the deletion held (ours).",
+            base,
+            ours,
+            theirs: edit(base, (d) => moveNode(d, BOX, "folder-a")),
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "delete-vs-modify",
+                    mergePath("node", BOX),
+                    { base: nodeOf(base, BOX), theirs: { ...nodeOf(base, BOX), parentId: "folder-a" } },
+                    ["body.box1"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
+
+    "tree-kept-node-parents-gone": () => {
+        const base = edit(
+            sharedBase(),
+            (d) => addNode(d, folder("folder-p", "Folder P"), ROOT),
+            (d) => addNode(d, folder("folder-c", "Folder C"), "folder-p"),
+            (d) => addNode(d, folder("folder-q", "Folder Q"), ROOT),
+        );
+        const ours = edit(base, (d) => removeNode(d, "folder-q"));
+        const theirs = edit(
+            base,
+            (d) => moveNode(d, "folder-c", "folder-q"),
+            (d) => removeNode(d, "folder-p"),
+        );
+        return {
+            description:
+                "Folder C is kept by both devices, but each deleted the folder the other put it in (this one Q, the other P): C is never dropped — ours' parent P comes back with it, reported as a move.",
+            base,
+            ours,
+            theirs,
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "move",
+                    mergePath("node", "folder-c", "parent"),
+                    { base: "folder-p", ours: "folder-p", theirs: "folder-q" },
+                    ["Folder C"],
+                    sideChoices,
+                ),
+                conflict(
+                    "delete-vs-modify",
+                    mergePath("node", "folder-q"),
+                    { base: nodeOf(base, "folder-q"), theirs: nodeOf(theirs, "folder-q") },
+                    ["Folder Q"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
+
+    "tree-cycle-into-deleted-parent": () => {
+        const base = edit(
+            sharedBase(),
+            (d) => addNode(d, folder("folder-p", "Folder P"), ROOT),
+            (d) => addNode(d, folder("folder-n", "Folder N"), "folder-p"),
+            (d) => addNode(d, folder("folder-m", "Folder M"), ROOT),
+        );
+        return {
+            description:
+                "M into N here; N into M and N's folder P deleted there: a cycle whose reverted node has no parent left on any side — it goes to the root, with its subtree.",
+            base,
+            ours: edit(base, (d) => moveNode(d, "folder-m", "folder-n")),
+            theirs: edit(
+                base,
+                (d) => moveNode(d, "folder-n", "folder-m"),
+                (d) => removeNode(d, "folder-p"),
+            ),
+            expected: edit(
+                base,
+                (d) => moveNode(d, "folder-n", ROOT),
+                (d) => removeNode(d, "folder-p"),
+                (d) => moveNode(d, "folder-m", "folder-n"),
+            ),
+            conflicts: [
+                conflict(
+                    "cycle",
+                    mergePath("node", "folder-n", "parent"),
+                    { base: "folder-p", ours: "folder-p", theirs: "folder-m" },
+                    ["Folder N", "Folder M"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
+
     "delete-node-vs-modify-theirs-deleted": () => {
         const base = sharedBase();
         const ours = edit(base, (d) => (nodeOf(d, BOX)["dx"] = 25));
