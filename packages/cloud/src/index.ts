@@ -9,4 +9,5 @@ export * from "./config";
 export * from "./documents";
 export * from "./links";
 export * from "./problem";
+export * from "./settings";
 export * from "./ui";

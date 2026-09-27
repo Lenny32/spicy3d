@@ -1,7 +1,15 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type I18nKeys, type IApplication, type IDocument, PubSub } from "@spicy3d/core";
+import {
+    AutosaveStatus,
+    formatTime,
+    I18n,
+    type I18nKeys,
+    type IApplication,
+    type IDocument,
+    PubSub,
+} from "@spicy3d/core";
 import { button, div, span } from "@spicy3d/element";
 import accountStyle from "../ui/account.module.css";
 import { downloadDocument, saveCopyOnThisDevice, saveOpenDocumentToCloud } from "./documentActions";
@@ -23,8 +31,8 @@ export const DOCUMENT_STATUS_LABELS: Record<DocumentStatus, I18nKeys> = {
 };
 
 /**
- * The status of a cloud document from its last save and its state here. `unsaved` (edits since
- * the last save) is shown until autosave (CLOUD-07) makes it rare.
+ * The status of a cloud document from its last save and its state here. `unsaved` = edits since
+ * the last save (autosave catches up within its interval).
  */
 export function documentStatus(
     state: CloudSaveState,
@@ -45,6 +53,10 @@ export interface DocumentStatusContext {
     repository: () => CloudDocumentRepository | undefined;
     /** "Edit here instead". */
     takeOver: (document: IDocument) => Promise<void>;
+    /** Opens the conflict dialog of a document whose last save (an autosave) met a conflict. */
+    resolveConflict?: (document: IDocument) => Promise<void>;
+    /** When each document was last autosaved (default: the app's). */
+    autosave?: AutosaveStatus;
 }
 
 /**
@@ -56,10 +68,12 @@ export class DocumentStatusItem extends HTMLElement {
     private menu?: HTMLElement;
     private watched?: IDocument;
     private readonly cleanups: (() => void)[] = [];
+    private readonly autosave: AutosaveStatus;
 
     constructor(readonly ctx: DocumentStatusContext) {
         super();
         this.className = style.status;
+        this.autosave = ctx.autosave ?? AutosaveStatus.current;
     }
 
     connectedCallback(): void {
@@ -67,6 +81,11 @@ export class DocumentStatusItem extends HTMLElement {
         PubSub.default.sub("documentClosed", this.render);
         this.ctx.app.repositories.onPropertyChanged(this.render);
         this.cleanups.push(this.ctx.locks.onChanged(this.render));
+        this.cleanups.push(
+            this.autosave.onChanged((document) => {
+                if (document === this.watched) this.render();
+            }),
+        );
         globalThis.addEventListener?.("online", this.render);
         globalThis.addEventListener?.("offline", this.render);
         document.addEventListener("pointerdown", this.onDocumentPointerDown);
@@ -136,10 +155,23 @@ export class DocumentStatusItem extends HTMLElement {
                 readOnly: this.ctx.locks.isReadOnly(open.id),
                 online: globalThis.navigator?.onLine !== false,
             });
-            const label = span({
-                className: style.state,
-                textContent: I18n.translate(DOCUMENT_STATUS_LABELS[status]),
-            });
+            const autosavedAt = status === "saved" ? this.autosave.lastAutosavedAt(open) : undefined;
+            const text =
+                autosavedAt !== undefined
+                    ? I18n.translate("autosave.status.autosaved{0}", formatTime(autosavedAt))
+                    : I18n.translate(DOCUMENT_STATUS_LABELS[status]);
+            const resolve = this.ctx.resolveConflict;
+            // A conflict met by an autosave opens no dialog by itself: the status does, when clicked.
+            const label =
+                status === "conflict" && resolve
+                    ? button({
+                          type: "button",
+                          className: `${style.state} ${style.resolve}`,
+                          textContent: text,
+                          title: I18n.translate("cloud.status.conflictHint"),
+                          onclick: () => void resolve(open).finally(this.render),
+                      })
+                    : span({ className: style.state, textContent: text });
             label.dataset["status"] = status;
             label.setAttribute("role", "status");
             children.push(label);

@@ -62,6 +62,7 @@ export class CloudDocuments {
                 locks: this.locks,
                 repository: () => this.repository,
                 takeOver: this.takeOver,
+                resolveConflict: this.resolveConflict,
             });
             // Left of the account button.
             TitleBar.items.push(this.statusItem);
@@ -179,6 +180,15 @@ export class CloudDocuments {
         if (!saved.isOk || saved.value.status !== "saved") {
             Logger.warn(`[cloud] ${id}: could not save before handing it over`);
         }
+    };
+
+    /** The dialog of the conflict the last save met — an autosave opens none by itself. */
+    readonly resolveConflict = async (document: IDocument) => {
+        const repository = this.repository;
+        if (!repository || document.repository !== repository) return;
+        await document.settled();
+        const conflict = repository.conflictOf(document.id);
+        if (conflict) await showConflictDialog(this.app, document, conflict, repository);
     };
 
     /**

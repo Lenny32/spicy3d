@@ -41,6 +41,15 @@
     }
 }
 
+.resolve {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    text-decoration: underline dotted;
+    cursor: pointer;
+}
+
 .takeOver {
     padding: 1px 8px;
     border: 1px solid var(--border-color);

@@ -3,7 +3,9 @@
 
 import { rs } from "@rstest/core";
 import {
+    AutosaveStatus,
     type CloseDocumentOptions,
+    formatTime,
     type IApplication,
     type IDocument,
     type IDocumentRepository,
@@ -96,7 +98,7 @@ const takenLocks: LockManagerLike = {
 async function setup(options: { keepOfflineCopies?: boolean; locks?: EditLocks } = {}) {
     const server = new FakeServer();
     const account = await signedInAccount(server, options.keepOfflineCopies);
-    new FakeDocumentServer(server);
+    const docs = new FakeDocumentServer(server);
     const app = createMockApplication();
     const cache = new MemoryBlobCache();
     const connection = new CloudConnection(CONFIG, server.client());
@@ -107,7 +109,7 @@ async function setup(options: { keepOfflineCopies?: boolean; locks?: EditLocks }
         repository: { encodeThumbnail: async () => undefined },
         titleBar: false,
     });
-    return { server, account, app, cache, documents };
+    return { server, account, app, cache, documents, docs };
 }
 
 describe("cloud repository while signed in", () => {
@@ -360,6 +362,77 @@ describe("title bar status", () => {
         button!.click();
 
         expect(takeOver).toHaveBeenCalledWith(doc);
+        item.remove();
+        documents.dispose();
+    });
+
+    test("after an autosave, 'Autosaved' with the local time instead of 'Saved'", async () => {
+        const { app, documents } = await setup();
+        const doc = openDocument(app, "doc-1", documents.cloud!);
+        (app as { activeView: unknown }).activeView = { document: doc };
+        const autosave = new AutosaveStatus();
+        const item = new DocumentStatusItem({
+            app,
+            locks: documents.locks,
+            repository: () => documents.cloud,
+            takeOver: async () => {},
+            autosave,
+        });
+        document.body.append(item);
+        await documents.cloud!.save({ id: "doc-1", name: "Bracket", data: doc.serialize(), kind: "auto" });
+
+        const at = Date.UTC(2026, 8, 27, 12, 5);
+        autosave.recordAutosave(doc as unknown as IDocument, at);
+
+        expect(item.querySelector("[role=status]")?.textContent).toBe(
+            `autosave.status.autosaved${formatTime(at)}`,
+        );
+        expect(published).toEqual([]);
+        autosave.clear(doc as unknown as IDocument);
+        expect(item.querySelector("[role=status]")?.textContent).toBe("cloud.status.saved");
+        item.remove();
+        documents.dispose();
+    });
+
+    test("a conflict an autosave met opens the dialog only when the status is clicked", async () => {
+        const { app, documents, docs } = await setup();
+        const doc = openDocument(app, "doc-1", documents.cloud!);
+        (app as { activeView: unknown }).activeView = { document: doc };
+        const first = await documents.cloud!.save({
+            id: "doc-1",
+            name: "Bracket",
+            data: doc.serialize(),
+            kind: "manual",
+        });
+        const base = first.isOk && first.value.status === "saved" ? first.value.version : undefined;
+        expect(base).toBeDefined();
+        await docs.saveElsewhere("doc-1");
+        const item = new DocumentStatusItem({
+            app,
+            locks: documents.locks,
+            repository: () => documents.cloud,
+            takeOver: async () => {},
+            resolveConflict: documents.resolveConflict,
+        });
+        document.body.append(item);
+
+        const saved = await documents.cloud!.save({
+            id: "doc-1",
+            name: "Bracket",
+            data: doc.serialize(),
+            kind: "auto",
+            baseVersion: base,
+        });
+        expect(saved.isOk && saved.value.status).toBe("conflict");
+        expect(document.querySelector("dialog[open]")).toBeNull();
+
+        const status = item.querySelector("[role=status]") as HTMLButtonElement;
+        expect(status.tagName).toBe("BUTTON");
+        expect(status.dataset["status"]).toBe("conflict");
+        status.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(document.querySelector("dialog[open]")).not.toBeNull();
         item.remove();
         documents.dispose();
     });

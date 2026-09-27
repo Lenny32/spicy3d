@@ -124,6 +124,19 @@ describe("save", () => {
         expect(cloud.documents.get("doc-1")!.versions).toHaveLength(2);
     });
 
+    test("an autosave is an `auto` version; a manual save of the same content still adds a `manual` one", async () => {
+        const { cloud, repository } = await setup();
+        const first = await repository.save(request({ kind: "auto" }));
+        const base = first.value!.status === "saved" ? first.value!.version : undefined;
+
+        const promoted = await repository.save(request({ kind: "manual", baseVersion: base }));
+
+        expect(promoted.value?.status).toBe("saved");
+        const versions = cloud.documents.get("doc-1")!.versions;
+        expect(versions.map((x) => x.kind)).toEqual(["auto", "manual"]);
+        expect(versions[1].manifestSha256).toBe(versions[0].manifestSha256);
+    });
+
     test("unchanged geometry uploads only the manifest", async () => {
         const { server, cloud, repository } = await setup();
         const first = await repository.save(request());

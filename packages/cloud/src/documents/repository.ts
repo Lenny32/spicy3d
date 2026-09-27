@@ -135,6 +135,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
     readonly cache: IBlobCache;
     readonly clientId: string;
     private readonly states = new Map<string, CloudSaveState>();
+    private readonly conflicts = new Map<string, SaveConflict>();
     private readonly stateListeners = new Set<(id: string, state: CloudSaveState) => void>();
     /** The server's name of each document seen, to rename (metadata only) when the app's differs. */
     private readonly serverNames = new Map<string, string>();
@@ -180,6 +181,16 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (this.stateOf(id) === state) return;
         this.states.set(id, state);
         for (const listener of [...this.stateListeners]) listener(id, state);
+    }
+
+    /** Another tab edits the document: saving it here answers `readOnly`. */
+    isReadOnly(id: string): boolean {
+        return this.options.editGuard?.isReadOnly(id) ?? false;
+    }
+
+    /** The conflict the last save of a document met, while that is its state. */
+    conflictOf(id: string): SaveConflict | undefined {
+        return this.stateOf(id) === "conflict" ? this.conflicts.get(id) : undefined;
     }
 
     // ---- Listing -----------------------------------------------------------------------------
@@ -318,7 +329,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
 
     async save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
         if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
-        if (this.options.editGuard?.isReadOnly(request.id)) return Result.err({ kind: "readOnly" });
+        if (this.isReadOnly(request.id)) return Result.err({ kind: "readOnly" });
         this.setState(request.id, "saving");
         let result: Result<SaveOutcome, DocumentRepositoryError>;
         try {
@@ -333,6 +344,8 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (!result.isOk) {
             this.setState(request.id, result.error.kind === "offline" ? "offline" : "error");
         } else {
+            if (result.value.status === "conflict") this.conflicts.set(request.id, result.value);
+            else this.conflicts.delete(request.id);
             this.setState(request.id, result.value.status === "saved" ? "saved" : "conflict");
         }
         return result;
