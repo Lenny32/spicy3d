@@ -468,7 +468,9 @@ with the user's choices (re-applied by path) and lists what is left. Choices acc
 `MergeResult.resolutions` are the choices applied so far and `resolved` the conflicts they answered; a
 later `resolveMerge` keeps them (a new choice for the same path replaces the old one) and accepts a
 path from `conflicts` or `resolved` — so a conflict a resolution created (a cycle, a new dangling
-reference) is resolved without undoing the first.
+reference) is resolved without undoing the first. The conflict panel (CLOUD-13) reapplies its choices with `reapplyResolutions`
+(`packages/cloud/src/conflicts/`): `resolveMerge` in rounds, so choices for conflicts other choices
+create apply in one call, and the choices whose path a re-merge no longer has come back as `dropped`.
 
 ### Paths
 
