@@ -6,6 +6,7 @@ import {
     type DialogButton,
     DOCUMENT_FORMAT_VERSION,
     DocumentMigrations,
+    DocumentRebuilds,
     History,
     type I18nKeys,
     type IApplication,
@@ -300,6 +301,47 @@ describe("Document", () => {
             await waiting;
 
             expect(settled).toBe(true);
+        });
+
+        test("settled drains a deferred save requested while it is waiting for a rebuild", async () => {
+            const rebuilt = Promise.withResolvers<void>();
+            const saved = Promise.withResolvers<void>();
+            const saving = Promise.withResolvers<void>();
+            const release = DocumentRebuilds.add(document, {
+                settled: rebuilt.promise,
+                flush: () => {
+                    release();
+                    rebuilt.resolve();
+                },
+            });
+            repository.save = async (request) => {
+                repository.saves.push(request);
+                saving.resolve();
+                await saved.promise;
+                return Result.ok({ status: "saved", updatedAt: 1 });
+            };
+            let settled = false;
+            const waiting = document.settled().then(() => {
+                settled = true;
+            });
+            const save = document.save();
+            try {
+                expect(repository.saves).toHaveLength(0);
+                release();
+                rebuilt.resolve();
+                await saving.promise;
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                expect(repository.saves).toHaveLength(1);
+                expect(settled).toBe(false);
+                saved.resolve();
+                await Promise.all([save, waiting]);
+                expect(settled).toBe(true);
+            } finally {
+                release();
+                rebuilt.resolve();
+                saved.resolve();
+                await Promise.all([save, waiting]);
+            }
         });
 
         test("a failed save is returned and does not throw", async () => {

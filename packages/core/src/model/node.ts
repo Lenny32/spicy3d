@@ -3,6 +3,7 @@
 
 import type { IDocument } from "../document";
 import { HistoryObservable, type IDisposable, Id, type IPropertyChanged } from "../foundation";
+import { PerformanceTrace } from "../performanceTrace";
 import { property } from "../property";
 import { InternalClassName, type Serialized, Serializer, serialize } from "../serialize";
 
@@ -339,10 +340,21 @@ export class NodeUtils {
     ) {
         const nodeMap: Map<string, INodeLinkedList> = new Map();
         nodes.forEach((n) => {
-            const node =
-                unknown !== undefined && !Serializer.isRegistered(n[InternalClassName])
-                    ? unknown(document, n)
-                    : Serializer.deserializeObject(document, n);
+            const span = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("node.deserialize", {
+                      nodeId: n["id"],
+                      nodeType: n[InternalClassName],
+                  })
+                : undefined;
+            let node: INode;
+            try {
+                node =
+                    unknown !== undefined && !Serializer.isRegistered(n[InternalClassName])
+                        ? unknown(document, n)
+                        : Serializer.deserializeObject(document, n);
+            } finally {
+                if (PerformanceTrace.enabled) PerformanceTrace.end(span);
+            }
             if (NodeUtils.isLinkedListNode(node)) {
                 nodeMap.set(n["id"], node);
             }

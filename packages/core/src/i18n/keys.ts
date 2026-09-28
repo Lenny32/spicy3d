@@ -922,6 +922,7 @@ export const I18N_KEYS = [
     "sketch.fullyConstrained",
     "sketch.noProjectableEdges",
     "sketch.rollbackFailed",
+    "model.rebuilding{0}{1}",
     "sketch.underConstrained",
     "snap.center",
     "snap.end",

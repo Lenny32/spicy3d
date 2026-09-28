@@ -5,6 +5,7 @@ import { Config, I18n, type I18nKeys, Navigation3D, PubSub } from "@spicy3d/core
 import { div, label } from "@spicy3d/element";
 import { AutosaveIndicator } from "./autosaveStatus";
 import { McpStatusIndicator } from "./mcpStatus";
+import { RebuildIndicator } from "./rebuildStatus";
 import { SnapConfig } from "./snapConfig";
 import style from "./statusbar.module.css";
 
@@ -38,6 +39,7 @@ export class Statusbar extends HTMLElement {
         this.append(
             div({ className: style.left }, this.tip),
             new AutosaveIndicator(),
+            new RebuildIndicator(),
             div({ className: style.right }, new SnapConfig()),
             new McpStatusIndicator(),
         );

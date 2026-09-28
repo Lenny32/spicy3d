@@ -1,0 +1,220 @@
+{
+    "revision": "bf111c777bb2aa4d266146a51372a6d6081f7b4e",
+    "environment": {
+        "platform": "win32",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) i9-10900K CPU @ 3.70GHz",
+        "logicalCpus": 20,
+        "memoryBytes": 68412256256,
+        "node": "v24.12.0"
+    },
+    "browserVersion": "155.0",
+    "hashes": [
+        "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+        "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569"
+    ],
+    "capabilities": {
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
+        "longTasks": false,
+        "jsMemory": false,
+        "wasmHeap": true
+    },
+    "sourceClean": true,
+    "errors": [],
+    "writeAttempts": [],
+    "geometry": {
+        "faces": 1232,
+        "edges": 3448,
+        "vertices": 2255,
+        "bounds": {
+            "min": {
+                "x": -48.390005,
+                "y": -61.970005,
+                "z": 0.3999949999999998
+            },
+            "max": {
+                "x": 48.800005,
+                "y": 62.030005,
+                "z": 16.500005
+            }
+        },
+        "brepSha256": "b805d49baffe59a613641c31d75afeefcfcb2feba7fe635dfd0f26b46941562c",
+        "brepUnchanged": false,
+        "featuresUnchanged": true,
+        "sketchesUnchanged": true,
+        "visibilityUnchanged": true,
+        "after": {
+            "faces": 1232,
+            "edges": 3448,
+            "vertices": 2255,
+            "bounds": {
+                "min": {
+                    "x": -48.390005,
+                    "y": -61.970005,
+                    "z": 0.3999949999999998
+                },
+                "max": {
+                    "x": 48.800005,
+                    "y": 62.030005,
+                    "z": 16.500005
+                }
+            },
+            "brepSha256": "a5ba923fff810aafe1c18749c73a18b291d147bc0ad2a4199155912f5b1ba397"
+        },
+        "featureErrors": []
+    },
+    "scenarios": [
+        {
+            "name": "cold-open",
+            "elapsedMs": 49838,
+            "maxEventLoopGapMs": 47098,
+            "booleanCount": 83,
+            "booleanMs": 38722,
+            "longestBooleanMs": 4898,
+            "meshCount": 3356,
+            "memoryAfter": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 81,
+                    "maxMs": 81
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 2,
+                    "maxMs": 2
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 235,
+                    "maxMs": 132
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 46367,
+                    "maxMs": 45257
+                },
+                "mesh.construct": {
+                    "count": 3356,
+                    "totalMs": 1467,
+                    "maxMs": 468
+                },
+                "mesh.kernel": {
+                    "count": 3356,
+                    "totalMs": 183,
+                    "maxMs": 30
+                },
+                "kernel.operation": {
+                    "count": 1541,
+                    "totalMs": 39047,
+                    "maxMs": 4898
+                },
+                "profile.kernelRegions": {
+                    "count": 6,
+                    "totalMs": 43,
+                    "maxMs": 14
+                },
+                "feature.step": {
+                    "count": 84,
+                    "totalMs": 44733,
+                    "maxMs": 4936
+                },
+                "feature.chain": {
+                    "count": 1,
+                    "totalMs": 44742,
+                    "maxMs": 44742
+                }
+            },
+            "meshes": {
+                "construction:true": 1362,
+                "construction:false": 2,
+                "body:true": 1992
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 2126,
+                "durationMs": 4898,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 0,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_SwBlockSlit_B",
+            "elapsedMs": 930,
+            "maxEventLoopGapMs": 595,
+            "booleanCount": 1,
+            "booleanMs": 337,
+            "longestBooleanMs": 337,
+            "meshCount": 16,
+            "memoryAfter": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 334,
+                    "totalMs": 410,
+                    "maxMs": 402
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 445,
+                    "maxMs": 413
+                },
+                "mesh.construct": {
+                    "count": 16,
+                    "totalMs": 239,
+                    "maxMs": 119
+                },
+                "mesh.kernel": {
+                    "count": 16,
+                    "totalMs": 47,
+                    "maxMs": 25
+                },
+                "kernel.operation": {
+                    "count": 6,
+                    "totalMs": 338,
+                    "maxMs": 337
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 16
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 52262,
+                "durationMs": 337,
+                "details": {
+                    "operation": "booleanCutTracked",
+                    "boolean": true,
+                    "featureIndex": 83,
+                    "featureType": "extrude"
+                }
+            },
+            "featureHits": 333,
+            "featureMisses": 1
+        }
+    ],
+    "rawSha256": "e6cfadea5319395d266e331d9d2f48b11c0a0db312a516e0ccce32dd7e6a3494"
+}

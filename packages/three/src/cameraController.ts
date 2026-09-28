@@ -3,6 +3,7 @@
 
 import {
     type CameraType,
+    DocumentRebuilds,
     type ICameraController,
     MathUtils,
     Observable,
@@ -12,6 +13,7 @@ import {
 import {
     Box3,
     Camera,
+    type Mesh,
     Object3D,
     OrthographicCamera,
     PerspectiveCamera,
@@ -21,7 +23,7 @@ import {
     Vector3,
 } from "three";
 import { Constants } from "./constants";
-import type { ThreeGeometry } from "./threeGeometry";
+import { ThreeGeometry } from "./threeGeometry";
 import { ThreeHelper } from "./threeHelper";
 import type { ThreeView } from "./threeView";
 import type { ThreeVisualContext } from "./threeVisualContext";
@@ -260,10 +262,24 @@ export class CameraController extends Observable implements ICameraController {
 
         const box = new Box3();
         if (shapes.length === 0) {
-            box.setFromObject(context.visualShapes);
+            ThreeGeometry.buildMeshesIn(context.visualShapes, true);
+            context.visualShapes.updateWorldMatrix(true, true);
+            context.visualShapes.traverseVisible((object) => {
+                const geometry = (object as Mesh).geometry;
+                if (!geometry) return;
+                if (geometry.boundingBox === null) geometry.computeBoundingBox();
+                if (geometry.boundingBox)
+                    box.union(geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
+            });
         } else {
             for (const shape of shapes) {
                 const threeGeometry = context.getVisual(shape) as ThreeGeometry;
+                if (!threeGeometry) continue;
+                ThreeGeometry.buildMeshesIn(threeGeometry);
+                // Selected fitting is explicit geometry demand, including a hidden body
+                // whose first mesh read just scheduled its initial evaluation.
+                DocumentRebuilds.flush(shape.document);
+                ThreeGeometry.buildMeshesIn(threeGeometry);
                 const boundingBox = new Box3().setFromObject(threeGeometry);
                 if (boundingBox) {
                     box.union(boundingBox);

@@ -2,8 +2,48 @@
 // See LICENSE file in the project root for full license information.
 
 import { History, type IDocument, type PropertyHistoryRecord, Transaction } from "../src";
+import { TestDocument } from "../test-utils";
 
 describe("Transaction", () => {
+    test("rollback restores properties under the replay guard and preserves undo/redo positions", () => {
+        const doc = new TestDocument();
+        try {
+            const root = doc.modelManager.rootNode;
+            const original = root.name;
+            Transaction.execute(doc, "rename", () => {
+                root.name = "redo target";
+            });
+            doc.history.undo();
+            const position = doc.history.position();
+            const flags: Array<{ disabled: boolean; undoing: boolean }> = [];
+            root.onPropertyChanged((property) => {
+                if (property === "name") {
+                    flags.push({ disabled: doc.history.disabled, undoing: doc.history.isUndoing });
+                }
+            });
+            expect(() =>
+                Transaction.execute(doc, "failure", () => {
+                    root.name = "uncommitted";
+                    throw new Error("reject transaction");
+                }),
+            ).toThrow("reject transaction");
+            expect(root.name).toBe(original);
+            expect(doc.history.position()).toBe(position);
+            expect(doc.history.undoCount()).toBe(0);
+            expect(doc.history.redoCount()).toBe(1);
+            expect(flags).toEqual([
+                { disabled: false, undoing: false },
+                { disabled: true, undoing: true },
+            ]);
+            expect(doc.history.disabled).toBe(false);
+            expect(doc.history.isUndoing).toBe(false);
+            doc.history.redo();
+            expect(root.name).toBe("redo target");
+        } finally {
+            doc.dispose();
+        }
+    });
+
     test("should record history via static add and execute", () => {
         const doc: IDocument = { history: new History() } as any;
         const history: PropertyHistoryRecord = {} as any;

@@ -16,6 +16,7 @@ import {
     createMockApplication,
     createMockView,
     createMockVisualWithDocument,
+    MockShape,
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
@@ -105,6 +106,107 @@ const DATA: SketchData = {
 describe("SketchEditor session statics", () => {
     afterEach(() => {
         rs.restoreAllMocks();
+    });
+
+    test("unchanged commits preserve stored JSON, geometry and history across key order and empty defaults", () => {
+        const { doc, restoreFactory } = setup();
+        Object.assign(shapeFactory, { combine: () => Result.ok(new MockShape()) });
+        try {
+            const node = new SketchNode({
+                document: doc,
+                plane: Plane.XY,
+                dataJson: JSON.stringify({
+                    anchors: [],
+                    externalRefs: [],
+                    refPositions: {},
+                    constraints: [],
+                    entities: [{ params: [0, 0, 10, 0], construction: false, type: "line", id: 1 }],
+                }),
+            });
+            const stored = node.dataJson;
+            const shape = node.shape;
+            expect(shape.isOk).toBe(true);
+            const revision = node.geometryRevision;
+            const position = doc.history.position();
+            const rebuild = rs.spyOn(node, "setDataEmitShapeChanged");
+            for (let cycle = 0; cycle < 3; cycle++) {
+                const editor = SketchEditor.enter(node);
+                editor.commit();
+                editor.exit();
+            }
+            expect(node.dataJson).toBe(stored);
+            expect(node.shape).toBe(shape);
+            expect(node.geometryRevision).toBe(revision);
+            expect(doc.history.position()).toBe(position);
+            expect(rebuild).not.toHaveBeenCalled();
+        } finally {
+            SketchEditor.exit();
+            restoreFactory();
+        }
+    });
+
+    test("label-only commits undo and redo across sessions without invalidating geometry", () => {
+        const { doc, restoreFactory } = setup();
+        Object.assign(shapeFactory, { combine: () => Result.ok(new MockShape()) });
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+            const editor = SketchEditor.enter(node);
+            const id = editor.solver.addConstraint({
+                kind: ConstraintKind.P2PDistance,
+                refs: [
+                    { entityId: 1, pointIndex: 0 },
+                    { entityId: 1, pointIndex: 1 },
+                ],
+                datum: 10,
+            });
+            editor.commit();
+            const shape = node.shape;
+            expect(shape.isOk).toBe(true);
+            const revision = node.geometryRevision;
+            const count = doc.history.undoCount();
+            const rebuild = rs.spyOn(node, "setDataEmitShapeChanged");
+            editor.dimensionAnchors.set(id, { kind: "offset", offset: 25 });
+            editor.commit();
+            expect(doc.history.undoCount()).toBe(count + 1);
+            expect(node.data.anchors).toEqual([{ id, anchor: { kind: "offset", offset: 25 } }]);
+            editor.exit();
+            const reopened = SketchEditor.enter(node);
+            doc.history.undo();
+            expect(node.data.anchors).toBeUndefined();
+            expect(reopened.dimensionAnchors.size).toBe(0);
+            doc.history.redo();
+            expect(reopened.dimensionAnchors.get(id)).toEqual({ kind: "offset", offset: 25 });
+            expect(node.shape).toBe(shape);
+            expect(node.geometryRevision).toBe(revision);
+            expect(rebuild).not.toHaveBeenCalled();
+        } finally {
+            SketchEditor.exit();
+            restoreFactory();
+        }
+    });
+
+    test("a genuine coordinate edit still regenerates and records the sketch", () => {
+        const { doc, restoreFactory } = setup();
+        Object.assign(shapeFactory, { combine: () => Result.ok(new MockShape()) });
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+            const editor = SketchEditor.enter(node);
+            const before = node.geometryRevision;
+            const rebuild = rs.spyOn(node, "setDataEmitShapeChanged");
+            editor.solver.reset({
+                entities: [{ id: 1, type: "line", params: [0, 0, 20, 0] }],
+                constraints: [],
+            });
+            editor.commit();
+            expect(rebuild).toHaveBeenCalledTimes(1);
+            expect(node.data.entities[0].params).toEqual([0, 0, 20, 0]);
+            expect(node.geometryRevision).toBeGreaterThan(before);
+            doc.history.undo();
+            expect(node.data.entities[0].params).toEqual([0, 0, 10, 0]);
+        } finally {
+            SketchEditor.exit();
+            restoreFactory();
+        }
     });
 
     test("enter returns the editor and makes it the active editor", () => {

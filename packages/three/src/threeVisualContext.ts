@@ -24,6 +24,7 @@ import {
     type MeshOption,
     type NodeRecord,
     NodeUtils,
+    PerformanceTrace,
     type Plane,
     RefSegmentAnnotation,
     type ShapeMeshData,
@@ -182,7 +183,10 @@ export class ThreeVisualContext implements IVisualContext {
         this.applyAnalysisClip();
         this.appearanceLeases.clear();
         this.refreshAnalysisAppearance();
-        this.visualShapes.traverse((x) => {
+        // Disposing a geometry removes its mesh children; do not mutate a live traversal.
+        const objects: Object3D[] = [];
+        this.visualShapes.traverse((x) => objects.push(x));
+        objects.forEach((x) => {
             if (isDisposable(x)) x.dispose();
         });
         this.visual.document.modelManager.materials.forEach((x) =>
@@ -342,16 +346,17 @@ export class ThreeVisualContext implements IVisualContext {
             ThreeHelper.fromXYZ(boundingBox.max),
         ]);
         return this.visuals().filter((x) => {
+            if (!x.visible) return false;
             const node = (x as ThreeGeometry)?.geometryNode;
+            if (!node || !node.visible || !node.parentVisible) return false;
             const shape = (node as ShapeNode)?.shape?.unchecked();
             if (filter && shape && !filter.allow(shape, node.transform)) {
                 return false;
             }
 
-            const boundingBox = BoundingBox.transformed(x.boundingBox()!, node.worldTransform());
-            if (boundingBox === undefined) {
-                return false;
-            }
+            const localBox = x.boundingBox();
+            if (!localBox) return false;
+            const boundingBox = BoundingBox.transformed(localBox, node.worldTransform());
 
             const testBox = new Box3(
                 new Vector3(boundingBox.min.x, boundingBox.min.y, boundingBox.min.z),
@@ -465,8 +470,14 @@ export class ThreeVisualContext implements IVisualContext {
 
     setVisible(node: INode, visible: boolean): void {
         const shape = this.getVisual(node);
-        if (shape === undefined || shape.visible === visible) return;
+        if (shape === undefined) return;
         shape.visible = visible;
+        // transfer/remove briefly resets parentVisible before its remove record arrives.
+        // The subsequent add/reparent is the demand point, not that detached interval.
+        if (shape instanceof Object3D && visible && node.parent) {
+            ThreeGeometry.buildMeshesIn(shape, true);
+            if (this.appearanceLeases.size) this.refreshAnalysisAppearance();
+        }
     }
 
     setNodeOnTop(nodes: INode[], onTop: boolean): void {
@@ -480,20 +491,14 @@ export class ThreeVisualContext implements IVisualContext {
 
     moveNode(node: INode, oldParent: INode): void {
         if (oldParent === node.parent) return;
-
-        const parentNode = this._NodeVisualMap.get(oldParent) ?? this.visualShapes;
-        const newParentNode = (this._NodeVisualMap.get(node.parent!) as any) ?? this.visualShapes;
-        if (parentNode === newParentNode) {
-            return;
-        }
-
-        if (parentNode instanceof Group) {
-            const visual = this._NodeVisualMap.get(node);
-            if (visual instanceof Object3D) {
-                parentNode.remove(visual);
-                newParentNode.add(visual);
-            }
-        }
+        const visual = this._NodeVisualMap.get(node);
+        if (!visual) return;
+        // Match initial creation: only groups parent scene objects. Consumed tools keep
+        // their flat scene placement and use parentVisible for the body's render=false policy.
+        const parent = this.getParentVisual(node);
+        if (visual.parent !== parent) parent.add(visual);
+        visual.updateWorldMatrix(true, true);
+        ThreeGeometry.buildMeshesIn(visual, true);
     }
 
     addNode(nodes: INode[]) {
@@ -506,6 +511,22 @@ export class ThreeVisualContext implements IVisualContext {
     }
 
     private displayNode(node: INode) {
+        // Inclusive: constructing a visible geometry may initiate lazy evaluation and meshing.
+        const span = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("visual.create", {
+                  nodeId: node.id,
+                  nodeType: node.constructor.name,
+                  visible: node.visible && node.parentVisible,
+              })
+            : undefined;
+        try {
+            this.createNodeVisual(node);
+        } finally {
+            if (PerformanceTrace.enabled) PerformanceTrace.end(span);
+        }
+    }
+
+    private createNodeVisual(node: INode) {
         let visualObject: (IVisualObject & Object3D) | undefined;
         if (node instanceof MeshNode) {
             visualObject = new ThreeMeshObject(this, node);
@@ -524,6 +545,7 @@ export class ThreeVisualContext implements IVisualContext {
             parent.add(visualObject);
             this._visualNodeMap.set(visualObject, node);
             this._NodeVisualMap.set(node, visualObject);
+            visualObject.updateWorldMatrix(true, true);
         }
     }
 

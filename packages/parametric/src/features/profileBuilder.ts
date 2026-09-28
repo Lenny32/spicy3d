@@ -1,7 +1,16 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IEdge, type IFace, type IWire, type Plane, Result } from "@spicy3d/core";
+import {
+    type IEdge,
+    type IFace,
+    type IShape,
+    type IWire,
+    isDisposable,
+    PerformanceTrace,
+    type Plane,
+    Result,
+} from "@spicy3d/core";
 import { shapeEntityIds } from "../sketch/sketchModel";
 import type { SketchNode } from "../sketch/sketchNode";
 import {
@@ -47,6 +56,120 @@ export interface SketchProfileSet {
     readonly innerEntities: (number[] | undefined)[];
 }
 
+// Stored on the node, never in a global map or serialized payload. Even a disposed
+// node retains its tombstone so a late feature query cannot resurrect kernel handles.
+const PROFILE_CACHE = Symbol("sketchProfiles");
+type ProfileOwner = SketchNode & { [PROFILE_CACHE]?: ProfileCache };
+interface ProfileCache {
+    disposed?: boolean;
+    entry?: {
+        shape: IShape;
+        revision: number;
+        dataJson: string;
+        plane: Plane;
+        showProfileFaces: boolean;
+        result: Result<SketchProfileSet>;
+    };
+}
+
+function releaseShapes(shapes: Iterable<IShape>): void {
+    for (const shape of new Set(shapes)) {
+        if (isDisposable(shape)) shape.dispose();
+    }
+}
+
+/** Frees only profiles owned by the sketch, never its source shape or feature outputs. */
+export function invalidateSketchProfiles(sketch: SketchNode): void {
+    const cache = (sketch as ProfileOwner)[PROFILE_CACHE];
+    const result = cache?.entry?.result;
+    if (cache !== undefined) cache.entry = undefined;
+    if (result?.isOk) releaseShapes(allProfiles(result.value));
+}
+
+export function disposeSketchProfiles(sketch: SketchNode): void {
+    invalidateSketchProfiles(sketch);
+    profileCacheOf(sketch).disposed = true;
+}
+
+function profileCacheOf(sketch: SketchNode): ProfileCache {
+    const owner = sketch as ProfileOwner;
+    owner[PROFILE_CACHE] ??= {};
+    return owner[PROFILE_CACHE];
+}
+
+function liveProfile(face: IFace): boolean {
+    try {
+        // Structural test doubles may omit kernel queries. A released OCCT wrapper
+        // throws here before entering WASM; a null kernel shape is unusable too.
+        return typeof face.isNull !== "function" || !face.isNull();
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Borrowed profiles, owned by this sketch until invalidation/disposal. Consumers
+ * must not dispose them or store them as feature outputs: sweeps own their results.
+ * Rendering and feature evaluation both use this same construction/cache path.
+ * The chain scheduler yields BEFORE evaluating a feature. Profile resolution,
+ * sweeping and history capture are synchronous, with no sketch writes between
+ * them. A consumer that yields must reacquire profiles afterwards, not retain
+ * borrowed faces across the yield (a display toggle can invalidate them).
+ */
+export function sketchProfiles(sketch: SketchNode): Result<SketchProfileSet> {
+    const queryTrace = PerformanceTrace.enabled
+        ? PerformanceTrace.begin("profile.query", { nodeId: sketch.id })
+        : undefined;
+    let cacheHit = false;
+    try {
+        const cache = profileCacheOf(sketch);
+        if (cache.disposed) return Result.err("Sketch is disposed");
+        const shape = sketch.shape;
+        if (!shape.isOk) {
+            invalidateSketchProfiles(sketch);
+            return Result.err(shape.error);
+        }
+        // Read the key AFTER lazy shape generation, which may resolve refs and the plane.
+        const { geometryRevision: revision, dataJson, plane, showProfileFaces } = sketch;
+        const entry = cache.entry;
+        if (
+            entry?.shape === shape.value &&
+            entry.revision === revision &&
+            entry.dataJson === dataJson &&
+            entry.plane === plane &&
+            entry.showProfileFaces === showProfileFaces &&
+            (!entry.result.isOk || allProfiles(entry.result.value).every(liveProfile))
+        ) {
+            cacheHit = true;
+            return entry.result;
+        }
+        invalidateSketchProfiles(sketch);
+        const owned = new Set<IShape>();
+        let result: Result<SketchProfileSet> | undefined;
+        try {
+            const buildTrace = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("profile.build", { nodeId: sketch.id })
+                : undefined;
+            try {
+                result = buildSketchProfiles(sketch, shape.value, owned);
+            } finally {
+                if (PerformanceTrace.enabled) PerformanceTrace.end(buildTrace);
+            }
+            if (result.isOk) {
+                cache.entry = { shape: shape.value, revision, dataJson, plane, showProfileFaces, result };
+            }
+            return result;
+        } finally {
+            // Wires are construction temporaries; faces keep their own kernel topology.
+            // Failed/throwing builds also release every partially constructed face.
+            const retained = new Set<IShape>(result?.isOk ? allProfiles(result.value) : []);
+            releaseShapes([...owned].filter((shape) => !retained.has(shape)));
+        }
+    } finally {
+        if (PerformanceTrace.enabled) PerformanceTrace.end(queryTrace, { cacheHit });
+    }
+}
+
 /**
  * Extrudable profiles of a sketch as faces. Two paths, chosen by whether the sketch's edges can
  * be trusted to form simple loops.
@@ -62,11 +185,12 @@ export interface SketchProfileSet {
  *   their contacts and returns every minimal bounded region as a profile — even-odd no longer
  *   applies on that path.
  */
-export function sketchProfiles(sketch: SketchNode): Result<SketchProfileSet> {
-    const shape = sketch.shape;
-    if (!shape.isOk) return Result.err(shape.error);
-
-    const edges = collectEdges(shape.value);
+function buildSketchProfiles(
+    sketch: SketchNode,
+    shape: IShape,
+    owned: Set<IShape>,
+): Result<SketchProfileSet> {
+    const edges = collectEdges(shape);
     if (edges.length === 0) return Result.err("Sketch has no entities");
 
     // Edge i was generated from sketch entity shapeEntityIds[i] (generateShape combines
@@ -78,14 +202,14 @@ export function sketchProfiles(sketch: SketchNode): Result<SketchProfileSet> {
     // Mid-span crossings and T-junctions split edges into regions endpoint connectivity
     // cannot see, so the whole sketch goes through the kernel.
     if (needsKernelSplit(edges)) {
-        return crossingProfiles(edges, entityIds, sketch);
+        return crossingProfiles(edges, entityIds, sketch, owned);
     }
 
     const groups = groupConnected(edges);
     const branchGroups = groups.filter(hasBranchVertex);
     return branchGroups.length === 0
-        ? connectivityProfiles(groups, sketch.plane, idByEdge)
-        : splitProfiles(groups, branchGroups, idByEdge, sketch);
+        ? connectivityProfiles(groups, sketch.plane, idByEdge, owned)
+        : splitProfiles(groups, branchGroups, idByEdge, sketch, owned);
 }
 
 /**
@@ -99,13 +223,14 @@ function splitProfiles(
     branchGroups: IEdge[][],
     idByEdge: Map<IEdge, number>,
     sketch: SketchNode,
+    owned: Set<IShape>,
 ): Result<SketchProfileSet> {
     const simpleGroups = groups.filter((group) => !hasBranchVertex(group));
     const empty: SketchProfileSet = { outer: [], inner: [], outerEntities: [], innerEntities: [] };
     const simple =
         simpleGroups.length === 0
             ? Result.ok(empty)
-            : connectivityProfiles(simpleGroups, sketch.plane, idByEdge);
+            : connectivityProfiles(simpleGroups, sketch.plane, idByEdge, owned);
     if (!simple.isOk) return Result.err(simple.error);
 
     const branchEdges = branchGroups.flat();
@@ -119,7 +244,7 @@ function splitProfiles(
     if (missing > 0) {
         reportMissingEntityId(sketch, `${missing} of ${branchEdges.length} branch edges have no entity id`);
     }
-    const branch = crossingProfiles(branchEdges, branchEntityIds, sketch);
+    const branch = crossingProfiles(branchEdges, branchEntityIds, sketch, owned);
     if (!branch.isOk) return Result.err(branch.error);
 
     return Result.ok({
@@ -135,10 +260,12 @@ function crossingProfiles(
     edges: IEdge[],
     entityIds: readonly (number | undefined)[],
     sketch: SketchNode,
+    owned: Set<IShape>,
 ): Result<SketchProfileSet> {
     const regions = shapeFactory.facesFromEdges(edges, sketch.plane);
     if (!regions.isOk) return Result.err(regions.error);
     const { faces, sources } = regions.value;
+    for (const face of faces) owned.add(face);
 
     const outerEntities = sources.map((set) => sourceEntityIds(set, entityIds, sketch));
     for (const [index, face] of faces.entries()) {
@@ -153,8 +280,9 @@ function connectivityProfiles(
     groups: IEdge[][],
     plane: Plane,
     idByEdge: Map<IEdge, number>,
+    owned: Set<IShape>,
 ): Result<SketchProfileSet> {
-    const loops = buildWires(groups, plane, idByEdge);
+    const loops = buildWires(groups, plane, idByEdge, owned);
     if (!loops.isOk) return Result.err(loops.error);
     const { wires, polygons, wireEntities, wireEdges } = loops.value;
 
@@ -163,7 +291,7 @@ function connectivityProfiles(
         polygons.map((other, j) => i !== j && loopContains(other, poly)),
     );
     const depth = containedIn.map((row) => row.filter(Boolean).length);
-    return buildFaces(wires, wireEntities, wireEdges, idByEdge, containedIn, depth);
+    return buildFaces(wires, wireEntities, wireEdges, idByEdge, containedIn, depth, owned);
 }
 
 /**
@@ -175,6 +303,7 @@ function buildWires(
     groups: IEdge[][],
     plane: Plane,
     idByEdge: Map<IEdge, number>,
+    owned: Set<IShape>,
 ): Result<{ wires: IWire[]; polygons: Polygon[]; wireEntities: number[][]; wireEdges: IEdge[][] }> {
     const wires: IWire[] = [];
     const polygons: Polygon[] = [];
@@ -183,6 +312,7 @@ function buildWires(
     for (const group of groups) {
         const wire = shapeFactory.wire(group);
         if (!wire.isOk) return Result.err(wire.error);
+        owned.add(wire.value);
         if (!wire.value.isClosed()) continue;
         wires.push(wire.value);
         polygons.push(sampleLoop(group, plane));
@@ -212,6 +342,7 @@ function buildFaces(
     idByEdge: Map<IEdge, number>,
     containedIn: boolean[][],
     depth: number[],
+    owned: Set<IShape>,
 ): Result<SketchProfileSet> {
     const outer: IFace[] = [];
     const inner: IFace[] = [];
@@ -224,6 +355,7 @@ function buildFaces(
             : wires.flatMap((_, j) => (depth[j] === depth[index] + 1 && containedIn[j][index] ? [j] : []));
         const face = shapeFactory.face([wire, ...holeIndexes.map((j) => wires[j])]);
         if (!face.isOk) return Result.err(face.error);
+        owned.add(face.value);
         // The outer wire's entities are the profile's identity; hole wires are incidental.
         registerProfileEntities(face.value, wireEntities[index]);
         // Boundary edges of the outer AND hole wires are the face's seed candidates.

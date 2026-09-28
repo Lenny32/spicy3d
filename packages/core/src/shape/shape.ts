@@ -42,6 +42,8 @@ export interface IShape extends IDisposable {
     clone(): IShape;
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape;
     boundingBox(): BoundingBox;
+    /** Conservative world-space bounds from geometry, without creating a render mesh. */
+    geometryBoundingBox(): BoundingBox;
     orientedBoundingBox(): OrientedBoundingBox;
     extremaDistance(other: IShape): number;
     /** Exact closest points in world coordinates, or an error for missing geometry. */

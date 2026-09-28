@@ -10,6 +10,7 @@ import {
     DOCUMENT_THUMBNAIL_MAX_SIZE,
     type DocumentFormatError,
     DocumentMigrations,
+    DocumentRebuilds,
     type DocumentRepositoryError,
     type DocumentSource,
     History,
@@ -28,6 +29,7 @@ import {
     NullVisual,
     Observable,
     ObservableCollection,
+    PerformanceTrace,
     ProjectSettings,
     PubSub,
     Result,
@@ -134,6 +136,7 @@ export class Document extends Observable implements IDocument {
     }
 
     serialize(): Serialized {
+        DocumentRebuilds.flush(this);
         const serialized = {
             [InternalClassName]: "Document",
             formatVersion: DOCUMENT_FORMAT_VERSION,
@@ -203,9 +206,12 @@ export class Document extends Observable implements IDocument {
         return followUp.promise;
     }
 
-    /** Resolves once no save of this document is running or queued. */
+    /** Resolves once neither saves nor geometry work remain, including work queued while waiting. */
     async settled(): Promise<void> {
-        while (this.followUp || this.running) await (this.followUp?.promise ?? this.running);
+        do {
+            while (this.followUp || this.running) await (this.followUp?.promise ?? this.running);
+            await DocumentRebuilds.settled(this);
+        } while (this.followUp || this.running || DocumentRebuilds.pending(this));
     }
 
     private running?: Promise<unknown>;
@@ -224,6 +230,7 @@ export class Document extends Observable implements IDocument {
         kind: SaveKind,
         label?: string,
     ): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
+        if (DocumentRebuilds.pending(this)) await DocumentRebuilds.settled(this);
         // A save queued behind the one made while closing: the document is gone (disposed, its
         // models cleared), and serializing it now would store an empty document over the real one.
         if (this.closing || this._isDisposed) {
@@ -335,7 +342,9 @@ export class Document extends Observable implements IDocument {
         stored: Serialized,
         source: DocumentSource = {},
     ): Promise<IDocument | undefined> {
+        const span = PerformanceTrace.enabled ? PerformanceTrace.begin("document.migrate") : undefined;
         const migrated = DocumentMigrations.migrate(stored);
+        if (PerformanceTrace.enabled) PerformanceTrace.end(span, { ok: migrated.isOk });
         if (!migrated.isOk) {
             Document.reportFormatError(migrated.error);
             return undefined;
@@ -352,7 +361,11 @@ export class Document extends Observable implements IDocument {
         app: IApplication,
         stored: Serialized,
     ): Promise<Result<Document, DocumentFormatError | { kind: "loadFailed"; message: string }>> {
+        const span = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("document.migrate", { headless: true })
+            : undefined;
         const migrated = DocumentMigrations.migrate(stored);
+        if (PerformanceTrace.enabled) PerformanceTrace.end(span, { ok: migrated.isOk });
         if (!migrated.isOk) return Result.err(migrated.error);
         try {
             return Result.ok(await Document.build(app, migrated.value, {}, true));
@@ -370,6 +383,9 @@ export class Document extends Observable implements IDocument {
         source: DocumentSource,
         headless: boolean,
     ): Promise<Document> {
+        const span = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("document.load", { headless })
+            : undefined;
         const document = new Document(app, data["name"], data["id"], source, { headless });
         try {
             await Document.fill(document, data);
@@ -377,6 +393,8 @@ export class Document extends Observable implements IDocument {
             // a headless document is nobody's: it must not outlive a failed load
             if (headless) document.dispose();
             throw error;
+        } finally {
+            if (PerformanceTrace.enabled) PerformanceTrace.end(span);
         }
         return document;
     }
@@ -397,7 +415,10 @@ export class Document extends Observable implements IDocument {
         await document.modelManager.deserialize(data["models"]);
         document.analyses.attachModel();
         document.history.disabled = false;
-        document.markSaved();
+        // Derived work suppresses its own writes, never the user's edits between batches.
+        const loadedPosition = document.history.position();
+        await DocumentRebuilds.settled(document);
+        document.markSaved(loadedPosition);
     }
 
     private static foreignVersionsOf(moduleVersions: Record<string, number>): Record<string, number> {

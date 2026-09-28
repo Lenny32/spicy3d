@@ -54,6 +54,10 @@ class TestPanelFace implements ISubShape {
         );
     }
 
+    geometryBoundingBox(): BoundingBox {
+        return this.boundingBox();
+    }
+
     isEqual(other: IShape): boolean {
         return other === this;
     }
@@ -176,6 +180,10 @@ class TestPanel implements IShape {
     }
 
     boundingBox(): BoundingBox {
+        return this.face.boundingBox();
+    }
+
+    geometryBoundingBox(): BoundingBox {
         return this.face.boundingBox();
     }
 

@@ -1444,7 +1444,7 @@ describe("sketchProfiles external entity ids", () => {
                     edges.indexOf(edge) < 4 !== edges.indexOf(other) < 4
                         ? [{ parameter: 0.5, point: new XYZ({ x: 1.5, y: 1.5, z: 0 }) }]
                         : [];
-                (edge as any).boundingBox = () =>
+                edge.geometryBoundingBox = () =>
                     new BoundingBox(new XYZ({ x: 0, y: 0, z: 0 }), new XYZ({ x: 3, y: 3, z: 0 }));
             }
             const compound = {
@@ -1896,7 +1896,7 @@ describe("profile closure with external refs", () => {
             isEqual: () => false,
             dispose: rs.fn(),
             intersect: (other: IEdge) => segmentIntersect(start, end, other.startPoint(), other.endPoint()),
-            boundingBox: () =>
+            geometryBoundingBox: () =>
                 new BoundingBox(
                     new XYZ({ x: Math.min(x1, x2), y: Math.min(y1, y2), z: 0 }),
                     new XYZ({ x: Math.max(x1, x2), y: Math.max(y1, y2), z: 0 }),

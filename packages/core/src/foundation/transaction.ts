@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "../document";
+import { DocumentRebuilds } from "../documentRebuilds";
 import { ArrayRecord, type IHistoryRecord } from "./history";
 import { Logger } from "./logger";
 
@@ -15,6 +16,7 @@ export class Transaction {
 
     static add(document: IDocument, record: IHistoryRecord) {
         if (document.history.disabled) return;
+        DocumentRebuilds.edited(document);
         const arrayRecord = Transaction._transactionMap.get(document);
         if (arrayRecord !== undefined) {
             arrayRecord.records.push(record);
@@ -91,6 +93,6 @@ export class Transaction {
         const transaction = Transaction._transactionMap.get(this.document);
         Transaction._transactionMap.delete(this.document);
 
-        transaction?.undo();
+        if (transaction) this.document.history.rollback(transaction);
     }
 }

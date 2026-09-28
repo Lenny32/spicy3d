@@ -962,6 +962,7 @@ export default {
         "sketch.fullyConstrained": "Fully constrained",
         "sketch.noProjectableEdges": "No coplanar edges could be projected",
         "sketch.rollbackFailed": "Some bodies could not be rolled back to the sketch's timeline position",
+        "model.rebuilding{0}{1}": "Rebuilding: {0} / {1} features",
         "sketch.underConstrained": "Under-constrained",
         "snap.center": "Center",
         "snap.end": "End",

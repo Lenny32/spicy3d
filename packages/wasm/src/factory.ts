@@ -18,6 +18,7 @@ import {
     type Line,
     MathUtils,
     type OffsetMode,
+    PerformanceTrace,
     type Plane,
     Precision,
     Result,
@@ -63,10 +64,19 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
     errorString: string,
 ): Result<IShape, string> {
     let result: ShapeResult;
+    const span = PerformanceTrace.enabled
+        ? PerformanceTrace.begin("kernel.operation", {
+              operation: errorString.replace(/ Error$/, ""),
+              boolean: /^(Fuse|Boolean)/.test(errorString),
+              tracked: false,
+          })
+        : undefined;
     try {
         result = factory(...params);
     } catch (err) {
         return Result.err(`${errorString}: ${err}`);
+    } finally {
+        if (PerformanceTrace.enabled) PerformanceTrace.end(span);
     }
 
     let res: Result<IShape, string>;
@@ -117,12 +127,23 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     errorString: string,
 ): Result<TrackedShape, string> {
     let result: TrackedShapeResult;
+    // OCCT's tracked call includes history completion in C++; it cannot be timed separately here.
+    const span = PerformanceTrace.enabled
+        ? PerformanceTrace.begin("kernel.operation", {
+              operation: errorString.replace(/ Error$/, ""),
+              boolean: /^(Fuse|Boolean)/.test(errorString),
+              tracked: true,
+          })
+        : undefined;
     try {
         result = factory(...params);
     } catch (err) {
         return Result.err(`${errorString}: ${err}`);
+    } finally {
+        if (PerformanceTrace.enabled) PerformanceTrace.end(span);
     }
 
+    const history = PerformanceTrace.enabled ? PerformanceTrace.begin("kernel.historyConversion") : undefined;
     let res: Result<TrackedShape, string>;
     if (!result.isOk) {
         res = Result.err(result.error);
@@ -139,6 +160,7 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     }
 
     result.delete();
+    if (PerformanceTrace.enabled) PerformanceTrace.end(history);
     return res;
 }
 

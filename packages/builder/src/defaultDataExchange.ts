@@ -3,6 +3,7 @@
 
 import {
     type DataExportOptions,
+    DocumentRebuilds,
     EditableShapeNode,
     type ExportUnitHandling,
     exportLengthUnit,
@@ -118,7 +119,7 @@ export class DefaultDataExchange implements IDataExchange {
             shapeResult = document.visual.meshExporter.exportToObj(nodes, { scale });
         } else {
             // STEP/IGES writers convert and record the unit themselves; the rest scale here.
-            const shapes = this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
+            const shapes = await this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
             if (!shapes.length) return undefined;
             // STL goes through the headless OCCT-mesh converter (not the Three.js
             // visual exporter), so the same path works in the browser and the MCP server.
@@ -135,10 +136,20 @@ export class DefaultDataExchange implements IDataExchange {
         return undefined;
     }
 
-    private getExportShapes(nodes: VisualNode[], scale: number): IShape[] {
-        const shapes = nodes
-            .filter((x): x is ShapeNode => x instanceof ShapeNode)
-            .map((x) => this.scaled(x.shape.value.transformedMul(x.worldTransform()), scale));
+    private async getExportShapes(nodes: VisualNode[], scale: number): Promise<IShape[]> {
+        const selected = nodes.filter((node): node is ShapeNode => node instanceof ShapeNode);
+        // Hidden bodies may never have been evaluated. Demand every selected shape before
+        // awaiting: a pending getter returns last-good (or an initial error), not export data.
+        for (const node of selected) void node.shape;
+        const documents = new Set(selected.map((node) => node.document));
+        await Promise.all([...documents].map((document) => DocumentRebuilds.settled(document)));
+
+        // Do not use the earlier getter results or start another lazy evaluation here.
+        const shapes: IShape[] = [];
+        for (const node of selected) {
+            const shape = node.resolvedShape;
+            if (shape) shapes.push(this.scaled(shape.transformedMul(node.worldTransform()), scale));
+        }
 
         !shapes.length && PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
         return shapes;

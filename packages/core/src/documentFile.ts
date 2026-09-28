@@ -4,6 +4,7 @@
 import { DOCUMENT_FILE_EXTENSION } from "./document";
 import { decodeCloudVersionEnvelope, isCloudVersionEnvelope } from "./documentManifest";
 import { Result } from "./foundation";
+import { PerformanceTrace } from "./performanceTrace";
 import type { Serialized } from "./serialize";
 
 /** Extensions of documents saved before `.spicy` files: plain (uncompressed) JSON. */
@@ -33,13 +34,28 @@ export async function encodeDocumentFile(data: Serialized): Promise<Blob> {
  * export (one cloud version: manifest and base64 blobs, SpicySrv#17) is reassembled into its document.
  */
 export async function decodeDocumentFile(file: Blob): Promise<Result<Serialized, DocumentFileError>> {
+    const span = PerformanceTrace.enabled ? PerformanceTrace.begin("document.decode") : undefined;
     try {
         const head = new Uint8Array(await file.slice(0, GZIP_MAGIC.length).arrayBuffer());
         const isGzip = GZIP_MAGIC.every((byte, i) => head[i] === byte);
-        const text = isGzip
-            ? await new Response(file.stream().pipeThrough(new DecompressionStream("gzip"))).text()
-            : await file.text();
-        const data: unknown = JSON.parse(text);
+        const decompress = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("document.decompress", { gzip: isGzip })
+            : undefined;
+        let text: string;
+        try {
+            text = isGzip
+                ? await new Response(file.stream().pipeThrough(new DecompressionStream("gzip"))).text()
+                : await file.text();
+        } finally {
+            if (PerformanceTrace.enabled) PerformanceTrace.end(decompress);
+        }
+        const parse = PerformanceTrace.enabled ? PerformanceTrace.begin("document.parse") : undefined;
+        let data: unknown;
+        try {
+            data = JSON.parse(text);
+        } finally {
+            if (PerformanceTrace.enabled) PerformanceTrace.end(parse);
+        }
         if (typeof data !== "object" || data === null || Array.isArray(data)) {
             return Result.err({ kind: "unreadable", message: "not a JSON object" });
         }
@@ -52,6 +68,8 @@ export async function decodeDocumentFile(file: Blob): Promise<Result<Serialized,
         return Result.ok(data as Serialized);
     } catch (error) {
         return Result.err({ kind: "unreadable", message: (error as Error).message });
+    } finally {
+        if (PerformanceTrace.enabled) PerformanceTrace.end(span);
     }
 }
 

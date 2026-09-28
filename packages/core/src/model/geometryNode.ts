@@ -76,6 +76,11 @@ export abstract class GeometryNode extends VisualNode {
     }
 
     protected _mesh: IShapeMeshData | undefined;
+    /**
+     * Display-only invalidation uses propertyChanged("mesh", oldMesh), after clearing
+     * the cached mesh. Visuals rebuild their geometry; model dependencies must ignore
+     * it and continue watching "shape"/"geometry"/"transform" instead.
+     */
     get mesh(): IShapeMeshData {
         this._mesh ??= this.createMesh();
         return this._mesh as any;

@@ -7,14 +7,19 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../../..");
 // The container's check, without the directory it creates for nginx.
-const script = readFileSync(resolve(root, "docker/19-spicy3d-plugin-origins.sh"), "utf8").replace(
-    "mkdir -p /tmp/conf.d",
-    "",
-);
+const script = readFileSync(resolve(root, "docker/19-spicy3d-plugin-origins.sh"), "utf8")
+    // The Linux image uses LF; Git's Windows checkout can use CRLF.
+    .replace(/\r\n/g, "\n")
+    .replace("mkdir -p /tmp/conf.d", "");
 
 function run(env: Record<string, string>): number | null {
-    return spawnSync("sh", ["-s"], { input: script, env: { PATH: process.env["PATH"] ?? "", ...env } })
-        .status;
+    const result = spawnSync("sh", ["-s"], {
+        input: script,
+        env: { PATH: process.env["PATH"] ?? "", ...env },
+    });
+    // Report a missing shell as infrastructure failure, rather than an origin-validation mismatch.
+    if (result.error) throw result.error;
+    return result.status;
 }
 
 /** SPICY3D_*_ORIGINS go verbatim into the CSP header (docker/default.conf.template). */

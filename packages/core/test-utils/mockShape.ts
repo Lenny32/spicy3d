@@ -102,6 +102,10 @@ export class MockShape implements IShape {
         throw new Error("Method not implemented.");
     }
 
+    geometryBoundingBox(): BoundingBox {
+        throw new Error("Method not implemented.");
+    }
+
     orientedBoundingBox(): OrientedBoundingBox {
         throw new Error("Method not implemented.");
     }

@@ -65,6 +65,11 @@ export interface PubSubEventMap {
         ...args: any[]
     ) => void;
     statusBarTip: (tip: I18nKeys) => void;
+    rebuildProgress: (
+        document: IDocument,
+        nodeId: string,
+        progress: { completed: number; total: number } | undefined,
+    ) => void;
     toggleChatPanel: () => void;
     viewClosed: (view: IView) => void;
     viewCursor: (cursor: CursorType) => void;

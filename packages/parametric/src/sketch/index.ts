@@ -24,6 +24,8 @@ MergePathRevealers.register(sketchMergeRevealer);
 // Double-clicking a sketch node in the project tree enters its editing session.
 PubSub.default.sub("nodeDoubleClicked", (node) => {
     if (node instanceof SketchNode && SketchEditor.getActive()?.node !== node) {
-        SketchEditor.enter(node);
+        void SketchEditor.enterAsync(node).catch((error) =>
+            PubSub.default.pub("displayError", String(error)),
+        );
     }
 });

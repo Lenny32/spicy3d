@@ -16,6 +16,7 @@ import type { Component } from "./model/component";
 import { FolderNode } from "./model/folderNode";
 import { type INode, type INodeLinkedList, NodeUtils } from "./model/node";
 import { UnknownNode } from "./model/unknownNode";
+import { PerformanceTrace } from "./performanceTrace";
 import { InternalClassName, type Serialized, Serializer } from "./serialize";
 
 /** JSON with object keys sorted: equal for equal records whatever their key order. */
@@ -147,6 +148,9 @@ export class ModelManager extends Observable {
         // parametric body referencing a sketch), which findNode cannot reach while
         // _rootNode is still the old root.
         this._deserializing = true;
+        const span = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("model.deserialize", { nodeCount: data.nodes.length })
+            : undefined;
         try {
             const rootNode = await NodeUtils.deserializeNode(
                 this.document,
@@ -157,6 +161,7 @@ export class ModelManager extends Observable {
             this.ensureMaterials();
         } finally {
             this._deserializing = false;
+            if (PerformanceTrace.enabled) PerformanceTrace.end(span);
         }
         this.notifyNodeChanged([{ action: "add", node: this.rootNode }]);
     }

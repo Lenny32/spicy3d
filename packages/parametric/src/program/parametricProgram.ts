@@ -263,6 +263,10 @@ function refsFor(document: IDocument): Map<string, string> {
 
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
 export function runParametricProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
+    return ParametricBodyNode.withSynchronousEvaluation(document, () => evaluateProgram(document, ops));
+}
+
+function evaluateProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -750,13 +754,14 @@ function appendFeature(state: State, body: ParametricBodyNode, feature: FeatureD
 }
 
 function checkBody(state: State, body: ParametricBodyNode, before: Set<string> | undefined): void {
+    // A newly created body can still be lazy. Evaluate before inspecting its feature failures.
+    const shape = body.shape;
     const failed = body
         .featureItems()
         .find((item) => item.error !== undefined && (before === undefined || !before.has(item.id)));
     if (failed !== undefined) {
         throw new Error(`feature "${failed.display}" (${failed.id}) failed: ${failed.error}`);
     }
-    const shape = body.shape;
     if (!shape.isOk) throw new Error(`the body could not be rebuilt: ${shape.error}`);
     state.touched.add(body);
 }

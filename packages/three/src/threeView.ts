@@ -653,7 +653,8 @@ export class ThreeView extends Observable implements IView {
     ): ThreeVisualObject[] {
         const result: ThreeVisualObject[] = [];
         this.document.visual.context.visuals().forEach((x) => {
-            if (!(x instanceof ThreeVisualObject) || !x.node.visible || !x.node.parentVisible) return;
+            if (!(x instanceof ThreeVisualObject) || !x.visible || !x.node.visible || !x.node.parentVisible)
+                return;
 
             const node = this.getNodeFromObject(x);
             if (node === undefined) return;
@@ -1013,6 +1014,7 @@ export class ThreeView extends Observable implements IView {
         this.document.visual.context.visuals().forEach((x) => {
             if (!x.visible) return;
             if (x instanceof ThreeVisualObject && x.node.visible && x.node.parentVisible) {
+                if (x instanceof ThreeGeometry) x.buildVisibleMeshes();
                 visuals.push(...x.wholeVisual());
             } else if (x instanceof ThreeRefSegmentAnnotation) {
                 visuals.push(...x.wholeVisual());
@@ -1035,7 +1037,7 @@ export class ThreeView extends Observable implements IView {
     private initIntersectableShapes(shapeType: ShapeType) {
         let shapes: Object3D[] = [];
         this.document.visual.context.visuals().forEach((x) => {
-            if (x instanceof ThreeVisualObject && x.node.visible && x.node.parentVisible) {
+            if (x instanceof ThreeVisualObject && x.visible && x.node.visible && x.node.parentVisible) {
                 shapes.push(...x.subShapeVisual(shapeType));
             }
         });

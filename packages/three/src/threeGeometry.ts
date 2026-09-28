@@ -9,8 +9,10 @@ import {
     type IShape,
     type ISubShape,
     type IVisualGeometry,
+    isFeatureListNode,
     type Matrix4,
     MeshUtils,
+    PerformanceTrace,
     type ShapeMeshRange,
     ShapeNode,
     type ShapeType,
@@ -52,6 +54,12 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     private _faces?: Mesh;
     private _vertexs?: Points;
     private _renderOnTop = false;
+    private _meshesDirty = true;
+    private _buildingMeshes = false;
+    private _disposed = false;
+    private _temporaryFaces?: MeshLambertMaterial;
+    private _temporaryEdges?: LineMaterial;
+    private _temporaryVertexs?: PointsMaterial;
 
     constructor(
         readonly geometryNode: GeometryNode,
@@ -59,7 +67,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     ) {
         super(geometryNode);
         this._faceMaterial = context.getMaterial(geometryNode.materialId);
-        this.generateShape();
+        this.buildVisibleMeshes();
         geometryNode.onPropertyChanged(this.handleGeometryPropertyChanged);
     }
 
@@ -112,11 +120,16 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     box() {
-        return this._faces?.geometry.boundingBox ?? this._edges?.geometry.boundingBox;
+        this.buildMeshes();
+        return (
+            this._faces?.geometry.boundingBox ??
+            this._edges?.geometry.boundingBox ??
+            this._vertexs?.geometry.boundingBox
+        );
     }
 
     override boundingBox(): BoundingBox | undefined {
-        const box = this._faces?.geometry.boundingBox ?? this._edges?.geometry.boundingBox;
+        const box = this.box();
         if (!box) return undefined;
 
         return {
@@ -128,21 +141,74 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     private readonly handleGeometryPropertyChanged = (property: keyof GeometryNode) => {
         if (property === "materialId") {
             this.changeFaceMaterial(this.context.getMaterial(this.geometryNode.materialId));
-        } else if ((property as keyof ShapeNode) === "shape") {
-            this.removeMeshes();
-            this.generateShape();
+        } else if ((property as keyof ShapeNode) === "shape" || property === "mesh") {
+            this._meshesDirty = true;
+            this.buildVisibleMeshes();
         }
         this.context.refreshAnalysisAppearance();
     };
 
-    private generateShape() {
+    /** Passive rendering never demands geometry from hidden/consumed nodes. */
+    buildVisibleMeshes(): void {
+        if (this.visible && this.geometryNode.visible && this.geometryNode.parentVisible) this.buildMeshes();
+    }
+
+    /** Explicit demand (export, selected fitting, highlighting), independent of visibility. */
+    buildMeshes(): void {
+        if (this._disposed || !this._meshesDirty || this._buildingMeshes) return;
+        this._buildingMeshes = true;
+        try {
+            this.generateMeshes();
+        } finally {
+            this._buildingMeshes = false;
+        }
+    }
+
+    private generateMeshes(): void {
+        // Read first so a failed mesh query does not discard the last displayed result.
+        if (PerformanceTrace.enabled && this.geometryNode instanceof ShapeNode) {
+            const shape = this.geometryNode.resolvedShape;
+            if (shape) {
+                PerformanceTrace.tagShape(shape, {
+                    nodeId: this.geometryNode.id,
+                    meshKind: isFeatureListNode(this.geometryNode) ? "body" : "construction",
+                    visible: this.visible && this.geometryNode.visible && this.geometryNode.parentVisible,
+                });
+            }
+        }
         const mesh = this.geometryNode.mesh;
-        if (mesh?.vertexs?.position.length) this.initVertexs(mesh.vertexs);
-        if (mesh?.faces?.position.length) this.initFaces(mesh.faces);
-        if (mesh?.edges?.position.length) this.initEdges(mesh.edges);
+        const vertexs = mesh?.vertexs;
+        const faces = mesh?.faces;
+        const edges = mesh?.edges;
+        this.removeMeshes();
+        if (vertexs?.position.length) this.initVertexs(vertexs);
+        if (faces?.position.length) this.initFaces(faces);
+        if (edges?.position.length) this.initEdges(edges);
+        this._meshesDirty = false;
+        if (this.locked) {
+            this.locked = false;
+            this.locked = true;
+        }
+        if (this._faces && this._temporaryFaces) this._faces.material = this._temporaryFaces;
+        if (this._edges && this._temporaryEdges) this._edges.material = this._temporaryEdges;
+        if (this._vertexs && this._temporaryVertexs) this._vertexs.material = this._temporaryVertexs;
+        this.updateWorldMatrix(true, true);
+    }
+
+    static buildMeshesIn(object: Object3D, visibleOnly = false): void {
+        const build = (child: Object3D) => {
+            if (child instanceof ThreeGeometry) {
+                if (visibleOnly) child.buildVisibleMeshes();
+                else child.buildMeshes();
+            }
+        };
+        if (visibleOnly) object.traverseVisible(build);
+        else object.traverse(build);
     }
 
     override dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
         super.dispose();
         this.geometryNode.removePropertyChanged(this.handleGeometryPropertyChanged);
         this.removeMeshes();
@@ -153,19 +219,19 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
             this.disposeOnTopMaterial(this._vertexs);
             this.remove(this._vertexs);
             this._vertexs.geometry.dispose();
-            this._vertexs = null as any;
+            this._vertexs = undefined;
         }
         if (this._edges) {
             this.disposeOnTopMaterial(this._edges);
             this.remove(this._edges);
             this._edges.geometry.dispose();
-            this._edges = null as any;
+            this._edges = undefined;
         }
         if (this._faces) {
             this.disposeOnTopMaterial(this._faces);
             this.remove(this._faces);
             this._faces.geometry.dispose();
-            this._faces = null as any;
+            this._faces = undefined;
         }
     }
 
@@ -200,18 +266,27 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     setFacesMateiralTemperary(material: MeshLambertMaterial) {
+        this._temporaryFaces = material;
+        this.buildMeshes();
         if (this._faces) this._faces.material = material;
     }
 
     setEdgesMateiralTemperary(material: LineMaterial) {
+        this._temporaryEdges = material;
+        this.buildMeshes();
         if (this._edges) this._edges.material = material;
     }
 
     setVertexsMateiralTemperary(material: PointsMaterial) {
+        this._temporaryVertexs = material;
+        this.buildMeshes();
         if (this._vertexs) this._vertexs.material = material;
     }
 
     removeTemperaryMaterial(): void {
+        this._temporaryFaces = undefined;
+        this._temporaryEdges = undefined;
+        this._temporaryVertexs = undefined;
         if (this._vertexs) this._vertexs.material = defaultVertexMaterial;
         if (this._edges && this._edges.material !== lockLineMaterial)
             this._edges.material = this._edgeMaterial;
@@ -229,7 +304,11 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     cloneSubEdge(index: number) {
-        const positions = MeshUtils.subEdge(this.geometryNode.mesh.edges!, index);
+        this.buildMeshes();
+        this.updateWorldMatrix(true, false);
+        const edges = this.geometryNode.mesh.edges;
+        if (!edges) return undefined;
+        const positions = MeshUtils.subEdge(edges, index);
         if (!positions) return undefined;
 
         const buff = new LineSegmentsGeometry();
@@ -240,7 +319,11 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     cloneSubFace(index: number) {
-        const mesh = MeshUtils.subFace(this.geometryNode.mesh.faces!, index);
+        this.buildMeshes();
+        this.updateWorldMatrix(true, false);
+        const faces = this.geometryNode.mesh.faces;
+        if (!faces) return undefined;
+        const mesh = MeshUtils.subFace(faces, index);
         if (!mesh) return undefined;
 
         const buff = ThreeGeometryFactory.createFaceBufferGeometry(mesh);
@@ -262,6 +345,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     override getSubShapeAndIndex(shapeType: "face" | "edge" | "vertex", subVisualIndex: number) {
+        this.buildMeshes();
         let subShape: ISubShape | undefined;
         let transform: Matrix4 | undefined;
         let index: number = -1;
@@ -297,6 +381,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     override subShapeVisual(shapeType: ShapeType): (Mesh | LineSegments2 | Points)[] {
+        this.buildMeshes();
         const shapes: (Mesh | LineSegments2 | Points | undefined)[] = [];
 
         const isWhole =

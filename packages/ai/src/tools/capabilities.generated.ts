@@ -568,6 +568,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "shape.geometryBoundingBox",
+        name: "geometryBoundingBox",
+        owner: "shape",
+        family: "shape",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "shape.orientedBoundingBox",
         name: "orientedBoundingBox",
         owner: "shape",
@@ -2085,6 +2093,7 @@ shape.* (target must be a shape):
   shape.clone(target) -> shape ref (registered under the op id)
   shape.hlr(target, position: xyz, direction: xyz, xDir: xyz) -> shape ref (registered under the op id)
   shape.boundingBox(target) -> BoundingBox
+  shape.geometryBoundingBox(target) -> BoundingBox
   shape.orientedBoundingBox(target) -> OrientedBoundingBox
   shape.extremaDistance(target, other: ref) -> number
   shape.inspectionDistance(target, other: ref) -> Result<{ distance: number; first: XYZ; second: XYZ; }, string>

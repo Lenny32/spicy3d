@@ -5,6 +5,7 @@ import {
     type AsyncController,
     AutosaveHolds,
     type CameraType,
+    DocumentRebuilds,
     documentLengthUnit,
     EditSessions,
     formatLengthParameter,
@@ -43,6 +44,7 @@ import type { SketchTransform } from "../utilityOperations";
 import * as datumPrompt from "./datumPrompt";
 import { type DimensionAnchor, toDisplayDatum } from "./dimensionLayout";
 import { SketchAnnotationManager } from "./sketchAnnotations";
+import { sameSketchData } from "./sketchCommit";
 import { SketchEventHandler } from "./sketchEventHandler";
 import { SolverFeedback } from "./solverFeedback";
 
@@ -138,6 +140,9 @@ export class SketchEditor implements IDisposable {
      * (committing changes) with `exit` or Escape.
      */
     private static activeEditor?: SketchEditor;
+    private static entryRevision = 0;
+    private static entryTask?: Promise<SketchEditor | undefined>;
+    private static cancelPrepared?: () => void;
     /** Ends the session's hold on autosave. */
     private releaseAutosave?: () => void;
     /** Unregisters the session from `EditSessions`. */
@@ -149,13 +154,16 @@ export class SketchEditor implements IDisposable {
         return SketchEditor.activeEditor;
     }
 
-    static enter(node: SketchNode): SketchEditor {
+    static enter(node: SketchNode, preparedRollback?: RollbackMap): SketchEditor {
+        if (!preparedRollback) SketchEditor.cancelPrepared?.();
         SketchEditor.exit();
+        // Legacy synchronous callers need the same boundary as enterAsync's awaited restoration.
+        DocumentRebuilds.flush(node.document);
         // Profile faces are normally shown for picking; hide them while editing.
         node.setShowProfileFaces(false);
         let releaseAutosave: (() => void) | undefined;
         try {
-            const editor = new SketchEditor(node.document, node);
+            const editor = new SketchEditor(node.document, node, preparedRollback);
             // The session rolls bodies back: an autosave now would save that state.
             releaseAutosave = AutosaveHolds.hold("sketch");
             editor.releaseAutosave = releaseAutosave;
@@ -176,7 +184,157 @@ export class SketchEditor implements IDisposable {
 
     /** Closes the live session, if any — the instance counterpart is `exit` below. */
     static exit(): void {
+        SketchEditor.entryRevision++;
         SketchEditor.activeEditor?.exit();
+    }
+
+    /** UI entry: finish restoration and rollback before the solver claims capture-time geometry. */
+    static enterAsync(node: SketchNode, signal?: AbortSignal): Promise<SketchEditor | undefined> {
+        if (signal?.aborted) return Promise.resolve(undefined);
+        SketchEditor.exit();
+        const revision = SketchEditor.entryRevision;
+        const previous = SketchEditor.entryTask;
+        const task = (async () => {
+            // A superseded preparation restores its own bodies before another session touches them.
+            if (previous) await previous.catch(() => undefined);
+            if (signal?.aborted || revision !== SketchEditor.entryRevision) return undefined;
+            return SketchEditor.prepareEntry(node, revision, signal);
+        })();
+        // prepareEntry runs synchronously until genuine work yields. Do not leave a resolved
+        // promise in the slot: a same-task exit/re-entry must keep the fast path too.
+        if (previous || SketchEditor.cancelPrepared) SketchEditor.entryTask = task;
+        const finished = () => {
+            if (SketchEditor.entryTask === task) SketchEditor.entryTask = undefined;
+        };
+        void task.then(finished, finished);
+        return task;
+    }
+
+    private static async prepareEntry(
+        node: SketchNode,
+        revision: number,
+        signal?: AbortSignal,
+    ): Promise<SketchEditor | undefined> {
+        const document = node.document;
+        const attached = document.modelManager.findNode((candidate) => candidate === node) !== undefined;
+        const release = AutosaveHolds.hold("sketch rollback");
+        const cancel = () => {
+            SketchEditor.entryRevision++;
+        };
+        const releaseSession = EditSessions.begin(document, cancel);
+        document.history.onBeforeReplay.sub(cancel);
+        const rollback: RollbackMap = new Map();
+        let cleanedSynchronously = false;
+        const cancelPrepared = () => {
+            cancel();
+            cleanedSynchronously = true;
+            for (const body of rollbackRestoreOrder(rollback)) {
+                if (document.modelManager.findNode((candidate) => candidate === body) === undefined) continue;
+                try {
+                    body.setRollbackIndex(undefined);
+                } catch {
+                    // Continue unwinding every body.
+                }
+            }
+            rollback.clear();
+            if (document.modelManager.findNode((candidate) => candidate === node)) {
+                node.setEditingSession(false);
+            }
+        };
+        SketchEditor.cancelPrepared = cancelPrepared;
+        let entered = false;
+        const current = () =>
+            !signal?.aborted &&
+            revision === SketchEditor.entryRevision &&
+            node.document === document &&
+            document.application.activeView?.document === document &&
+            (!attached || document.modelManager.findNode((candidate) => candidate === node) !== undefined);
+        try {
+            if (DocumentRebuilds.pending(document)) {
+                await SketchEditor.waitForEntryWork(DocumentRebuilds.settled(document), signal);
+            }
+            if (!current()) return undefined;
+            node.setEditingSession(true);
+            let failed = false;
+            for (const [body, index] of computeSketchRollback(document, node)) {
+                if (!current()) return undefined;
+                rollback.set(body, index);
+                let applied = false;
+                try {
+                    applied = body.requestRollbackIndex(index);
+                    if (body.isRebuilding) {
+                        applied = (await SketchEditor.waitForEntryWork(body.whenRebuilt(), signal)) ?? false;
+                    }
+                } catch {
+                    // A failing body does not prevent editing the sketch or rolling back the others.
+                }
+                if (!current()) return undefined;
+                if (!applied) {
+                    failed = true;
+                    try {
+                        body.requestRollbackIndex(undefined);
+                        if (body.isRebuilding) {
+                            await SketchEditor.waitForEntryWork(body.whenRebuilt(), signal);
+                        }
+                    } catch {
+                        // Retain its last good shape.
+                    }
+                    if (!current()) return undefined;
+                    rollback.delete(body);
+                }
+            }
+            if (!current()) return undefined;
+            if (failed) PubSub.default.pub("statusBarTip", "sketch.rollbackFailed");
+            // Release the preparation session before enter registers the real one.
+            releaseSession();
+            SketchEditor.cancelPrepared = undefined;
+            const editor = rollback.size ? SketchEditor.enter(node, rollback) : SketchEditor.enter(node);
+            entered = true;
+            return editor;
+        } finally {
+            if (SketchEditor.cancelPrepared === cancelPrepared) SketchEditor.cancelPrepared = undefined;
+            document.history.onBeforeReplay.remove(cancel);
+            releaseSession();
+            if (!entered && !cleanedSynchronously) {
+                if (document.modelManager.findNode((candidate) => candidate === node)) {
+                    node.setEditingSession(false);
+                }
+                for (const body of rollbackRestoreOrder(rollback)) {
+                    if (document.modelManager.findNode((candidate) => candidate === body) === undefined)
+                        continue;
+                    try {
+                        body.requestRollbackIndex(undefined);
+                        await body.whenRebuilt();
+                    } catch {
+                        // Keep unwinding.
+                    }
+                }
+            }
+            release();
+        }
+    }
+
+    /** Aborting this preparation enters its finally immediately; restoration itself is always awaited. */
+    private static waitForEntryWork<T>(work: Promise<T>, signal?: AbortSignal): Promise<T | undefined> {
+        if (!signal) return work;
+        if (signal.aborted) return Promise.resolve(undefined);
+        return new Promise((resolve, reject) => {
+            const abort = () => {
+                signal.removeEventListener("abort", abort);
+                resolve(undefined);
+            };
+            signal.addEventListener("abort", abort, { once: true });
+            void work.then(
+                (value) => {
+                    signal.removeEventListener("abort", abort);
+                    resolve(value);
+                },
+                (error) => {
+                    signal.removeEventListener("abort", abort);
+                    reject(error);
+                },
+            );
+        });
     }
 
     // ------------------------------------------------------------------ Construction
@@ -184,13 +342,14 @@ export class SketchEditor implements IDisposable {
     constructor(
         readonly document: IDocument,
         readonly node: SketchNode,
+        preparedRollback?: RollbackMap,
     ) {
         // The only non-null assertion in here — resolve it before any session state
         // is written: enter() publishes the active editor only after the constructor
         // returns, so a later throw unwinds in this constructor's own catch, and this
         // one cannot strand anything.
         this.view = this.document.application.activeView!;
-        const session = this.startSession();
+        const session = this.startSession(preparedRollback);
         this.solver = session.solver;
         this.rollback = session.rollback;
 
@@ -268,13 +427,13 @@ export class SketchEditor implements IDisposable {
      * after the constructor returns (it restores the profile-face visibility it
      * set itself).
      */
-    private startSession(): { rollback: RollbackMap; solver: SketchSolver } {
+    private startSession(preparedRollback?: RollbackMap): { rollback: RollbackMap; solver: SketchSolver } {
         // the session owns the solver and dataJson; the node skips its off-session
         // re-solve of external-reference followers while this flag is set
         this.node.setEditingSession(true);
         let rollback: RollbackMap | undefined;
         try {
-            rollback = this.applyTimelineRollback();
+            rollback = preparedRollback ?? this.applyTimelineRollback();
             return { rollback, solver: this.createSessionSolver() };
         } catch (error) {
             try {
@@ -730,8 +889,34 @@ export class SketchEditor implements IDisposable {
         if (this.dimensionAnchors.size > 0) {
             data.anchors = [...this.dimensionAnchors].map(([id, anchor]) => ({ id, anchor }));
         }
+        const previous = this.node.data;
+        if (sameSketchData(previous, data)) return;
         Transaction.execute(this.document, "edit sketch", () => {
-            this.node.setDataEmitShapeChanged(data);
+            if (!sameSketchData(previous, data, false)) {
+                this.node.setDataEmitShapeChanged(data);
+                return;
+            }
+            // Label placement belongs to the editor, not the solver/profile geometry. Record
+            // only anchors so replay neither regenerates a shape nor overwrites later geometry.
+            const node = this.node;
+            const apply = (anchors: SketchData["anchors"]) => {
+                const current = node.data;
+                if (anchors?.length) current.anchors = anchors;
+                else delete current.anchors;
+                node.setPrivateValue("dataJson", JSON.stringify(current));
+                const active = SketchEditor.getActive();
+                if (active?.node === node) {
+                    active.loadAnchors(current);
+                    active.annotations.refresh();
+                }
+            };
+            apply(data.anchors);
+            Transaction.add(this.document, {
+                name: "sketch dimension labels",
+                undo: () => apply(previous.anchors),
+                redo: () => apply(data.anchors),
+                dispose: () => {},
+            });
         });
         // toData re-derives external-ref roles from the constraints — a flip
         // (dashed ↔ solid) shows up only when the session display re-renders
@@ -905,13 +1090,15 @@ export class SketchEditor implements IDisposable {
         this.document.visual.context.setNodeOnTop([this.node], false);
         this.node.setEditingSession(false);
         this.node.removePropertyChanged(this.onNodeDataChanged);
+        let restoration: Promise<void> | undefined;
         try {
-            this.restoreRolledBackBodies();
+            restoration = this.restoreRolledBackBodies();
         } finally {
             try {
                 this.teardownSession();
             } finally {
-                this.releaseAutosave?.();
+                if (restoration) void restoration.finally(() => this.releaseAutosave?.());
+                else this.releaseAutosave?.();
             }
         }
     }
@@ -930,15 +1117,47 @@ export class SketchEditor implements IDisposable {
      *   `startSession`/`unwindSession`) nor the teardown. `disposed` is already set, so there is
      *   no retry.
      */
-    private restoreRolledBackBodies(): void {
-        for (const body of rollbackRestoreOrder(this.rollback)) {
-            if (this.document.modelManager.findNode((n) => n === body) === undefined) continue;
-            try {
-                body.setRollbackIndex(undefined);
-            } catch {
-                // best effort — the body keeps displaying its last good shape
+    private restoreRolledBackBodies(): Promise<void> | undefined {
+        const bodies = rollbackRestoreOrder(this.rollback);
+        let index = 0;
+        const next = (): Promise<void> | undefined => {
+            while (index < bodies.length) {
+                const body = bodies[index++];
+                if (this.document.modelManager.findNode((n) => n === body) === undefined) continue;
+                try {
+                    body.requestRollbackIndex(undefined);
+                    if (body.isRebuilding) return body.whenRebuilt().then(next);
+                } catch {
+                    // A failure must not strand the remaining bodies or the session teardown.
+                }
             }
-        }
+        };
+        const pending = next();
+        if (!pending) return undefined;
+        // Keep the whole dependency-ordered restoration inside save/load barriers, including
+        // the gap between one body's completion and the next body's request.
+        let finish!: () => void;
+        const settled = new Promise<void>((resolve) => {
+            finish = resolve;
+        });
+        const release = DocumentRebuilds.add(this.document, {
+            settled,
+            flush: () => {
+                for (const body of bodies) {
+                    if (this.document.modelManager.findNode((n) => n === body) !== undefined) {
+                        body.setRollbackIndex(undefined);
+                    }
+                }
+                index = bodies.length;
+                release();
+                finish();
+            },
+        });
+        void pending.finally(() => {
+            release();
+            finish();
+        });
+        return settled;
     }
 
     private teardownSession(): void {

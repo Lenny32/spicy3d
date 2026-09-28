@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { FolderNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
+import { DocumentRebuilds, FolderNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
@@ -108,6 +108,127 @@ const plate = (depth: number): ParametricOp[] => [
     { op: "sketch", id: "s1", plane: "XY", entities: rect(0, 0, 40, 30) },
     { op: "extrude", id: "b1", sketch: "s1", depth },
 ];
+
+/** Cross the scheduling threshold with a single appended feature, without unnecessary booleans. */
+function elevenFeaturePlate(doc: TestDocument): ParametricBodyNode {
+    const body = createdBody(doc, run(doc, plate(20)), "b1");
+    const base = body.features[0];
+    body.setFeaturesEmitShapeChanged([
+        base,
+        ...Array.from({ length: 10 }, (_, index) => ({
+            ...base,
+            id: `suppressed-${index}`,
+            suppressed: true,
+        })),
+    ]);
+    expect(body.featureCount).toBe(11);
+    expect(body.isRebuilding).toBe(false);
+    return body;
+}
+
+describe("program evaluation across the async scheduling threshold", () => {
+    test("an invalid twelfth feature throws at that operation and rolls back the transaction", async () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            run(doc, [
+                {
+                    op: "sketch",
+                    id: "open",
+                    plane: "XY",
+                    entities: [{ type: "line", params: [0, 0, 10, 0] }],
+                },
+            ]);
+            const features = body.featuresJson;
+            const previous = body.shape.value;
+            const position = doc.history.position();
+            const before = nodeIds(doc);
+            const message = runExpectingFailure(doc, [
+                { op: "extrude", id: "bad12", sketch: "open", depth: 5, body: "b1", operation: "fuse" },
+                { op: "sketch", id: "must-not-run", plane: "XY", entities: rect(0, 0, 5, 5) },
+            ]);
+            expect(message).toContain('op 0 ("extrude") failed');
+            expect(message).toContain("Sketch profile is not closed");
+            expect(body.featuresJson).toBe(features);
+            expect(body.shape.value).toBe(previous);
+            expect(nodeIds(doc)).toEqual(before);
+            expect(doc.history.position()).toBe(position);
+            expect(DocumentRebuilds.pending(doc)).toBe(false);
+
+            // Throwing out of the program must release its scope for subsequent interactive work.
+            body.setFeaturesEmitShapeChanged([
+                ...body.features,
+                {
+                    ...body.features[0],
+                    id: "interactive-12",
+                },
+            ]);
+            expect(body.isRebuilding).toBe(true);
+            expect(await body.whenRebuilt()).toBe(true);
+        } finally {
+            doc.dispose();
+        }
+    });
+
+    test("operations after the twelfth feature capture its new faces and edges before appending more", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const base = body.features[0];
+            if (base.type !== "extrude") throw new Error("Expected the plate extrusion");
+            const before = body.features;
+            let topIndex = -1;
+            let edgeIndex = -1;
+            // Determine indexes on the expected 40-high result. The test then restores the
+            // 20-high input before the single program that must capture that new topology.
+            ParametricBodyNode.withSynchronousEvaluation(doc, () => {
+                body.setFeaturesEmitShapeChanged([
+                    ...before,
+                    {
+                        ...base,
+                        id: "probe",
+                        depth: 40,
+                        operation: "fuse",
+                    },
+                ]);
+                const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+                topIndex = faces.findIndex((face) => face.normal(0, 0)[1].z > 0.99);
+                const edges = body.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+                edgeIndex = edges.findIndex(
+                    (edge) =>
+                        Math.abs(edge.startPoint().z - 40) < 1e-6 && Math.abs(edge.endPoint().z - 40) < 1e-6,
+                );
+                body.setFeaturesEmitShapeChanged(before);
+            });
+            expect(topIndex).toBeGreaterThanOrEqual(0);
+            expect(edgeIndex).toBeGreaterThanOrEqual(0);
+            expect(extent(body)[5]).toBe(20);
+            const result = run(doc, [
+                { op: "extrude", id: "grow12", sketch: "s1", depth: 40, body: "b1", operation: "fuse" },
+                {
+                    op: "sketch",
+                    id: "top",
+                    plane: { nodeId: "grow12", faceIndex: topIndex },
+                    entities: rect(5, 5, 10, 10),
+                },
+                { op: "fillet", id: "round13", body: "grow12", edgeIndexes: [edgeIndex], radius: 1 },
+            ]);
+            const top = result.created.find((entry) => entry.id === "top");
+            expect(top).not.toBeUndefined();
+            const sketch = doc.modelManager.findNode((node) => node.id === top?.nodeId) as SketchNode;
+            expect(sketch.plane.origin.z).toBeCloseTo(40, 6);
+            expect(body.features.at(-1)).toMatchObject({
+                type: "fillet",
+                edges: [{ kind: "line", start: { z: 40 }, end: { z: 40 } }],
+            });
+            expect(body.isRebuilding).toBe(false);
+            expect(DocumentRebuilds.pending(doc)).toBe(false);
+            expectClean(body);
+        } finally {
+            doc.dispose();
+        }
+    });
+});
 
 describe("sketch and extrude", () => {
     test("a sketch plus an extrude produces a clean body with the expected extent", () => {

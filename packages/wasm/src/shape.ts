@@ -34,6 +34,7 @@ import {
     MeshUtils,
     type Orientation,
     type OrientedBoundingBox,
+    PerformanceTrace,
     Plane,
     Result,
     type Serialized,
@@ -100,6 +101,7 @@ function occShapeDeserialize(properties: Serialized) {
 })
 export class OccShape implements IShape {
     private _boundingBox: BoundingBox | undefined;
+    protected _geometryBoundingBox: BoundingBox | undefined;
     private _orientedBoundingBox: OrientedBoundingBox | undefined;
 
     readonly shapeType: ShapeType;
@@ -126,6 +128,9 @@ export class OccShape implements IShape {
         gc((c) => {
             const location = c(new wasm.TopLoc_Location(c(convertFromMatrix(matrix))));
             this._shape.setLocation(location, false);
+            // Location replaces the previous transform; recompute from geometry rather
+            // than transforming an already world-space box (which also loosens rotations).
+            this._geometryBoundingBox = undefined;
 
             if (this._boundingBox) {
                 this._boundingBox = BoundingBox.transformed(this._boundingBox, matrix);
@@ -192,6 +197,11 @@ export class OccShape implements IShape {
             this._orientedBoundingBox = wasm.Shape.orientedBoundingBox(this.shape, this._mesh !== undefined);
         }
         return this._orientedBoundingBox;
+    }
+
+    geometryBoundingBox(): BoundingBox {
+        this._geometryBoundingBox ??= wasm.Shape.boundingBox(this.shape, false);
+        return this._geometryBoundingBox;
     }
 
     transformed(matrix: Matrix4): IShape {
@@ -416,6 +426,7 @@ export class OccShape implements IShape {
 
     setTolerance(tolerance: number): void {
         wasm.Shape.setTolerance(this.shape, tolerance);
+        this._geometryBoundingBox = undefined;
     }
 
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape {
@@ -515,6 +526,7 @@ export class OccEdge extends OccShape implements IEdge {
             throw new Error("Invalid curve");
         }
         this._shape = wasm.Edge.fromCurve(curve.curve);
+        this._geometryBoundingBox = undefined;
         this._mesh = undefined;
     }
 
@@ -989,13 +1001,27 @@ export class Mesher implements IShapeMeshData, IDisposable {
         this._isMeshed = true;
 
         gc((c) => {
+            const span = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("mesh.kernel", {
+                      shapeId: this.shape.id,
+                      meshKind: "unclassified",
+                      ...PerformanceTrace.shapeDetails(this.shape),
+                  })
+                : undefined;
             const occMesher = c(new wasm.Mesher(this.shape.shape, 0.005, true));
             const meshData = c(occMesher.mesh());
+            if (PerformanceTrace.enabled) PerformanceTrace.end(span);
+            const conversion = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("mesh.buffers", {
+                      shapeId: this.shape.id,
+                  })
+                : undefined;
             const faceMeshData = c(meshData.faceMeshData);
             const edgeMeshData = c(meshData.edgeMeshData);
 
             this._faces = this.parseFaceMeshData(faceMeshData);
             this._lines = this.parseEdgeMeshData(edgeMeshData);
+            if (PerformanceTrace.enabled) PerformanceTrace.end(conversion);
         });
     }
 

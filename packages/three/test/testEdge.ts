@@ -163,6 +163,10 @@ export class TestEdge implements IEdge {
     orientedBoundingBox(): OrientedBoundingBox {
         throw new Error("Method not implemented.");
     }
+
+    geometryBoundingBox(): BoundingBox {
+        throw new Error("Method not implemented.");
+    }
     shapeType: ShapeType = ShapeTypes.edge;
     matrix: Matrix4 = Matrix4.identity();
     get mesh(): IShapeMeshData {
