@@ -5,6 +5,7 @@ import {
     type ConstructionRef,
     type FeatureParameter,
     type I18nKeys,
+    type IAsyncShapeOperation,
     type IDocument,
     type IEdge,
     type IFace,
@@ -197,6 +198,8 @@ export interface FeatureContext {
      * path fills the output arrays — left empty when tracking is unavailable.
      */
     readonly tracking?: ShapeTracking;
+    /** Only the final result of this replay needs an eagerly transferred worker mesh. */
+    readonly meshResult?: boolean;
 }
 
 export interface ShapeTracking {
@@ -330,6 +333,8 @@ export interface FeatureHandler<F extends FeatureData = any> {
     /** Set when the user can re-pick the shapes the feature references (e.g. edges). */
     readonly reselectable?: boolean;
     evaluate(feature: F, context: FeatureContext): Result<IShape>;
+    /** Synchronously capture inputs, then park the replay. No document changes until take(). */
+    prepareAsync?(feature: F, context: FeatureContext): IAsyncShapeOperation<IShape> | undefined;
     /**
      * Ids of nodes this feature references — the body watches them for changes. `document`
      * (always passed by the body) lets a feature name nodes another body's data points it at

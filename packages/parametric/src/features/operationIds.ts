@@ -47,14 +47,47 @@ export function mapBooleanIds(
     type: (typeof ShapeTypes)["face" | "edge"],
     ancestors?: number[],
 ): string[] {
+    return captureBooleanIds(featureId, input, inputIds, tools, type)(map, ancestors);
+}
+
+/** Freeze all node-dependent seeds BEFORE awaiting a kernel operation. */
+export function captureBooleanIds(
+    featureId: string,
+    input: IShape,
+    inputIds: readonly string[],
+    tools: ShapeNode[],
+    type: (typeof ShapeTypes)["face" | "edge"],
+): (map: number[], ancestors?: number[]) => string[] {
+    inputIds = [...inputIds];
+    const countOf = (shape: IShape) => {
+        const subs = shape.findSubShapes(type);
+        try {
+            return subs.length;
+        } finally {
+            for (const sub of subs) sub.dispose();
+        }
+    };
     // The boundary is the tracked-id count when available, else the input shape's
     // own sub-shape count (upstream tracking lost): without it, main-body sub-shapes
     // would leak into the tool ranges and get bogus tool ids.
-    const mainCount = Math.max(inputIds.length, input.findSubShapes(type).length);
+    const mainCount = Math.max(inputIds.length, countOf(input));
     let start = mainCount;
     const ranges = tools.map((node) => {
-        const count = node.shape.unchecked()!.findSubShapes(type).length;
-        const range = { node, start, count };
+        const count = countOf(node.shape.unchecked()!);
+        const ids = Array.from({ length: count }, (_, local) => {
+            const toolId = isBodyTrackingNode(node)
+                ? type === ShapeTypes.face
+                    ? node.faceIdAt(local)
+                    : node.edgeIdAt(local)
+                : undefined;
+            return toolId === undefined
+                ? `tool:${node.id}:${local}`
+                : toolId
+                      .split("|")
+                      .map((part) => `tool:${node.id}:${part}`)
+                      .join("|");
+        });
+        const range = { ids, start, count };
         start += count;
         return range;
     });
@@ -65,23 +98,13 @@ export function mapBooleanIds(
         const range = ranges.find((x) => inputIndex >= x.start && inputIndex < x.start + x.count);
         if (range === undefined) return `${featureId}:${outputIndex}`;
         const local = inputIndex - range.start;
-        const node = range.node;
-        const toolId = isBodyTrackingNode(node)
-            ? type === ShapeTypes.face
-                ? node.faceIdAt(local)
-                : node.edgeIdAt(local)
-            : undefined;
-        if (toolId === undefined) return `tool:${node.id}:${local}`;
         // A parametric tool's id may already be a compound (`combineIds` over a merge).
         // Prefix EVERY leaf: prefixing only the first leaks the rest into the host's id
         // space as bare ids, colliding with the seeds a direct boolean against those
         // bodies generates (`idsOverlap` would then match unrelated sub-shapes).
-        return toolId
-            .split("|")
-            .map((x) => `tool:${node.id}:${x}`)
-            .join("|");
+        return range.ids[local];
     };
-    return mapAncestorIds(featureId, map, ancestors, idOfInput);
+    return (map, ancestors) => mapAncestorIds(featureId, map, ancestors, idOfInput);
 }
 
 /**

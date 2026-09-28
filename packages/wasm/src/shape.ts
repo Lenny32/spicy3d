@@ -106,9 +106,38 @@ export class OccShape implements IShape {
 
     readonly shapeType: ShapeType;
     protected _mesh: IShapeMeshData | undefined;
+    private transientTriangulation = false;
+    private replicaInvalidations?: Set<() => void>;
     get mesh(): IShapeMeshData {
-        this._mesh ??= new Mesher(this);
+        this._mesh ??= new Mesher(this, this.transientTriangulation);
         return this._mesh;
+    }
+
+    /** Hybrid prefix replicas retain analytic geometry, not a second native copy of render buffers. */
+    useTransientTriangulation(): void {
+        this.transientTriangulation = true;
+    }
+
+    /** Explicit native-cache lifetime, independent of GC or FinalizationRegistry. */
+    addReplicaInvalidation(handler: () => void): () => void {
+        if (this.#isDisposed) {
+            handler();
+            return () => {};
+        }
+        this.replicaInvalidations ??= new Set();
+        this.replicaInvalidations.add(handler);
+        return () => this.replicaInvalidations?.delete(handler);
+    }
+
+    protected invalidateReplicas(): void {
+        if (this.replicaInvalidations) for (const handler of this.replicaInvalidations) handler();
+    }
+
+    /** A verified worker mesh, with pick ranges bound to this local replica's topology. */
+    installMesh(mesh: IShapeMeshData & IDisposable): void {
+        if (isDisposable(this._mesh)) this._mesh.dispose();
+        this._mesh = mesh;
+        this._boundingBox = undefined;
     }
 
     protected _shape: TopoDS_Shape;
@@ -125,6 +154,7 @@ export class OccShape implements IShape {
     }
 
     set matrix(matrix: Matrix4) {
+        this.invalidateReplicas();
         gc((c) => {
             const location = c(new wasm.TopLoc_Location(c(convertFromMatrix(matrix))));
             this._shape.setLocation(location, false);
@@ -221,6 +251,7 @@ export class OccShape implements IShape {
     protected onTransformChanged(): void {
         if (this._mesh) {
             Logger.warn("Shape matrix changed, mesh will be recreated");
+            if (isDisposable(this._mesh)) this._mesh.dispose();
             this._mesh = undefined;
         }
     }
@@ -421,10 +452,12 @@ export class OccShape implements IShape {
     }
 
     reserve(): void {
+        this.invalidateReplicas();
         this.shape.reverse();
     }
 
     setTolerance(tolerance: number): void {
+        this.invalidateReplicas();
         wasm.Shape.setTolerance(this.shape, tolerance);
         this._geometryBoundingBox = undefined;
     }
@@ -463,7 +496,12 @@ export class OccShape implements IShape {
     readonly dispose = () => {
         if (!this.#isDisposed) {
             this.#isDisposed = true;
-            this.disposeInternal();
+            try {
+                this.invalidateReplicas();
+            } finally {
+                this.replicaInvalidations?.clear();
+                this.disposeInternal();
+            }
         }
     };
 
@@ -525,6 +563,7 @@ export class OccEdge extends OccShape implements IEdge {
         if (!(curve instanceof OccCurve)) {
             throw new Error("Invalid curve");
         }
+        this.invalidateReplicas();
         this._shape = wasm.Edge.fromCurve(curve.curve);
         this._geometryBoundingBox = undefined;
         this._mesh = undefined;
@@ -886,16 +925,18 @@ export interface OccSubEdgeShapeOptions {
     parent: IShape;
     shape: TopoDS_Edge;
     index: number;
+    meshIndex?: number;
     id?: string;
 }
 
 export class OccSubEdgeShape extends OccEdge implements ISubEdgeShape {
+    private readonly meshIndex: number;
     override get mesh(): IShapeMeshData {
         this._mesh ??= {
             faces: undefined,
             vertexs: undefined,
             edges: {
-                position: MeshUtils.subEdge(this.parent.mesh.edges!, this.index)!,
+                position: MeshUtils.subEdge(this.parent.mesh.edges!, this.meshIndex)!,
                 lineType: this.parent.mesh.edges!.lineType,
                 range: [],
             },
@@ -910,6 +951,7 @@ export class OccSubEdgeShape extends OccEdge implements ISubEdgeShape {
         super(options);
         this.parent = options.parent;
         this.index = options.index;
+        this.meshIndex = options.meshIndex ?? options.index;
     }
 }
 
@@ -917,13 +959,15 @@ export interface OccSubFaceShapeOptions {
     parent: IShape;
     shape: TopoDS_Face;
     index: number;
+    meshIndex?: number;
     id?: string;
 }
 
 export class OccSubFaceShape extends OccFace implements ISubFaceShape {
+    private readonly meshIndex: number;
     override get mesh(): IShapeMeshData {
         this._mesh ??= {
-            faces: MeshUtils.subFace(this.parent.mesh.faces!, this.index),
+            faces: MeshUtils.subFace(this.parent.mesh.faces!, this.meshIndex),
             vertexs: undefined,
             edges: undefined,
         };
@@ -937,6 +981,7 @@ export class OccSubFaceShape extends OccFace implements ISubFaceShape {
         super(options);
         this.parent = options.parent;
         this.index = options.index;
+        this.meshIndex = options.meshIndex ?? options.index;
     }
 }
 
@@ -992,7 +1037,10 @@ export class Mesher implements IShapeMeshData, IDisposable {
         this._points = value;
     }
 
-    constructor(private shape: OccShape) {}
+    constructor(
+        private shape: OccShape,
+        private readonly transientTriangulation = false,
+    ) {}
 
     private mesh() {
         if (this._isMeshed) {
@@ -1021,6 +1069,10 @@ export class Mesher implements IShapeMeshData, IDisposable {
 
             this._faces = this.parseFaceMeshData(faceMeshData);
             this._lines = this.parseEdgeMeshData(edgeMeshData);
+            // JS arrays and local pick ranges are complete. A retained hybrid prefix must not keep
+            // all native tessellations too: visiting many rollback positions otherwise grows a
+            // second mesh cache per complete BREP replica. Cleaning changes no analytic topology.
+            if (this.transientTriangulation) wasm.Shape.clean(this.shape.shape);
             if (PerformanceTrace.enabled) PerformanceTrace.end(conversion);
         });
     }

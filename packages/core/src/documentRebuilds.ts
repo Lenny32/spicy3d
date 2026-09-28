@@ -6,6 +6,7 @@ import type { IDocument } from "./document";
 /** Runtime-only geometry work. Synchronous consumers use flush; load/save await settled. */
 export interface IDocumentRebuild {
     readonly settled: Promise<void>;
+    /** Must finish synchronously: an RPC-backed job cancels/takes over locally, never waits or spins. */
     flush(): void;
 }
 

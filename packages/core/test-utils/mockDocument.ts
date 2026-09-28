@@ -4,7 +4,7 @@
 import {
     AnalysisManager,
     BoundingBox,
-    type History,
+    History,
     type I18nKeys,
     type IApplication,
     type IDocument,
@@ -79,9 +79,9 @@ export function createPlainNode(name = "plain-node", id?: string): INode {
  * Create a configurable mock IDocument for unit tests.
  * Builds on top of createMockVisualWithDocument.
  *
- * Unlike `TestDocument` (which wires real `History` / `ModelManager` instances),
- * this is a pure mock object: every collaborator is a stub and each slice
- * (selection / history / modelManager / ...) can be overridden per field.
+ * Unlike `TestDocument` (which wires real history stacks and a ModelManager),
+ * collaborators are stubbed and each slice can be overridden per field. History
+ * retains real transaction rollback so replay restores state and emits its signals.
  */
 export function createMockDocument(overrides: MockDocumentOverrides = {}): IDocument {
     const docId = overrides.id ?? "mock-doc-id";
@@ -106,15 +106,14 @@ export function createMockDocument(overrides: MockDocumentOverrides = {}): IDocu
         ...overrides.selection,
     };
 
-    const history: History = {
-        disabled: false,
+    const history = Object.assign(new History(), {
         add: () => {},
         addRecords: () => {},
         undo: async () => undefined,
         redo: async () => undefined,
         dispose: () => {},
         ...overrides.history,
-    } as unknown as History;
+    });
 
     const modelManager: ModelManager = {
         nodes: [],

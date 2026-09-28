@@ -8,15 +8,18 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { profileGeometryIssues } from "./profile-geometry.mjs";
 
 test("read-only example: stable geometry/references, zero unchanged booleans, deferred hidden meshes and profile hits", {
     skip: !process.env.SPICY3D_BENCHMARK_MODEL,
     timeout: 600_000,
 }, () => {
+    const mode = process.env.SPICY3D_BENCHMARK_MODE ?? "main";
+    assert.ok(["main", "hybrid"].includes(mode), "SPICY3D_BENCHMARK_MODE must be main or hybrid");
     const parent = path.join(os.tmpdir(), "opencode");
     assert.ok(existsSync(parent), "create/verify the benchmark output parent before running");
     const directory = mkdtempSync(path.join(parent, "spicy3d-regression-"));
-    const output = path.join(directory, "after.json");
+    const output = process.env.SPICY3D_BENCHMARK_OUTPUT ?? path.join(directory, "after.json");
     execFileSync(
         process.execPath,
         [
@@ -32,10 +35,15 @@ test("read-only example: stable geometry/references, zero unchanged booleans, de
             "--compare-before",
             "docs/performance/before-firefox-final.json.gz",
             "--assert-optimized",
+            "--kernel-mode",
+            mode,
         ],
         { stdio: "inherit", timeout: 580_000 },
     );
     const evidence = JSON.parse(readFileSync(output, "utf8"));
+    assert.deepEqual(evidence.deploymentOverride, { performance: { geometryWorker: mode === "hybrid" } });
+    assert.ok(evidence.deploymentConfigRequests > 0);
+    assert.equal(evidence.startupConfig.geometryWorker, mode === "hybrid");
     assert.equal(evidence.modelSha256Before, evidence.modelSha256After);
     assert.equal(evidence.sourceFilesSha256, evidence.sourceFilesSha256After);
     assert.deepEqual(evidence.errors, []);
@@ -46,6 +54,15 @@ test("read-only example: stable geometry/references, zero unchanged booleans, de
     const cold = evidence.scenarios[0];
     assert.equal(cold.booleanCount, 83);
     assert.equal(cold.sourceBooleanCount, 83);
+    assert.equal(cold.telemetryComplete, true);
+    assert.equal(cold.mainBooleanCount + cold.workerBooleanCount, 83);
+    if (mode === "hybrid") {
+        assert.equal(cold.workerBooleanCount, 83);
+        assert.equal(cold.mainBooleanCount, 0);
+    } else {
+        assert.equal(cold.mainBooleanCount, 83);
+        assert.equal(cold.workerBooleanCount, 0);
+    }
     assert.equal(cold.sourceFeatureMisses, 84);
     assert.ok(cold.sourceTrace.records.some((record) => record.stage === "body.batch"));
     const hidden = evidence.before.hiddenGeometry;
@@ -56,11 +73,17 @@ test("read-only example: stable geometry/references, zero unchanged booleans, de
         assert.equal(node.kernelMeshed, false, node.nodeId);
     }
     for (const run of evidence.scenarios.slice(1)) {
+        assert.equal(run.telemetryComplete, true, run.telemetryIssues.join("; "));
+        assert.equal(run.workerBooleanCount, 0, run.name);
         assert.equal(run.booleanCount, 0, run.name);
         assert.equal(run.sourceBooleanCount, 0, run.name);
         assert.equal(run.sourceFeatureMisses, 0, run.name);
         assert.ok(run.sourceFeatureHits > 0, run.name);
-        assert.deepEqual(run.stability, { features: true, sketches: true, visibility: true }, run.name);
+        assert.deepEqual(
+            run.stability,
+            { features: true, sketches: true, visibility: true, trackedIds: true },
+            run.name,
+        );
     }
     let hits = 0;
     for (const run of evidence.scenarios) {
@@ -78,12 +101,22 @@ test("read-only example: stable geometry/references, zero unchanged booleans, de
         assert.equal(builds.size, 0, "every profile build has a completed query");
     }
     assert.ok(hits >= 83, "cold display/feature queries share profiles");
-    assert.equal(evidence.geometryComparison.coldCleanBrepIdentical, true);
-    assert.equal(evidence.geometryComparison.cyclesCleanBrepIdentical, true);
+    assert.deepEqual(profileGeometryIssues(evidence.geometryComparison, mode), []);
+    assert.equal(evidence.before.trackedIdsHash, evidence.after.trackedIdsHash);
+    if (mode === "hybrid") {
+        const probe = evidence.cancellationProbe;
+        assert.equal(probe.realmTelemetry.complete, true);
+        assert.equal(probe.realmTelemetry.worker.booleanCount, 1);
+        assert.equal(probe.callerSettled.pendingRequests, 0);
+        assert.ok(probe.callerSettled.pendingNative > 0);
+        assert.deepEqual(probe.realmTelemetry.worker.pendingAfter, { requests: 0, native: 0 });
+    }
     for (const snapshot of [evidence.before, evidence.after]) {
         assert.deepEqual([snapshot.faces, snapshot.edges, snapshot.vertices], [1232, 3448, 2255]);
         assert.deepEqual(snapshot.bounds, evidence.geometryComparison.baselineCold.bounds);
         assert.deepEqual(snapshot.featureErrors, []);
+        assert.equal(snapshot.picking.faces.valid, true);
+        assert.equal(snapshot.picking.edges.valid, true);
     }
     console.log(`Regression evidence retained at ${output}`);
 });

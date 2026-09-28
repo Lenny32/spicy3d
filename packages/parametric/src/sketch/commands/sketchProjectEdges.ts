@@ -10,6 +10,7 @@ import {
     type INode,
     type Plane,
     PubSub,
+    pickedTopologyIndex,
     property,
     ShapeTypes,
     type VisualShapeData,
@@ -38,9 +39,9 @@ function sameExternalEdge(a: ExternalRefData, b: ExternalRefData): boolean {
  * The owner's tracked edge id for a picked sub-shape. A tracking body that cannot
  * produce one reports the loss instead of letting the ref silently lose its id.
  */
-function pickedEdgeTrackedId(owner: INode, index: number): string | undefined {
+function pickedEdgeTrackedId(owner: INode, index: number | undefined): string | undefined {
     if (!isBodyTrackingNode(owner)) return undefined;
-    const edgeId = owner.edgeIdAt(index);
+    const edgeId = index === undefined ? undefined : owner.edgeIdAt(index);
     if (edgeId === undefined) {
         reportSilentIdLoss(owner, "edge", "a projected edge has no tracked id");
     }
@@ -71,7 +72,7 @@ function projectEdge(
     try {
         if (!isEdgeCoplanarWithPlane(plane, worldEdge)) return false;
         const owner = picked.owner.node;
-        const edgeId = pickedEdgeTrackedId(owner, picked.indexes[0]);
+        const edgeId = pickedEdgeTrackedId(owner, pickedTopologyIndex(picked));
         // solver-side monotonic counter — deleted ids are never reissued
         const ref = captureExternalRef(
             editor.solver.allocateExternalEntityId(),

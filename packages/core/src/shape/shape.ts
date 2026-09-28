@@ -65,6 +65,7 @@ export interface IShape extends IDisposable {
 }
 
 export interface ISubShape extends IShape {
+    /** Position in parent.findSubShapes(shapeType), independent of mesh-range order or omissions. */
     index: number;
     parent: IShape;
 }

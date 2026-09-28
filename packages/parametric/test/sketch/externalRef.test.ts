@@ -2562,15 +2562,16 @@ describe("ProjectSketchEdges command", () => {
         }
     });
 
-    test("a tracking body owner supplies the kernel edgeId", async () => {
+    test("a tracking body owner supplies the kernel edgeId independently of the mesh index", async () => {
         const bodyOwner = {
             id: "body",
             faceIdAt: () => undefined,
-            edgeIdAt: (index: number) => (index === 0 ? "edge-7" : undefined),
+            edgeIdAt: (index: number) => (index === 7 ? "edge-7" : undefined),
             edgeIndexById: () => undefined,
         };
         const worldEdge = movableLineEdge(0, 5, 10, 5);
-        const editor = fakeProjectEditor([pickedOf(edgeProjectingTo(worldEdge), { ownerNode: bodyOwner })]);
+        const pickedEdge = Object.assign(edgeProjectingTo(worldEdge), { index: 7 });
+        const editor = fakeProjectEditor([pickedOf(pickedEdge, { ownerNode: bodyOwner })]);
         try {
             await runProject(editor);
 

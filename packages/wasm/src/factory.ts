@@ -188,6 +188,7 @@ function filletResultEdges(edges: TopoDS_Shape[]): OccEdge[] {
 }
 
 export class ShapeFactory implements IShapeFactory {
+    constructor(readonly asyncOperations?: import("@spicy3d/core").IAsyncShapeFactory) {}
     readonly kernelName = "opencascade";
 
     edge(curve: ICurve): IEdge {
@@ -645,6 +646,7 @@ export class ShapeFactory implements IShapeFactory {
         );
     }
     fuse(bottom: IShape, top: IShape): Result<IShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertShapeResult(
             wasm.ShapeFactory.booleanFuse,
             [ensureOccShape(bottom), ensureOccShape(top)],
@@ -688,6 +690,7 @@ export class ShapeFactory implements IShapeFactory {
         );
     }
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertShapeResult(
             wasm.ShapeFactory.booleanCommon,
             [ensureOccShape(shape1), ensureOccShape(shape2)],
@@ -695,6 +698,7 @@ export class ShapeFactory implements IShapeFactory {
         );
     }
     booleanCut(shape1: IShape[], shape2: IShape[]): Result<IShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertShapeResult(
             wasm.ShapeFactory.booleanCut,
             [ensureOccShape(shape1), ensureOccShape(shape2)],
@@ -703,6 +707,7 @@ export class ShapeFactory implements IShapeFactory {
     }
 
     booleanCommonTracked(shape1: IShape[], shape2: IShape[]): Result<TrackedShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertTrackedShapeResult(
             wasm.ShapeFactory.booleanCommonTracked,
             [ensureOccShape(shape1), ensureOccShape(shape2)],
@@ -711,6 +716,7 @@ export class ShapeFactory implements IShapeFactory {
     }
 
     booleanCutTracked(shape1: IShape[], shape2: IShape[]): Result<TrackedShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertTrackedShapeResult(
             wasm.ShapeFactory.booleanCutTracked,
             [ensureOccShape(shape1), ensureOccShape(shape2)],
@@ -719,6 +725,7 @@ export class ShapeFactory implements IShapeFactory {
     }
 
     booleanFuseTracked(shape1: IShape[], shape2: IShape[]): Result<TrackedShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         return convertTrackedShapeResult(
             wasm.ShapeFactory.booleanFuseTracked,
             [ensureOccShape(shape1), ensureOccShape(shape2)],
@@ -726,6 +733,7 @@ export class ShapeFactory implements IShapeFactory {
         );
     }
     booleanFuse(shape1: IShape[], shape2: IShape[], simplifyShape: boolean): Result<IShape> {
+        if (this.asyncOperations?.failure !== undefined) return Result.err(this.asyncOperations.failure);
         const occShape1 = ensureOccShape(shape1);
         const occShape2 = ensureOccShape(shape2);
 

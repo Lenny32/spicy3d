@@ -11,6 +11,13 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { chromium, firefox } from "playwright";
+import { profileDeploymentConfig, serveProfileDeployment } from "./profile-deployment.mjs";
+import {
+    captureProfileGeometry,
+    compareProfileGeometry,
+    profileGeometryIssues,
+} from "./profile-geometry.mjs";
+import { aggregateProfileRealms } from "./profile-realms.mjs";
 
 const { values: args } = parseArgs({
     options: {
@@ -23,6 +30,7 @@ const { values: args } = parseArgs({
         "all-sketches": { type: "boolean", default: false },
         "compare-before": { type: "string" },
         "assert-optimized": { type: "boolean", default: false },
+        "kernel-mode": { type: "string", default: "main" },
         "allow-dirty": { type: "boolean", default: false },
         headed: { type: "boolean", default: false },
     },
@@ -39,6 +47,8 @@ if (output === model || path.extname(output) !== ".json" || existsSync(output)) 
 if (!existsSync(path.dirname(output))) throw new Error("Output parent must already exist");
 const cycles = Number(args.cycles);
 if (!Number.isInteger(cycles) || cycles < 0) throw new Error("cycles must be a nonnegative integer");
+if (!["auto", "main", "hybrid", "worker"].includes(args["kernel-mode"]))
+    throw new Error("Invalid --kernel-mode");
 const git = (...params) => execFileSync("git", params, { cwd: source, encoding: "utf8" }).trim();
 const diff = git("diff", "HEAD", "--");
 if (diff && !args["allow-dirty"])
@@ -58,6 +68,7 @@ const sourceFingerprint = () =>
         (file) => file.includes("/src/") || /\/package.json$/.test(file),
     );
 const bytes = readFileSync(model); // Read only: this path is NEVER opened for writing or served as a file handle.
+const deploymentOverride = profileDeploymentConfig(args["kernel-mode"]);
 const evidence = {
     revision: git("rev-parse", "HEAD"),
     sourceDirty: !!diff,
@@ -76,6 +87,10 @@ const evidence = {
         node: process.version,
     },
     browser: args.browser,
+    expectedKernelMode: args["kernel-mode"],
+    deploymentOverride,
+    deploymentConfigRequests: 0,
+    realmTelemetryVersion: 1,
     scenarios: [],
     errors: [],
 };
@@ -90,6 +105,10 @@ const types = {
 };
 const server = createServer((req, res) => {
     if (req.method !== "GET") return res.writeHead(405).end();
+    if (serveProfileDeployment(req, res, deploymentOverride)) {
+        evidence.deploymentConfigRequests++;
+        return;
+    }
     const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
     if (pathname === "/benchmark-input") return res.writeHead(200).end(bytes);
     const file = path.resolve(dist, `.${pathname === "/" ? "/index.html" : pathname}`);
@@ -139,6 +158,10 @@ try {
         Storage.prototype.setItem = () => {};
     });
     const page = await context.newPage();
+    let workerRealmsObserved = 0;
+    page.on("worker", () => {
+        workerRealmsObserved++;
+    });
     page.on("pageerror", (error) => evidence.errors.push(error.message));
     await page.goto(origin);
     await page.waitForFunction(
@@ -152,6 +175,23 @@ try {
         undefined,
         { timeout: 120_000 },
     );
+    evidence.startupConfig = await page.evaluate(() => ({
+        geometryWorker: globalThis.Spicy3DCore.DeploymentConfig.section("performance")?.geometryWorker,
+        kernelMode: globalThis.Spicy3DWorkerProfile?.snapshot?.().mode ?? null,
+    }));
+    if (
+        evidence.deploymentConfigRequests === 0 ||
+        evidence.startupConfig.geometryWorker !== deploymentOverride.performance.geometryWorker
+    )
+        throw new Error("Benchmark deployment override was not consumed before startup");
+    if (args["kernel-mode"] === "hybrid" && evidence.startupConfig.kernelMode !== "hybrid")
+        throw new Error("Hybrid deployment opt-in did not enable the provider");
+    if (
+        args["kernel-mode"] === "main" &&
+        evidence.startupConfig.kernelMode !== null &&
+        evidence.startupConfig.kernelMode !== "main"
+    )
+        throw new Error("Main benchmark unexpectedly enabled the geometry worker");
     await page.evaluate(() => {
         const core = globalThis.Spicy3DCore;
         const app = core.getCurrentApplication();
@@ -314,6 +354,7 @@ try {
             return node;
         };
         state.memory = () => ({
+            realm: "main", // Worker heaps are unavailable here; use the optional bridge snapshot separately.
             wasmHeapBytes: globalThis.__profileWasmMemories.length
                 ? Math.max(...globalThis.__profileWasmMemories.map((memory) => memory.buffer.byteLength))
                 : null,
@@ -326,12 +367,17 @@ try {
             for (const node of state.document?.modelManager.findNodes() ?? []) {
                 if (typeof node.whenRebuilt === "function") await node.whenRebuilt();
             }
+            await globalThis.Spicy3DWorkerProfile?.settled?.();
             await new Promise((resolve) => setTimeout(resolve, 50));
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         };
         state.measure = async (action) => {
+            // A cancelled caller may settle before native execution stops. Drain the transport too.
+            await globalThis.Spicy3DWorkerProfile?.settled?.();
             state.records = [];
             core.PerformanceTrace?.enable();
+            const workerBefore = globalThis.Spicy3DWorkerProfile?.snapshot?.() ?? null;
+            let workerAfter = null;
             const memoryBefore = state.memory();
             let last = performance.now();
             let maxEventLoopGapMs = 0;
@@ -345,6 +391,8 @@ try {
             try {
                 await action();
                 await state.settle();
+                await globalThis.Spicy3DWorkerProfile?.settled?.();
+                workerAfter = globalThis.Spicy3DWorkerProfile?.snapshot?.() ?? null;
             } finally {
                 clearInterval(timer);
                 core.PerformanceTrace?.disable();
@@ -356,6 +404,7 @@ try {
                 memoryAfter: state.memory(),
                 records: state.records,
                 sourceTrace: core.PerformanceTrace?.snapshot() ?? null,
+                workerCapture: { before: workerBefore, after: workerAfter },
             };
         };
         state.snapshot = () => {
@@ -371,10 +420,48 @@ try {
             };
             const brep = app.shapeProvider.converter.convertToBrep(shape);
             if (!brep.isOk) throw new Error(brep.error);
+            const faces = count(core.ShapeTypes.face);
+            const edges = count(core.ShapeTypes.edge);
+            const faceIds = Array.from({ length: faces }, (_, index) => body.faceIdAt(index));
+            const edgeIds = Array.from({ length: edges }, (_, index) => body.edgeIdAt(index));
+            if (![...faceIds, ...edgeIds].every((id) => typeof id === "string"))
+                throw new Error("Missing tracked IDs");
+            state.trackedSizes = { faces, edges };
+            const picking = {};
+            for (const [kind, type] of [
+                ["faces", core.ShapeTypes.face],
+                ["edges", core.ShapeTypes.edge],
+            ]) {
+                const analytic = shape.findSubShapes(type);
+                try {
+                    const ranges = shape.mesh[kind]?.range;
+                    if (!ranges?.length) throw new Error(`Missing ${kind} pick ranges`);
+                    let nonidentity = 0;
+                    for (let meshIndex = 0; meshIndex < ranges.length; meshIndex++) {
+                        const range = ranges[meshIndex];
+                        const topologyIndex = core.pickedTopologyIndex(range);
+                        if (!analytic[topologyIndex] || !range.shape.isSame(analytic[topologyIndex]))
+                            throw new Error(`${kind} topology pick mismatch`);
+                        if (!core.meshIndexesForTopology(ranges, topologyIndex).includes(meshIndex))
+                            throw new Error(`${kind} inverse pick mapping mismatch`);
+                        if (topologyIndex !== meshIndex) nonidentity++;
+                    }
+                    picking[kind] = {
+                        checkedRanges: ranges.length,
+                        analyticCount: analytic.length,
+                        nonidentity,
+                        valid: true,
+                    };
+                } finally {
+                    analytic.forEach((item) => item.dispose());
+                }
+            }
             return {
                 brep: brep.value,
-                faces: count(core.ShapeTypes.face),
-                edges: count(core.ShapeTypes.edge),
+                faces,
+                edges,
+                trackedIds: [faceIds, edgeIds],
+                picking,
                 vertices: count(core.ShapeTypes.vertex),
                 bounds: wasm.Shape.boundingBox(shape.shape, false),
                 featuresJson: body.featuresJson,
@@ -416,6 +503,12 @@ try {
                     .filter((n) => n.constructor.name === "SketchNode")
                     .map((n) => [n.id, n.dataJson]),
                 visibility: nodes.map((n) => [n.id, n.visible, n.parentVisible]),
+                trackedIds: nodes
+                    .filter((node) => node.constructor.name === "ParametricBodyNode")
+                    .map((body) => [
+                        Array.from({ length: state.trackedSizes.faces }, (_, index) => body.faceIdAt(index)),
+                        Array.from({ length: state.trackedSizes.edges }, (_, index) => body.edgeIdAt(index)),
+                    ]),
             };
         };
         state.cycle = async (name) => {
@@ -471,21 +564,31 @@ try {
         });
     });
     const summarize = (name, run) => {
-        const booleans = run.records.filter((r) => r.stage === "kernel.operation" && r.details.boolean);
-        const meshes = run.records.filter((r) => r.stage === "mesh.kernel");
+        const realms = aggregateProfileRealms(run, {
+            expectedMode: args["kernel-mode"],
+            workersObserved: workerRealmsObserved,
+        });
         const summary = {
             name,
             elapsedMs: run.elapsedMs,
             maxEventLoopGapMs: run.maxEventLoopGapMs,
-            booleanCount: booleans.length,
-            booleanMs: booleans.reduce((n, r) => n + r.durationMs, 0),
-            longestBooleanMs: Math.max(0, ...booleans.map((r) => r.durationMs)),
-            meshCount: meshes.length,
+            booleanCount: realms.booleanCount,
+            booleanMs: realms.booleanMs,
+            longestBooleanMs: realms.longestBooleanMs,
+            mainBooleanCount: realms.main.booleanCount,
+            workerBooleanCount: realms.worker.booleanCount,
+            longestMainBooleanMs: realms.main.longestBooleanMs,
+            longestWorkerBooleanMs: realms.worker.longestBooleanMs,
+            kernelMode: realms.mode,
+            telemetryComplete: realms.complete,
+            telemetryIssues: realms.issues,
+            meshCount: realms.meshCount,
             memoryAfter: run.memoryAfter,
             stability: run.stability,
-            sourceBooleanCount: run.sourceTrace?.records.filter(
-                (r) => r.stage === "kernel.operation" && r.details?.boolean,
-            ).length,
+            sourceBooleanCount:
+                realms.complete && realms.main.sourceBooleanCount !== null
+                    ? realms.main.sourceBooleanCount + realms.worker.booleanCount
+                    : null,
             sourceFeatureHits: run.sourceTrace?.records.filter(
                 (r) => r.stage === "body.feature" && r.details?.cacheHit,
             ).length,
@@ -493,12 +596,13 @@ try {
                 (r) => r.stage === "body.feature" && !r.details?.cacheHit,
             ).length,
         };
-        evidence.scenarios.push({ ...summary, ...run });
+        evidence.scenarios.push({ ...summary, ...run, realmTelemetry: realms });
         console.log(JSON.stringify(summary));
     };
     summarize("cold-open", cold);
     evidence.before = await page.evaluate(() => globalThis.__savedModelProfile.snapshot());
     evidence.before.brepSha256 = sha256(evidence.before.brep);
+    evidence.before.trackedIdsHash = sha256(JSON.stringify(evidence.before.trackedIds));
     const sketchNames = args.sketch
         ? [args.sketch]
         : await page.evaluate(() => {
@@ -528,6 +632,7 @@ try {
     }
     evidence.after = await page.evaluate(() => globalThis.__savedModelProfile.snapshot());
     evidence.after.brepSha256 = sha256(evidence.after.brep);
+    evidence.after.trackedIdsHash = sha256(JSON.stringify(evidence.after.trackedIds));
     if (args["compare-before"]) {
         const baselineBytes = readFileSync(args["compare-before"]);
         const baseline = JSON.parse(
@@ -536,6 +641,7 @@ try {
         evidence.geometryComparison = {
             baselineArtifactSha256: sha256(baselineBytes),
             baselineRevision: baseline.revision,
+            validationMode: args["kernel-mode"] === "hybrid" ? "hybrid-ordered-graph-v1" : "strict-brep",
         };
         // Parse detached exports and clean ONLY those independent shapes. Never clean the live document.
         for (const [label, snapshot] of Object.entries({
@@ -560,16 +666,101 @@ try {
                 vertices: snapshot.vertices,
                 bounds: snapshot.bounds,
                 volume: snapshot.volume,
+                ...(args["kernel-mode"] === "hybrid" && {
+                    geometryProbe: await page.evaluate(captureProfileGeometry, snapshot.brep),
+                }),
             };
         }
         const comparison = evidence.geometryComparison;
         comparison.coldCleanBrepIdentical = comparison.baselineCold.sha256 === comparison.afterCold.sha256;
         comparison.cyclesCleanBrepIdentical = comparison.afterCold.sha256 === comparison.afterCycles.sha256;
+        if (args["kernel-mode"] === "hybrid") {
+            comparison.independentCold = compareProfileGeometry(
+                comparison.baselineCold.geometryProbe,
+                comparison.afterCold.geometryProbe,
+            );
+            comparison.independentCycles = compareProfileGeometry(
+                comparison.baselineCold.geometryProbe,
+                comparison.afterCycles.geometryProbe,
+            );
+        }
         console.log(
             JSON.stringify({
                 geometryComparison: {
                     coldCleanBrepIdentical: comparison.coldCleanBrepIdentical,
                     cyclesCleanBrepIdentical: comparison.cyclesCleanBrepIdentical,
+                },
+            }),
+        );
+    }
+    if (args["kernel-mode"] === "hybrid") {
+        const cancelled = await page.evaluate(async () => {
+            const state = globalThis.__savedModelProfile;
+            const core = globalThis.Spicy3DCore;
+            const factory = core.getCurrentApplication().shapeProvider.factory;
+            const bridge = globalThis.Spicy3DWorkerProfile;
+            const shapes = [];
+            let callerSettled;
+            try {
+                for (let i = 0; i < 26; i++) {
+                    const plane = new core.Plane({
+                        origin: new core.XYZ({
+                            x: i ? ((i - 1) % 5) * 1.8 : 0,
+                            y: i ? Math.floor((i - 1) / 5) * 1.8 : 0,
+                            z: 0,
+                        }),
+                        normal: core.XYZ.unitZ,
+                        xvec: core.XYZ.unitX,
+                    });
+                    const box = factory.box(plane, 10, 10, 10);
+                    if (!box.isOk) throw new Error("Synthetic cancellation box failed");
+                    shapes.push(box.value);
+                }
+                const run = await state.measure(async () => {
+                    const operation = factory.asyncOperations.booleanTracked(
+                        "fuse",
+                        [shapes[0]],
+                        shapes.slice(1),
+                    );
+                    if (!operation) throw new Error("Synthetic cancellation did not use async worker");
+                    let didCancel = false;
+                    const timer = setTimeout(() => {
+                        didCancel = true;
+                        operation.cancel();
+                    }, 20);
+                    try {
+                        await operation.ready;
+                        callerSettled = bridge.snapshot();
+                        if (!didCancel || callerSettled.pendingNative < 1)
+                            throw new Error("Cancellation did not precede native terminal delivery");
+                        if (operation.take().isOk)
+                            throw new Error("Cancelled synthetic operation remained consumable");
+                    } finally {
+                        clearTimeout(timer);
+                    }
+                    await bridge.settled();
+                });
+                return { ...run, callerSettled };
+            } finally {
+                shapes.forEach((shape) => shape.dispose());
+            }
+        });
+        evidence.cancellationProbe = {
+            ...cancelled,
+            realmTelemetry: aggregateProfileRealms(cancelled, {
+                expectedMode: "hybrid",
+                workersObserved: workerRealmsObserved,
+            }),
+        };
+        const result = evidence.cancellationProbe.realmTelemetry;
+        if (!result.complete || result.main.booleanCount !== 0 || result.worker.booleanCount !== 1)
+            throw new Error(`Cancelled native work was not fully accounted for: ${JSON.stringify(result)}`);
+        console.log(
+            JSON.stringify({
+                cancellationProbe: {
+                    complete: result.complete,
+                    nativeBooleans: result.worker.booleanCount,
+                    pendingAfter: result.worker.pendingAfter,
                 },
             }),
         );
@@ -583,6 +774,19 @@ try {
     }));
     if (args["assert-optimized"]) {
         evidence.regressions = [];
+        for (const scenario of evidence.scenarios) {
+            if (!scenario.telemetryComplete)
+                evidence.regressions.push(
+                    `${scenario.name}: incomplete realm telemetry: ${scenario.telemetryIssues.join("; ")}`,
+                );
+        }
+        if (evidence.scenarios[0]?.booleanCount !== 83)
+            evidence.regressions.push("cold-load total native boolean count is not 83");
+        if (
+            ["hybrid", "worker"].includes(evidence.scenarios[0]?.kernelMode) &&
+            !(evidence.scenarios[0]?.workerBooleanCount > 0)
+        )
+            evidence.regressions.push("requested worker path performed no verified native worker booleans");
         for (const scenario of evidence.scenarios.filter((run) => run.name !== "cold-open")) {
             if (scenario.booleanCount !== 0)
                 evidence.regressions.push(`${scenario.name}: ${scenario.booleanCount} booleans`);
@@ -591,10 +795,7 @@ try {
             if (scenario.sourceTrace?.dropped)
                 evidence.regressions.push(`${scenario.name}: dropped source records`);
         }
-        if (evidence.geometryComparison && !evidence.geometryComparison.coldCleanBrepIdentical)
-            evidence.regressions.push("cold geometry-only BREP differs");
-        if (evidence.geometryComparison && !evidence.geometryComparison.cyclesCleanBrepIdentical)
-            evidence.regressions.push("cycle geometry-only BREP differs");
+        evidence.regressions.push(...profileGeometryIssues(evidence.geometryComparison, args["kernel-mode"]));
         if (evidence.regressions.length || evidence.writeAttempts.length || evidence.errors.length)
             process.exitCode = 1;
     }

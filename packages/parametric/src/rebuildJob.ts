@@ -4,7 +4,8 @@
 import { AutosaveHolds, DocumentRebuilds, type IDocument, type IShape, type Result } from "@spicy3d/core";
 
 /** A yield is BEFORE a kernel cache miss. Hits run through synchronously. */
-export type RebuildSteps = Generator<number, Result<IShape>, void>;
+export type RebuildPause = number | { readonly ready: Promise<void>; cancel(): void };
+export type RebuildSteps = Generator<RebuildPause, Result<IShape>, void>;
 
 /** Owns a suspended replay and its timer; cancellation runs the replay's disposal finally. */
 export class RebuildJob {
@@ -12,18 +13,20 @@ export class RebuildJob {
     private resolve!: () => void;
     private timer?: ReturnType<typeof setTimeout>;
     private done = false;
+    private waiting?: Exclude<RebuildPause, number>;
     private readonly release: () => void;
     private readonly releaseAutosave = AutosaveHolds.hold("rebuild");
 
     constructor(
         document: IDocument,
         private readonly steps: RebuildSteps,
-        private readonly advance: () => IteratorResult<number, Result<IShape>>,
+        private readonly advance: () => IteratorResult<RebuildPause, Result<IShape>>,
         private readonly complete: (result: Result<IShape>) => void,
         private readonly progress: (index: number) => void,
         private readonly failed: (error: unknown) => void,
         private readonly isCurrent: () => boolean,
         private readonly superseded: () => void,
+        private readonly forceSynchronous: () => void = () => {},
     ) {
         this.settled = new Promise((resolve) => {
             this.resolve = resolve;
@@ -31,9 +34,25 @@ export class RebuildJob {
         this.release = DocumentRebuilds.add(document, this);
     }
 
-    start(index: number): void {
-        this.progress(index);
-        if (!this.done) this.timer = setTimeout(() => this.tick(), 0);
+    start(pause: RebuildPause): void {
+        if (typeof pause === "number") {
+            this.progress(pause);
+            if (!this.done) this.timer = setTimeout(() => this.tick(), 0);
+        } else {
+            this.waiting = pause;
+            void pause.ready.then(
+                () => {
+                    if (this.done || this.waiting !== pause) return;
+                    this.waiting = undefined;
+                    this.tick();
+                },
+                (error) => {
+                    if (this.done || this.waiting !== pause) return;
+                    this.cancel();
+                    this.failed(error);
+                },
+            );
+        }
     }
 
     private tick(): void {
@@ -58,6 +77,11 @@ export class RebuildJob {
     }
 
     flush(): void {
+        // Keep the generator's already-built prefix. Cancel only the in-flight operation, then
+        // resume this same feature synchronously; later misses also stay local for this replay.
+        this.forceSynchronous();
+        this.waiting?.cancel();
+        this.waiting = undefined;
         while (!this.done) {
             clearTimeout(this.timer);
             this.tick();
@@ -67,6 +91,8 @@ export class RebuildJob {
     cancel(): void {
         if (this.done) return;
         try {
+            this.waiting?.cancel();
+            this.waiting = undefined;
             this.steps.return(undefined as never);
         } finally {
             this.finish();

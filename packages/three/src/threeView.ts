@@ -963,6 +963,8 @@ export class ThreeView extends Observable implements IView {
         if (!keepsSubShape(shapeType, subShape.shapeType)) {
             return { shape: undefined, indexes: [index] };
         }
+        // Selection/highlighting consumes mesh ranges. Reference capture must instead
+        // use the picked subShape's topology index (pickedTopologyIndex).
         return { shape: subShape, indexes: [index], transform };
     }
 
