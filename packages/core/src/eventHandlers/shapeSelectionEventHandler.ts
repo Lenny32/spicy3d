@@ -6,7 +6,7 @@ import type { AsyncController } from "../foundation";
 import type { INodeFilter, IShapeFilter } from "../selectionFilter";
 import type { IShape, ShapeType } from "../shape";
 import { type IView, type VisualShapeData, type VisualState, VisualStates } from "../visual";
-import { SelectionHandler } from "./selectionEventHandler";
+import { isToggleSelectEvent, SelectionHandler } from "./selectionEventHandler";
 
 export abstract class ShapeSelectionHandler extends SelectionHandler {
     protected _highlights: VisualShapeData[] | undefined;
@@ -124,8 +124,18 @@ export abstract class ShapeSelectionHandler extends SelectionHandler {
     }
 }
 
+/**
+ * Picks sub-shapes. Multi mode toggles on every click, as it always has (edge picks rely on
+ * it), so Ctrl/Cmd+click toggles there too. With `toggleWithModifier` a single pick also
+ * toggles on Ctrl/Cmd+click (`isToggleSelectEvent`) and stays open, so several shapes can be
+ * gathered before a plain click (which replaces the selection with the clicked shape and
+ * finishes) or Enter (which finishes with the selection as it is).
+ */
 export class SubshapeSelectionHandler extends ShapeSelectionHandler {
     selectedState: VisualState = VisualStates.edgeSelected;
+
+    /** Single mode: Ctrl/Cmd+click toggles and keeps the pick open (see `PickShapeOptions`). */
+    toggleWithModifier = false;
 
     protected override select(view: IView, event: PointerEvent): number {
         if (!this._highlights?.length) {
@@ -135,7 +145,15 @@ export class SubshapeSelectionHandler extends ShapeSelectionHandler {
         return this.document.selection.setSelectedShapes(
             this._highlights,
             this.selectedState,
-            this.multiMode,
+            this.multiMode || this.modifierToggles(event),
         );
+    }
+
+    protected override keepsSelecting(event: PointerEvent): boolean {
+        return this.modifierToggles(event);
+    }
+
+    private modifierToggles(event: PointerEvent): boolean {
+        return this.toggleWithModifier && isToggleSelectEvent(event);
     }
 }

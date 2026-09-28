@@ -16,9 +16,22 @@ import {
 import { SketchNode } from "../sketch/sketchNode";
 import { type TrackedMethod, trackedBoolean } from "./boolean";
 import {
+    canSweepTracked,
+    type ExtentEnvironment,
+    extentDependencies,
+    extentNodeIds,
+    type ResolvedExtents,
+    resolveExtents,
+    type SweepSide,
+    sweepSideTracked,
+    toObjectExtents,
+} from "./extrudeExtent";
+import {
+    type BooleanOperation,
     completeTrackedHistory,
     type ExtrudeFeatureData,
     type FeatureContext,
+    type FeatureData,
     type FeatureHandler,
     registerFeature,
     type ShapeTracking,
@@ -43,8 +56,35 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
     icon: "icon-prism",
     reselectable: true,
 
-    nodeIds: (feature) =>
-        [feature.sketchId, feature.source?.nodeId].filter((x): x is string => x !== undefined),
+    nodeIds: (feature) => [
+        ...new Set(
+            [feature.sketchId, feature.source?.nodeId, ...extentNodeIds(feature)].filter(
+                (x): x is string => x !== undefined,
+            ),
+        ),
+    ],
+
+    // A to-object face on a body holding an entry of this extrude resolves on that body's state
+    // entering the entry (`extrudeExtent.ts`): a token of that state is part of the key, and the
+    // body's shape is no cache ref.
+    cacheKey: (feature, document) => {
+        if (toObjectExtents(feature).length === 0) return undefined;
+        const host = extrudeHostOf(document, feature);
+        return host === undefined
+            ? undefined
+            : extentDependencies(document, host, feature, host).key.join("|");
+    },
+
+    cacheRefIds: (feature, document) => {
+        const base = [feature.sketchId, feature.source?.nodeId].filter((x): x is string => x !== undefined);
+        if (toObjectExtents(feature).length === 0) return base;
+        const host = extrudeHostOf(document, feature);
+        const extent =
+            host === undefined
+                ? extentNodeIds(feature)
+                : extentDependencies(document, host, feature, host).refIds;
+        return [...new Set([...base, ...extent])];
+    },
 
     // Only the sketch: `source` is the body being press-pulled, which the tree
     // already shows and the feature row does not need a second door to.
@@ -62,36 +102,174 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
             unit: LENGTH_UNITS,
         },
         { key: "symmetric", display: "option.command.symmetric", value: feature.symmetric ?? false },
+        ...(feature.extent?.type === "toObject"
+            ? [
+                  {
+                      key: EXTENT_OFFSET,
+                      display: "option.command.extentOffset" as const,
+                      value: feature.extent.offset ?? 0,
+                      unit: LENGTH_UNITS,
+                  },
+              ]
+            : []),
     ],
 
-    setParameter: (feature, key, value) =>
-        key === "symmetric"
-            ? { ...feature, symmetric: value === true || value === "true" }
-            : { ...feature, [key]: value },
+    setParameter: (feature, key, value) => {
+        if (key === "symmetric") return { ...feature, symmetric: value === true || value === "true" };
+        if (key === EXTENT_OFFSET) {
+            if (feature.extent?.type !== "toObject" || typeof value === "boolean") return feature;
+            return { ...feature, extent: { ...feature.extent, offset: value } };
+        }
+        return { ...feature, [key]: value };
+    },
 
-    applyResolvedRefs: (feature, { resolvedProfiles }) =>
-        resolvedProfiles === undefined
-            ? feature
-            : feature.source === undefined
-              ? { ...feature, profiles: resolvedProfiles }
-              : { ...feature, source: { ...feature.source, profiles: resolvedProfiles } },
+    applyResolvedRefs: (feature, { resolvedProfiles, resolvedFaces }) => {
+        let next = feature;
+        if (resolvedProfiles !== undefined) {
+            next =
+                next.source === undefined
+                    ? { ...next, profiles: resolvedProfiles }
+                    : { ...next, source: { ...next.source, profiles: resolvedProfiles } };
+        }
+        for (const key of ["extent", "secondExtent"] as const) {
+            const face = resolvedFaces?.[key];
+            const extent = next[key];
+            if (face !== undefined && extent?.type === "toObject")
+                next = { ...next, [key]: { ...extent, face } };
+        }
+        return next;
+    },
 
     evaluate(feature, context): Result<IShape> {
         const params = resolveExtrudeParams(feature, context);
         if (!params.isOk) return Result.err(params.error);
         const { depth, startOffset } = params.value;
+        const extents = resolveExtents(feature, depth, hostExtentEnvironment(feature, context));
+        if (!extents.isOk) return Result.err(extents.error);
+        try {
+            const tracked = evaluateOperationTracked(feature, context, extents.value, startOffset);
+            if (tracked !== undefined) return tracked;
 
-        const tracked = evaluateOperationTracked(feature, context, depth, startOffset);
-        if (tracked !== undefined) return tracked;
-
-        const source = feature.source;
-        const built =
-            source === undefined
-                ? extrudeFromSketch(feature, context, depth, startOffset)
-                : extrudeFromSourceFaces({ ...feature, source }, context, depth, startOffset);
-        return combineWithInput(built, feature, context);
+            const source = feature.source;
+            const built =
+                source === undefined
+                    ? extrudeFromSketch(feature, context, extents.value, startOffset)
+                    : extrudeFromSourceFaces({ ...feature, source }, context, extents.value, startOffset);
+            return combineWithInput(built, feature, context);
+        } finally {
+            extents.value.dispose();
+        }
     },
 };
+
+/** `parameters` key of a to-object extent's offset. */
+const EXTENT_OFFSET = "extentOffset";
+
+/** The id of the body whose feature list holds `feature`. */
+function extrudeHostOf(document: IDocument, feature: ExtrudeFeatureData): string | undefined {
+    return document.modelManager.findNode((n) => {
+        const features = (n as { features?: unknown }).features;
+        return Array.isArray(features) && features.some((x: FeatureData) => x.id === feature.id);
+    })?.id;
+}
+
+/**
+ * The extents' environment when the host evaluates its own extrude: its chain input bounds a
+ * through-all side, and matched target faces are re-anchored.
+ */
+function hostExtentEnvironment(feature: ExtrudeFeatureData, context: FeatureContext): ExtentEnvironment {
+    return {
+        document: context.document,
+        scope: context.scope,
+        toolHost: context.host,
+        current: context,
+        bounds: context.input === undefined ? [] : [context.input],
+        flush: feature.operation === "fuse",
+        tracking: context.tracking,
+    };
+}
+
+/**
+ * The prism a sketch extrude sweeps — its tool volume, without the operation — in the
+ * coordinates of the body hosting it. `context.host` is that body; no tracking runs and no
+ * profile is re-anchored (the host's own evaluation does that). Press-pull extrudes read
+ * their host's chain state and have no standalone tool.
+ */
+export function extrudeToolShape(
+    feature: ExtrudeFeatureData,
+    context: FeatureContext,
+    replay?: ExtentReplay,
+): Result<IShape> {
+    if (feature.source !== undefined) return Result.err("Only a sketch extrude can act on other bodies");
+    const params = resolveExtrudeParams(feature, context);
+    if (!params.isOk) return Result.err(params.error);
+    const plainContext = { ...context, tracking: undefined };
+    const extents = resolveExtents(feature, params.value.depth, {
+        document: context.document,
+        scope: context.scope,
+        toolHost: context.host,
+        current: replay?.current ?? plainContext,
+        bounds: replay?.bounds ?? (context.input === undefined ? [] : [context.input]),
+        flush: feature.operation === "fuse",
+    });
+    if (!extents.isOk) return Result.err(extents.error);
+    try {
+        return extrudeFromSketch(
+            { ...feature, operation: undefined },
+            plainContext,
+            extents.value,
+            params.value.startOffset,
+        );
+    } finally {
+        extents.value.dispose();
+    }
+}
+
+/**
+ * Where a target body replaying an extrude (`extrudeTarget.ts`) stands: its own context (a
+ * to-object face on it resolves on its input) and its input as the through-all bounds, in the
+ * extrude host's local space.
+ */
+export interface ExtentReplay {
+    readonly current: FeatureContext;
+    readonly bounds: readonly IShape[];
+}
+
+/**
+ * Combines `tool` (not disposed here) with the chain input by `operation` — tracked when the
+ * kernel and the body allow it, so the input's face and edge ids survive; the tool's own
+ * sub-shapes get positional ids scoped to `featureId`.
+ */
+export function combineWithTool(
+    featureId: string,
+    operation: BooleanOperation,
+    context: FeatureContext,
+    tool: IShape,
+): Result<IShape> {
+    const input = context.input;
+    if (input === undefined) return Result.err("Extrude join/cut/intersect requires a preceding feature");
+    const tracked = trackedBoolean(operation);
+    if (context.tracking !== undefined && tracked !== undefined) {
+        const ids = {
+            shape: tool,
+            faceIds: (tool.findSubShapes(ShapeTypes.face) as IFace[]).map(
+                (_, index) => `${featureId}:tool:f${index}`,
+            ),
+            edgeIds: (tool.findSubShapes(ShapeTypes.edge) as IEdge[]).map(
+                (_, index) => `${featureId}:tool:e${index}`,
+            ),
+        };
+        return applyTrackedOperation(featureId, input, context.tracking, tracked, ids);
+    }
+    switch (operation) {
+        case "cut":
+            return shapeFactory.booleanCut([input], [tool]);
+        case "common":
+            return shapeFactory.booleanCommon([input], [tool]);
+        default:
+            return shapeFactory.booleanFuse([input], [tool], true);
+    }
+}
 
 /** Resolves the numeric parameters first, so a bad expression fails before any geometry runs. */
 function resolveExtrudeParams(
@@ -115,14 +293,14 @@ function resolveExtrudeParams(
 function evaluateOperationTracked(
     feature: ExtrudeFeatureData,
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> | undefined {
     if (feature.operation === undefined) return undefined;
     const source = feature.source;
     return source === undefined
-        ? extrudeOperationTracked(feature, context, depth, startOffset)
-        : pressPullOperationTracked({ ...feature, source }, context, depth, startOffset);
+        ? extrudeOperationTracked(feature, context, extents, startOffset)
+        : pressPullOperationTracked({ ...feature, source }, context, extents, startOffset);
 }
 
 /** Combines the freshly built prism with the chain input, when an operation was asked for. */
@@ -155,25 +333,22 @@ function combineWithInput(
 function extrudeFromSketch(
     feature: ExtrudeFeatureData,
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> {
     const resolved = resolveSketchProfiles(feature, context);
     if (!resolved.isOk) return Result.err(resolved.error);
     const { sketch, profiles } = resolved.value;
-    const vec = sketch.plane.normal.multiply(depth);
-    const vecs = feature.symmetric === true ? [vec, vec.multiply(-1)] : [vec];
+    const sides = extents.sidesAlong(sketch.plane.normal);
     const offsetVec = sketch.plane.normal.multiply(startOffset);
 
     // An operation with unavailable tracking falls back to the plain path — downstream
     // edge fingerprints then re-match geometrically after a rebuild.
     const plain =
-        feature.operation !== undefined ||
-        context.tracking === undefined ||
-        shapeFactory.prismTracked === undefined;
+        feature.operation !== undefined || context.tracking === undefined || !canSweepTracked(sides);
     return plain
-        ? extrudePlain(profiles, vecs, offsetVec)
-        : extrudeTracked(feature, sketch, vecs, profiles, context.tracking!, offsetVec);
+        ? extrudePlain(profiles, sides, offsetVec)
+        : extrudeTracked(feature, sketch, sides, profiles, context.tracking!, offsetVec);
 }
 
 /**
@@ -200,12 +375,12 @@ function resolveSketchProfiles(
 function extrudeTracked(
     feature: ExtrudeFeatureData,
     sketch: SketchNode,
-    vecs: XYZ[],
+    sides: SweepSide[],
     profiles: ResolvedProfile[],
     tracking: ShapeTracking,
     offsetVec: XYZ,
 ): Result<IShape> {
-    const swept = sweepProfiles(feature, sketch, vecs, profiles, offsetVec);
+    const swept = sweepProfiles(feature, sketch, sides, profiles, offsetVec);
     if (!swept.isOk) return Result.err(swept.error);
     tracking.outputFaceIds = swept.value.faceIds;
     tracking.outputEdgeIds = swept.value.edgeIds;
@@ -213,14 +388,14 @@ function extrudeTracked(
 }
 
 /**
- * Sweeps every profile along each direction with kernel history (sketch-scoped ids)
+ * Sweeps every profile along each side with kernel history (sketch-scoped ids)
  * and merges touching prisms, returning the shape with its tracked ids in
  * findSubShapes order.
  */
 function sweepProfiles(
     feature: ExtrudeFeatureData,
     sketch: SketchNode,
-    vecs: XYZ[],
+    sides: SweepSide[],
     profiles: ResolvedProfile[],
     offsetVec: XYZ,
 ): Result<{ shape: IShape; faceIds: string[]; edgeIds: string[] }> {
@@ -228,16 +403,19 @@ function sweepProfiles(
     const faceIds: string[][] = [];
     const edgeIds: string[][] = [];
     for (const profile of profiles) {
-        for (const [direction, vec] of vecs.entries()) {
+        for (const [direction, side] of sides.entries()) {
             const swept = sweepProfileTracked(
                 feature,
                 sketch,
-                vec,
+                side,
                 profile,
                 offsetVec,
                 direction === 0 ? "" : ":neg",
             );
-            if (!swept.isOk) return Result.err(swept.error);
+            if (!swept.isOk) {
+                shapes.forEach((x) => x.dispose());
+                return Result.err(swept.error);
+            }
             shapes.push(swept.value.shape);
             faceIds.push(swept.value.faceIds);
             edgeIds.push(swept.value.edgeIds);
@@ -290,7 +468,7 @@ function fuseSweptPrisms(
 function pressPullOperationTracked(
     feature: ExtrudeFeatureData & { source: NonNullable<ExtrudeFeatureData["source"]> },
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> | undefined {
     const tracking = context.tracking;
@@ -299,7 +477,7 @@ function pressPullOperationTracked(
     if (context.input === undefined) {
         return Result.err("Extrude join/cut/intersect requires a preceding feature");
     }
-    const built = extrudeFromSourceFaces(feature, context, depth, startOffset);
+    const built = extrudeFromSourceFaces(feature, context, extents, startOffset);
     if (!built.isOk) return Result.err(built.error);
     try {
         const result = tracked([context.input], [built.value]);
@@ -332,14 +510,12 @@ function pressPullOperationTracked(
 function extrudeOperationTracked(
     feature: ExtrudeFeatureData,
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> | undefined {
     const tracking = context.tracking;
     const tracked = trackedBoolean(feature.operation!);
-    if (tracking === undefined || tracked === undefined || shapeFactory.prismTracked === undefined) {
-        return undefined;
-    }
+    if (tracking === undefined || tracked === undefined) return undefined;
     const input = context.input;
     if (input === undefined) {
         return Result.err("Extrude join/cut/intersect requires a preceding feature");
@@ -347,10 +523,10 @@ function extrudeOperationTracked(
     const resolved = resolveSketchProfiles(feature, context);
     if (!resolved.isOk) return Result.err(resolved.error);
 
-    const vec = resolved.value.sketch.plane.normal.multiply(depth);
-    const vecs = feature.symmetric === true ? [vec, vec.multiply(-1)] : [vec];
+    const sides = extents.sidesAlong(resolved.value.sketch.plane.normal);
+    if (!canSweepTracked(sides)) return undefined;
     const offsetVec = resolved.value.sketch.plane.normal.multiply(startOffset);
-    const tool = sweepProfiles(feature, resolved.value.sketch, vecs, resolved.value.profiles, offsetVec);
+    const tool = sweepProfiles(feature, resolved.value.sketch, sides, resolved.value.profiles, offsetVec);
     if (!tool.isOk) return Result.err(tool.error);
     try {
         return applyTrackedOperation(feature.id, input, tracking, tracked, tool.value);
@@ -425,7 +601,7 @@ function trackOperation(
 function sweepProfileTracked(
     feature: ExtrudeFeatureData,
     sketch: SketchNode,
-    vec: XYZ,
+    side: SweepSide,
     profile: ResolvedProfile,
     offsetVec: XYZ,
     seedSuffix = "",
@@ -433,7 +609,7 @@ function sweepProfileTracked(
     const owned: IFace[] = [];
     try {
         const face = translateProfileFace(profile, offsetVec, owned);
-        const result = shapeFactory.prismTracked!(face, vec);
+        const result = sweepSideTracked(face, side);
         if (!result.isOk) return Result.err(result.error);
         const seed = `sketch:${sketch.id}:${profile.seed}${seedSuffix}`;
         const faceEdges = face.findSubShapes(ShapeTypes.edge) as IEdge[];

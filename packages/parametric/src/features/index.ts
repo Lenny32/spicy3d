@@ -7,6 +7,7 @@ export * from "./edgeCorner";
 export * from "./edgeMatcher";
 export * from "./edgeRef";
 export * from "./extrude";
+export * from "./extrudeTarget";
 export * from "./feature";
 export * from "./historyCompletion";
 export * from "./operationIds";

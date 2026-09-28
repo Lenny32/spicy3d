@@ -15,7 +15,12 @@ import {
     withConstructionFeaturePosition,
 } from "@spicy3d/core";
 import type { FeatureTimelineState } from "../features/bodyTracking";
-import { evaluateFeature, type FeatureData, type ShapeTracking } from "../features/feature";
+import {
+    evaluateFeature,
+    type FeatureContext,
+    type FeatureData,
+    type ShapeTracking,
+} from "../features/feature";
 import type { ParametricBodyNode } from "../parametricBodyNode";
 
 /**
@@ -108,6 +113,27 @@ export class FeatureChainPreview {
         const tail = this.replayTail(edited.value, input, scope);
         this._tailMs = performance.now() - started;
         return tail;
+    }
+
+    /**
+     * The feature context entering the edited feature (the body as host, its input and ids) — what
+     * a session resolves the edited feature's references against, e.g. an extrude's to-object
+     * face for its highlight. Undefined when the steps before it failed.
+     */
+    enteringContext(): FeatureContext | undefined {
+        if (this.index > 0 && this.entering === undefined) return undefined;
+        return {
+            document: this.body.document,
+            host: this.body,
+            input: this.entering?.shape,
+            scope: this.body.document.variables.evaluate().scope,
+            tracking: {
+                inputFaceIds: this.entering?.faceIds ?? [],
+                outputFaceIds: [],
+                inputEdgeIds: this.entering?.edgeIds ?? [],
+                outputEdgeIds: [],
+            },
+        };
     }
 
     /**

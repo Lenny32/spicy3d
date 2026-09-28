@@ -234,6 +234,22 @@ describe("ExtrudeFeatureCommand profile step", () => {
         expect(result!.shapes).toEqual([planar]);
     });
 
+    test("Ctrl-gathered faces go on together, those of other nodes than the first one's left out", async () => {
+        mockSelection([], []);
+        const second = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { entities: [], constraints: [] },
+        });
+        const picked = [faceData(sketch), faceData(second), faceData(sketch)];
+        doc.picker = { pickShape: rs.fn(() => Promise.resolve(picked)) } as any;
+
+        const result = await profileStep().execute(doc, new AsyncController());
+
+        expect(result!.nodes![0]).toBe(sketch);
+        expect(result!.shapes).toEqual([picked[0], picked[2]]);
+    });
+
     test("picks faces interactively when nothing usable is selected", async () => {
         mockSelection([], []);
         const picked = [faceData(sketch)];
@@ -246,13 +262,15 @@ describe("ExtrudeFeatureCommand profile step", () => {
         const options = pickShape.mock.calls[0][2] as any;
         expect(options.shapeType).toBe(ShapeTypes.face);
         expect(options.multi).toBe(false);
+        // Ctrl/Cmd+click gathers several profiles before going on.
+        expect(options.toggleWithModifier).toBe(true);
         // Only planar faces are pickable — solid press-pull needs a plane.
         const planar = { surface: () => ({ isPlanar: () => true }) };
         const curved = { surface: () => ({ isPlanar: () => false }) };
         expect(options.shapeFilter.allow(planar, Matrix4.identity())).toBe(true);
         expect(options.shapeFilter.allow(curved, Matrix4.identity())).toBe(false);
         expect(result!.nodes![0]).toBe(sketch);
-        expect(result!.shapes).toBe(picked);
+        expect(result!.shapes).toEqual(picked);
         // A sketch drawn on a solid face is coplanar with it, so the viewport reports the
         // two in an order that flips as the pointer moves: the sketch has to lead.
         const bodyFace = faceData(new ParametricBodyNode({ document: doc, features: [] }));

@@ -22,6 +22,30 @@ const edges: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "edge
 const profiles: MergeValueRule = { kind: "atomic", of: { kind: "ref", target: "profile" } };
 
 /**
+ * An extrude's extent (parametric 3): by its `type`. A to-object face and the body it is on are one
+ * pick; its offset is a parameter of its own. A changed type is one value.
+ */
+const extrudeExtent: MergeValueRule = {
+    kind: "union",
+    tag: "type",
+    variants: {
+        distance: { kind: "object", fields: { type: scalar } },
+        toObject: {
+            kind: "object",
+            fields: {
+                type: scalar,
+                face: { kind: "ref", target: "profile" },
+                nodeId: nodeRef,
+                offset: expression,
+            },
+            groups: { face: ["face", "nodeId"] },
+        },
+        throughAll: { kind: "object", fields: { type: scalar } },
+    },
+    fallback: atomic,
+};
+
+/**
  * Derived state of a merged sketch (docs/merge.md, "Post-merge normalization"): an unpinned external
  * reference's role follows the constraints now using it, and dimension anchors of removed
  * constraints go (the solver drops them too).
@@ -92,6 +116,9 @@ registerMergePayload("parametric.features", {
                         startOffset: expression,
                         operation: scalar,
                         profiles,
+                        // where each side ends (parametric 3)
+                        extent: extrudeExtent,
+                        secondExtent: extrudeExtent,
                     },
                     // the input is a sketch (and its picked profiles) or source faces (press-pull):
                     // alternatives of one choice, one value
@@ -129,6 +156,13 @@ registerMergePayload("parametric.features", {
                         toolIds: { kind: "atomic", of: nodeRef },
                         consumeTools: scalar,
                     },
+                },
+                // an extrude hosted in another body, applied here (parametric 2): the host and the
+                // extrude in it name one thing together — one value
+                extrudeTarget: {
+                    kind: "object",
+                    fields: { ...featureBase, bodyId: nodeRef, featureId: scalar },
+                    groups: { link: ["bodyId", "featureId"] },
                 },
             },
             fallback: { kind: "object", fields: featureBase, rest: atomic },

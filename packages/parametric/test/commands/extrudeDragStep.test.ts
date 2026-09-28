@@ -440,6 +440,138 @@ describe("ExtrudeDragHandler", () => {
         expect(handler.state.anchor).toBe(anchorA);
     });
 
+    test.each([
+        { name: "Ctrl", modifiers: { ctrlKey: true } },
+        { name: "Cmd", modifiers: { metaKey: true } },
+    ])("$name+click toggles profiles like Shift, a plain click replaces them", ({ modifiers }) => {
+        doc.selection = createMockSelection();
+        const faceA = faceData(sketch, [0], new XYZ({ x: 1, y: 0, z: 0 }));
+        const faceB = faceData(sketch, [1], new XYZ({ x: 2, y: 0, z: 0 }));
+        // The handler hands the same (mutated) state object each time: record what it held then.
+        const previewed: number[] = [];
+        const data = {
+            ...dragData([faceA]),
+            depth: 5,
+            buildPreview: (state: any) => {
+                previewed.push(state.faces.length);
+                return { meshes: [fakeMesh()] };
+            },
+        };
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const viewA = createHandlerMockView({ document: doc, detectShapes: () => [faceA] });
+        const viewB = createHandlerMockView({ document: doc, detectShapes: () => [faceB] });
+        const click = (view: IView, init: object) => {
+            handler.pointerDown(view, createPointerEvent(init));
+            handler.pointerUp(view, createPointerEvent(init));
+        };
+        const previewedFaces = () => previewed;
+
+        click(viewB, modifiers);
+        expect(handler.state.faces).toEqual([faceA, faceB]);
+        click(viewA, modifiers);
+        expect(handler.state.faces).toEqual([faceB]);
+        // A toggle keeps the depth, so the preview follows it live.
+        expect(handler.state.dist).toBe(5);
+        expect(previewedFaces().slice(-2)).toEqual([2, 1]);
+        // A plain click replaces the profiles with the clicked one (and starts over from zero).
+        click(viewA, {});
+        expect(handler.state.faces).toEqual([faceA]);
+        expect(handler.state.dist).toBe(0);
+    });
+
+    describe("Ctrl+click on a body", () => {
+        const bodyFace = (body: ParametricBodyNode) => ({
+            shape: { shapeType: ShapeTypes.face, surface: () => ({ isPlanar: () => false }) },
+            owner: { node: body },
+            indexes: [0],
+        });
+
+        test("hands the body to toggleTarget and rebuilds the preview at the current depth", () => {
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const data = { ...dragData([faceData(sketch)]), depth: 5, toggleTarget };
+            const handler = new ExtrudeDragHandler(doc, controller, data);
+            const view = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [bodyFace(body)] as any,
+            });
+            const previews = (data.buildPreview as ReturnType<typeof rs.fn>).mock.calls.length;
+
+            handler.pointerDown(view, createPointerEvent({ ctrlKey: true }));
+            handler.pointerUp(view, createPointerEvent({ ctrlKey: true }));
+
+            expect(toggleTarget.mock.calls).toEqual([[body]]);
+            // The depth stays; the preview is rebuilt with the new target set.
+            expect(handler.state.dist).toBe(5);
+            expect((data.buildPreview as ReturnType<typeof rs.fn>).mock.calls.length).toBe(previews + 1);
+            expect(handler.state.node).toBe(sketch);
+        });
+
+        test("without the modifier a non-planar body face does nothing", () => {
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const handler = new ExtrudeDragHandler(doc, controller, {
+                ...dragData([faceData(sketch)]),
+                toggleTarget,
+            });
+            const view = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [bodyFace(body)] as any,
+            });
+
+            handler.pointerDown(view, createPointerEvent());
+            handler.pointerUp(view, createPointerEvent());
+
+            expect(toggleTarget).not.toHaveBeenCalled();
+            expect(handler.state.node).toBe(sketch);
+        });
+
+        test("works while editing, where profile clicks do nothing", () => {
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const handler = new ExtrudeDragHandler(doc, controller, {
+                ...dragData(),
+                depth: 5,
+                editing: true,
+                toggleTarget,
+            });
+            const view = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [bodyFace(body)] as any,
+            });
+
+            handler.pointerDown(view, createPointerEvent({ ctrlKey: true }));
+            handler.pointerUp(view, createPointerEvent({ ctrlKey: true }));
+
+            expect(toggleTarget.mock.calls).toEqual([[body]]);
+        });
+
+        test("a Ctrl+click on a face of the current body toggles that profile instead", () => {
+            doc.selection = createMockSelection();
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const planar = (index: number) => ({
+                shape: { shapeType: ShapeTypes.face, surface: () => ({ isPlanar: () => true }) },
+                owner: { node: body },
+                indexes: [index],
+            });
+            const faceA = planar(0) as any;
+            const faceB = planar(1) as any;
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const handler = new ExtrudeDragHandler(doc, controller, {
+                ...dragData([faceA]),
+                node: body,
+                toggleTarget,
+            });
+            const view = createHandlerMockView({ document: doc, detectShapes: () => [faceB] });
+
+            handler.pointerDown(view, createPointerEvent({ ctrlKey: true }));
+            handler.pointerUp(view, createPointerEvent({ ctrlKey: true }));
+
+            expect(toggleTarget).not.toHaveBeenCalled();
+            expect(handler.state.faces).toEqual([faceA, faceB]);
+        });
+    });
+
     test("hides the node a boolean preview replaces, and restores it on teardown", () => {
         const target = new ParametricBodyNode({ document: doc, features: [] });
         const setVisible = rs.spyOn(doc.visual.context, "setVisible");
@@ -724,5 +856,102 @@ describe("ExtrudeDragStep", () => {
         captured!.keyDown(createHandlerMockView({ document: doc }), { key: "Escape" } as KeyboardEvent);
 
         expect(await promise).toBeUndefined();
+    });
+});
+
+describe("ExtrudeDragHandler with a non-distance extent", () => {
+    let doc: TestDocument;
+    let sketch: SketchNode;
+    let controller: AsyncController;
+
+    beforeEach(() => {
+        doc = new TestDocument();
+        doc.visual = createMockVisualWithDocument(doc);
+        sketch = new SketchNode({ document: doc, plane: Plane.XY, data: { entities: [], constraints: [] } });
+        controller = new AsyncController();
+    });
+
+    afterEach(() => {
+        controller.dispose();
+    });
+
+    function lockedData(ready: () => boolean, picks = false): ExtrudeDragData {
+        return {
+            node: sketch,
+            faces: [],
+            origin: XYZ.zero,
+            normal: XYZ.unitZ,
+            anchor: new XYZ({ x: 1, y: 1, z: 0 }),
+            buildPreview: rs.fn((_state: any) => ({ meshes: [fakeMesh()] })),
+            meshArrow: rs.fn((_state: any) => [fakeMesh()]),
+            depthLocked: () => true,
+            extentReady: ready,
+            picksExtentFace: () => picks,
+            pickExtentFace: rs.fn((_face: any) => true),
+        };
+    }
+
+    const confirmControlOf = (pub: { mock: { calls: unknown[][] } }) =>
+        pub.mock.calls.find((x) => x[0] === "showSelectionControl")?.[1] as { success(): void };
+
+    test("draws no arrow, previews at zero depth and confirms once the extent is ready", () => {
+        const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
+        let ready = false;
+        const data = lockedData(() => ready);
+        try {
+            const handler = new ExtrudeDragHandler(doc, controller, data);
+            expect(data.meshArrow).not.toHaveBeenCalled();
+            expect(data.buildPreview).toHaveBeenCalled();
+            expect(handler.state.dist).toBe(0);
+
+            confirmControlOf(pub).success();
+            expect(controller.result).toBeUndefined();
+
+            ready = true;
+            confirmControlOf(pub).success();
+            expect(controller.result?.status).toBe("success");
+        } finally {
+            pub.mockRestore();
+        }
+    });
+
+    test("ignores the depth gestures: a drag leaves the depth at zero", () => {
+        const data = lockedData(() => true);
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const view = createHandlerMockView({
+            document: doc,
+            rayAt: (mx: number) =>
+                new Ray({ point: new XYZ({ x: 0, y: 0, z: mx - 113 }), direction: XYZ.unitX }),
+        });
+
+        handler.pointerDown(view, createPointerEvent({ offsetX: 100, offsetY: 200 }));
+        handler.pointerMove(view, createPointerEvent({ offsetX: 140, offsetY: 200 }));
+        handler.pointerUp(view, createPointerEvent({ offsetX: 140, offsetY: 200 }));
+
+        expect(handler.state.dist).toBe(0);
+        handler.dispose();
+    });
+
+    test("to object: a plain click on a solid face picks it, a sketch face is not offered", () => {
+        const data = lockedData(() => true, true);
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const body = new ParametricBodyNode({ document: doc, features: [] });
+        const bodyFace = faceData(body, [3]);
+        const sketchFace = faceData(sketch, [0]);
+
+        const sketchOnly = createHandlerMockView({ document: doc, detectShapes: () => [sketchFace] });
+        handler.pointerDown(sketchOnly, createPointerEvent());
+        handler.pointerUp(sketchOnly, createPointerEvent());
+        expect(data.pickExtentFace).not.toHaveBeenCalled();
+
+        const view = createHandlerMockView({ document: doc, detectShapes: () => [sketchFace, bodyFace] });
+        handler.pointerDown(view, createPointerEvent());
+        handler.pointerUp(view, createPointerEvent());
+
+        expect(data.pickExtentFace).toHaveBeenCalledWith(bodyFace);
+        // The profiles stay as they were: the click picked the extent, not a profile.
+        expect(handler.state.node).toBe(sketch);
+        expect(handler.state.faces).toEqual([]);
+        handler.dispose();
     });
 });

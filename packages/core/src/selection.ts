@@ -23,6 +23,13 @@ export interface PickShapeOptions {
      * shapes that overlap in the viewport.
      */
     sortDetected?: (detected: VisualShapeData[]) => VisualShapeData[];
+    /**
+     * Single picks only: Ctrl/Cmd+click toggles a shape and keeps the pick open, so several can
+     * be gathered (a plain click then replaces them with the clicked shape and finishes, Enter
+     * finishes with them). Opt-in: a caller expecting exactly one shape must not get several.
+     * Multi picks toggle on every click regardless.
+     */
+    toggleWithModifier?: boolean;
 }
 
 export interface PickNodeOptions {
