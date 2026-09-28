@@ -125,20 +125,20 @@ struct TrackedShapeResult {
     std::vector<int> edgeMap;
     // output face index -> input edge index for faces Generated from an input edge
     // (a sweep's side faces), -1 = not edge-generated
-    std::vector<int> faceEdgeMap = {};
+    std::vector<int> faceEdgeMap = { };
     // Every (output, input) derivation as flat pairs (out0, in0, out1, in1, ...) — the
     // maps above keep only the FIRST ancestor; these keep them all, so a face MERGED
     // from several input faces records each of them. Filled for booleans only (merges
     // are a boolean phenomenon); empty for sweeps/fillets, where the maps suffice.
-    std::vector<int> faceAncestors = {};
-    std::vector<int> edgeAncestors = {};
+    std::vector<int> faceAncestors = { };
+    std::vector<int> edgeAncestors = { };
     // Output face indexes (same MapShapes order as the maps) of a sweep's end cap —
     // BRepPrimAPI's LastShape(): a prism's top face, a PARTIAL revolve's end cap. A
     // separate channel on purpose: the cap must not go through faceMap's derivation
     // (it would claim the profile face's index and collide with the identical
     // bottom/start face). Empty for non-sweeps and for a full 360° revolve, where the
     // first and last shapes coincide and there is no distinct cap.
-    std::vector<int> capFaces = {};
+    std::vector<int> capFaces = { };
 };
 
 // Marks output sub-shapes identical to or derived (Modified/Generated — guarded, some
@@ -470,10 +470,10 @@ static SplitEdgesResult splitAtIntersections(const NCollection_List<TopoDS_Shape
     splitter.SetNonDestructive(true);
     splitter.Perform();
     if (splitter.HasErrors()) {
-        return SplitEdgesResult { TopoDS_Shape(), {}, {}, false, "Failed to split edges at intersections" };
+        return SplitEdgesResult { TopoDS_Shape(), { }, { }, false, "Failed to split edges at intersections" };
     }
 
-    SplitEdgesResult result { splitter.Shape(), {}, {}, true, "" };
+    SplitEdgesResult result { splitter.Shape(), { }, { }, true, "" };
     int inputIndex = 0;
     for (const TopoDS_Shape& edge : edges) {
         const NCollection_List<TopoDS_Shape>& modified = splitter.Modified(edge);
@@ -522,7 +522,7 @@ static RegionsResult boundedAreas(const TopoDS_Face& baseFace, const NCollection
     faceBuilder.SetAvoidInternalShapes(true);
     faceBuilder.Perform();
     if (faceBuilder.HasErrors()) {
-        return RegionsResult { ShapeArray(val::array()), {}, {}, false, "Failed to build faces from edges" };
+        return RegionsResult { ShapeArray(val::array()), { }, { }, false, "Failed to build faces from edges" };
     }
 
     const double outerThreshold = extent * extent;
@@ -549,7 +549,7 @@ static RegionsResult boundedAreas(const TopoDS_Face& baseFace, const NCollection
         sourceIds.insert(sourceIds.end(), sources.begin(), sources.end());
     }
     if (sourceCounts.empty()) {
-        return RegionsResult { ShapeArray(val::array()), {}, {}, false, "No bounded regions found" };
+        return RegionsResult { ShapeArray(val::array()), { }, { }, false, "No bounded regions found" };
     }
     return RegionsResult { ShapeArray(faces), sourceCounts, sourceIds, true, "" };
 }
@@ -740,7 +740,7 @@ public:
     {
         BRepPrimAPI_MakeRevol revol(profile, Ax1::toAx1(axis), rad);
         if (!revol.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to revolve profile", {}, {} };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to revolve profile", { }, { } };
         }
         TrackedShapeResult result { revol.Shape(), true, "", faceHistory(revol, profile, revol.Shape()),
             edgeHistory(revol, profile, revol.Shape()), faceFromEdgeHistory(revol, profile, revol.Shape()) };
@@ -763,7 +763,7 @@ public:
         gp_Vec vec3 = Vector3::toVec(vec);
         BRepPrimAPI_MakePrism prism(profile, vec3);
         if (!prism.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to create prism", {}, {} };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to create prism", { }, { } };
         }
         TrackedShapeResult result { prism.Shape(), true, "", faceHistory(prism, profile, prism.Shape()),
             edgeHistory(prism, profile, prism.Shape()), faceFromEdgeHistory(prism, profile, prism.Shape()) };
@@ -1100,7 +1100,7 @@ public:
     {
         std::vector<TopoDS_Edge> edgesVec = vecFromJSArray<TopoDS_Edge>(edges);
         if (edgesVec.empty()) {
-            return RegionsResult { ShapeArray(val::array()), {}, {}, false, "No edges provided" };
+            return RegionsResult { ShapeArray(val::array()), { }, { }, false, "No edges provided" };
         }
 
         NCollection_List<TopoDS_Shape> arguments;
@@ -1109,7 +1109,7 @@ public:
         }
         SplitEdgesResult split = splitAtIntersections(arguments);
         if (!split.isOk) {
-            return RegionsResult { ShapeArray(val::array()), {}, {}, false, split.error };
+            return RegionsResult { ShapeArray(val::array()), { }, { }, false, split.error };
         }
 
         NCollection_List<TopoDS_Shape> faceEdges;
@@ -1386,7 +1386,7 @@ public:
         if (!boolOperater.IsDone()) {
             std::ostringstream oss;
             boolOperater.DumpErrors(oss);
-            return TrackedShapeResult { TopoDS_Shape(), false, oss.str(), {}, {} };
+            return TrackedShapeResult { TopoDS_Shape(), false, oss.str(), { }, { } };
         }
 
         // SimplifyResult runs after Build; it merges the unification into the history.
@@ -1467,7 +1467,7 @@ public:
         }
         makeFillet.Build();
         if (!makeFillet.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to fillet", {}, {} };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to fillet", { }, { } };
         }
 
         return TrackedShapeResult { makeFillet.Shape(), true, "", faceHistory(makeFillet, shape, makeFillet.Shape()),
@@ -1505,7 +1505,7 @@ public:
         }
         makeChamfer.Build();
         if (!makeChamfer.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to chamfer", {}, {} };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to chamfer", { }, { } };
         }
 
         return TrackedShapeResult { makeChamfer.Shape(), true, "", faceHistory(makeChamfer, shape, makeChamfer.Shape()),

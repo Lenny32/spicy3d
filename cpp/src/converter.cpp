@@ -183,7 +183,7 @@ ShapeNode initLabelNode(const TDF_Label label, const Handle(XCAFDoc_ShapeTool) s
     ShapeNode node = {
         .shape = std::nullopt,
         .color = color,
-        .children = {},
+        .children = { },
         .name = getLabelName(label, shapeTool),
     };
 
@@ -195,14 +195,14 @@ ShapeNode initShapeNode(const TopoDS_Shape& shape, const Handle(XCAFDoc_ShapeToo
 {
     std::string color;
     getShapeColor(shape, shapeTool, colorTool, color);
-    ShapeNode childShapeNode = { .shape = shape, .color = color, .children = {}, .name = getShapeName(shape, shapeTool) };
+    ShapeNode childShapeNode = { .shape = shape, .color = color, .children = { }, .name = getShapeName(shape, shapeTool) };
     return childShapeNode;
 }
 
 ShapeNode initGroupNode(const TopoDS_Shape& shape, const Handle(XCAFDoc_ShapeTool) & shapeTool)
 {
     ShapeNode groupNode = {
-        .shape = std::nullopt, .color = std::nullopt, .children = {}, .name = getShapeName(shape, shapeTool)
+        .shape = std::nullopt, .color = std::nullopt, .children = { }, .name = getShapeName(shape, shapeTool)
     };
 
     return groupNode;
@@ -453,7 +453,7 @@ public:
             return std::nullopt;
         }
 
-        ShapeNode node = { .shape = shape, .color = std::nullopt, .children = {}, .name = "STL Shape" };
+        ShapeNode node = { .shape = shape, .color = std::nullopt, .children = { }, .name = "STL Shape" };
 
         return node;
     }

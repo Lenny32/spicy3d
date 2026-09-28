@@ -46,7 +46,7 @@
         "@rspack/dev-server": "^2.0.0",
         "@rstest/core": "^0.10.0",
         "@rstest/coverage-istanbul": "^0.10.0",
-        "clang-format": "^1.8.0",
+        "clang-format-node": "^4.0.0",
         "fast-check": "^4.10.2",
         "happy-dom": "^20.9.0",
         "lint-staged": "^17.0.5",
@@ -64,6 +64,12 @@
     "overrides": {
         "openapi-typescript": {
             "typescript": "$typescript"
+        },
+        "typescript-plugin-css-modules": {
+            "stylus": {
+                ".": "^0.64.0",
+                "glob": "^13.0.6"
+            }
         }
     }
 }
