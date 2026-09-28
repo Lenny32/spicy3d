@@ -346,6 +346,8 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
 
     override getSubShapeAndIndex(shapeType: "face" | "edge" | "vertex", subVisualIndex: number) {
         this.buildMeshes();
+        // `index` addresses render buffers; subShape.index carries the independent
+        // topology position. Preserve both when meshing reorders or omits subshapes.
         let subShape: ISubShape | undefined;
         let transform: Matrix4 | undefined;
         let index: number = -1;

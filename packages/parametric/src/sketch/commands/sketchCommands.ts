@@ -17,6 +17,7 @@ import {
     type Matrix4,
     type Plane,
     PubSub,
+    pickedTopologyIndex,
     resolveConstructionRef,
     ShapeTypes,
     Transaction,
@@ -143,7 +144,8 @@ function capturePlaneOwner(
     // Faces of a parametric body carry a stable id across rebuilds — store it so
     // the sketch tracks the face exactly instead of re-matching geometrically.
     if (owner instanceof ParametricBodyNode) {
-        const faceId = owner.faceIdAt(result.data.indexes[0]);
+        const index = pickedTopologyIndex(result.data);
+        const faceId = index === undefined ? undefined : owner.faceIdAt(index);
         if (faceId !== undefined) {
             planeRef.faceId = faceId;
         } else {

@@ -12,7 +12,9 @@ import {
     type INodeVisual,
     type IShape,
     Matrix4,
+    meshIndexesForTopology,
     PubSub,
+    pickedTopologyIndex,
     Result,
     type ShapeType,
     ShapeTypes,
@@ -217,7 +219,8 @@ export class EdgeReselectSession {
 
     /** The ref of one picked edge, warning when its tracked id went missing. */
     private captureRef(picked: VisualShapeData): EdgeRef {
-        const edgeId = this.host.edgeIdAt(picked.indexes[0]);
+        const index = pickedTopologyIndex(picked);
+        const edgeId = index === undefined ? undefined : this.host.edgeIdAt(index);
         if (edgeId === undefined) {
             reportSilentIdLoss(this.host, "edge", "a re-picked fillet/chamfer edge has no tracked id");
         }
@@ -287,20 +290,26 @@ export class EdgeReselectSession {
         // A failed match is a common reason to re-pick; then there is nothing to preselect.
         const indexes = matchEdgeIndexes(shape.value, feature.edges);
         if (!indexes.isOk) return;
-        // Mesh ranges enumerate edges in the same order as findSubShapes (both use
-        // TopExp::MapShapes), so a matched position indexes into the ranges directly.
-        // The range shapes also carry the sub-edge ids detection produces, which the
-        // selection's toggle matching relies on.
+        // Matching returns topology positions; render ranges may be reordered or omit
+        // geometry. Keep the range's shape identity and buffer indexes for selection.
         const ranges = shape.value.mesh.edges?.range;
         if (ranges === undefined) return;
         const owner = this.host.document.visual.context.getVisual(this.host) as INodeVisual | undefined;
         if (owner === undefined) return;
-        const picked: VisualShapeData[] = indexes.value.map((index) => ({
-            owner,
-            shape: ranges[index].shape,
-            transform: owner.worldTransform(),
-            indexes: [index],
-        }));
+        const picked: VisualShapeData[] = indexes.value.flatMap((index) => {
+            const meshIndexes = meshIndexesForTopology(ranges, index);
+            const range = ranges[meshIndexes[0]];
+            if (!range) return [];
+            const world = owner.worldTransform();
+            return [
+                {
+                    owner,
+                    shape: range.shape,
+                    transform: range.transform ? world.multiply(range.transform) : world,
+                    indexes: meshIndexes,
+                },
+            ];
+        });
         this.host.document.selection.setSelectedShapes(picked, VisualStates.edgeSelected, false);
     }
 }

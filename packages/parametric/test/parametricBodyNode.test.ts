@@ -88,7 +88,7 @@ const EDGE_REF: EdgeRef = { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x:
 function subEdge() {
     return {
         shapeType: ShapeTypes.edge,
-        index: 3,
+        index: 0,
         curve: { basisCurve: { direction: { x: 1, y: 0, z: 0 } } },
         startPoint: () => ({ x: 0, y: 0, z: 0 }) as XYZ,
         endPoint: () => ({ x: 1, y: 0, z: 0 }) as XYZ,

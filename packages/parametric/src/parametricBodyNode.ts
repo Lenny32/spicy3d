@@ -8,6 +8,7 @@ import {
     type FeatureItem,
     type FeatureReference,
     type I18nKeys,
+    type IAsyncShapeOperation,
     type IDocument,
     type IEqualityComparer,
     type IFeatureListNode,
@@ -107,6 +108,7 @@ export interface ParametricBodyNodeOptions {
 
 interface RebuildRun {
     readonly trigger: string;
+    synchronous: boolean;
     readonly current: () => boolean;
     outcome: "cancelled" | "failed" | "success";
     cancelReason?: string;
@@ -608,6 +610,7 @@ export class ParametricBodyNode
         const scopeJson = JSON.stringify([...this.document.variables.evaluate().scope]);
         const run: RebuildRun = {
             trigger,
+            synchronous: !asynchronous,
             outcome: "cancelled",
             current: () =>
                 !this._isDisposed &&
@@ -673,6 +676,9 @@ export class ParametricBodyNode
                     this._job = undefined;
                     const result = this.generateShape("superseded");
                     if (result.isOk) this.shape = result;
+                },
+                () => {
+                    run.synchronous = true;
                 },
             );
             this._job = job;
@@ -883,23 +889,39 @@ export class ParametricBodyNode
                           })
                         : undefined;
                     try {
-                        step = withConstructionFeaturePosition(this.document, this.id, index, () => {
-                            // The cache probe preceded a yield. Refresh dependencies and capture
-                            // the evaluation key again inside this batch's in-flight timeline.
-                            if (asynchronous) {
-                                this.followReferencedSketches(feature, followedSketches);
-                                this.refreshConsumedTools(feature);
-                            }
-                            return this.evaluateAndCache(
-                                feature,
-                                this.cacheKey(feature, scope),
-                                scope,
-                                input,
-                                faceIds,
-                                edgeIds,
-                                nextCache,
+                        const evaluation = withConstructionFeaturePosition(
+                            this.document,
+                            this.id,
+                            index,
+                            () => {
+                                // The cache probe preceded a yield. Refresh dependencies and capture
+                                // the evaluation key again inside this batch's in-flight timeline.
+                                if (asynchronous) {
+                                    this.followReferencedSketches(feature, followedSketches);
+                                    this.refreshConsumedTools(feature);
+                                }
+                                return this.prepareEvaluation(
+                                    feature,
+                                    this.cacheKey(feature, scope),
+                                    scope,
+                                    input,
+                                    faceIds,
+                                    edgeIds,
+                                    nextCache,
+                                    asynchronous && !run.synchronous,
+                                    features.slice(index + 1, stop).every((feature) => feature.suppressed),
+                                );
+                            },
+                        );
+                        try {
+                            if (evaluation.pending) yield evaluation.pending;
+                            this._timeline.beginRun(timeline);
+                            step = withConstructionFeaturePosition(this.document, this.id, index, () =>
+                                evaluation.finish(run.synchronous),
                             );
-                        });
+                        } finally {
+                            evaluation.pending?.cancel();
+                        }
                     } finally {
                         if (featureTrace) PerformanceTrace.end(featureTrace);
                     }
@@ -1163,7 +1185,7 @@ export class ParametricBodyNode
     // ------------------------------------------------------------------ Cache plumbing
 
     /** Cache-miss path of `evaluateFeatureStep`: evaluates the feature and stores the result. */
-    private evaluateAndCache(
+    private prepareEvaluation(
         feature: FeatureData,
         key: string,
         scope: Scope,
@@ -1171,39 +1193,53 @@ export class ParametricBodyNode
         faceIds: string[] | undefined,
         edgeIds: string[] | undefined,
         nextCache: FeatureCacheEntry[],
-    ): Result<FeatureStepOutput> {
+        asynchronous: boolean,
+        meshResult: boolean,
+    ): { pending?: IAsyncShapeOperation<IShape>; finish(synchronous: boolean): Result<FeatureStepOutput> } {
         const tracking: ShapeTracking = {
             inputFaceIds: faceIds ?? [],
             outputFaceIds: [],
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
-        const result = evaluateFeature(feature, {
+        const context = {
             document: this.document,
             host: this,
             input,
             scope,
             tracking,
-        });
-        if (!result.isOk) return Result.err(result.error);
-        // A handler that cannot track (e.g. the kernel lacks history) leaves the
-        // output empty — ids stay undefined from here on rather than guessing.
-        const output: FeatureStepOutput = {
-            shape: result.value,
-            faceIds: tracking.outputFaceIds.length > 0 ? tracking.outputFaceIds : undefined,
-            edgeIds: tracking.outputEdgeIds.length > 0 ? tracking.outputEdgeIds : undefined,
-            resolvedProfiles: tracking.resolvedProfiles,
-            resolvedEdges: tracking.resolvedEdges,
+            meshResult,
         };
-        nextCache.push({
-            json: key,
-            input,
-            refs: this.snapshotNodeRefs(feature),
-            shape: output.shape,
-            faceIds: output.faceIds,
-            edgeIds: output.edgeIds,
-        });
-        return Result.ok(output);
+        const refs = this.snapshotNodeRefs(feature);
+        const pending = asynchronous
+            ? featureHandler(feature.type)?.prepareAsync?.(feature, context)
+            : undefined;
+        return {
+            pending,
+            finish: (synchronous) => {
+                if (synchronous) pending?.cancel();
+                const result = pending && !synchronous ? pending.take() : evaluateFeature(feature, context);
+                if (!result.isOk) return Result.err(result.error);
+                // A handler that cannot track (e.g. the kernel lacks history) leaves the
+                // output empty — ids stay undefined from here on rather than guessing.
+                const output: FeatureStepOutput = {
+                    shape: result.value,
+                    faceIds: tracking.outputFaceIds.length > 0 ? tracking.outputFaceIds : undefined,
+                    edgeIds: tracking.outputEdgeIds.length > 0 ? tracking.outputEdgeIds : undefined,
+                    resolvedProfiles: tracking.resolvedProfiles,
+                    resolvedEdges: tracking.resolvedEdges,
+                };
+                nextCache.push({
+                    json: key,
+                    input,
+                    refs: pending && !synchronous ? refs : this.snapshotNodeRefs(feature),
+                    shape: output.shape,
+                    faceIds: output.faceIds,
+                    edgeIds: output.edgeIds,
+                });
+                return Result.ok(output);
+            },
+        };
     }
 
     /** Cache keys include the scope snapshot so a variable change invalidates dependents. */

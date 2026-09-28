@@ -38,6 +38,11 @@ export class PerformanceTrace {
         return PerformanceTrace.active;
     }
 
+    /** Clock/allocation-free token for async producers; undefined outside a capture. */
+    static get captureId(): number | undefined {
+        return PerformanceTrace.active ? PerformanceTrace.generation : undefined;
+    }
+
     /** A fresh bounded capture; stale spans from a previous capture are ignored. */
     static enable(maxRecords = 100_000): void {
         PerformanceTrace.generation++;

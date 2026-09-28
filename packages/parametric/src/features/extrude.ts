@@ -7,6 +7,7 @@ import {
     type IFace,
     type IShape,
     LENGTH_UNITS,
+    PerformanceTrace,
     Result,
     resolveUnitSpec,
     ShapeTypes,
@@ -76,6 +77,88 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
               ? { ...feature, profiles: resolvedProfiles }
               : { ...feature, source: { ...feature.source, profiles: resolvedProfiles } },
 
+    prepareAsync(feature, context) {
+        const factory = shapeFactory.asyncOperations;
+        const { input, tracking } = context;
+        if (
+            !factory ||
+            factory.available === false ||
+            !input ||
+            !tracking ||
+            !feature.operation ||
+            !shapeFactory.prismTracked
+        )
+            return undefined;
+        const toolTracking: ShapeTracking = { ...tracking, outputFaceIds: [], outputEdgeIds: [] };
+        // Profiles/prisms and their sketch-scoped seeds are evaluated synchronously in this feature's
+        // timeline. Only the expensive final combine with the accumulated body crosses the await.
+        const built = extrudeHandler.evaluate(
+            { ...feature, operation: undefined },
+            { ...context, tracking: toolTracking },
+        );
+        if (!built.isOk) return { ready: Promise.resolve(), cancel: () => {}, take: () => built };
+        const ids = feature.source
+            ? {
+                  faceIds: positionalToolIds(built.value, ShapeTypes.face, `${feature.id}:tool:f`),
+                  edgeIds: positionalToolIds(built.value, ShapeTypes.edge, `${feature.id}:tool:e`),
+              }
+            : { faceIds: toolTracking.outputFaceIds, edgeIds: toolTracking.outputEdgeIds };
+        tracking.resolvedProfiles = toolTracking.resolvedProfiles;
+        let pending: ReturnType<typeof factory.booleanTracked>;
+        try {
+            pending = factory.booleanTracked(feature.operation, [input], [built.value], {
+                mesh: context.meshResult,
+            });
+        } finally {
+            built.value.dispose();
+        }
+        if (!pending) return undefined;
+        return {
+            ready: pending.ready,
+            cancel: () => pending.cancel(),
+            take: () => {
+                const answer = pending.take();
+                if (!answer.isOk) {
+                    if (!pending.canFallback) return Result.err(answer.error);
+                    const span = PerformanceTrace.enabled
+                        ? PerformanceTrace.begin("kernel.workerFallback", {
+                              operation: feature.operation,
+                              reason: answer.error,
+                          })
+                        : undefined;
+                    if (span) PerformanceTrace.end(span);
+                    return extrudeHandler.evaluate(feature, context);
+                }
+                const { inputs, result } = answer.value;
+                const subs: IShape[] = [];
+                let accepted = false;
+                try {
+                    const inputEdges = inputs.flatMap((shape) =>
+                        shape.findSubShapes(ShapeTypes.edge),
+                    ) as IEdge[];
+                    subs.push(...inputEdges);
+                    const inputFaces = inputs.flatMap((shape) =>
+                        shape.findSubShapes(ShapeTypes.face),
+                    ) as IFace[];
+                    subs.push(...inputFaces);
+                    const history = completeTrackedHistory(inputs, result, { inputEdges, inputFaces });
+                    subs.push(...history.outputEdges, ...history.outputFaces);
+                    trackOperation(feature.id, inputs[0], tracking, ids, {
+                        ...result,
+                        faceMap: history.faceMap,
+                        edgeMap: history.edgeMap,
+                    });
+                    accepted = true;
+                    return Result.ok(result.shape);
+                } finally {
+                    for (const shape of subs) shape.dispose();
+                    for (const shape of inputs) shape.dispose();
+                    if (!accepted) result.shape.dispose();
+                }
+            },
+        };
+    },
+
     evaluate(feature, context): Result<IShape> {
         const params = resolveExtrudeParams(feature, context);
         if (!params.isOk) return Result.err(params.error);
@@ -92,6 +175,19 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
         return combineWithInput(built, feature, context);
     },
 };
+
+function positionalToolIds(
+    shape: IShape,
+    type: typeof ShapeTypes.face | typeof ShapeTypes.edge,
+    prefix: string,
+): string[] {
+    const subs = shape.findSubShapes(type);
+    try {
+        return subs.map((_, index) => `${prefix}${index}`);
+    } finally {
+        for (const sub of subs) sub.dispose();
+    }
+}
 
 /** Resolves the numeric parameters first, so a bad expression fails before any geometry runs. */
 function resolveExtrudeParams(

@@ -45,6 +45,11 @@ const summary = {
     sourceFilesUnchanged: evidence.sourceFilesSha256 === evidence.sourceFilesSha256After,
     distSha256: evidence.distSha256,
     harnessSha256: evidence.harnessSha256,
+    realmTelemetryVersion: evidence.realmTelemetryVersion,
+    expectedKernelMode: evidence.expectedKernelMode,
+    deploymentOverride: evidence.deploymentOverride,
+    deploymentConfigRequests: evidence.deploymentConfigRequests,
+    startupConfig: evidence.startupConfig,
     allSketchCount: evidence.allSketchCount,
     regressions: evidence.regressions,
     geometryComparison:
@@ -52,7 +57,7 @@ const summary = {
         Object.fromEntries(
             Object.entries(evidence.geometryComparison).map(([key, value]) => [
                 key,
-                value?.cleanBrep ? { ...value, cleanBrep: undefined } : value,
+                value?.cleanBrep ? { ...value, cleanBrep: undefined, geometryProbe: undefined } : value,
             ]),
         ),
     errors: evidence.errors,
@@ -84,11 +89,26 @@ const summary = {
     },
     scenarios: evidence.scenarios.map(({ records, sourceTrace, ...run }) => ({
         ...run,
-        stages: stages(records),
-        sourceStages: sourceTrace && stages(sourceTrace.records),
+        runtimeMainStages: stages(records),
+        // Each source event belongs to ONE bucket. RPC is page wall time, not worker native time.
+        sourceStagesByRealm: sourceTrace && {
+            main: stages(
+                sourceTrace.records.filter(
+                    (record) => !record.stage.startsWith("worker.") && record.details?.realm !== "worker",
+                ),
+            ),
+            worker: stages(
+                sourceTrace.records.filter(
+                    (record) =>
+                        record.stage !== "worker.rpc" &&
+                        (record.stage.startsWith("worker.") || record.details?.realm === "worker"),
+                ),
+            ),
+            rpc: stages(sourceTrace.records.filter((record) => record.stage === "worker.rpc")),
+        },
         sourceDropped: sourceTrace?.dropped,
         sourceMeshes: sourceTrace?.records
-            .filter((r) => r.stage === "mesh.kernel")
+            .filter((r) => r.stage === "mesh.kernel" && r.details?.realm !== "worker")
             .reduce((counts, r) => {
                 const key = `${r.details?.meshKind}:${r.details?.visible}`;
                 counts[key] = (counts[key] ?? 0) + 1;
@@ -105,11 +125,23 @@ const summary = {
                 counts[key] = (counts[key] ?? 0) + 1;
                 return counts;
             }, {}),
-        longestBoolean: records
+        longestMainNativeBoolean: records
             .filter((r) => r.stage === "kernel.operation" && r.details.boolean)
             .sort((a, b) => b.durationMs - a.durationMs)[0],
-        featureHits: records.filter((r) => r.stage === "feature.step" && r.details.cacheHit).length,
-        featureMisses: records.filter((r) => r.stage === "feature.step" && !r.details.cacheHit).length,
+        longestWorkerNativeBoolean: sourceTrace?.records
+            .filter(
+                (record) =>
+                    record.details?.boolean &&
+                    (record.stage === "worker.kernel.operation" ||
+                        (record.stage === "kernel.operation" && record.details.realm === "worker")),
+            )
+            .sort((a, b) => b.durationMs - a.durationMs)[0],
+        runtimeFeatureHits: records.some((r) => r.stage === "feature.step")
+            ? records.filter((r) => r.stage === "feature.step" && r.details.cacheHit).length
+            : null,
+        runtimeFeatureMisses: records.some((r) => r.stage === "feature.step")
+            ? records.filter((r) => r.stage === "feature.step" && !r.details.cacheHit).length
+            : null,
     })),
 };
 if (process.argv[3]) {

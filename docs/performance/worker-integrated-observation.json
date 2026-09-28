@@ -1,0 +1,280 @@
+{
+    "auditScope": "existing evidence replay and detached BREP validation; no new application benchmark",
+    "evidenceSha256": "1e1b918ae569162e0ce15c5e0455af7300cd12ec6a8562fb86846c98b120325f",
+    "baselineArtifactSha256": "3fd24c814519217c2df0bb7de08d8ab759d402b163c0254dc786046f732d198f",
+    "measuredRevision": "7b0b384d990d16755846e094f18bae94235cef9c",
+    "sourceFilesSha256": "f4fb1f467d7fca0789b2f05d19ca29365f351bcea8baf655760cf4218d62fae6",
+    "sourceStableDuringRun": true,
+    "measuredDistSha256": "f15a4d3b13adf435ccd6542dd338e032f497da3da8dfbbaf56484bd37eff2543",
+    "browserVersion": "155.0",
+    "modelSha256": "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+    "payloadsAndVisibilityMatchPristine": true,
+    "telemetryReplay": {
+        "captures": 87,
+        "complete": true,
+        "storedCountsMatch": true
+    },
+    "cold": {
+        "elapsedMs": 99830,
+        "mainLoopGapMs": 1298,
+        "realms": {
+            "schemaVersion": 1,
+            "mode": "hybrid",
+            "complete": true,
+            "issues": [],
+            "workersObserved": 1,
+            "main": {
+                "booleanCount": 0,
+                "booleanMs": 0,
+                "longestBooleanMs": 0,
+                "sourceBooleanCount": 0,
+                "meshCount": 1473,
+                "meshMs": 960,
+                "historyConversionMs": 10,
+                "meshBufferMs": 49
+            },
+            "worker": {
+                "complete": true,
+                "observedBooleanCount": 83,
+                "booleanCount": 83,
+                "booleanMs": 34256,
+                "longestBooleanMs": 4749,
+                "historyCount": 83,
+                "historyConversionMs": 272,
+                "meshCount": 1,
+                "meshMs": 560,
+                "meshBufferMs": 19,
+                "rpcCount": 83,
+                "rpcMs": 62265,
+                "pendingBefore": {
+                    "requests": 0,
+                    "native": 0
+                },
+                "pendingAfter": {
+                    "requests": 0,
+                    "native": 0
+                }
+            },
+            "booleanCount": 83,
+            "booleanMs": 34256,
+            "meshCount": 1474,
+            "longestBooleanMs": 4749
+        },
+        "stageTotals": {
+            "document.decompress": {
+                "count": 1,
+                "totalMs": 51,
+                "maxMs": 51
+            },
+            "document.parse": {
+                "count": 1,
+                "totalMs": 19,
+                "maxMs": 19
+            },
+            "document.decode": {
+                "count": 1,
+                "totalMs": 71,
+                "maxMs": 71
+            },
+            "document.migrate": {
+                "count": 1,
+                "totalMs": 2,
+                "maxMs": 2
+            },
+            "node.deserialize": {
+                "count": 336,
+                "totalMs": 229,
+                "maxMs": 132
+            },
+            "model.deserialize": {
+                "count": 1,
+                "totalMs": 231,
+                "maxMs": 231
+            },
+            "visual.create": {
+                "count": 336,
+                "totalMs": 1030,
+                "maxMs": 125
+            },
+            "mesh.kernel": {
+                "count": 1473,
+                "totalMs": 960,
+                "maxMs": 61
+            },
+            "mesh.buffers": {
+                "count": 1473,
+                "totalMs": 49,
+                "maxMs": 4
+            },
+            "kernel.operation": {
+                "count": 1282,
+                "totalMs": 184,
+                "maxMs": 7
+            },
+            "profile.build": {
+                "count": 83,
+                "totalMs": 637,
+                "maxMs": 107
+            },
+            "profile.query": {
+                "count": 166,
+                "totalMs": 644,
+                "maxMs": 108
+            },
+            "body.batch": {
+                "count": 168,
+                "totalMs": 35574,
+                "maxMs": 387
+            },
+            "kernel.historyConversion": {
+                "count": 83,
+                "totalMs": 10,
+                "maxMs": 1
+            },
+            "body.feature": {
+                "count": 84,
+                "totalMs": 97821,
+                "maxMs": 5212
+            },
+            "worker.kernel.operation": {
+                "count": 83,
+                "totalMs": 34256,
+                "maxMs": 4749
+            },
+            "worker.kernel.historyConversion": {
+                "count": 83,
+                "totalMs": 272,
+                "maxMs": 9
+            },
+            "worker.rpc": {
+                "count": 83,
+                "totalMs": 62265,
+                "maxMs": 5032
+            },
+            "worker.mesh.kernel": {
+                "count": 1,
+                "totalMs": 560,
+                "maxMs": 560
+            },
+            "worker.mesh.buffers": {
+                "count": 1,
+                "totalMs": 19,
+                "maxMs": 19
+            },
+            "body.rebuild": {
+                "count": 1,
+                "totalMs": 98305,
+                "maxMs": 98305
+            },
+            "document.load": {
+                "count": 1,
+                "totalMs": 99232,
+                "maxMs": 99232
+            }
+        }
+    },
+    "sessions": {
+        "count": 86,
+        "allSketchCount": 83,
+        "additionalPlateRepeats": 0,
+        "allZeroBooleans": true,
+        "allZeroFeatureMisses": true,
+        "allPayloadsStable": true,
+        "minElapsedMs": 245,
+        "maxElapsedMs": 794,
+        "named": [
+            {
+                "name": "unchanged:Sk_Plate",
+                "elapsedMs": 384,
+                "mainLoopGapMs": 143,
+                "meshCount": 2
+            },
+            {
+                "name": "unchanged:Sk_RibBox1",
+                "elapsedMs": 482,
+                "mainLoopGapMs": 243,
+                "meshCount": 3
+            },
+            {
+                "name": "unchanged:Sk_SwBlockSlit_B",
+                "elapsedMs": 784,
+                "mainLoopGapMs": 622,
+                "meshCount": 2
+            }
+        ]
+    },
+    "memory": {
+        "mainWasmCapacityByFirstSessions": [556793856, 556793856, 657915904, 766771200],
+        "allSketchMainCapacities": [766771200],
+        "workerHeapCapacityBytes": null
+    },
+    "recordedByteChecks": {
+        "cold": false,
+        "cycles": true
+    },
+    "geometry": {
+        "counts": [1232, 3448, 2255],
+        "bounds": {
+            "min": {
+                "x": -48.390005,
+                "y": -61.970005,
+                "z": 0.3999949999999998
+            },
+            "max": {
+                "x": 48.800005,
+                "y": 62.030005,
+                "z": 16.500005
+            }
+        },
+        "volume": 22330.46097003607,
+        "hiddenGeometry": [
+            {
+                "nodeId": "MWc-Xe1CJSEHPiN4l8hQE",
+                "nodeType": "EditableShapeNode",
+                "visualFound": true,
+                "visualMeshesBuilt": false,
+                "resolvedShapeAvailable": true,
+                "kernelMeshed": false
+            },
+            {
+                "nodeId": "1Xksyz5c7Axv0je6zR_en",
+                "nodeType": "EditableShapeNode",
+                "visualFound": true,
+                "visualMeshesBuilt": false,
+                "resolvedShapeAvailable": true,
+                "kernelMeshed": false
+            }
+        ]
+    },
+    "errors": [],
+    "writeAttempts": [],
+    "independentGeometry": {
+        "algorithm": "ordered-bfs-v1",
+        "browserVersion": "155.0",
+        "kernelSha256": "ff3c489363d2d5538e91e3bab5634265d095d8a6e7722632f95145bf88bec114",
+        "cold": {
+            "ok": true,
+            "orderedGraphMatch": true,
+            "geometryAnchorsMatch": true,
+            "boundsMatch": true,
+            "volumeMatch": true,
+            "maxAnchorDelta": 1.8118839761882555e-13,
+            "volumeDelta": 0,
+            "anchorAbsoluteTolerance": 1e-9,
+            "anchorScaleEpsilons": 32,
+            "volumeAbsoluteTolerance": 0.000001
+        },
+        "cycles": {
+            "ok": true,
+            "orderedGraphMatch": true,
+            "geometryAnchorsMatch": true,
+            "boundsMatch": true,
+            "volumeMatch": true,
+            "maxAnchorDelta": 1.8118839761882555e-13,
+            "volumeDelta": 0,
+            "anchorAbsoluteTolerance": 1e-9,
+            "anchorScaleEpsilons": 32,
+            "volumeAbsoluteTolerance": 0.000001
+        }
+    }
+}

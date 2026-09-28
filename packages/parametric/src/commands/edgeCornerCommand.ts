@@ -14,6 +14,7 @@ import {
     MultistepCommand,
     type ParameterValue,
     PubSub,
+    pickedTopologyIndex,
     property,
     type ShapeMeshData,
     ShapeTypes,
@@ -223,7 +224,8 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
             return;
         }
         const edges = this.stepDatas[0].shapes.map((data) => {
-            const edgeId = this.body.edgeIdAt(data.indexes[0]);
+            const index = pickedTopologyIndex(data);
+            const edgeId = index === undefined ? undefined : this.body.edgeIdAt(index);
             if (edgeId === undefined) {
                 reportSilentIdLoss(this.body, "edge", "a picked fillet/chamfer edge has no tracked id");
             }

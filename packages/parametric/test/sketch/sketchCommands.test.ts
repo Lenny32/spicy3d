@@ -267,6 +267,7 @@ describe("CreateSketch", () => {
             dispose: rs.fn(),
         } as unknown as IFace;
         const pickedFace = {
+            index: 5,
             transformedMul: () => worldFace,
             findSubShapes: () => [],
         } as unknown as IFace;
@@ -295,6 +296,9 @@ describe("CreateSketch", () => {
                 { id: "e1", type: "extrude", sketchId: "missing-sketch", depth: 10 },
             ],
         });
+        const faceIdAt = rs
+            .spyOn(body, "faceIdAt")
+            .mockImplementation((index) => (index === 5 ? "tracked-face-5" : undefined));
         if (rollbackIndex !== undefined) {
             // the fillet/chamfer reselect pick previews the body at this position —
             // a sketch created on it must anchor there, not at the full feature count
@@ -302,23 +306,26 @@ describe("CreateSketch", () => {
         }
         (app as any).activeView = { document };
         const enter = rs.spyOn(SketchEditor, "enter").mockImplementation(() => ({}) as any);
-        return { app, body, enter };
+        return { app, body, enter, faceIdAt };
     }
 
     test.each([
         { name: "the live rollback position on a rollback preview", rollbackIndex: 1, expected: 1 },
         { name: "the full feature count outside a rollback preview", rollbackIndex: undefined, expected: 2 },
     ])("a face pick anchors refPositions to $name", async ({ rollbackIndex, expected }) => {
-        const { app, body, enter } = setup(rollbackIndex);
+        const { app, body, enter, faceIdAt } = setup(rollbackIndex);
         try {
             await new CreateSketch().execute(app);
 
             expect(enter).toHaveBeenCalledTimes(1);
             const node = enter.mock.calls[0][0] as SketchNode;
+            expect(faceIdAt).toHaveBeenCalledWith(5);
+            expect(node.planeRef?.faceId).toBe("tracked-face-5");
             expect(body.features.length).toBe(2);
             expect(node.data.refPositions).toEqual({ [body.id]: expected });
         } finally {
             enter.mockRestore();
+            faceIdAt.mockRestore();
         }
     });
 });

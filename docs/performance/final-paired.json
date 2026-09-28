@@ -1,0 +1,690 @@
+{
+    "directory": "C:\\Users\\lcormi\\AppData\\Local\\Temp\\opencode\\spicy3d-final-pair-05xDWx",
+    "revision": "7b0b384d990d16755846e094f18bae94235cef9c",
+    "modelSha256Before": "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+    "sourceBeforeBuild": "31570b914ba7231be5baa443dbd11b76758ebb58092e40d0787ce79a876c040c",
+    "buildInputsBefore": "211a16580b3afba65ae635229e04c05e76ae29f85006a447dff83a273dc49c0f",
+    "modes": {
+        "main": {
+            "output": "C:\\Users\\lcormi\\AppData\\Local\\Temp\\opencode\\spicy3d-final-pair-05xDWx\\main.json",
+            "rawSha256": "9a405213243c7db7d548294e93de6ad11fb1b76c6f61e5add02764c349d43ffc",
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "passed": true
+        },
+        "hybrid": {
+            "output": "C:\\Users\\lcormi\\AppData\\Local\\Temp\\opencode\\spicy3d-final-pair-05xDWx\\hybrid.json",
+            "rawSha256": "6f9e49bb690335005e2be7fc116ef2da27707b16382220a036af703a31551d40",
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "passed": true
+        }
+    },
+    "sourceAfterBuild": "31570b914ba7231be5baa443dbd11b76758ebb58092e40d0787ce79a876c040c",
+    "distSha256": "50dbc88e36bddfdd1eabf9981e9af414c5da73c3ff293d80a4df91b7e3aa7fe0",
+    "passed": true,
+    "sourceAfterPair": "31570b914ba7231be5baa443dbd11b76758ebb58092e40d0787ce79a876c040c",
+    "buildInputsAfter": "211a16580b3afba65ae635229e04c05e76ae29f85006a447dff83a273dc49c0f",
+    "modelSha256After": "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+    "baselineRevision": "bf111c777bb2aa4d266146a51372a6d6081f7b4e",
+    "reports": {
+        "main": {
+            "rawSha256": "9a405213243c7db7d548294e93de6ad11fb1b76c6f61e5add02764c349d43ffc",
+            "browserVersion": "155.0",
+            "environment": {
+                "platform": "win32",
+                "release": "10.0.26200",
+                "cpu": "Intel(R) Core(TM) i9-10900K CPU @ 3.70GHz",
+                "logicalCpus": 20,
+                "memoryBytes": 68412256256,
+                "node": "v24.12.0"
+            },
+            "deploymentOverride": {
+                "performance": {
+                    "geometryWorker": false
+                }
+            },
+            "startupConfig": {
+                "geometryWorker": false,
+                "kernelMode": "main"
+            },
+            "scenarios": [
+                {
+                    "name": "cold-open",
+                    "elapsedMs": 42900,
+                    "maxEventLoopGapMs": 4776,
+                    "mainBooleanCount": 83,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 4729,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 1474,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "unchanged:Sk_Plate",
+                    "elapsedMs": 298,
+                    "maxEventLoopGapMs": 162,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 2,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "unchanged:Sk_RibBox1",
+                    "elapsedMs": 374,
+                    "maxEventLoopGapMs": 173,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 3,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "unchanged:Sk_SwBlockSlit_B",
+                    "elapsedMs": 359,
+                    "maxEventLoopGapMs": 243,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 2,
+                    "mainWasmCapacityBytes": 268435456
+                }
+            ],
+            "repeatedPlate": {
+                "count": 10,
+                "elapsedMs": [312, 301, 721, 303, 668, 287, 663, 301, 263, 285],
+                "minMs": 263,
+                "medianMs": 302,
+                "maxMs": 721
+            },
+            "unchangedSessions": 96,
+            "allSketchCount": 83,
+            "allPayloadsAndTrackedIdsStable": true,
+            "allUnchangedBooleansAndFeatureMissesZero": true,
+            "completeCaptures": 97,
+            "geometry": {
+                "mode": "strict-brep",
+                "pristineCleanBrepIdentical": true,
+                "cycleCleanBrepIdentical": true,
+                "faces": 1232,
+                "edges": 3448,
+                "vertices": 2255,
+                "bounds": {
+                    "min": {
+                        "x": -48.390005,
+                        "y": -61.970005,
+                        "z": 0.3999949999999998
+                    },
+                    "max": {
+                        "x": 48.800005,
+                        "y": 62.030005,
+                        "z": 16.500005
+                    }
+                },
+                "volumeBefore": 22330.460970036078,
+                "volumeAfter": 22330.460970036078
+            },
+            "pickingBefore": {
+                "faces": {
+                    "checkedRanges": 1232,
+                    "analyticCount": 1232,
+                    "nonidentity": 0,
+                    "valid": true
+                },
+                "edges": {
+                    "checkedRanges": 3448,
+                    "analyticCount": 3448,
+                    "nonidentity": 0,
+                    "valid": true
+                }
+            },
+            "pickingAfter": {
+                "faces": {
+                    "checkedRanges": 1232,
+                    "analyticCount": 1232,
+                    "nonidentity": 0,
+                    "valid": true
+                },
+                "edges": {
+                    "checkedRanges": 3448,
+                    "analyticCount": 3448,
+                    "nonidentity": 0,
+                    "valid": true
+                }
+            },
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "hiddenGeometry": [
+                {
+                    "nodeId": "MWc-Xe1CJSEHPiN4l8hQE",
+                    "nodeType": "EditableShapeNode",
+                    "visualFound": true,
+                    "visualMeshesBuilt": false,
+                    "resolvedShapeAvailable": true,
+                    "kernelMeshed": false
+                },
+                {
+                    "nodeId": "1Xksyz5c7Axv0je6zR_en",
+                    "nodeType": "EditableShapeNode",
+                    "visualFound": true,
+                    "visualMeshesBuilt": false,
+                    "resolvedShapeAvailable": true,
+                    "kernelMeshed": false
+                }
+            ],
+            "mainWasmCapacitiesBytes": [268435456],
+            "workerHeapCapacityBytes": null,
+            "residentHits": 0,
+            "coldSourceStages": {
+                "document.decompress": {
+                    "count": 1,
+                    "totalMs": 57,
+                    "maxMs": 57
+                },
+                "document.parse": {
+                    "count": 1,
+                    "totalMs": 19,
+                    "maxMs": 19
+                },
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 76,
+                    "maxMs": 76
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 4,
+                    "maxMs": 4
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 223,
+                    "maxMs": 132
+                },
+                "model.deserialize": {
+                    "count": 1,
+                    "totalMs": 226,
+                    "maxMs": 226
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 1003,
+                    "maxMs": 122
+                },
+                "mesh.kernel": {
+                    "count": 1474,
+                    "totalMs": 1438,
+                    "maxMs": 470
+                },
+                "mesh.buffers": {
+                    "count": 1474,
+                    "totalMs": 59,
+                    "maxMs": 12
+                },
+                "kernel.operation": {
+                    "count": 1365,
+                    "totalMs": 35735,
+                    "maxMs": 4729
+                },
+                "profile.build": {
+                    "count": 83,
+                    "totalMs": 627,
+                    "maxMs": 105
+                },
+                "profile.query": {
+                    "count": 166,
+                    "totalMs": 633,
+                    "maxMs": 105
+                },
+                "body.batch": {
+                    "count": 85,
+                    "totalMs": 40187,
+                    "maxMs": 4768
+                },
+                "kernel.historyConversion": {
+                    "count": 166,
+                    "totalMs": 381,
+                    "maxMs": 11
+                },
+                "body.feature": {
+                    "count": 84,
+                    "totalMs": 40171,
+                    "maxMs": 4767
+                },
+                "body.rebuild": {
+                    "count": 1,
+                    "totalMs": 40930,
+                    "maxMs": 40930
+                },
+                "document.load": {
+                    "count": 1,
+                    "totalMs": 42311,
+                    "maxMs": 42311
+                }
+            },
+            "errors": [],
+            "writeAttempts": []
+        },
+        "hybrid": {
+            "rawSha256": "6f9e49bb690335005e2be7fc116ef2da27707b16382220a036af703a31551d40",
+            "browserVersion": "155.0",
+            "environment": {
+                "platform": "win32",
+                "release": "10.0.26200",
+                "cpu": "Intel(R) Core(TM) i9-10900K CPU @ 3.70GHz",
+                "logicalCpus": 20,
+                "memoryBytes": 68412256256,
+                "node": "v24.12.0"
+            },
+            "deploymentOverride": {
+                "performance": {
+                    "geometryWorker": true
+                }
+            },
+            "startupConfig": {
+                "geometryWorker": true,
+                "kernelMode": "hybrid"
+            },
+            "scenarios": [
+                {
+                    "name": "cold-open",
+                    "elapsedMs": 90050,
+                    "maxEventLoopGapMs": 1269,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 83,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 4681,
+                    "meshCount": 1474,
+                    "mainWasmCapacityBytes": 658833408
+                },
+                {
+                    "name": "unchanged:Sk_Plate",
+                    "elapsedMs": 446,
+                    "maxEventLoopGapMs": 153,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 2,
+                    "mainWasmCapacityBytes": 658833408
+                },
+                {
+                    "name": "unchanged:Sk_RibBox1",
+                    "elapsedMs": 528,
+                    "maxEventLoopGapMs": 254,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 3,
+                    "mainWasmCapacityBytes": 658833408
+                },
+                {
+                    "name": "unchanged:Sk_SwBlockSlit_B",
+                    "elapsedMs": 966,
+                    "maxEventLoopGapMs": 758,
+                    "mainBooleanCount": 0,
+                    "workerBooleanCount": 0,
+                    "longestMainBooleanMs": 0,
+                    "longestWorkerBooleanMs": 0,
+                    "meshCount": 2,
+                    "mainWasmCapacityBytes": 761790464
+                }
+            ],
+            "repeatedPlate": {
+                "count": 10,
+                "elapsedMs": [407, 387, 723, 284, 319, 301, 321, 306, 299, 292],
+                "minMs": 284,
+                "medianMs": 312.5,
+                "maxMs": 723
+            },
+            "unchangedSessions": 96,
+            "allSketchCount": 83,
+            "allPayloadsAndTrackedIdsStable": true,
+            "allUnchangedBooleansAndFeatureMissesZero": true,
+            "completeCaptures": 97,
+            "geometry": {
+                "mode": "hybrid-ordered-graph-v1",
+                "pristineCleanBrepIdentical": false,
+                "cycleCleanBrepIdentical": true,
+                "independentCold": {
+                    "ok": true,
+                    "orderedGraphMatch": true,
+                    "geometryAnchorsMatch": true,
+                    "boundsMatch": true,
+                    "volumeMatch": true,
+                    "maxAnchorDelta": 1.5276668818842154e-13,
+                    "volumeDelta": 0,
+                    "anchorAbsoluteTolerance": 1e-9,
+                    "anchorScaleEpsilons": 32,
+                    "volumeAbsoluteTolerance": 0.000001
+                },
+                "independentCycles": {
+                    "ok": true,
+                    "orderedGraphMatch": true,
+                    "geometryAnchorsMatch": true,
+                    "boundsMatch": true,
+                    "volumeMatch": true,
+                    "maxAnchorDelta": 1.5276668818842154e-13,
+                    "volumeDelta": 0,
+                    "anchorAbsoluteTolerance": 1e-9,
+                    "anchorScaleEpsilons": 32,
+                    "volumeAbsoluteTolerance": 0.000001
+                },
+                "faces": 1232,
+                "edges": 3448,
+                "vertices": 2255,
+                "bounds": {
+                    "min": {
+                        "x": -48.390005,
+                        "y": -61.970005,
+                        "z": 0.3999949999999998
+                    },
+                    "max": {
+                        "x": 48.800005,
+                        "y": 62.030005,
+                        "z": 16.500005
+                    }
+                },
+                "volumeBefore": 22330.46097003607,
+                "volumeAfter": 22330.46097003607
+            },
+            "pickingBefore": {
+                "faces": {
+                    "checkedRanges": 1232,
+                    "analyticCount": 1232,
+                    "nonidentity": 0,
+                    "valid": true
+                },
+                "edges": {
+                    "checkedRanges": 3448,
+                    "analyticCount": 3448,
+                    "nonidentity": 0,
+                    "valid": true
+                }
+            },
+            "pickingAfter": {
+                "faces": {
+                    "checkedRanges": 1232,
+                    "analyticCount": 1232,
+                    "nonidentity": 0,
+                    "valid": true
+                },
+                "edges": {
+                    "checkedRanges": 3448,
+                    "analyticCount": 3448,
+                    "nonidentity": 0,
+                    "valid": true
+                }
+            },
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "hiddenGeometry": [
+                {
+                    "nodeId": "MWc-Xe1CJSEHPiN4l8hQE",
+                    "nodeType": "EditableShapeNode",
+                    "visualFound": true,
+                    "visualMeshesBuilt": false,
+                    "resolvedShapeAvailable": true,
+                    "kernelMeshed": false
+                },
+                {
+                    "nodeId": "1Xksyz5c7Axv0je6zR_en",
+                    "nodeType": "EditableShapeNode",
+                    "visualFound": true,
+                    "visualMeshesBuilt": false,
+                    "resolvedShapeAvailable": true,
+                    "kernelMeshed": false
+                }
+            ],
+            "mainWasmCapacitiesBytes": [658833408, 761790464],
+            "workerHeapCapacityBytes": null,
+            "residentHits": 82,
+            "coldSourceStages": {
+                "document.decompress": {
+                    "count": 1,
+                    "totalMs": 49,
+                    "maxMs": 49
+                },
+                "document.parse": {
+                    "count": 1,
+                    "totalMs": 18,
+                    "maxMs": 18
+                },
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 67,
+                    "maxMs": 67
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 1,
+                    "maxMs": 1
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 222,
+                    "maxMs": 129
+                },
+                "model.deserialize": {
+                    "count": 1,
+                    "totalMs": 225,
+                    "maxMs": 225
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 1004,
+                    "maxMs": 124
+                },
+                "mesh.kernel": {
+                    "count": 1473,
+                    "totalMs": 966,
+                    "maxMs": 63
+                },
+                "mesh.buffers": {
+                    "count": 1473,
+                    "totalMs": 68,
+                    "maxMs": 11
+                },
+                "kernel.operation": {
+                    "count": 1282,
+                    "totalMs": 205,
+                    "maxMs": 8
+                },
+                "profile.build": {
+                    "count": 83,
+                    "totalMs": 624,
+                    "maxMs": 107
+                },
+                "profile.query": {
+                    "count": 166,
+                    "totalMs": 629,
+                    "maxMs": 107
+                },
+                "body.batch": {
+                    "count": 168,
+                    "totalMs": 38065,
+                    "maxMs": 425
+                },
+                "kernel.historyConversion": {
+                    "count": 83,
+                    "totalMs": 8,
+                    "maxMs": 1
+                },
+                "body.feature": {
+                    "count": 84,
+                    "totalMs": 88027,
+                    "maxMs": 5178
+                },
+                "replica.verify.source": {
+                    "count": 84,
+                    "totalMs": 127,
+                    "maxMs": 21
+                },
+                "replica.copy": {
+                    "count": 166,
+                    "totalMs": 1788,
+                    "maxMs": 34
+                },
+                "replica.verify.copy": {
+                    "count": 166,
+                    "totalMs": 8159,
+                    "maxMs": 140
+                },
+                "replica.export.input": {
+                    "count": 84,
+                    "totalMs": 61,
+                    "maxMs": 13
+                },
+                "replica.capture": {
+                    "count": 83,
+                    "totalMs": 15545,
+                    "maxMs": 264
+                },
+                "worker.replica.import": {
+                    "count": 84,
+                    "totalMs": 112,
+                    "maxMs": 21
+                },
+                "worker.replica.verify": {
+                    "count": 84,
+                    "totalMs": 161,
+                    "maxMs": 27
+                },
+                "worker.kernel.operation": {
+                    "count": 83,
+                    "totalMs": 35557,
+                    "maxMs": 4681
+                },
+                "worker.kernel.historyConversion": {
+                    "count": 83,
+                    "totalMs": 287,
+                    "maxMs": 8
+                },
+                "worker.replica.export": {
+                    "count": 83,
+                    "totalMs": 13021,
+                    "maxMs": 218
+                },
+                "worker.rpc": {
+                    "count": 83,
+                    "totalMs": 49971,
+                    "maxMs": 4954
+                },
+                "replica.import": {
+                    "count": 83,
+                    "totalMs": 4155,
+                    "maxMs": 68
+                },
+                "replica.verify.output": {
+                    "count": 83,
+                    "totalMs": 8171,
+                    "maxMs": 135
+                },
+                "replica.export.retain": {
+                    "count": 82,
+                    "totalMs": 5420,
+                    "maxMs": 96
+                },
+                "replica.install": {
+                    "count": 83,
+                    "totalMs": 17780,
+                    "maxMs": 297
+                },
+                "replica.export.version": {
+                    "count": 82,
+                    "totalMs": 5362,
+                    "maxMs": 92
+                },
+                "worker.mesh.kernel": {
+                    "count": 1,
+                    "totalMs": 558,
+                    "maxMs": 558
+                },
+                "worker.mesh.buffers": {
+                    "count": 1,
+                    "totalMs": 11,
+                    "maxMs": 11
+                },
+                "body.rebuild": {
+                    "count": 1,
+                    "totalMs": 88518,
+                    "maxMs": 88518
+                },
+                "document.load": {
+                    "count": 1,
+                    "totalMs": 89423,
+                    "maxMs": 89423
+                }
+            },
+            "cancellation": {
+                "elapsedMs": 1023,
+                "callerSettled": {
+                    "schemaVersion": 1,
+                    "mode": "hybrid",
+                    "epoch": "3478690075-2340393322-2115410343-4015039666:0",
+                    "telemetryComplete": true,
+                    "dropped": 0,
+                    "pendingRequests": 0,
+                    "pendingNative": 1,
+                    "booleanCount": 83,
+                    "historyCount": 83,
+                    "meshCount": 1,
+                    "meshBufferCount": 1
+                },
+                "realmTelemetry": {
+                    "schemaVersion": 1,
+                    "mode": "hybrid",
+                    "complete": true,
+                    "issues": [],
+                    "workersObserved": 1,
+                    "main": {
+                        "booleanCount": 0,
+                        "booleanMs": 0,
+                        "longestBooleanMs": 0,
+                        "sourceBooleanCount": 0,
+                        "meshCount": 0,
+                        "meshMs": 0,
+                        "historyConversionMs": 0,
+                        "meshBufferMs": 0
+                    },
+                    "worker": {
+                        "complete": true,
+                        "observedBooleanCount": 1,
+                        "booleanCount": 1,
+                        "booleanMs": 857,
+                        "longestBooleanMs": 857,
+                        "historyCount": 1,
+                        "historyConversionMs": 0,
+                        "meshCount": 0,
+                        "meshMs": 0,
+                        "meshBufferMs": 0,
+                        "rpcCount": 1,
+                        "rpcMs": 21,
+                        "pendingBefore": {
+                            "requests": 0,
+                            "native": 0
+                        },
+                        "pendingAfter": {
+                            "requests": 0,
+                            "native": 0
+                        }
+                    },
+                    "booleanCount": 1,
+                    "booleanMs": 857,
+                    "meshCount": 0,
+                    "longestBooleanMs": 857
+                },
+                "sourceDropped": 0
+            },
+            "errors": [],
+            "writeAttempts": []
+        }
+    },
+    "limitations": [
+        "Shared machine; independent full suite running concurrently",
+        "Capacity is not live allocation",
+        "Worker heap/JS/GPU memory not measured",
+        "Hybrid uses explicit graph/anchors/bounds/volume criterion, not pristine BREP byte identity"
+    ]
+}

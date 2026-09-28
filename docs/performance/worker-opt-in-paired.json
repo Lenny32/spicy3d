@@ -1,0 +1,1103 @@
+{
+    "sourceHash": "769747e6a3ddf252fe5d417b564cc1ad2b583b1107cf913d49eb89db8936a397",
+    "buildHash": "0cb12633ae51961cd06b603c4c6233811f24f184831e2074de0f81924b84ce39",
+    "baselineHash": "3fd24c814519217c2df0bb7de08d8ab759d402b163c0254dc786046f732d198f",
+    "modelHash": "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+    "browser": "155.0",
+    "reports": [
+        {
+            "mode": "main",
+            "elapsedMs": 45709,
+            "maxEventLoopGapMs": 5055,
+            "mainWasmCapacityCold": 268435456,
+            "mainWasmCapacityAfterSessions": 268435456,
+            "workerBooleans": 0,
+            "mainBooleans": 83,
+            "longestWorkerBooleanMs": 0,
+            "longestMainBooleanMs": 5013,
+            "residentHits": 0,
+            "stages": {
+                "document.decompress": {
+                    "count": 1,
+                    "totalMs": 48,
+                    "maxMs": 48
+                },
+                "document.parse": {
+                    "count": 1,
+                    "totalMs": 17,
+                    "maxMs": 17
+                },
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 65,
+                    "maxMs": 65
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 2,
+                    "maxMs": 2
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 225,
+                    "maxMs": 129
+                },
+                "model.deserialize": {
+                    "count": 1,
+                    "totalMs": 226,
+                    "maxMs": 226
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 1083,
+                    "maxMs": 121
+                },
+                "mesh.kernel": {
+                    "count": 1474,
+                    "totalMs": 1499,
+                    "maxMs": 495
+                },
+                "mesh.buffers": {
+                    "count": 1474,
+                    "totalMs": 101,
+                    "maxMs": 10
+                },
+                "kernel.operation": {
+                    "count": 1365,
+                    "totalMs": 38225,
+                    "maxMs": 5013
+                },
+                "profile.build": {
+                    "count": 83,
+                    "totalMs": 670,
+                    "maxMs": 106
+                },
+                "profile.query": {
+                    "count": 166,
+                    "totalMs": 675,
+                    "maxMs": 106
+                },
+                "body.batch": {
+                    "count": 85,
+                    "totalMs": 42932,
+                    "maxMs": 5053
+                },
+                "kernel.historyConversion": {
+                    "count": 166,
+                    "totalMs": 446,
+                    "maxMs": 11
+                },
+                "body.feature": {
+                    "count": 84,
+                    "totalMs": 42920,
+                    "maxMs": 5053
+                },
+                "body.rebuild": {
+                    "count": 1,
+                    "totalMs": 43675,
+                    "maxMs": 43675
+                },
+                "document.load": {
+                    "count": 1,
+                    "totalMs": 45142,
+                    "maxMs": 45142
+                }
+            },
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "unchangedSketchSessions": [
+                {
+                    "name": "Sk_Post16_A",
+                    "elapsedMs": 229,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post16_B",
+                    "elapsedMs": 182,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post15_A",
+                    "elapsedMs": 195,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post15_B",
+                    "elapsedMs": 201,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post15_C",
+                    "elapsedMs": 199,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post13_A",
+                    "elapsedMs": 225,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwitchBlock",
+                    "elapsedMs": 187,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post13_B",
+                    "elapsedMs": 182,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post13_C",
+                    "elapsedMs": 184,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post13_D",
+                    "elapsedMs": 196,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Post13_E",
+                    "elapsedMs": 191,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinBoss_A",
+                    "elapsedMs": 197,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinBoss_B",
+                    "elapsedMs": 203,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinBossPin_A",
+                    "elapsedMs": 204,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinBossPin_B",
+                    "elapsedMs": 198,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_J_Rib_A",
+                    "elapsedMs": 193,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_J_Rib_B",
+                    "elapsedMs": 208,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewBoss_RR",
+                    "elapsedMs": 203,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewBoss_RL",
+                    "elapsedMs": 206,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Tube",
+                    "elapsedMs": 222,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinPost_A",
+                    "elapsedMs": 204,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinPost_B",
+                    "elapsedMs": 212,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LocPin_A",
+                    "elapsedMs": 226,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LocPin_B",
+                    "elapsedMs": 216,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LocPin_C",
+                    "elapsedMs": 227,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LocPin_D",
+                    "elapsedMs": 231,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_1",
+                    "elapsedMs": 213,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_2",
+                    "elapsedMs": 270,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_3",
+                    "elapsedMs": 268,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_4",
+                    "elapsedMs": 240,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_5",
+                    "elapsedMs": 212,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_6",
+                    "elapsedMs": 202,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_7",
+                    "elapsedMs": 216,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SmallRib_8",
+                    "elapsedMs": 218,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LowPost_A",
+                    "elapsedMs": 228,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewBoss_Side",
+                    "elapsedMs": 235,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LowRib_A",
+                    "elapsedMs": 242,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LowRib_B",
+                    "elapsedMs": 230,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_LowRib_C",
+                    "elapsedMs": 264,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Foot_Rear",
+                    "elapsedMs": 321,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Foot_Front",
+                    "elapsedMs": 283,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Foot_Side",
+                    "elapsedMs": 254,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SensorWindow",
+                    "elapsedMs": 318,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_OctagonHole",
+                    "elapsedMs": 268,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwitchPocket_A",
+                    "elapsedMs": 257,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwitchPocket_B",
+                    "elapsedMs": 251,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Counterbore_F",
+                    "elapsedMs": 276,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Counterbore_S",
+                    "elapsedMs": 259,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Counterbore_RR",
+                    "elapsedMs": 261,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Counterbore_RL",
+                    "elapsedMs": 270,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewHole_F",
+                    "elapsedMs": 312,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewHole_S",
+                    "elapsedMs": 271,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewHole_RR",
+                    "elapsedMs": 282,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewHole_RL",
+                    "elapsedMs": 267,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_BossBore_F",
+                    "elapsedMs": 265,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_BossBore_S",
+                    "elapsedMs": 279,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_BossBore_RR",
+                    "elapsedMs": 258,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_BossBore_RL",
+                    "elapsedMs": 260,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleT_A",
+                    "elapsedMs": 256,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleT_B",
+                    "elapsedMs": 260,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleT_C",
+                    "elapsedMs": 277,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleL_A",
+                    "elapsedMs": 271,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleL_B",
+                    "elapsedMs": 312,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_PinHoleL_C",
+                    "elapsedMs": 333,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwBlockPocket_A",
+                    "elapsedMs": 283,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwBlockPocket_B",
+                    "elapsedMs": 266,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwBlockSlit_A",
+                    "elapsedMs": 262,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwBlockSlit_B",
+                    "elapsedMs": 266,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Plate",
+                    "elapsedMs": 228,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ThumbWing",
+                    "elapsedMs": 167,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_U_Rib",
+                    "elapsedMs": 163,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Oblong_11_6",
+                    "elapsedMs": 148,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ScrewBoss_Front",
+                    "elapsedMs": 149,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_ThumbRib",
+                    "elapsedMs": 144,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_BottomPocket",
+                    "elapsedMs": 299,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_SwitchGroove",
+                    "elapsedMs": 283,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Truss1",
+                    "elapsedMs": 213,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Truss2",
+                    "elapsedMs": 210,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_Truss3",
+                    "elapsedMs": 169,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_TrussOblong",
+                    "elapsedMs": 153,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_RibBox1",
+                    "elapsedMs": 270,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_RibBox2",
+                    "elapsedMs": 229,
+                    "mainWasmCapacityBytes": 268435456
+                },
+                {
+                    "name": "Sk_RibBox3",
+                    "elapsedMs": 194,
+                    "mainWasmCapacityBytes": 268435456
+                }
+            ],
+            "frames": 108,
+            "inputDuringFirstOperation": false,
+            "topologyMatches": true,
+            "volume": 22330.460970036078,
+            "unchangedPristinePayloads": true
+        },
+        {
+            "mode": "hybrid",
+            "elapsedMs": 98816,
+            "maxEventLoopGapMs": 1305,
+            "mainWasmCapacityCold": 658833408,
+            "mainWasmCapacityAfterSessions": 760741888,
+            "workerBooleans": 83,
+            "mainBooleans": 0,
+            "longestWorkerBooleanMs": 4998,
+            "longestMainBooleanMs": 0,
+            "residentHits": 82,
+            "stages": {
+                "document.decompress": {
+                    "count": 1,
+                    "totalMs": 78,
+                    "maxMs": 78
+                },
+                "document.parse": {
+                    "count": 1,
+                    "totalMs": 17,
+                    "maxMs": 17
+                },
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 95,
+                    "maxMs": 95
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 2,
+                    "maxMs": 2
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 209,
+                    "maxMs": 125
+                },
+                "model.deserialize": {
+                    "count": 1,
+                    "totalMs": 216,
+                    "maxMs": 216
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 1053,
+                    "maxMs": 129
+                },
+                "mesh.kernel": {
+                    "count": 1473,
+                    "totalMs": 1010,
+                    "maxMs": 69
+                },
+                "mesh.buffers": {
+                    "count": 1473,
+                    "totalMs": 45,
+                    "maxMs": 3
+                },
+                "kernel.operation": {
+                    "count": 1282,
+                    "totalMs": 214,
+                    "maxMs": 7
+                },
+                "profile.build": {
+                    "count": 83,
+                    "totalMs": 676,
+                    "maxMs": 112
+                },
+                "profile.query": {
+                    "count": 166,
+                    "totalMs": 683,
+                    "maxMs": 112
+                },
+                "body.batch": {
+                    "count": 168,
+                    "totalMs": 42278,
+                    "maxMs": 440
+                },
+                "kernel.historyConversion": {
+                    "count": 83,
+                    "totalMs": 6,
+                    "maxMs": 1
+                },
+                "body.feature": {
+                    "count": 84,
+                    "totalMs": 96774,
+                    "maxMs": 5525
+                },
+                "replica.capture": {
+                    "count": 83,
+                    "totalMs": 17335,
+                    "maxMs": 312
+                },
+                "worker.replica.import": {
+                    "count": 84,
+                    "totalMs": 85,
+                    "maxMs": 15
+                },
+                "worker.replica.verify": {
+                    "count": 84,
+                    "totalMs": 180,
+                    "maxMs": 27
+                },
+                "worker.kernel.operation": {
+                    "count": 83,
+                    "totalMs": 38688,
+                    "maxMs": 4998
+                },
+                "worker.kernel.historyConversion": {
+                    "count": 83,
+                    "totalMs": 309,
+                    "maxMs": 10
+                },
+                "worker.replica.export": {
+                    "count": 83,
+                    "totalMs": 14315,
+                    "maxMs": 254
+                },
+                "worker.rpc": {
+                    "count": 83,
+                    "totalMs": 54507,
+                    "maxMs": 5296
+                },
+                "replica.install": {
+                    "count": 83,
+                    "totalMs": 19671,
+                    "maxMs": 331
+                },
+                "worker.mesh.kernel": {
+                    "count": 1,
+                    "totalMs": 589,
+                    "maxMs": 589
+                },
+                "worker.mesh.buffers": {
+                    "count": 1,
+                    "totalMs": 11,
+                    "maxMs": 11
+                },
+                "body.rebuild": {
+                    "count": 1,
+                    "totalMs": 97317,
+                    "maxMs": 97317
+                },
+                "document.load": {
+                    "count": 1,
+                    "totalMs": 98213,
+                    "maxMs": 98213
+                }
+            },
+            "trackedIdsHash": "066b5c62cf70c5ef1a8d39b1c7f30d187991502ee2d66342bacc045e331fca2b",
+            "unchangedSketchSessions": [
+                {
+                    "name": "Sk_Post16_A",
+                    "elapsedMs": 339,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post16_B",
+                    "elapsedMs": 307,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post15_A",
+                    "elapsedMs": 304,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post15_B",
+                    "elapsedMs": 307,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post15_C",
+                    "elapsedMs": 319,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post13_A",
+                    "elapsedMs": 308,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwitchBlock",
+                    "elapsedMs": 346,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post13_B",
+                    "elapsedMs": 330,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post13_C",
+                    "elapsedMs": 319,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post13_D",
+                    "elapsedMs": 318,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Post13_E",
+                    "elapsedMs": 336,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinBoss_A",
+                    "elapsedMs": 333,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinBoss_B",
+                    "elapsedMs": 331,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinBossPin_A",
+                    "elapsedMs": 371,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinBossPin_B",
+                    "elapsedMs": 377,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_J_Rib_A",
+                    "elapsedMs": 356,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_J_Rib_B",
+                    "elapsedMs": 368,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewBoss_RR",
+                    "elapsedMs": 374,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewBoss_RL",
+                    "elapsedMs": 357,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Tube",
+                    "elapsedMs": 389,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinPost_A",
+                    "elapsedMs": 360,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinPost_B",
+                    "elapsedMs": 366,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LocPin_A",
+                    "elapsedMs": 396,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LocPin_B",
+                    "elapsedMs": 383,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LocPin_C",
+                    "elapsedMs": 396,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LocPin_D",
+                    "elapsedMs": 371,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_1",
+                    "elapsedMs": 350,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_2",
+                    "elapsedMs": 345,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_3",
+                    "elapsedMs": 353,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_4",
+                    "elapsedMs": 376,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_5",
+                    "elapsedMs": 369,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_6",
+                    "elapsedMs": 373,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_7",
+                    "elapsedMs": 366,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SmallRib_8",
+                    "elapsedMs": 369,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LowPost_A",
+                    "elapsedMs": 384,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewBoss_Side",
+                    "elapsedMs": 389,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LowRib_A",
+                    "elapsedMs": 371,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LowRib_B",
+                    "elapsedMs": 389,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_LowRib_C",
+                    "elapsedMs": 379,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Foot_Rear",
+                    "elapsedMs": 428,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Foot_Front",
+                    "elapsedMs": 479,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Foot_Side",
+                    "elapsedMs": 459,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SensorWindow",
+                    "elapsedMs": 468,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_OctagonHole",
+                    "elapsedMs": 469,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwitchPocket_A",
+                    "elapsedMs": 576,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwitchPocket_B",
+                    "elapsedMs": 602,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Counterbore_F",
+                    "elapsedMs": 604,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Counterbore_S",
+                    "elapsedMs": 651,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Counterbore_RR",
+                    "elapsedMs": 604,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Counterbore_RL",
+                    "elapsedMs": 607,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewHole_F",
+                    "elapsedMs": 625,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewHole_S",
+                    "elapsedMs": 624,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewHole_RR",
+                    "elapsedMs": 623,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewHole_RL",
+                    "elapsedMs": 629,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_BossBore_F",
+                    "elapsedMs": 631,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_BossBore_S",
+                    "elapsedMs": 632,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_BossBore_RR",
+                    "elapsedMs": 662,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_BossBore_RL",
+                    "elapsedMs": 662,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleT_A",
+                    "elapsedMs": 637,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleT_B",
+                    "elapsedMs": 640,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleT_C",
+                    "elapsedMs": 633,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleL_A",
+                    "elapsedMs": 645,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleL_B",
+                    "elapsedMs": 648,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_PinHoleL_C",
+                    "elapsedMs": 639,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwBlockPocket_A",
+                    "elapsedMs": 638,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwBlockPocket_B",
+                    "elapsedMs": 647,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwBlockSlit_A",
+                    "elapsedMs": 672,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwBlockSlit_B",
+                    "elapsedMs": 667,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Plate",
+                    "elapsedMs": 226,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ThumbWing",
+                    "elapsedMs": 229,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_U_Rib",
+                    "elapsedMs": 225,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Oblong_11_6",
+                    "elapsedMs": 212,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ScrewBoss_Front",
+                    "elapsedMs": 219,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_ThumbRib",
+                    "elapsedMs": 208,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_BottomPocket",
+                    "elapsedMs": 522,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_SwitchGroove",
+                    "elapsedMs": 607,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Truss1",
+                    "elapsedMs": 290,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Truss2",
+                    "elapsedMs": 283,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_Truss3",
+                    "elapsedMs": 245,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_TrussOblong",
+                    "elapsedMs": 248,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_RibBox1",
+                    "elapsedMs": 318,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_RibBox2",
+                    "elapsedMs": 283,
+                    "mainWasmCapacityBytes": 760741888
+                },
+                {
+                    "name": "Sk_RibBox3",
+                    "elapsedMs": 285,
+                    "mainWasmCapacityBytes": 760741888
+                }
+            ],
+            "frames": 3439,
+            "inputDuringFirstOperation": true,
+            "topologyMatches": true,
+            "volume": 22330.46097003607,
+            "unchangedPristinePayloads": true
+        }
+    ]
+}

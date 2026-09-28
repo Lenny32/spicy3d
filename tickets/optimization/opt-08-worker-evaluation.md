@@ -6,7 +6,24 @@ Move OCCT kernel ownership and geometry evaluation into a Web Worker so that lon
 
 ## Status
 
-**Gated by opt-01 and opt-07.** Only proceed if measurements show that a single OCCT call (e.g. the `SkirtWall` fuse) blocks the main thread long enough that yielding between features is insufficient.
+**Gate met; approved hybrid deviation integrated, opt-in, in review in
+[PR #62](https://github.com/Lenny32/spicy3d/pull/62).** Post-opt-07 measurements confirmed a multi-second
+single-call block. The implementation offloads supported scheduled booleans and final meshes while
+retaining local OCCT replicas; it is **not worker-only ownership or all-operation offload**. The original
+scope and acceptance checklist below remain the original target, not a claim of completion.
+
+Enable with `{"performance":{"geometryWorker":true}}` in the existing `deployment.json` before startup,
+then reload (literal boolean `true`, browser `Worker` required). Default remains the main-thread scheduler.
+See [enablement and supported paths](../../packages/wasm/WORKER.md#architecture-and-supported-paths) and
+the [delivery summary](README.md#current-delivery-status).
+
+[Latest final paired validation](../../docs/performance/final-paired.md): main/hybrid cold-open
+**42.900 / 90.050 s**, maximum main-loop gap **4.776 / 1.269 s**, and zero downstream booleans/feature
+misses in all 96 unchanged sessions per mode, including all 83 sketches. Hybrid is slower and increases
+main OCCT capacity (256 MiB main versus 628.3125–726.5 MiB hybrid); worker heap/live allocations remain
+unmeasured. Main passes pristine cleaned-BREP byte equality; hybrid passes the approved independent
+topology/geometry criterion, **not pristine BREP byte equality**. Original worker-only acceptance and
+memory/leak validation remain incomplete; the latest report supersedes earlier performance snapshots.
 
 ## Motivation
 

@@ -21,6 +21,7 @@ import {
     type ParameterValue,
     Precision,
     PubSub,
+    pickedTopologyIndex,
     property,
     Result,
     type ShapeMeshData,
@@ -558,7 +559,9 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
                       source: {
                           nodeId: node.id,
                           profiles: worldFaces.map((face, index) => {
-                              const faceId = node.faceIdAt(this.dragData.shapes[index].indexes[0]);
+                              const topologyIndex = pickedTopologyIndex(this.dragData.shapes[index]);
+                              const faceId =
+                                  topologyIndex === undefined ? undefined : node.faceIdAt(topologyIndex);
                               if (faceId === undefined) {
                                   reportSilentIdLoss(node, "face", "a press-pull face has no tracked id");
                               }

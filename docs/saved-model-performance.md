@@ -1,5 +1,30 @@
 # Saved-model loading and sketch performance
 
+## Final post-review pair
+
+[Final validation after both P1 fixes](performance/final-paired.md) passed on **one unchanged build**:
+**42.900 s main / 90.050 s hybrid**, with cold main-loop gaps **4.776 / 1.269 s**. Both modes completed all
+five scenarios and all 83 sketches, including ten repeats: 96 unchanged sessions each, zero booleans/misses,
+stable tracked IDs, explicit main strict-BREP / hybrid independent-geometry checks, picking verification,
+and a real-worker cancelled-but-executed native drain. Source/build/model hashes stayed unchanged.
+Timings are shared-machine observations; hybrid remains slower and uses more main-memory capacity.
+The sections below preserve earlier observations and their then-current limitations.
+
+## Worker profiling preparation
+
+Latest: [same-build main / opt-in hybrid pair](performance/worker-opt-in-paired.md), **45.709 / 98.816 s**,
+82 resident hits and matching complete tracked IDs. The small owner artifact is preserved once. The shared
+harness now enables hybrid through its GET `/deployment.json` route, with main explicitly off by default.
+Final full validation waits for the fallback P1 and picking P1 fixes; no fresh full benchmark ran for this update.
+
+**The results below remain pre-worker evidence.** The worker owner's integrated run has now been audited;
+see [the worker observation and bottleneck review](performance/worker-integrated-observation.md) for its
+99.830-second cold load, improved responsiveness, increased main memory and independent geometry validation.
+That captured snapshot predates later hardening and is not a fresh final-source benchmark. The harness
+requires explicit kernel-mode and cross-realm accounting rather than treating main-thread WASM counts as global. See
+[the worker telemetry handoff](performance-worker-telemetry.md) for exact bridge/protocol hooks and
+the new fail-closed aggregation contract. Existing evidence artifacts are unchanged.
+
 ## Combined AFTER validation (opt-09)
 
 **Passed in real Firefox 155.0**, using the combined working-tree production build (`--allow-dirty`).
