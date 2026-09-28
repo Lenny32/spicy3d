@@ -29,7 +29,7 @@ export class SaveDocumentToFile implements ICommand {
                     PubSub.default.pub("showToast", "error.default:{0}", result.error);
                 }
             },
-            "toast.excuting{0}",
+            "toast.executing{0}",
             I18n.translate("command.doc.saveToFile"),
         );
     }
