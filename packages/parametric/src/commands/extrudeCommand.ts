@@ -32,6 +32,13 @@ import {
     type VisualShapeData,
     type XYZ,
 } from "@spicy3d/core";
+import {
+    type ExtentEnd,
+    extentSides,
+    type SweepSide,
+    sweepSide,
+    THROUGH_ALL_NO_BODY_ERROR,
+} from "../features/extrudeExtent";
 import type { BooleanOperation, ExtrudeFeatureData, ExtrudeTargetFeatureData } from "../features/feature";
 import { reportSilentIdLoss } from "../features/idDiagnostics";
 import { allProfiles, sketchProfiles } from "../features/profileBuilder";
@@ -49,8 +56,21 @@ import {
     planeOfPickedFace,
     SELECTED_PROFILE_STATE,
 } from "./extrudeDragStep";
+import {
+    EXTENT_DISTANCE,
+    EXTENT_OPTIONS,
+    EXTENT_THROUGH_ALL,
+    EXTENT_TO_OBJECT,
+    extentFaceOverlay,
+    toObjectExtentOf,
+    worldFaceOf,
+} from "./extrudeExtentOptions";
+import { showPreviewProblem } from "./featureEditPreview";
 import { prioritizeSketchFaces } from "./profileFaceSort";
 import { toolOverlay } from "./toolOverlay";
+
+/** Options every extrude starts afresh with (see `isPropertyCached`). */
+const UNCACHED_PROPERTIES = new Set(["operation", "targetsInfo", "extent", "extentFaceInfo", "extentOffset"]);
 
 const OPERATION_NEW: I18nKeys = "option.command.operation.new";
 
@@ -325,12 +345,70 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     /** The targets of the last resolution — what a Ctrl+click toggles against. */
     private _lastTargets: readonly ParametricBodyNode[] = [];
 
-    /** Every extrude starts in Auto with its default targets: an explicit choice is for this extrude only. */
+    /**
+     * Every extrude starts in Auto with its default targets and a distance extent: an explicit
+     * choice is for this extrude only (a picked face means nothing to the next one).
+     */
     protected override isPropertyCached(property: Property): boolean {
-        return property.name !== "operation" && property.name !== "targetsInfo";
+        return !UNCACHED_PROPERTIES.has(property.name);
     }
 
-    @property("option.command.symmetric")
+    /** Distance (dragged), up to a face ("To object", picked by a click) or through all. */
+    @property("option.command.extent", { combobox: Combobox.from(EXTENT_OPTIONS) })
+    get extent(): I18nKeys {
+        return this.getPrivateValue("extent", EXTENT_DISTANCE);
+    }
+    set extent(value: I18nKeys) {
+        this.setProperty("extent", value);
+        this.setProperty("isDistance", value === EXTENT_DISTANCE);
+        this.setProperty("isToObject", value === EXTENT_TO_OBJECT);
+        this.showExtentFace();
+        this._dragHandler?.refresh();
+    }
+
+    /** True for a distance extent: only then are the depth and its arrow shown. */
+    get isDistance(): boolean {
+        return this.getPrivateValue("isDistance", true);
+    }
+
+    /** True for a to-object extent: its face and offset are shown, symmetric is not. */
+    get isToObject(): boolean {
+        return this.getPrivateValue("isToObject", false);
+    }
+
+    /** What a to-object extent ends on: a prompt to click a face, or that one was picked. */
+    @property("option.command.extentFace", {
+        type: "info",
+        dependencies: [{ property: "isToObject", value: true }],
+    })
+    get extentFaceInfo(): string {
+        return this.getPrivateValue("extentFaceInfo", "");
+    }
+
+    @property("option.command.extentOffset", {
+        unit: LENGTH_UNITS,
+        dependencies: [{ property: "isToObject", value: true }],
+    })
+    get extentOffset(): ParameterValue {
+        return this.getPrivateValue("extentOffset", 0);
+    }
+    set extentOffset(value: ParameterValue) {
+        this.setProperty("extentOffset", value);
+        this._dragHandler?.refresh();
+    }
+
+    /** The face a to-object extent ends on, as clicked during the drag step. */
+    private _extentFace: VisualShapeData | undefined;
+
+    private showExtentFace() {
+        const key =
+            this._extentFace === undefined
+                ? "option.command.extentFace.none"
+                : "option.command.extentFace.picked";
+        this.setProperty("extentFaceInfo", I18n.translate(key) ?? "");
+    }
+
+    @property("option.command.symmetric", { dependencies: [{ property: "isToObject", value: false }] })
     get symmetric() {
         return this.getPrivateValue("symmetric", false);
     }
@@ -351,7 +429,10 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         if (resolved !== undefined) this._dragHandler.setStartOffset(resolved);
     }
 
-    @property("option.command.depth", { unit: LENGTH_UNITS })
+    @property("option.command.depth", {
+        unit: LENGTH_UNITS,
+        dependencies: [{ property: "isDistance", value: true }],
+    })
     get depth(): ParameterValue {
         return this.getPrivateValue("depth", 0);
     }
@@ -418,6 +499,14 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             buildPreview: this.buildPreview,
             meshArrow: this.meshArrow,
             toggleTarget: this.toggleTarget,
+            depthLocked: () => this.extent !== EXTENT_DISTANCE,
+            extentReady: () => this.extent !== EXTENT_TO_OBJECT || this._extentFace !== undefined,
+            picksExtentFace: () => this.extent === EXTENT_TO_OBJECT,
+            pickExtentFace: (face: VisualShapeData) => {
+                this._extentFace = face;
+                this.showExtentFace();
+                return true;
+            },
             onReady: (handler: ExtrudeDragHandler) => {
                 this._dragHandler = handler;
             },
@@ -442,47 +531,87 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
      * (a cut's removed volume in translucent red, see `toolOverlay`).
      */
     private readonly buildPreview = (state: ExtrudeDragState): ExtrudePreview => {
-        if (Math.abs(state.dist) < Precision.Float) return { meshes: [] };
+        const locked = this.extent !== EXTENT_DISTANCE;
+        if (!locked && Math.abs(state.dist) < Precision.Float) return { meshes: [] };
+        if (this.extent === EXTENT_TO_OBJECT && this._extentFace === undefined) return { meshes: [] };
         const owned: IFace[] = [];
+        const node = state.node as SketchNode | ParametricBodyNode;
         try {
             const faces = ExtrudeFeatureCommand.previewFaces(state, owned);
             if (faces === undefined) return { meshes: [] };
-            const vecsOf = this.sweepVectorsOf(state.node, state.normal, state.dist);
-            const offsetOf = this.offsetVectorOf(state.node, state.normal);
-            const merged = ExtrudeFeatureCommand.buildPrisms(faces, vecsOf, offsetOf);
-            if (!merged.isOk) throw merged.error;
-            const tool = merged.value;
+            const tool = this.buildTool(node, faces, state.normal, state.dist);
+            if (!tool.isOk) {
+                // A face the profile cannot reach, nothing to go through: say so, show nothing.
+                if (locked) {
+                    showPreviewProblem(tool.error);
+                    return { meshes: [] };
+                }
+                throw tool.error;
+            }
+            if (locked) showPreviewProblem(undefined);
             try {
-                const node = state.node as SketchNode | ParametricBodyNode;
-                return this.operationPreview(node.document, tool, !(node instanceof SketchNode));
+                const preview = this.operationPreview(
+                    node.document,
+                    tool.value,
+                    !(node instanceof SketchNode),
+                    (host) => this.buildTool(node, faces, state.normal, state.dist, host),
+                );
+                return this.withExtentFace(preview);
             } finally {
-                tool.dispose();
+                tool.value.dispose();
             }
         } finally {
             owned.forEach((x) => x.dispose());
         }
     };
 
+    /** `preview` with the picked to-object face highlighted over it. */
+    private withExtentFace(preview: ExtrudePreview): ExtrudePreview {
+        if (this.extent !== EXTENT_TO_OBJECT || this._extentFace === undefined) return preview;
+        const owned: IFace[] = [];
+        try {
+            const overlay = extentFaceOverlay(worldFaceOf(this._extentFace, owned));
+            return overlay === undefined
+                ? preview
+                : { ...preview, overlays: [...(preview.overlays ?? []), overlay] };
+        } finally {
+            owned.forEach((x) => x.dispose());
+        }
+    }
+
     /**
      * The preview of `tool` (not disposed here): the boolean result on every resolved target
      * body, each standing in for its body, plus the tool overlay; the tool alone for a new
-     * body or when every boolean fails. A join previews the merged body.
+     * body or when every boolean fails. A join previews the merged body. A through-all join
+     * rebuilds its tool flush with the host (`retool`), as the feature will.
      */
-    private operationPreview(document: IDocument, tool: IShape, pressPull: boolean): ExtrudePreview {
+    private operationPreview(
+        document: IDocument,
+        tool: IShape,
+        pressPull: boolean,
+        retool?: (host: ParametricBodyNode) => Result<IShape>,
+    ): ExtrudePreview {
         const { operation, targets } = this.resolveOperation(document, tool, pressPull);
         if (operation === undefined || targets.length === 0) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
-        const results = this.targetPreviews(operation, targets, tool);
-        if (results.length === 0) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
+        const flush =
+            operation === "fuse" && this.extent === EXTENT_THROUGH_ALL ? retool?.(targets[0]) : undefined;
+        const used = flush?.isOk ? flush.value : tool;
         try {
-            // Intersect keeps only the overlap: there is no tool volume to show besides it.
-            const overlay = operation === "common" ? undefined : this.toolOverlayOf(operation, tool);
-            return {
-                meshes: results.flatMap(({ shape }) => ExtrudeFeatureCommand.meshesOf(shape.mesh).meshes),
-                hide: results.flatMap(({ hide }) => hide),
-                ...(overlay === undefined ? {} : { overlays: [overlay] }),
-            };
+            const results = this.targetPreviews(operation, targets, used);
+            if (results.length === 0) return ExtrudeFeatureCommand.meshesOf(used.mesh);
+            try {
+                // Intersect keeps only the overlap: there is no tool volume to show besides it.
+                const overlay = operation === "common" ? undefined : this.toolOverlayOf(operation, used);
+                return {
+                    meshes: results.flatMap(({ shape }) => ExtrudeFeatureCommand.meshesOf(shape.mesh).meshes),
+                    hide: results.flatMap(({ hide }) => hide),
+                    ...(overlay === undefined ? {} : { overlays: [overlay] }),
+                };
+            } finally {
+                for (const { shape } of results) shape.dispose();
+            }
         } finally {
-            for (const { shape } of results) shape.dispose();
+            if (used !== tool) used.dispose();
         }
     }
 
@@ -627,20 +756,96 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     }
 
     /**
-     * Sweep vectors per face: sketch profiles share the drag plane normal; body faces
-     * sweep along their own outward normal, matching the feature's evaluation.
-     * Symmetric extrusion sweeps both directions.
+     * The extrude's tool for `faces` (world placement): each face swept by its sides
+     * (`sweepSidesOf`) from the start offset, touching prisms merged. `fuseHost` builds a
+     * through-all join flush with that body, as the feature does; otherwise through all
+     * passes every body (what the targets are detected with).
      */
-    private sweepVectorsOf(node: INode, normal: XYZ, dist: number): (face: IFace) => XYZ[] {
-        const bothWays = (vec: XYZ) => (this.symmetric ? [vec, vec.multiply(-1)] : [vec]);
+    private buildTool(
+        node: SketchNode | ParametricBodyNode,
+        faces: IFace[],
+        normal: XYZ,
+        dist: number,
+        fuseHost?: ParametricBodyNode,
+    ): Result<IShape> {
+        const owned: IShape[] = [];
+        try {
+            const end = this.extentEnd(node.document, owned, fuseHost);
+            if (!end.isOk) return Result.err(end.error);
+            return ExtrudeFeatureCommand.buildPrisms(
+                faces,
+                this.sweepSidesOf(node, normal, dist, end.value),
+                this.offsetVectorOf(node, normal),
+            );
+        } finally {
+            owned.forEach((x) => x.dispose());
+        }
+    }
+
+    /** Where the extrusion ends, from the options (see `extrudeExtent.ts`). */
+    private extentEnd(
+        document: IDocument,
+        owned: IShape[],
+        fuseHost?: ParametricBodyNode,
+    ): Result<ExtentEnd> {
+        switch (this.extent) {
+            case EXTENT_TO_OBJECT: {
+                if (this._extentFace === undefined)
+                    return Result.err(I18n.translate("option.command.extentFace.none") ?? "");
+                const faces: IFace[] = [];
+                const face = worldFaceOf(this._extentFace, faces);
+                owned.push(...faces);
+                return Result.ok({
+                    kind: "toObject",
+                    face,
+                    offset: this.resolveLength(this.extentOffset) ?? 0,
+                });
+            }
+            case EXTENT_THROUGH_ALL: {
+                const bodies =
+                    fuseHost === undefined ? ExtrudeFeatureCommand.allBodies(document) : [fuseHost];
+                const bounds = bodies.map((body) => {
+                    const transform = body.worldTransform();
+                    if (transform.equals(Matrix4.identity())) return body.shape.value;
+                    const placed = body.shape.value.transformedMul(transform);
+                    owned.push(placed);
+                    return placed;
+                });
+                if (bounds.length === 0) return Result.err(THROUGH_ALL_NO_BODY_ERROR);
+                return Result.ok({ kind: "throughAll", bounds, flush: fuseHost !== undefined });
+            }
+            default:
+                return Result.ok({ kind: "distance" });
+        }
+    }
+
+    /** Every parametric body with a shape — what a through-all tool is sized against while detecting. */
+    private static allBodies(document: IDocument): ParametricBodyNode[] {
+        return (
+            document.modelManager.findNodes((n) => n instanceof ParametricBodyNode) as ParametricBodyNode[]
+        ).filter((x) => x.shape.isOk);
+    }
+
+    /**
+     * The sides each face sweeps (`extentSides`): sketch profiles share the drag plane normal;
+     * body faces sweep along their own outward normal, matching the feature's evaluation.
+     * Symmetric extrusion sweeps both directions (never a to-object extent: it has no mirror).
+     */
+    private sweepSidesOf(
+        node: INode,
+        normal: XYZ,
+        dist: number,
+        end: ExtentEnd,
+    ): (face: IFace) => SweepSide[] {
+        const second = this.symmetric && end.kind !== "toObject" ? end : undefined;
         return node instanceof SketchNode
-            ? () => bothWays(normal.multiply(dist))
-            : (face) => bothWays(face.normal(0, 0)[1].multiply(dist));
+            ? () => extentSides(end, second, normal, dist)
+            : (face) => extentSides(end, second, face.normal(0, 0)[1], dist);
     }
 
     /**
      * Start-offset vector per face: sketch profiles share the drag plane normal;
-     * body faces offset along their own outward normal, matching `sweepVectorsOf`.
+     * body faces offset along their own outward normal, matching `sweepSidesOf`.
      */
     private offsetVectorOf(node: INode, normal: XYZ): (face: IFace) => XYZ {
         return node instanceof SketchNode
@@ -667,7 +872,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
      */
     private static buildPrisms(
         faces: IFace[],
-        vecsOf: (face: IFace) => XYZ[],
+        sidesOf: (face: IFace) => SweepSide[],
         offsetOf: (face: IFace) => XYZ,
     ): Result<IShape> {
         const prisms: IShape[] = [];
@@ -675,8 +880,8 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         try {
             for (const face of faces) {
                 const sweptFace = ExtrudeFeatureCommand.translateFace(face, offsetOf(face), owned);
-                for (const vec of vecsOf(face)) {
-                    const prism = shapeFactory.prism(sweptFace, vec);
+                for (const side of sidesOf(face)) {
+                    const prism = sweepSide(sweptFace, side);
                     if (!prism.isOk) {
                         prisms.forEach((x) => x.dispose());
                         return Result.err(prism.error);
@@ -715,6 +920,11 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             return;
         }
         const depth = depthResult.value;
+        const refusal = this.extentRefusal();
+        if (refusal !== undefined) {
+            PubSub.default.pub("showToast", "error.default:{0}", refusal);
+            return;
+        }
 
         // Body-face fingerprints are captured in world coordinates (see the feature's
         // `source` contract); sketch profiles keep their raw faces.
@@ -722,8 +932,17 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         const worldFaces = this.dragData.shapes.map((x) => ExtrudeFeatureCommand.worldFace(x, owned));
         const feature = this.buildFeature(node, this.depth, worldFaces);
         try {
+            const resolved = this.resolveCommitted(node, depth, plane.normal, worldFaces);
+            if (
+                this.extent === EXTENT_THROUGH_ALL &&
+                (resolved.operation === undefined || resolved.targets.length === 0)
+            ) {
+                // A new body has nothing to go through: refuse rather than add a failing body.
+                PubSub.default.pub("showToast", "error.default:{0}", THROUGH_ALL_NO_BODY_ERROR);
+                return;
+            }
             Transaction.execute(this.document, "excute feature.extrude", () => {
-                this.commitFeature(node, feature, depth, plane.normal, worldFaces);
+                this.commitFeature(node, feature, resolved);
                 if (node instanceof SketchNode) {
                     // The sketch is consumed by the feature; hide it. Same transaction,
                     // so undo restores the visibility together with the body.
@@ -736,6 +955,23 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         }
     }
 
+    /** Why the extent cannot be committed as it stands; undefined when it can. */
+    private extentRefusal(): string | undefined {
+        if (this.extent === EXTENT_TO_OBJECT) {
+            if (this._extentFace === undefined) return I18n.translate("option.command.extentFace.none");
+            const offset = this.resolveParameter(this.extentOffset, LENGTH_UNITS);
+            if (!offset.isOk) return offset.error;
+        }
+        return undefined;
+    }
+
+    /** The feature's extent fields: none for a distance (the format-2 shape), the picked face for "To object". */
+    private extentData(): Pick<ExtrudeFeatureData, "extent"> {
+        if (this.extent === EXTENT_THROUGH_ALL) return { extent: { type: "throughAll" } };
+        if (this.extent !== EXTENT_TO_OBJECT || this._extentFace === undefined) return {};
+        return { extent: toObjectExtentOf(this._extentFace, this.extentOffset) };
+    }
+
     /** The feature payload of the committed drag. */
     private buildFeature(
         node: SketchNode | ParametricBodyNode,
@@ -746,8 +982,9 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             id: Id.generate(),
             type: "extrude",
             depth,
-            ...(this.symmetric ? { symmetric: true } : {}),
+            ...(this.symmetric && this.extent !== EXTENT_TO_OBJECT ? { symmetric: true } : {}),
             ...(this.startOffset !== 0 ? { startOffset: this.startOffset } : {}),
+            ...this.extentData(),
             ...(node instanceof SketchNode
                 ? {
                       sketchId: node.id,
@@ -784,13 +1021,11 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
      * the file.
      */
     private commitFeature(
-        node: SketchNode | ParametricBodyNode,
+        _node: SketchNode | ParametricBodyNode,
         feature: ExtrudeFeatureData,
-        depth: number,
-        normal: XYZ,
-        worldFaces: IFace[],
+        resolved: ResolvedOperation,
     ): void {
-        const { operation, targets } = this.resolveCommitted(node, depth, normal, worldFaces);
+        const { operation, targets } = resolved;
         if (operation !== undefined && targets.length > 0) {
             applyExtrudeToTargets({ ...feature, operation }, targets);
         } else {
@@ -814,11 +1049,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             if (!profiles.isOk) return { targets: [] };
             faces = profiles.value.outer;
         }
-        const built = ExtrudeFeatureCommand.buildPrisms(
-            faces,
-            this.sweepVectorsOf(node, normal, depth),
-            this.offsetVectorOf(node, normal),
-        );
+        const built = this.buildTool(node, faces, normal, depth);
         if (!built.isOk) return { targets: [] };
         try {
             return this.resolveOperation(node.document, built.value, !(node instanceof SketchNode));

@@ -256,9 +256,12 @@ feature by its `type`:
 - **Alternatives are one group**: an extrude's input `sketchId` + `profiles` + `source` (a sketch or
   press-pull faces) at `…/param/input`; a revolve's `sketchId` + `profiles` at `…/param/input` and its
   axis `axis` + `axisSource` + `constructionAxisRef` at `…/param/axis`.
+- **Extents** (parametric 3): an extrude's `extent` / `secondExtent` merge by their `type`; a changed
+  type is one value. A to-object extent's `face` (a `ProfileRef`) + `nodeId` are one pick, its `offset`
+  an expression of its own.
 - **References** (checked by the integrity pass): `sketchId`, `source.nodeId`, `axisSource.nodeId`,
-  `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id` → tracked
-  sub-shape ids; `profiles[].entities` → entities of the feature's sketch; `constructionAxisRef` → a
+  `extent.nodeId`, `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id`,
+  `extent.face.id` → tracked sub-shape ids; `profiles[].entities` → entities of the feature's sketch; `constructionAxisRef` → a
   construction ref (its `featureIndex` a timeline position).
 - A feature type this build does not know: base fields as above, every other field one value.
 - Consumed boolean tools are the body's children in the tree; the child relation is re-derived from
@@ -691,6 +694,32 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `startOffset`: expression
       - `operation`: scalar
       - `profiles`: atomic of ref → profile
+      - `extent`: union on `type` (distance, toObject, throughAll, any other)
+        - `type: "distance"`
+          - `type`: scalar
+        - `type: "toObject"`
+          - `type`: scalar
+          - `face`: ref → profile
+          - `nodeId`: ref → node
+          - `offset`: expression
+          - group `face` (one value): `face`, `nodeId`
+        - `type: "throughAll"`
+          - `type`: scalar
+        - any other `type`
+          - atomic
+      - `secondExtent`: union on `type` (distance, toObject, throughAll, any other)
+        - `type: "distance"`
+          - `type`: scalar
+        - `type: "toObject"`
+          - `type`: scalar
+          - `face`: ref → profile
+          - `nodeId`: ref → node
+          - `offset`: expression
+          - group `face` (one value): `face`, `nodeId`
+        - `type: "throughAll"`
+          - `type`: scalar
+        - any other `type`
+          - atomic
       - group `input` (one value): `sketchId`, `source`, `profiles`
     - `type: "revolve"`
       - `id`: scalar
