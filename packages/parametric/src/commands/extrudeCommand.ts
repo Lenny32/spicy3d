@@ -6,6 +6,7 @@ import {
     BoundingBox,
     Combobox,
     command,
+    I18n,
     type I18nKeys,
     type IDocument,
     Id,
@@ -31,14 +32,14 @@ import {
     type VisualShapeData,
     type XYZ,
 } from "@spicy3d/core";
-import type { BooleanOperation, ExtrudeFeatureData } from "../features/feature";
+import type { BooleanOperation, ExtrudeFeatureData, ExtrudeTargetFeatureData } from "../features/feature";
 import { reportSilentIdLoss } from "../features/idDiagnostics";
 import { allProfiles, sketchProfiles } from "../features/profileBuilder";
 import { captureProfileRef } from "../features/profileRef";
 import { fuseProfiles } from "../features/sweepGeometry";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { SketchNode } from "../sketch/sketchNode";
-import { autoOperation, findExtrudeTarget } from "./extrudeContact";
+import { autoOperation, defaultTargets, findExtrudeTargets, primaryTarget } from "./extrudeContact";
 import {
     createExtrudeArrowMesher,
     type ExtrudeDragHandler,
@@ -63,10 +64,75 @@ const AUTO_LABELS: Record<"cut" | "fuse" | "new", I18nKeys> = {
     new: "option.command.operation.auto.new",
 };
 
-/** The operation an extrude resolved to, and the body it combines with (none for a new body). */
+/**
+ * The operation an extrude resolved to, and the bodies it acts on — the first one hosts the
+ * extrude; none for a new body.
+ */
 interface ResolvedOperation {
     readonly operation?: BooleanOperation;
-    readonly target?: ParametricBodyNode;
+    readonly targets: readonly ParametricBodyNode[];
+}
+
+const TARGET_LABELS: Record<BooleanOperation, I18nKeys> = {
+    cut: "option.command.targets.cut{0}",
+    fuse: "option.command.targets.join{0}",
+    common: "option.command.targets.intersect{0}",
+};
+
+/** The options tab's line naming what an extrude acts on ("Objects to cut: 2 bodies"). */
+export function extrudeTargetsInfo(operation: BooleanOperation, count: number): string {
+    const bodies =
+        count === 1
+            ? I18n.translate("option.command.targets.one")
+            : I18n.translate("option.command.targets.many{0}", count);
+    return I18n.translate(TARGET_LABELS[operation], bodies) ?? "";
+}
+
+/**
+ * Commits an extrude acting on `targets` (the first hosts it; see `extrudeTarget.ts`):
+ * - cut / intersect: the extrude goes into the host's feature list, and every other target
+ *   gets an `extrudeTarget` entry appended, replaying the extrude there;
+ * - join: the extrude joins the host, and the other bodies are merged into it by a boolean
+ *   fuse right after (Fusion's participating bodies end up one body), consumed as tools.
+ * Call inside a transaction.
+ */
+export function applyExtrudeToTargets(
+    feature: ExtrudeFeatureData & { operation: BooleanOperation },
+    targets: readonly ParametricBodyNode[],
+): void {
+    const [host, ...others] = targets;
+    if (feature.operation === "fuse") {
+        const merge =
+            others.length === 0
+                ? []
+                : [
+                      {
+                          id: Id.generate(),
+                          type: "boolean" as const,
+                          operation: "fuse" as const,
+                          toolIds: others.map((x) => x.id),
+                      },
+                  ];
+        host.setFeaturesEmitShapeChanged([...host.features, feature, ...merge]);
+        return;
+    }
+    host.setFeaturesEmitShapeChanged([...host.features, feature]);
+    for (const other of others) addExtrudeTarget(other, host, feature.id);
+}
+
+/** Appends to `body` the entry applying extrude `featureId` of `host` (see `extrudeTarget.ts`). */
+export function addExtrudeTarget(
+    body: ParametricBodyNode,
+    host: ParametricBodyNode,
+    featureId: string,
+): void {
+    const link: ExtrudeTargetFeatureData = {
+        id: Id.generate(),
+        type: "extrudeTarget",
+        bodyId: host.id,
+        featureId,
+    };
+    body.setFeaturesEmitShapeChanged([...body.features, link]);
 }
 
 /** Maps the command's operation dropdown values to boolean operations; new has none. */
@@ -151,7 +217,11 @@ export class SelectSketchProfilesStep implements IStep {
         return { view, shapes: faces, nodes: [selectedSketch], type: "shape" };
     }
 
-    /** Interactive pick: planar faces of allowed nodes only, sketches before solid faces. */
+    /**
+     * Interactive pick: planar faces of allowed nodes only, sketches before solid faces. A
+     * plain click picks one face and goes on; Ctrl/Cmd+click gathers several (toggling), and
+     * Enter goes on with them. Faces of other nodes than the first one's are ignored.
+     */
     private async pickFace(
         document: IDocument,
         view: IView,
@@ -161,12 +231,14 @@ export class SelectSketchProfilesStep implements IStep {
             shapeType: ShapeTypes.face,
             shapeFilter: { allow: (shape) => (shape as IFace).surface().isPlanar() },
             multi: false,
+            toggleWithModifier: true,
             nodeFilter: { allow: this.allowNode },
             selectedState: SELECTED_PROFILE_STATE,
             sortDetected: prioritizeSketchFaces,
         });
         if (shapes.length === 0) return undefined;
-        return { view, shapes, nodes: [shapes[0].owner.node], type: "shape" };
+        const node = shapes[0].owner.node;
+        return { view, shapes: shapes.filter((x) => x.owner.node === node), nodes: [node], type: "shape" };
     }
 
     /**
@@ -230,9 +302,32 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         return this.getPrivateValue("autoOperationLabel", OPERATION_AUTO);
     }
 
-    /** Every extrude starts in Auto: an explicit choice is for this extrude only. */
+    /**
+     * What the extrude acts on, e.g. "Objects to cut: 2 bodies" — by default every body it
+     * goes into (a join: touches); Ctrl/Cmd+click on a body during the drag adds or removes it.
+     */
+    @property("option.command.targets", {
+        type: "info",
+        dependencies: [{ property: "hasTargets", value: true }],
+    })
+    get targetsInfo(): string {
+        return this.getPrivateValue("targetsInfo", "");
+    }
+
+    /** True while the extrude acts on at least one body (the targets line shows only then). */
+    get hasTargets(): boolean {
+        return this.getPrivateValue("hasTargets", false);
+    }
+
+    /** Bodies Ctrl+clicked in beyond the default targets, and default ones Ctrl+clicked out, by id. */
+    private readonly _includedTargets = new Set<string>();
+    private readonly _excludedTargets = new Set<string>();
+    /** The targets of the last resolution — what a Ctrl+click toggles against. */
+    private _lastTargets: readonly ParametricBodyNode[] = [];
+
+    /** Every extrude starts in Auto with its default targets: an explicit choice is for this extrude only. */
     protected override isPropertyCached(property: Property): boolean {
-        return property.name !== "operation";
+        return property.name !== "operation" && property.name !== "targetsInfo";
     }
 
     @property("option.command.symmetric")
@@ -322,6 +417,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             startOffset: this.startOffsetValue,
             buildPreview: this.buildPreview,
             meshArrow: this.meshArrow,
+            toggleTarget: this.toggleTarget,
             onReady: (handler: ExtrudeDragHandler) => {
                 this._dragHandler = handler;
             },
@@ -357,7 +453,8 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             if (!merged.isOk) throw merged.error;
             const tool = merged.value;
             try {
-                return this.operationPreview((state.node as SketchNode | ParametricBodyNode).document, tool);
+                const node = state.node as SketchNode | ParametricBodyNode;
+                return this.operationPreview(node.document, tool, !(node instanceof SketchNode));
             } finally {
                 tool.dispose();
             }
@@ -367,26 +464,88 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     };
 
     /**
-     * The preview of `tool` (not disposed here): the boolean result against the resolved
-     * target body, which it stands in for, plus the tool overlay; the tool alone for a new
-     * body or when the boolean fails.
+     * The preview of `tool` (not disposed here): the boolean result on every resolved target
+     * body, each standing in for its body, plus the tool overlay; the tool alone for a new
+     * body or when every boolean fails. A join previews the merged body.
      */
-    private operationPreview(document: IDocument, tool: IShape): ExtrudePreview {
-        const { operation, target } = this.resolveOperation(document, tool);
-        if (operation === undefined || target === undefined) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
-        const result = this.booleanPreview(operation, target, tool);
-        if (!result.isOk) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
+    private operationPreview(document: IDocument, tool: IShape, pressPull: boolean): ExtrudePreview {
+        const { operation, targets } = this.resolveOperation(document, tool, pressPull);
+        if (operation === undefined || targets.length === 0) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
+        const results = this.targetPreviews(operation, targets, tool);
+        if (results.length === 0) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
         try {
             // Intersect keeps only the overlap: there is no tool volume to show besides it.
             const overlay = operation === "common" ? undefined : this.toolOverlayOf(operation, tool);
             return {
-                ...ExtrudeFeatureCommand.meshesOf(result.value.mesh),
-                hide: [target],
+                meshes: results.flatMap(({ shape }) => ExtrudeFeatureCommand.meshesOf(shape.mesh).meshes),
+                hide: results.flatMap(({ hide }) => hide),
                 ...(overlay === undefined ? {} : { overlays: [overlay] }),
             };
         } finally {
-            result.value.dispose();
+            for (const { shape } of results) shape.dispose();
         }
+    }
+
+    /**
+     * The previewed shapes and the bodies each stands in for: one merged body for a join, one
+     * result per target otherwise. A target whose boolean fails keeps its own display.
+     */
+    private targetPreviews(
+        operation: BooleanOperation,
+        targets: readonly ParametricBodyNode[],
+        tool: IShape,
+    ): { shape: IShape; hide: INode[] }[] {
+        if (operation === "fuse") {
+            const [host, ...others] = targets;
+            const merged = shapeFactory.booleanFuse(
+                [host.shape.value],
+                [tool, ...others.map((x) => x.shape.value)],
+                true,
+            );
+            return merged.isOk ? [{ shape: merged.value, hide: [...targets] }] : [];
+        }
+        return targets.flatMap((target) => {
+            const result = this.booleanPreview(operation, target, tool);
+            return result.isOk ? [{ shape: result.value, hide: [target] }] : [];
+        });
+    }
+
+    /**
+     * Ctrl/Cmd+click on a body during the drag: a target is left out, any other body is added.
+     * The defaults stay live (they follow the depth), the clicks are kept on top of them.
+     */
+    private readonly toggleTarget = (node: INode): boolean => {
+        if (!(node instanceof ParametricBodyNode)) return false;
+        if (this._lastTargets.includes(node)) {
+            this._includedTargets.delete(node.id);
+            this._excludedTargets.add(node.id);
+        } else {
+            this._excludedTargets.delete(node.id);
+            this._includedTargets.add(node.id);
+        }
+        return true;
+    };
+
+    /** `defaults` with the Ctrl+click choices applied: left-out bodies dropped, added ones appended. */
+    private applyTargetToggles(
+        document: IDocument,
+        defaults: readonly ParametricBodyNode[],
+    ): ParametricBodyNode[] {
+        const targets = defaults.filter((x) => !this._excludedTargets.has(x.id));
+        for (const id of this._includedTargets) {
+            if (this._excludedTargets.has(id) || targets.some((x) => x.id === id)) continue;
+            const node = document.modelManager.findNode((n) => n.id === id);
+            if (node instanceof ParametricBodyNode && node.shape.isOk) targets.push(node);
+        }
+        return targets;
+    }
+
+    /** Publishes what the extrude acts on to the options tab (see `targetsInfo`). */
+    private showTargets(operation: BooleanOperation | undefined, targets: readonly ParametricBodyNode[]) {
+        this._lastTargets = targets;
+        const shown = operation !== undefined && targets.length > 0;
+        this.setProperty("targetsInfo", shown ? extrudeTargetsInfo(operation, targets.length) : "");
+        this.setProperty("hasTargets", shown);
     }
 
     private toolOverlayOf(operation: BooleanOperation, tool: IShape) {
@@ -401,26 +560,46 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     }
 
     /**
-     * The operation this extrude applies with `tool` as its prism, and the body it applies
+     * The operation this extrude applies with `tool` as its prism, and the bodies it applies
      * to — shared by the preview and the commit, so both agree on what is modified:
      * - Auto: into a body's material = cut, touching one and growing outward = join, no
      *   contact = new body (see `extrudeContact.ts`); hidden bodies are left alone. The
      *   options tab's Auto item follows the resolution ("Auto (Cut)").
-     * - join/cut/intersect: against the body the tool goes into (else touches); without
+     * - join/cut/intersect: against the bodies the tool goes into (else touches); without
      *   one the extrude is a new body.
      * - new: always a new body.
+     *
+     * The targets are `defaultTargets` with the drag's Ctrl+click choices applied; the host is
+     * the body the tool goes into first (else the first target left). Leaving every body out
+     * makes a new body. A press-pull cuts or intersects its host only — its tool comes off the
+     * host's own chain, which another body cannot replay (`extrudeTarget.ts`).
      */
-    private resolveOperation(document: IDocument, tool: IShape): ResolvedOperation {
-        if (this.operation === OPERATION_AUTO) {
-            const target = findExtrudeTarget(document, tool);
-            const operation = autoOperation(target);
-            this.setProperty("autoOperationLabel", AUTO_LABELS[operation ?? "new"]);
-            return operation === undefined ? {} : { operation, target: target?.node };
+    private resolveOperation(document: IDocument, tool: IShape, pressPull: boolean): ResolvedOperation {
+        const auto = this.operation === OPERATION_AUTO;
+        const explicit = EXTRUDE_OPERATIONS[this.operation];
+        if (!auto && explicit === undefined) {
+            this.showTargets(undefined, []);
+            return { targets: [] };
         }
-        const operation = EXTRUDE_OPERATIONS[this.operation];
-        if (operation === undefined) return {};
-        const target = findExtrudeTarget(document, tool, { includeHidden: true });
-        return target === undefined ? {} : { operation, target: target.node };
+        const contacts = findExtrudeTargets(document, tool, { includeHidden: !auto });
+        const primary = primaryTarget(contacts)?.node;
+        const autoResolved = auto ? autoOperation(primaryTarget(contacts)) : undefined;
+        const operation = auto ? autoResolved : explicit;
+        let targets =
+            operation === undefined
+                ? []
+                : this.applyTargetToggles(document, defaultTargets(operation, contacts));
+        if (primary !== undefined && targets.includes(primary)) {
+            targets = [primary, ...targets.filter((x) => x !== primary)];
+        }
+        if (pressPull && operation !== "fuse") targets = targets.slice(0, 1);
+        const resolved = targets.length === 0 ? undefined : operation;
+        if (auto) {
+            const label = targets.length === 0 ? "new" : (autoResolved ?? "new");
+            this.setProperty("autoOperationLabel", AUTO_LABELS[label]);
+        }
+        this.showTargets(resolved, targets);
+        return resolved === undefined ? { targets: [] } : { operation: resolved, targets };
     }
 
     /** The boolean of the preview prism against the target body's current shape. */
@@ -599,9 +778,10 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
 
     /**
      * Join/cut/intersect (explicit or resolved by Auto): the feature is appended to the
-     * target body and combines with its shape (Fusion-style); without a target (or for
-     * "new") the extrude becomes a standalone body. The stored feature keeps the resolved
-     * operation — Auto never reaches the file.
+     * host body and combines with its shape (Fusion-style), and reaches the other targets
+     * through `applyExtrudeToTargets`; without a target (or for "new") the extrude becomes a
+     * standalone body. The stored feature keeps the resolved operation — Auto never reaches
+     * the file.
      */
     private commitFeature(
         node: SketchNode | ParametricBodyNode,
@@ -610,9 +790,9 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         normal: XYZ,
         worldFaces: IFace[],
     ): void {
-        const { operation, target } = this.resolveCommitted(node, depth, normal, worldFaces);
-        if (operation !== undefined && target !== undefined) {
-            target.setFeaturesEmitShapeChanged([...target.features, { ...feature, operation }]);
+        const { operation, targets } = this.resolveCommitted(node, depth, normal, worldFaces);
+        if (operation !== undefined && targets.length > 0) {
+            applyExtrudeToTargets({ ...feature, operation }, targets);
         } else {
             this.document.modelManager.addNode(
                 new ParametricBodyNode({ document: this.document, features: [feature] }),
@@ -627,11 +807,11 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         normal: XYZ,
         worldFaces: IFace[],
     ): ResolvedOperation {
-        if (this.operation === OPERATION_NEW) return {};
+        if (this.operation === OPERATION_NEW) return { targets: [] };
         let faces = worldFaces;
         if (node instanceof SketchNode && faces.length === 0) {
             const profiles = sketchProfiles(node);
-            if (!profiles.isOk) return {};
+            if (!profiles.isOk) return { targets: [] };
             faces = profiles.value.outer;
         }
         const built = ExtrudeFeatureCommand.buildPrisms(
@@ -639,9 +819,9 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             this.sweepVectorsOf(node, normal, depth),
             this.offsetVectorOf(node, normal),
         );
-        if (!built.isOk) return {};
+        if (!built.isOk) return { targets: [] };
         try {
-            return this.resolveOperation(node.document, built.value);
+            return this.resolveOperation(node.document, built.value, !(node instanceof SketchNode));
         } finally {
             built.value.dispose();
         }

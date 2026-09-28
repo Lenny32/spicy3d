@@ -388,8 +388,21 @@ export class ParametricBodyNode
         this.setProperty("featuresJson", JSON.stringify(features));
     }
 
+    /**
+     * Removes the feature. An extrude that also acts on other bodies takes its
+     * `extrudeTarget` entries there along (same undo step when the caller transacts), so
+     * removing it undoes its effect everywhere instead of leaving them failing.
+     */
     removeFeature(featureId: string): void {
         this.setFeaturesEmitShapeChanged(this.features.filter((feature) => feature.id !== featureId));
+        for (const node of this.document.modelManager.findNodes((n) => n instanceof ParametricBodyNode)) {
+            const body = node as ParametricBodyNode;
+            if (body === this) continue;
+            const kept = body.features.filter(
+                (x) => !(x.type === "extrudeTarget" && x.bodyId === this.id && x.featureId === featureId),
+            );
+            if (kept.length !== body.features.length) body.setFeaturesEmitShapeChanged(kept);
+        }
     }
 
     // ------------------------------------------------------------------ Interactive editing
@@ -940,7 +953,9 @@ export class ParametricBodyNode
 
     /** Cache keys include the scope snapshot so a variable change invalidates dependents. */
     private cacheKey(feature: FeatureData, scope: Scope): string {
-        return scope.size === 0 ? JSON.stringify(feature) : JSON.stringify([feature, [...scope]]);
+        const extra = featureHandler(feature.type)?.cacheKey?.(feature, this.document);
+        const own = extra === undefined ? feature : [feature, extra];
+        return scope.size === 0 ? JSON.stringify(own) : JSON.stringify([own, [...scope]]);
     }
 
     /** The cached entry for `index`, when the feature data, the input and the refs all still match. */
@@ -964,7 +979,9 @@ export class ParametricBodyNode
 
     private snapshotNodeRefs(feature: FeatureData): Map<string, RefSnapshot> {
         const refs = new Map<string, RefSnapshot>();
-        for (const id of featureHandler(feature.type)?.nodeIds(feature) ?? []) {
+        const handler = featureHandler(feature.type);
+        const ids = handler?.cacheRefIds?.(feature, this.document) ?? handler?.nodeIds(feature) ?? [];
+        for (const id of ids) {
             // A feature may reference the host itself (e.g. an extrude sourced on one
             // of its own faces) — the input-identity check already covers that.
             if (id === this.id) continue;

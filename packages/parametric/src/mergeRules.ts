@@ -130,6 +130,13 @@ registerMergePayload("parametric.features", {
                         consumeTools: scalar,
                     },
                 },
+                // an extrude hosted in another body, applied here (parametric 2): the host and the
+                // extrude in it name one thing together — one value
+                extrudeTarget: {
+                    kind: "object",
+                    fields: { ...featureBase, bodyId: nodeRef, featureId: scalar },
+                    groups: { link: ["bodyId", "featureId"] },
+                },
             },
             fallback: { kind: "object", fields: featureBase, rest: atomic },
         },

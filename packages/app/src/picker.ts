@@ -46,6 +46,7 @@ export class Picker implements IPicker {
             options?.highlightState ?? (isFacePick ? VisualStates.faceHighlight : VisualStates.edgeHighlight);
         handler.canFinish = options?.canFinish;
         handler.sortDetected = options?.sortDetected;
+        handler.toggleWithModifier = options?.toggleWithModifier ?? false;
         await this.pickAsync(handler, prompt, controller, multi);
         return this.document.selection.getSelectedShapes();
     }

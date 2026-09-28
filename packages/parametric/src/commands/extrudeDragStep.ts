@@ -12,6 +12,7 @@ import {
     type IStep,
     type IView,
     type IVisualObject,
+    isToggleSelectEvent,
     Line,
     Plane,
     Precision,
@@ -153,6 +154,12 @@ export interface ExtrudeDragData {
     startOffset?: number;
     buildPreview(state: ExtrudeDragState): ExtrudePreview;
     meshArrow(state: ExtrudeDragState): ShapeMeshData[];
+    /**
+     * Ctrl/Cmd+click on a body: the command adds it to or removes it from the bodies the
+     * extrude acts on, and returns true when that changed anything (the preview then
+     * rebuilds). Absent: such a click does nothing special. Works while editing too.
+     */
+    toggleTarget?(node: INode): boolean;
     /** The handler registers itself so the command can push option/depth changes back. */
     onReady?(handler: ExtrudeDragHandler): void;
     /** The handler reports its cleanup so the command can drop the reference. */
@@ -181,8 +188,9 @@ export function planeOfPickedFace(face: VisualShapeData): Plane {
  * start. Two gestures set the depth: drag the arrow with the left button held, or
  * click the arrow and then click a second point (classic click-move-click) — both
  * project the mouse ray onto the extrude normal. A plain click on another profile face
- * (sketch profile or planar solid face) switches the target (Shift toggles faces of
- * the current node). Typing a number enters an exact length. Confirm (button/Enter)
+ * (sketch profile or planar solid face) switches the profiles to it; Ctrl/Cmd+click or
+ * Shift+click toggles a face of the current node, and Ctrl/Cmd+click on a body adds it to or
+ * removes it from the bodies the extrude acts on. Typing a number enters an exact length. Confirm (button/Enter)
  * commits once a non-zero depth exists; Escape cancels (exiting click-move mode first).
  */
 export class ExtrudeDragStep implements IStep {
@@ -328,9 +336,9 @@ export class ExtrudeDragHandler implements IEventHandler {
             this.settle(view);
             return;
         }
-        // A plain click on the arrow starts the click-move-click gesture; Shift keeps
-        // its face-toggle meaning even on the arrow.
-        if (!event.shiftKey && this.isOverArrow(view, event)) {
+        // A plain click on the arrow starts the click-move-click gesture; Shift and Ctrl
+        // keep their toggle meaning even on the arrow.
+        if (!event.shiftKey && !isToggleSelectEvent(event) && this.isOverArrow(view, event)) {
             this.enterMoveMode(view, event);
             return;
         }
@@ -472,22 +480,32 @@ export class ExtrudeDragHandler implements IEventHandler {
         return axis.nearestTo(ray.toLine()).sub(this.state.origin).dot(this.state.normal);
     }
 
+    /**
+     * A click that is not a drag: Shift or Ctrl/Cmd on a face of the current node toggles that
+     * profile; Ctrl/Cmd on a body toggles it as a target; any other click on a profile face
+     * switches to it (replacing the profiles). Editing keeps the feature's own profiles (see
+     * `ExtrudeDragData.editing`), so only the target toggle applies there.
+     */
     private handleClick(view: IView, event: PointerEvent) {
-        // Editing keeps the feature's own profiles (see `ExtrudeDragData.editing`).
-        if (this.data.editing) return;
-        const face = this.detectProfileFace(view, event);
+        const face = this.data.editing ? undefined : this.detectProfileFace(view, event);
+        const toggle = event.shiftKey || isToggleSelectEvent(event);
+        const profileToggle =
+            face !== undefined &&
+            toggle &&
+            face.owner.node === this.state.node &&
+            this.state.faces.length > 0;
+        if (!profileToggle && isToggleSelectEvent(event) && this.toggleTargetAt(view, event)) return;
         if (face === undefined) return;
 
-        const shiftToggle =
-            event.shiftKey && face.owner.node === this.state.node && this.state.faces.length > 0;
-        if (shiftToggle) {
+        if (profileToggle) {
+            // Same node, same plane: the depth stays, so the preview follows the toggle live.
             if (!this.toggleFace(face)) return;
         } else {
             this.switchTarget(face);
+            this.state.dist = 0;
+            this.data.onDist?.(0);
         }
 
-        this.state.dist = 0;
-        this.data.onDist?.(0);
         // Refresh the arrow before syncing the selection: a throwing selection
         // subscriber must not leave the arrow at the stale position.
         this.refreshTempShapes(view);
@@ -496,7 +514,23 @@ export class ExtrudeDragHandler implements IEventHandler {
     }
 
     /**
-     * Shift-click on the current node toggles the face in the extrude set. Returns
+     * Ctrl/Cmd+click on a body (the topmost face under the pointer, sketch faces first, is a
+     * body's): hands it to `toggleTarget` and rebuilds the preview. False when nothing changed.
+     */
+    private toggleTargetAt(view: IView, event: PointerEvent): boolean {
+        if (this.data.toggleTarget === undefined) return false;
+        const hit = prioritizeSketchFaces(
+            view.detectShapes(ShapeTypes.face, event.offsetX, event.offsetY),
+        )[0];
+        const node = hit?.owner.node;
+        if (!(node instanceof ParametricBodyNode) || !this.data.toggleTarget(node)) return false;
+        this.refreshTempShapes(view);
+        view.document.visual.update();
+        return true;
+    }
+
+    /**
+     * Shift/Ctrl-click on the current node toggles the face in the extrude set. Returns
      * false when the click is a no-op (removing the last remaining profile).
      */
     private toggleFace(face: VisualShapeData): boolean {

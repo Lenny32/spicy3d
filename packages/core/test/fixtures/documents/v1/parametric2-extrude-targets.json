@@ -1,0 +1,161 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 1,
+    "moduleVersions": {
+        "parametric": 2,
+        "sketch": 1
+    },
+    "id": "fixture-parametric2-extrude-targets",
+    "name": "Fixture parametric v2: one cut through two bodies",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[0,0,20,0]},{\"id\":2,\"type\":\"line\",\"params\":[20,0,20,20]},{\"id\":3,\"type\":\"line\",\"params\":[20,20,0,20]},{\"id\":4,\"type\":\"line\",\"params\":[0,20,0,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-left",
+                "name": "body.sketch1",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-left\",\"type\":\"extrude\",\"sketchId\":\"sketch-left\",\"depth\":10},{\"id\":\"feature-slot\",\"type\":\"extrude\",\"sketchId\":\"sketch-slot\",\"depth\":-5,\"operation\":\"cut\"}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-left",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[30,0,50,0]},{\"id\":2,\"type\":\"line\",\"params\":[50,0,50,20]},{\"id\":3,\"type\":\"line\",\"params\":[50,20,30,20]},{\"id\":4,\"type\":\"line\",\"params\":[30,20,30,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-right",
+                "name": "body.sketch2",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-right\",\"type\":\"extrude\",\"sketchId\":\"sketch-right\",\"depth\":10},{\"id\":\"feature-slot-target\",\"type\":\"extrudeTarget\",\"bodyId\":\"body-left\",\"featureId\":\"feature-slot\"}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-right",
+                "name": "body.parametricBody2",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 10,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[10,5,40,5]},{\"id\":2,\"type\":\"line\",\"params\":[40,5,40,15]},{\"id\":3,\"type\":\"line\",\"params\":[40,15,10,15]},{\"id\":4,\"type\":\"line\",\"params\":[10,15,10,5]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-slot",
+                "name": "body.sketch3",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

@@ -65,28 +65,63 @@ export interface ExtrudeTargetOptions {
 }
 
 /**
- * The body `tool` combines with: the first parametric body (tree order) the tool goes into,
- * else the first one it touches; undefined when it meets none. Bodies whose shape failed
- * to build are skipped.
+ * Every parametric body `tool` meets, in tree order, with how it meets each. Bodies whose
+ * shape failed to build are skipped, hidden ones too unless `includeHidden`.
  */
-export function findExtrudeTarget(
+export function findExtrudeTargets(
     document: IDocument,
     tool: IShape,
     options: ExtrudeTargetOptions = {},
-): ExtrudeTarget | undefined {
+): ExtrudeTarget[] {
     const candidates = document.modelManager.findNodes(
         (node) =>
             node instanceof ParametricBodyNode &&
             node.shape.isOk &&
             (options.includeHidden === true || (node.visible && node.parentVisible)),
     ) as ParametricBodyNode[];
-    let touching: ParametricBodyNode | undefined;
+    const targets: ExtrudeTarget[] = [];
     for (const node of candidates) {
         const contact = classifyContact(tool, node.shape.value);
-        if (contact === "overlap") return { node, contact };
-        if (contact === "touch") touching ??= node;
+        if (contact !== "none") targets.push({ node, contact });
     }
-    return touching === undefined ? undefined : { node: touching, contact: "touch" };
+    return targets;
+}
+
+/**
+ * The body an extrude is hosted in among `targets`: the first one the tool goes into, else
+ * the first one it touches; undefined when there is none.
+ */
+export function primaryTarget(targets: readonly ExtrudeTarget[]): ExtrudeTarget | undefined {
+    return targets.find((x) => x.contact === "overlap") ?? targets[0];
+}
+
+/**
+ * The body `tool` combines with: the first parametric body (tree order) the tool goes into,
+ * else the first one it touches; undefined when it meets none (see `findExtrudeTargets`).
+ */
+export function findExtrudeTarget(
+    document: IDocument,
+    tool: IShape,
+    options: ExtrudeTargetOptions = {},
+): ExtrudeTarget | undefined {
+    return primaryTarget(findExtrudeTargets(document, tool, options));
+}
+
+/**
+ * The bodies an operation acts on by default, among every body the tool meets: a join merges
+ * every body it touches or goes into (Fusion's participating bodies); a cut or an intersect
+ * only the bodies it goes into — cutting a body the tool merely touches changes nothing, and
+ * intersecting one would leave it empty. When the tool goes into none, the one body it
+ * touches first stays the target, as a single-body extrude always had it.
+ */
+export function defaultTargets(
+    operation: BooleanOperation,
+    targets: readonly ExtrudeTarget[],
+): ParametricBodyNode[] {
+    if (operation === "fuse") return targets.map((x) => x.node);
+    const overlapping = targets.filter((x) => x.contact === "overlap").map((x) => x.node);
+    if (overlapping.length > 0) return overlapping;
+    return targets.length === 0 ? [] : [targets[0].node];
 }
 
 /**

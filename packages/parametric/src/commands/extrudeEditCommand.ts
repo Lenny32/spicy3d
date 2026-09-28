@@ -9,19 +9,25 @@ import {
     command,
     type I18nKeys,
     type INode,
+    type IShape,
     LENGTH_UNITS,
+    Matrix4,
     type ParameterValue,
+    type Property,
     PubSub,
     property,
+    type ShapeMeshData,
+    Transaction,
     type XYZ,
 } from "@spicy3d/core";
 import { findSketch } from "../features/extrude";
-import type { ExtrudeFeatureData } from "../features/feature";
+import { linkedExtrude, withLinkedExtrudeOverride } from "../features/extrudeTarget";
+import type { BooleanOperation, ExtrudeFeatureData, ExtrudeTargetFeatureData } from "../features/feature";
 import { pressPullFaces } from "../features/pressPull";
 import { resolveProfiles } from "../features/profileBuilder";
-import type { ParametricBodyNode } from "../parametricBodyNode";
+import { ParametricBodyNode } from "../parametricBodyNode";
 import { planeOfFace } from "../sketch/planeRef";
-import { EXTRUDE_OPERATIONS } from "./extrudeCommand";
+import { addExtrudeTarget, EXTRUDE_OPERATIONS, extrudeTargetsInfo } from "./extrudeCommand";
 import {
     createExtrudeArrowMesher,
     type ExtrudeDragData,
@@ -54,6 +60,12 @@ interface ExtrudeAxis {
  * previews through `FeatureChainPreview`; confirming replaces the feature as one undo step,
  * Escape leaves the model untouched. The profiles stay the feature's own (re-picking them is
  * "Reselect").
+ *
+ * A sketch extrude that cuts or intersects also lists the other bodies it acts on (its
+ * `extrudeTarget` entries, see `extrudeTarget.ts`): Ctrl/Cmd+click on a body adds or removes
+ * it, previewed live, and confirming adds or removes the entries in the same undo step. The
+ * host body always stays a target — the extrude lives in its feature list. A join acts on the
+ * host alone here (the create command merges several bodies with a separate boolean).
  */
 @command({ key: "feature.editExtrude", icon: "icon-prism" })
 export class ExtrudeEditCommand extends CancelableCommand {
@@ -77,6 +89,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
     }
     set operation(value: I18nKeys) {
         this.setProperty("operation", value);
+        this.showTargets();
         this._dragHandler?.refresh();
     }
 
@@ -84,6 +97,29 @@ export class ExtrudeEditCommand extends CancelableCommand {
     get combines(): boolean {
         return this.getPrivateValue("combines", false);
     }
+
+    /** What the extrude acts on, e.g. "Objects to cut: 2 bodies" (see the class comment). */
+    @property("option.command.targets", {
+        type: "info",
+        dependencies: [{ property: "combines", value: true }],
+    })
+    get targetsInfo(): string {
+        return this.getPrivateValue("targetsInfo", "");
+    }
+
+    /** The session's values are the feature's: none is carried over from another run. */
+    protected override isPropertyCached(property: Property): boolean {
+        return property.name !== "targetsInfo";
+    }
+
+    /** The other target bodies as stored when the session opened (their entry ids by body). */
+    private _storedTargets = new Map<ParametricBodyNode, string>();
+    /** The other target bodies as the session has them now. */
+    private _targets: ParametricBodyNode[] = [];
+    /** Per stored target: the preview of its chain around its entry, built once. */
+    private readonly _targetPreviews = new Map<ParametricBodyNode, FeatureChainPreview>();
+    /** False for a press-pull or a new-body extrude: those act on their host only. */
+    private _multiTarget = false;
 
     @property("option.command.symmetric")
     get symmetric() {
@@ -132,6 +168,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
 
         // After the command's cached options were read (`beforeExecute`): the stored values win.
         this.loadFeature(feature);
+        this.loadTargets(body, feature);
         const preview = new FeatureChainPreview(body, index);
         const axis = this.extrudeAxis(body, feature, index);
         if (axis === undefined) {
@@ -151,6 +188,55 @@ export class ExtrudeEditCommand extends CancelableCommand {
             closeSession();
         }
         if (confirmed) this.commit(body, feature);
+    }
+
+    /** The bodies holding an entry of this extrude — its other targets as stored. */
+    private loadTargets(body: ParametricBodyNode, feature: ExtrudeFeatureData) {
+        this._storedTargets = new Map();
+        for (const node of this.document.modelManager.findNodes((n) => n instanceof ParametricBodyNode)) {
+            const other = node as ParametricBodyNode;
+            if (other === body) continue;
+            const link = other.features.find(
+                (x): x is ExtrudeTargetFeatureData =>
+                    x.type === "extrudeTarget" && x.bodyId === body.id && x.featureId === feature.id,
+            );
+            if (link !== undefined) this._storedTargets.set(other, link.id);
+        }
+        this._targets = [...this._storedTargets.keys()];
+        this._multiTarget = feature.source === undefined && feature.operation !== undefined;
+        this.showTargets();
+    }
+
+    /** The operation being edited, when it can act on other bodies (cut / intersect). */
+    private get targetOperation(): Extract<BooleanOperation, "cut" | "common"> | undefined {
+        if (!this._multiTarget) return undefined;
+        const operation = EXTRUDE_OPERATIONS[this.operation];
+        return operation === "cut" || operation === "common" ? operation : undefined;
+    }
+
+    /** The other targets the session confirms: none unless the operation can have them. */
+    private get effectiveTargets(): ParametricBodyNode[] {
+        return this.targetOperation === undefined ? [] : this._targets;
+    }
+
+    private showTargets() {
+        const operation = EXTRUDE_OPERATIONS[this.operation];
+        const info =
+            this.combines && operation !== undefined
+                ? extrudeTargetsInfo(operation, 1 + this.effectiveTargets.length)
+                : "";
+        this.setProperty("targetsInfo", info);
+    }
+
+    /** Ctrl/Cmd+click on a body: adds or removes it as a target; the host always stays. */
+    private toggleTarget(node: INode, body: ParametricBodyNode): boolean {
+        if (this.targetOperation === undefined) return false;
+        if (!(node instanceof ParametricBodyNode) || node === body || !node.shape.isOk) return false;
+        const index = this._targets.indexOf(node);
+        if (index >= 0) this._targets.splice(index, 1);
+        else this._targets.push(node);
+        this.showTargets();
+        return true;
     }
 
     private loadFeature(feature: ExtrudeFeatureData) {
@@ -176,6 +262,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
             editing: true,
             meshArrow: createExtrudeArrowMesher(),
             buildPreview: (state) => this.buildPreview(body, feature, preview, state.dragging === true),
+            toggleTarget: (node) => this.toggleTarget(node, body),
             onReady: (handler) => {
                 this._dragHandler = handler;
             },
@@ -207,7 +294,94 @@ export class ExtrudeEditCommand extends CancelableCommand {
         const meshes = previewMeshes(body, result.shape);
         if (meshes === undefined) return { meshes: [] };
         const overlay = this.toolOverlayOf(body, edited, preview);
-        return { meshes, hide: [body], ...(overlay === undefined ? {} : { overlays: [overlay] }) };
+        const others = this.targetsPreview(body, edited, preview, dragging);
+        return {
+            meshes: [...meshes, ...others.meshes],
+            hide: [body, ...others.hide],
+            ...(overlay === undefined ? {} : { overlays: [overlay] }),
+        };
+    }
+
+    /**
+     * The other bodies as the session would leave them: a stored target replays its chain with
+     * the edited extrude (or, removed, without it); an added one gets the edited tool applied
+     * to its current shape, where its new entry will go (the end of its list).
+     */
+    private targetsPreview(
+        body: ParametricBodyNode,
+        edited: ExtrudeFeatureData,
+        preview: FeatureChainPreview,
+        dragging: boolean,
+    ): { meshes: ShapeMeshData[]; hide: INode[] } {
+        const effective = this.effectiveTargets;
+        const result = { meshes: [] as ShapeMeshData[], hide: [] as INode[] };
+        const show = (other: ParametricBodyNode, shape: IShape | undefined) => {
+            const meshes = shape === undefined ? undefined : previewMeshes(other, shape);
+            if (meshes === undefined) return;
+            result.meshes.push(...meshes);
+            result.hide.push(other);
+        };
+        for (const [other, linkId] of this._storedTargets) {
+            const kept = effective.includes(other);
+            show(other, this.storedTargetPreview(other, linkId, kept ? edited : null, dragging));
+        }
+        const added = effective.filter((x) => !this._storedTargets.has(x));
+        const operation = this.targetOperation;
+        if (added.length === 0 || operation === undefined) return result;
+        const { operation: _operation, ...prism } = edited;
+        const tool = preview.evaluateStep(prism);
+        if (!tool.isOk) return result;
+        try {
+            for (const other of added)
+                show(other, this.addedTargetPreview(body, other, operation, tool.value));
+        } finally {
+            tool.value.dispose();
+        }
+        return result;
+    }
+
+    /** A stored target's chain with its entry replaying `edited` (`null`: no effect). */
+    private storedTargetPreview(
+        other: ParametricBodyNode,
+        linkId: string,
+        edited: ExtrudeFeatureData | null,
+        dragging: boolean,
+    ): IShape | undefined {
+        const index = other.features.findIndex((x) => x.id === linkId);
+        if (index < 0) return undefined;
+        let chain = this._targetPreviews.get(other);
+        if (chain === undefined) {
+            chain = new FeatureChainPreview(other, index);
+            this._targetPreviews.set(other, chain);
+        }
+        const link = other.features[index] as ExtrudeTargetFeatureData;
+        const evaluated = withLinkedExtrudeOverride(link.featureId, edited, () =>
+            chain.evaluate(link, dragging),
+        );
+        return evaluated.shape;
+    }
+
+    /** `tool` (host-local) applied to an added target's current shape, in its local space. */
+    private addedTargetPreview(
+        body: ParametricBodyNode,
+        other: ParametricBodyNode,
+        operation: BooleanOperation,
+        tool: IShape,
+    ): IShape | undefined {
+        if (!other.shape.isOk) return undefined;
+        const invert = other.worldTransform().invert();
+        const matrix = invert === undefined ? undefined : invert.multiply(body.worldTransform());
+        const placed =
+            matrix === undefined || matrix.equals(Matrix4.identity()) ? tool : tool.transformedMul(matrix);
+        try {
+            const result =
+                operation === "cut"
+                    ? shapeFactory.booleanCut([other.shape.value], [placed])
+                    : shapeFactory.booleanCommon([other.shape.value], [placed]);
+            return result.isOk ? result.value : undefined;
+        } finally {
+            if (placed !== tool) placed.dispose();
+        }
     }
 
     /** The edited extrude's tool — the feature without its operation, on the entering state. */
@@ -248,7 +422,23 @@ export class ExtrudeEditCommand extends CancelableCommand {
                 return;
             }
         }
-        commitFeatureEdit(body, this.editedFeature(feature));
+        const effective = this.effectiveTargets;
+        const removed = [...this._storedTargets].filter(([other]) => !effective.includes(other));
+        const added = effective.filter((x) => !this._storedTargets.has(x));
+        if (removed.length === 0 && added.length === 0) {
+            commitFeatureEdit(body, this.editedFeature(feature));
+            return;
+        }
+        // One undo step for the extrude and its targets. The host first: the entries read it.
+        Transaction.execute(this.document, "edit feature", () => {
+            const edited = this.editedFeature(feature);
+            body.setFeaturesEmitShapeChanged(body.features.map((x) => (x.id === edited.id ? edited : x)));
+            for (const [other, linkId] of removed) {
+                other.setFeaturesEmitShapeChanged(other.features.filter((x) => x.id !== linkId));
+            }
+            for (const other of added) addExtrudeTarget(other, body, feature.id);
+            this.document.visual.update();
+        });
     }
 
     /**
@@ -315,3 +505,11 @@ export class ExtrudeEditCommand extends CancelableCommand {
 }
 
 registerFeatureEditor("extrude", (body, featureId) => new ExtrudeEditCommand(body, featureId));
+
+// Editing an extrude's entry in another target body edits the extrude itself, in its host.
+registerFeatureEditor("extrudeTarget", (body, featureId) => {
+    const entry = body.features.find((x) => x.id === featureId);
+    const linked = entry?.type === "extrudeTarget" ? linkedExtrude(body.document, entry) : undefined;
+    const host = linked?.host instanceof ParametricBodyNode ? linked.host : undefined;
+    return new ExtrudeEditCommand(host, linked?.feature.id);
+});

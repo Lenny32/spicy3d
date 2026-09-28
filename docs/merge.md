@@ -678,7 +678,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, extrudeTarget, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -727,6 +727,14 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `operation`: scalar
       - `toolIds`: atomic of ref → node
       - `consumeTools`: scalar
+    - `type: "extrudeTarget"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `bodyId`: ref → node
+      - `featureId`: scalar
+      - group `link` (one value): `bodyId`, `featureId`
     - any other `type`
       - `id`: scalar
       - `type`: scalar

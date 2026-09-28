@@ -16,6 +16,7 @@ import {
 import { SketchNode } from "../sketch/sketchNode";
 import { type TrackedMethod, trackedBoolean } from "./boolean";
 import {
+    type BooleanOperation,
     completeTrackedHistory,
     type ExtrudeFeatureData,
     type FeatureContext,
@@ -92,6 +93,60 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
         return combineWithInput(built, feature, context);
     },
 };
+
+/**
+ * The prism a sketch extrude sweeps — its tool volume, without the operation — in the
+ * coordinates of the body hosting it. `context.host` is that body; no tracking runs and no
+ * profile is re-anchored (the host's own evaluation does that). Press-pull extrudes read
+ * their host's chain state and have no standalone tool.
+ */
+export function extrudeToolShape(feature: ExtrudeFeatureData, context: FeatureContext): Result<IShape> {
+    if (feature.source !== undefined) return Result.err("Only a sketch extrude can act on other bodies");
+    const params = resolveExtrudeParams(feature, context);
+    if (!params.isOk) return Result.err(params.error);
+    return extrudeFromSketch(
+        { ...feature, operation: undefined },
+        { ...context, tracking: undefined },
+        params.value.depth,
+        params.value.startOffset,
+    );
+}
+
+/**
+ * Combines `tool` (not disposed here) with the chain input by `operation` — tracked when the
+ * kernel and the body allow it, so the input's face and edge ids survive; the tool's own
+ * sub-shapes get positional ids scoped to `featureId`.
+ */
+export function combineWithTool(
+    featureId: string,
+    operation: BooleanOperation,
+    context: FeatureContext,
+    tool: IShape,
+): Result<IShape> {
+    const input = context.input;
+    if (input === undefined) return Result.err("Extrude join/cut/intersect requires a preceding feature");
+    const tracked = trackedBoolean(operation);
+    if (context.tracking !== undefined && tracked !== undefined) {
+        const ids = {
+            shape: tool,
+            faceIds: (tool.findSubShapes(ShapeTypes.face) as IFace[]).map(
+                (_, index) => `${featureId}:tool:f${index}`,
+            ),
+            edgeIds: (tool.findSubShapes(ShapeTypes.edge) as IEdge[]).map(
+                (_, index) => `${featureId}:tool:e${index}`,
+            ),
+        };
+        return applyTrackedOperation(featureId, input, context.tracking, tracked, ids);
+    }
+    switch (operation) {
+        case "cut":
+            return shapeFactory.booleanCut([input], [tool]);
+        case "common":
+            return shapeFactory.booleanCommon([input], [tool]);
+        default:
+            return shapeFactory.booleanFuse([input], [tool], true);
+    }
+}
 
 /** Resolves the numeric parameters first, so a bad expression fails before any geometry runs. */
 function resolveExtrudeParams(

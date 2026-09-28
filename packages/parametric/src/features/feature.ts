@@ -36,7 +36,8 @@ export type FeatureData =
     | RevolveFeatureData
     | FilletFeatureData
     | ChamferFeatureData
-    | BooleanFeatureData;
+    | BooleanFeatureData
+    | ExtrudeTargetFeatureData;
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";
@@ -120,6 +121,21 @@ export interface BooleanFeatureData extends FeatureBase {
      * the scene, still listed and editable under the body in the model tree.
      */
     readonly consumeTools?: boolean;
+}
+
+/**
+ * Where an extrude hosted in another body also acts on this one (a cut through several
+ * bodies, Fusion's "Objects to cut"). The extrude stays in its host's feature list, the only
+ * place its parameters live; each other target body holds one of these at the timeline
+ * position the extrude was applied at, and replays the extrude's tool there with the
+ * extrude's operation. Parametric format 2.
+ */
+export interface ExtrudeTargetFeatureData extends FeatureBase {
+    readonly type: "extrudeTarget";
+    /** The body whose feature list holds the extrude. */
+    readonly bodyId: string;
+    /** The extrude's feature id in that body. */
+    readonly featureId: string;
 }
 
 /**
@@ -277,6 +293,19 @@ export interface FeatureHandler<F extends FeatureData = any> {
     evaluate(feature: F, context: FeatureContext): Result<IShape>;
     /** Ids of nodes this feature references — the body watches them for changes. */
     nodeIds(feature: F): string[];
+    /**
+     * What the evaluation reads from other nodes besides their shapes (e.g. another body's
+     * feature data), folded into the body's cache key so a change there re-evaluates the
+     * feature. Absent: the feature's own payload is the whole key.
+     */
+    cacheKey?(feature: F, document: IDocument): string;
+    /**
+     * The nodes whose shape (and placement) a cached result depends on; defaults to
+     * `nodeIds`. A feature that watches a node only to hear about its data changes (see
+     * `cacheKey`) leaves that node out, so its rebuilt shape alone does not invalidate the
+     * result — two bodies reading each other would otherwise re-evaluate forever.
+     */
+    cacheRefIds?(feature: F, document: IDocument): string[];
     /**
      * Nodes the user is meant to reach from this feature (e.g. the sketch it
      * consumes), shown as link rows in its panel row. A subset of `nodeIds` in
