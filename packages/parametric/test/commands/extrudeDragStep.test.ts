@@ -235,6 +235,61 @@ describe("ExtrudeDragHandler", () => {
         expect(handler.state.arrowHovered).toBe(true);
     });
 
+    test("editing: leaving click-move mode goes back to the stored depth, not zero", () => {
+        const handler = new ExtrudeDragHandler(doc, controller, { ...dragData(), depth: 5, editing: true });
+        const view = twoClickView();
+        const escapeKey = { key: "Escape", preventDefault: () => {}, stopImmediatePropagation: () => {} };
+
+        handler.pointerMove(view, createPointerEvent({ offsetX: 401, offsetY: 255 }));
+        clickArrow(handler, view, 255);
+        expect(handler.state.dragging).toBe(true);
+        handler.pointerMove(view, createPointerEvent({ offsetX: 401, offsetY: 235 }));
+        expect(handler.state.dist).toBeCloseTo(25);
+
+        handler.keyDown(view, escapeKey as KeyboardEvent);
+        expect(handler.state.dist).toBe(5);
+        expect(handler.state.dragging).toBe(false);
+    });
+
+    test("editing: a drag previews as dragging, and once more at rest when released", () => {
+        // The state is one live object: record the flag as each preview is built.
+        const seen: (boolean | undefined)[] = [];
+        const data: ExtrudeDragData = {
+            ...dragData(),
+            depth: 5,
+            editing: true,
+            buildPreview: (state) => {
+                seen.push(state.dragging);
+                return { meshes: [fakeMesh()] };
+            },
+        };
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const view = dragView();
+        const dragging = () => seen;
+
+        handler.pointerDown(view, createPointerEvent({ offsetX: 100, offsetY: 200 }));
+        handler.pointerMove(view, createPointerEvent({ offsetX: 113, offsetY: 200 }));
+        handler.pointerMove(view, createPointerEvent({ offsetX: 120, offsetY: 200 }));
+        const duringDrag = dragging().length;
+        handler.pointerUp(view, createPointerEvent({ offsetX: 120, offsetY: 200 }));
+
+        expect(dragging().slice(0, duringDrag)).toContain(true);
+        expect(dragging().length).toBe(duringDrag + 1);
+        expect(dragging().at(-1)).toBe(false);
+    });
+
+    test("editing: a click on another profile face does not switch the extrude", () => {
+        const face = faceData(other, [3], new XYZ({ x: 0, y: 2, z: 2 }));
+        const view = createHandlerMockView({ document: doc, detectShapes: () => [face] });
+
+        const handler = new ExtrudeDragHandler(doc, controller, { ...dragData(), depth: 5, editing: true });
+        handler.pointerDown(view, createPointerEvent());
+        handler.pointerUp(view, createPointerEvent());
+
+        expect(handler.state.node).toBe(sketch);
+        expect(handler.state.dist).toBe(5);
+    });
+
     test("clicking another sketch's profile face switches the extrude target", () => {
         const setSelectedShapes = rs.fn((_shapes: any, _state: any, _toggle: any) => 0);
         doc.selection = { ...createMockSelection(), setSelectedShapes } as any;

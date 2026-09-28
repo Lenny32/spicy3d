@@ -44,6 +44,8 @@ export interface EdgeCornerPickCallbacks {
     /** Undefined while no edge is selected — no arrow is shown then. */
     arrowData(): EdgeCornerArrowData | undefined;
     setValue(value: number): void;
+    /** A value drag was released — the moment an edit session rebuilds its full preview. */
+    onSettled?(): void;
 }
 
 /**
@@ -105,11 +107,17 @@ export class EdgeCornerPickHandler extends SubshapeSelectionHandler {
         }
     }
 
+    /** True while the value arrow is held. */
+    get dragging(): boolean {
+        return this._dragging;
+    }
+
     override pointerUp(view: IView, event: PointerEvent): void {
         if (this._dragging) {
             this._dragging = false;
             this.pointerEventMap.delete(event.pointerId);
             PubSub.default.pub("clearFloatTip");
+            this.callbacks.onSettled?.();
             return;
         }
         super.pointerUp(view, event);

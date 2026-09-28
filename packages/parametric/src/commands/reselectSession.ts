@@ -194,12 +194,12 @@ export class EdgeReselectSession {
             },
             // Runs after the preview subscription, so the session opens with the preview
             // of the current edges already shown.
-            preselect: () => this.preselect(feature),
+            preselect: () => selectFeatureEdges(this.host, feature.edges),
             // Capture refs (including the stable edge id) while the rolled-back cache
             // still describes the shape the user picked from — after the teardown
             // restores the full chain, edgeIdAt would index the filleted shape, whose
             // edge order differs from the pre-feature one.
-            capture: (picked) => picked.map((x) => this.captureRef(x)),
+            capture: (picked) => picked.map((x) => captureBodyEdgeRef(this.host, x)),
             teardown: () => {
                 active = false;
                 this.clearPreview();
@@ -213,15 +213,6 @@ export class EdgeReselectSession {
                 this.host.setRollbackIndex(undefined);
             },
         });
-    }
-
-    /** The ref of one picked edge, warning when its tracked id went missing. */
-    private captureRef(picked: VisualShapeData): EdgeRef {
-        const edgeId = this.host.edgeIdAt(picked.indexes[0]);
-        if (edgeId === undefined) {
-            reportSilentIdLoss(this.host, "edge", "a re-picked fillet/chamfer edge has no tracked id");
-        }
-        return captureEdgeRef(picked.shape as unknown as IEdge, edgeId, this.host.edgeIdIsShared(edgeId));
     }
 
     private clearPreview(): void {
@@ -257,7 +248,7 @@ export class EdgeReselectSession {
         // narrower interface — both are `INode`, which is what identity means here.
         return selected
             .filter((x) => (x.owner.node as INode) === this.host && x.shape.shapeType === ShapeTypes.edge)
-            .map((x) => this.captureRef(x));
+            .map((x) => captureBodyEdgeRef(this.host, x));
     }
 
     /**
@@ -279,30 +270,45 @@ export class EdgeReselectSession {
             if (previewShape !== shape) shape.dispose();
         }
     }
+}
 
-    /** Selects the edges the feature currently references so the pick starts from them. */
-    private preselect(feature: FilletFeatureData | ChamferFeatureData): void {
-        const shape = this.host.shape;
-        if (!shape.isOk) return;
-        // A failed match is a common reason to re-pick; then there is nothing to preselect.
-        const indexes = matchEdgeIndexes(shape.value, feature.edges);
-        if (!indexes.isOk) return;
-        // Mesh ranges enumerate edges in the same order as findSubShapes (both use
-        // TopExp::MapShapes), so a matched position indexes into the ranges directly.
-        // The range shapes also carry the sub-edge ids detection produces, which the
-        // selection's toggle matching relies on.
-        const ranges = shape.value.mesh.edges?.range;
-        if (ranges === undefined) return;
-        const owner = this.host.document.visual.context.getVisual(this.host) as INodeVisual | undefined;
-        if (owner === undefined) return;
-        const picked: VisualShapeData[] = indexes.value.map((index) => ({
-            owner,
-            shape: ranges[index].shape,
-            transform: owner.worldTransform(),
-            indexes: [index],
-        }));
-        this.host.document.selection.setSelectedShapes(picked, VisualStates.edgeSelected, false);
-    }
+/**
+ * The ref of one picked edge of `host` — its tracked id read from the host's current (possibly
+ * rolled-back) cache, so call it while that cache still describes the shape picked from —
+ * warning when the id went missing.
+ */
+export function captureBodyEdgeRef(
+    host: ReselectHost,
+    picked: VisualShapeData,
+    lossNote = "a re-picked fillet/chamfer edge has no tracked id",
+): EdgeRef {
+    const edgeId = host.edgeIdAt(picked.indexes[0]);
+    if (edgeId === undefined) reportSilentIdLoss(host, "edge", lossNote);
+    return captureEdgeRef(picked.shape as unknown as IEdge, edgeId, host.edgeIdIsShared(edgeId));
+}
+
+/** Selects the edges `edges` match on `host`'s current shape, so a pick starts from them. */
+export function selectFeatureEdges(host: ReselectHost, edges: readonly EdgeRef[]): void {
+    const shape = host.shape;
+    if (!shape.isOk) return;
+    // A failed match is a common reason to re-pick; then there is nothing to preselect.
+    const indexes = matchEdgeIndexes(shape.value, [...edges]);
+    if (!indexes.isOk) return;
+    // Mesh ranges enumerate edges in the same order as findSubShapes (both use
+    // TopExp::MapShapes), so a matched position indexes into the ranges directly.
+    // The range shapes also carry the sub-edge ids detection produces, which the
+    // selection's toggle matching relies on.
+    const ranges = shape.value.mesh.edges?.range;
+    if (ranges === undefined) return;
+    const owner = host.document.visual.context.getVisual(host) as INodeVisual | undefined;
+    if (owner === undefined) return;
+    const picked: VisualShapeData[] = indexes.value.map((index) => ({
+        owner,
+        shape: ranges[index].shape,
+        transform: owner.worldTransform(),
+        indexes: [index],
+    }));
+    host.document.selection.setSelectedShapes(picked, VisualStates.edgeSelected, false);
 }
 
 /**
