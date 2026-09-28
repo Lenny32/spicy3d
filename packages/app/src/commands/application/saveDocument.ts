@@ -33,7 +33,7 @@ export class SaveDocument implements ICommand {
                     PubSub.default.pub("showToast", "toast.document.saved");
                 }
             },
-            "toast.excuting{0}",
+            "toast.executing{0}",
             I18n.translate("command.doc.save"),
         );
     }

@@ -111,7 +111,7 @@ describe("SaveDocumentToFile", () => {
             const cmd = new SaveDocumentToFile();
             await cmd.execute(app);
 
-            expect(templateArg).toBe("toast.excuting{0}");
+            expect(templateArg).toBe("toast.executing{0}");
         } finally {
             PubSub.default.pub = originalPub;
         }

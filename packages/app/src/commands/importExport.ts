@@ -141,7 +141,7 @@ export class Export extends CancelableCommand {
                     await this.exportAsZipAsync(nodes);
                 }
             },
-            "toast.excuting{0}",
+            "toast.executing{0}",
             I18n.translate("command.file.export"),
         );
     }

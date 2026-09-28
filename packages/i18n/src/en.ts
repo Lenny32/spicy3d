@@ -978,7 +978,7 @@ export default {
         "timeline.edit{0}": "Edit {0}",
         "timeline.feature{0}{1}": "{0} ({1})",
         "timeline.title": "Timeline",
-        "toast.command.{0}excuting": "Command {0} is runing",
+        "toast.command.{0}executing": "Command {0} is running",
         "toast.converter.error": "Converter error",
         "toast.converter.invalidColor": "The color is invalid",
         "toast.consumedTool.forbidden":
@@ -988,7 +988,7 @@ export default {
         "toast.document.saved": "Document saved",
         "toast.document.savedToFile": "Document saved to file",
         "toast.downloading": "Downloading",
-        "toast.excuting{0}": "Excuting {0}",
+        "toast.executing{0}": "Executing {0}",
         "toast.fail": "Fail",
         "toast.read.error": "Read error",
         "toast.select.noSelected": "No selected",

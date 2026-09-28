@@ -106,7 +106,7 @@ describe("importFiles", () => {
 
                 await importFiles(app, [new File([], "test.stl")]);
 
-                expect(capturedMessage).toBe("toast.excuting{0}");
+                expect(capturedMessage).toBe("toast.executing{0}");
                 expect(typeof capturedCallback).toBe("function");
             } finally {
                 PubSub.default.pub = originalPub;

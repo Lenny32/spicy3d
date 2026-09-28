@@ -52,7 +52,7 @@ export function createMockApplication(overrides: MockApplicationOverrides = {}):
             create: (doc: IDocument) => ({
                 ...createMockVisualWithDocument(doc),
                 resetEventHandler: () => {},
-                isExcutingHandler: () => false,
+                isExecutingHandler: () => false,
             }),
             ...overrides.visualFactory,
         } as unknown as IVisualFactory,
