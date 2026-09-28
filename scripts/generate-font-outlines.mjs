@@ -251,13 +251,12 @@ function pathOf(contours) {
 function contourSegments(points) {
     if (points.length < 2) return [];
     // Start on an on-curve point (or the implied midpoint of two off-curve ones).
-    let first = points.findIndex((p) => p.on);
+    const first = points.findIndex((p) => p.on);
     let start;
     let ordered;
     if (first < 0) {
         start = mid(points[0], points[1]);
         ordered = [...points.slice(1), points[0]];
-        first = 0;
     } else {
         start = [points[first].x, points[first].y];
         ordered = [...points.slice(first + 1), ...points.slice(0, first)];
