@@ -248,7 +248,9 @@ describe("the create command's extents", () => {
         s.doc.modelManager.addNode(sketch);
         const { cmd, preview, commit } = extrudeCommand(s, sketch);
         cmd.extent = EXTENT_THROUGH_ALL;
+        expect(cmd.isDistance).toBe(false);
         cmd.extent = EXTENT_DISTANCE;
+        expect(cmd.isDistance).toBe(true);
         cmd.depth = -4;
         preview(-4);
         commit();
