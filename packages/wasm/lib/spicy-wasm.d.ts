@@ -726,6 +726,8 @@ interface EmbindModule {
     point(_0: Vector3): ShapeResult;
     line(_0: Vector3, _1: Vector3): ShapeResult;
     prismTracked(_0: TopoDS_Shape, _1: Vector3): TrackedShapeResult;
+    prismUntilTracked(_0: TopoDS_Shape, _1: Vector3, _2: TopoDS_Shape, _3: number): TrackedShapeResult;
+    prismThruAllTracked(_0: TopoDS_Shape, _1: Vector3, _2: Array<TopoDS_Shape>, _3: boolean): TrackedShapeResult;
     revolve(_0: TopoDS_Shape, _1: Ax1, _2: number): ShapeResult;
     revolveTracked(_0: TopoDS_Shape, _1: Ax1, _2: number): TrackedShapeResult;
     box(_0: Pln, _1: number, _2: number, _3: number): ShapeResult;
