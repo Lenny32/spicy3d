@@ -139,7 +139,12 @@ export class FeatureListProperty extends HTMLElement {
             },
         });
         const header = div(
-            { className: style.header, onclick: () => this.toggleExpand(item) },
+            {
+                className: style.header,
+                onclick: () => this.toggleExpand(item),
+                // The two clicks before it toggled the row twice, leaving it as it was.
+                ondblclick: () => this.edit(item),
+            },
             ...(item.icon === undefined ? [] : [svg({ className: style.icon, icon: item.icon })]),
             span({ className: style.name, textContent: item.name ?? new Localize(item.display) }),
             more,
@@ -273,9 +278,14 @@ export class FeatureListProperty extends HTMLElement {
     // --- menu ---
 
     private openMenu(anchor: ContextMenuAnchor, item: FeatureItem) {
-        const entries: ContextMenuEntry[] = [
-            { icon: "icon-edit", label: "common.rename", run: () => this.rename(item) },
-        ];
+        const entries: ContextMenuEntry[] = [];
+        if (item.editable) {
+            entries.push(
+                { icon: item.icon ?? "icon-edit", label: "features.edit", run: () => this.edit(item) },
+                "separator",
+            );
+        }
+        entries.push({ icon: "icon-edit", label: "common.rename", run: () => this.rename(item) });
         if (item.reselectable) {
             entries.push({
                 icon: "icon-sync-alt",
@@ -293,6 +303,11 @@ export class FeatureListProperty extends HTMLElement {
             { icon: "icon-delete", label: "common.delete", danger: true, run: () => this.removeItem(item) },
         );
         this.closeMenu = showContextMenu(anchor, entries);
+    }
+
+    /** Reopens the feature in its interactive session (handles and live preview). */
+    private edit(item: FeatureItem) {
+        if (item.editable) this.node.editFeature?.(item.id);
     }
 
     private rename(item: FeatureItem) {

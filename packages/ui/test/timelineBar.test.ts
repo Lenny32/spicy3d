@@ -60,6 +60,7 @@ function bodyNode(name: string, features: FeatureItem[], faces: Record<string, n
         removeFeature: rs.fn((_featureId: string) => {}),
         reselectShapes: rs.fn((_featureId: string) => {}),
         activateReference: rs.fn((_featureId: string, _key: string) => {}),
+        editFeature: rs.fn((_featureId: string) => {}),
         featureFaces: (featureId: string) => faces[featureId] ?? [],
     });
 }
@@ -386,6 +387,22 @@ describe("TimelineBar", () => {
 
             expect(focused).toEqual(["f1"]);
             expect(setSelectedNodes).toHaveBeenCalledWith([body], false);
+        });
+
+        test("an editable feature reopens in its interactive session, by menu or double-click", () => {
+            const { document, bar } = setup();
+            const body = bodyNode("Body 1", [extrude("f1", { editable: true }), extrude("f2")]);
+            document.modelManager.rootNode.add(body);
+            show(document);
+
+            chooseMenuItem(rightClick(entries(bar)[0]), t("timeline.edit{0}", t("command.feature.fuse")));
+            expect(body.editFeature).toHaveBeenCalledWith("f1");
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            expect(body.editFeature).toHaveBeenCalledTimes(2);
+
+            // A feature without a session only opens its row.
+            entries(bar)[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            expect(body.editFeature).toHaveBeenCalledTimes(2);
         });
 
         test("suppressing a feature is one undo step", () => {

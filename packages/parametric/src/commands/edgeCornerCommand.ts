@@ -149,47 +149,8 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         }
     }
 
-    /**
-     * Arrow placement for the drag handle: anchored at the first picked edge's midpoint,
-     * pointing out of the body — radially for circular edges, otherwise along the
-     * edge-midpoint-to-body-center direction projected perpendicular to the tangent.
-     */
-    private readonly arrowData = (): EdgeCornerArrowData | undefined => {
-        const value = this.valueNumber;
-        if (value === undefined) return undefined;
-        const first = this.document.selection.getSelectedShapes().at(0);
-        if (first === undefined || !(first.owner.node instanceof ParametricBodyNode)) return undefined;
-
-        const world = (first.shape as unknown as IEdge).transformedMul(first.transform) as IEdge;
-        try {
-            const midParam = (world.firstParameter() + world.lastParameter()) / 2;
-            const direction = this.arrowDirection(world, midParam, first);
-            if (direction === undefined) return undefined;
-            return { anchor: world.pointAt(midParam), direction, value: Math.max(value, 0) };
-        } finally {
-            world.dispose();
-        }
-    };
-
-    private arrowDirection(edge: IEdge, midParam: number, data: VisualShapeData): XYZ | undefined {
-        const basis = edge.curve.basisCurve;
-        if (CurveUtils.isCircle(basis)) {
-            return edge.pointAt(midParam).sub(basis.center).normalize();
-        }
-
-        const tangent = edge.curve.d1(midParam).vec.normalize();
-        const node = data.owner.node as ParametricBodyNode;
-        if (tangent === undefined || !node.shape.isOk) return undefined;
-
-        const center = data.transform.ofPoint(BoundingBox.center(node.shape.value.boundingBox()));
-        const outward = edge.pointAt(midParam).sub(center);
-        const perpendicular = outward.sub(tangent.multiply(outward.dot(tangent))).normalize();
-        if (perpendicular !== undefined) return perpendicular;
-
-        // Degenerate (the midpoint-to-center line runs along the edge): any perpendicular.
-        const side = Math.abs(tangent.dot(XYZ.unitZ)) < 0.9 ? XYZ.unitZ : XYZ.unitX;
-        return tangent.cross(side).normalize();
-    }
+    private readonly arrowData = (): EdgeCornerArrowData | undefined =>
+        edgeCornerArrowData(this.document.selection.getSelectedShapes().at(0), this.valueNumber);
 
     private readonly setValueFromArrow = (value: number) => {
         this.value = value;
@@ -241,6 +202,50 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         }
         return { id: Id.generate(), type: "chamfer", distance: value, edges };
     }
+}
+
+/**
+ * Arrow placement for the fillet/chamfer drag handle: anchored at the midpoint of `first` (the
+ * first picked edge), pointing out of the body — radially for circular edges, otherwise along
+ * the edge-midpoint-to-body-center direction projected perpendicular to the tangent. Shared by
+ * the create and edit sessions; undefined without an edge on a parametric body or a value.
+ */
+export function edgeCornerArrowData(
+    first: VisualShapeData | undefined,
+    value: number | undefined,
+): EdgeCornerArrowData | undefined {
+    if (value === undefined) return undefined;
+    if (first === undefined || !(first.owner.node instanceof ParametricBodyNode)) return undefined;
+
+    const world = (first.shape as unknown as IEdge).transformedMul(first.transform) as IEdge;
+    try {
+        const midParam = (world.firstParameter() + world.lastParameter()) / 2;
+        const direction = arrowDirection(world, midParam, first);
+        if (direction === undefined) return undefined;
+        return { anchor: world.pointAt(midParam), direction, value: Math.max(value, 0) };
+    } finally {
+        world.dispose();
+    }
+}
+
+function arrowDirection(edge: IEdge, midParam: number, data: VisualShapeData): XYZ | undefined {
+    const basis = edge.curve.basisCurve;
+    if (CurveUtils.isCircle(basis)) {
+        return edge.pointAt(midParam).sub(basis.center).normalize();
+    }
+
+    const tangent = edge.curve.d1(midParam).vec.normalize();
+    const node = data.owner.node as ParametricBodyNode;
+    if (tangent === undefined || !node.shape.isOk) return undefined;
+
+    const center = data.transform.ofPoint(BoundingBox.center(node.shape.value.boundingBox()));
+    const outward = edge.pointAt(midParam).sub(center);
+    const perpendicular = outward.sub(tangent.multiply(outward.dot(tangent))).normalize();
+    if (perpendicular !== undefined) return perpendicular;
+
+    // Degenerate (the midpoint-to-center line runs along the edge): any perpendicular.
+    const side = Math.abs(tangent.dot(XYZ.unitZ)) < 0.9 ? XYZ.unitZ : XYZ.unitX;
+    return tangent.cross(side).normalize();
 }
 
 @command({ key: "feature.fillet", icon: "icon-fillet" })

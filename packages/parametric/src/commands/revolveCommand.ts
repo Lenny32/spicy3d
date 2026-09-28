@@ -18,6 +18,7 @@ import {
     type IShapeFilter,
     type IStep,
     Line,
+    Matrix4,
     MultistepCommand,
     type ParameterValue,
     PubSub,
@@ -30,13 +31,22 @@ import {
     type SnapResult,
     Transaction,
     VisualStates,
+    type XYZ,
 } from "@spicy3d/core";
 import { captureEdgeRef } from "../features/edgeRef";
-import type { RevolveFeatureData } from "../features/feature";
+import { evaluateFeature, type RevolveFeatureData } from "../features/feature";
+import { sketchProfiles } from "../features/profileBuilder";
 import { captureProfileRef } from "../features/profileRef";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { SketchNode } from "../sketch/sketchNode";
 import { SelectSketchProfilesStep } from "./extrudeCommand";
+import type { ExtrudePreview } from "./extrudeDragStep";
+import {
+    type RevolveAngleData,
+    type RevolveAngleHandler,
+    RevolveAngleStep,
+    revolveHandleAnchor,
+} from "./revolveAngleStep";
 
 @command({ key: "feature.revolve", icon: "icon-revolve" })
 export class RevolveFeatureCommand extends MultistepCommand {
@@ -74,7 +84,15 @@ export class RevolveFeatureCommand extends MultistepCommand {
     }
     set angle(value: ParameterValue) {
         this.setProperty("angle", value);
+        if (this._syncingFromHandle) return;
+        const resolved = this.resolveParameter(value, ANGLE_UNITS);
+        if (resolved.isOk) this._angleHandler?.setAngle(resolved.value);
     }
+
+    private _angleHandler: RevolveAngleHandler | undefined;
+    private _syncingFromHandle = false;
+    /** The feature the angle step previews, built once per session (only the angle varies). */
+    private _previewBase: RevolveFeatureData | undefined;
 
     private get sketch(): SketchNode {
         return this.stepDatas[0].nodes![0] as unknown as SketchNode;
@@ -84,7 +102,75 @@ export class RevolveFeatureCommand extends MultistepCommand {
         return [
             new SelectSketchProfilesStep((node) => node instanceof SketchNode),
             new SelectRevolveAxisStep(this),
+            new RevolveAngleStep("prompt.dragToRevolve", this.angleData),
         ];
+    }
+
+    protected override onRestarting(): void {
+        this._previewBase = undefined;
+    }
+
+    /** The angle handle: around the picked axis, hung on the first profile, starting at the angle input. */
+    private readonly angleData = (): RevolveAngleData | undefined => {
+        this._previewBase = undefined;
+        let axis: Line;
+        try {
+            axis = this.axis();
+        } catch (error) {
+            PubSub.default.pub("showToast", "error.default:{0}", String(error));
+            return undefined;
+        }
+        const resolved = this.resolveParameter(this.angle, ANGLE_UNITS);
+        return {
+            axis,
+            anchor: this.handleAnchor(axis),
+            angle: resolved.isOk ? resolved.value : 0,
+            buildPreview: (angle) => this.buildPreview(angle),
+            onReady: (handler) => {
+                this._angleHandler = handler;
+            },
+            onDone: () => {
+                this._angleHandler = undefined;
+            },
+            onAngle: (angle) => {
+                this._syncingFromHandle = true;
+                this.angle = angle;
+                this._syncingFromHandle = false;
+            },
+        };
+    };
+
+    /** The first picked profile's (or the sketch's first profile's) point farthest from the axis. */
+    private handleAnchor(axis: Line): XYZ {
+        const picked = this.stepDatas[0].shapes[0];
+        if (picked !== undefined) {
+            return picked.transform.ofPoint(revolveHandleAnchor(picked.shape as unknown as IFace, axis));
+        }
+        const profiles = sketchProfiles(this.sketch);
+        const face = profiles.isOk ? profiles.value.outer[0] : undefined;
+        return face === undefined ? this.sketch.plane.origin : revolveHandleAnchor(face, axis);
+    }
+
+    /** The revolved profiles at `angle` — the body the command is about to create. */
+    private buildPreview(angle: number): ExtrudePreview {
+        try {
+            this._previewBase ??= this.buildFeature();
+        } catch {
+            return { meshes: [] };
+        }
+        const shape = evaluateFeature(
+            { ...this._previewBase, angle },
+            {
+                document: this.document,
+                host: { id: "", worldTransform: () => Matrix4.identity() },
+                scope: this.document.variables.evaluate().scope,
+            },
+        );
+        if (!shape.isOk) return { meshes: [] };
+        const { faces, edges } = shape.value.mesh;
+        shape.value.dispose();
+        if (faces === undefined) return { meshes: [] };
+        return { meshes: edges === undefined ? [faces] : [faces, edges] };
     }
 
     private axis(): Line {

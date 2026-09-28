@@ -71,6 +71,7 @@ function featureNode(parameters: FeatureItem["parameters"], item?: Partial<Featu
         renameFeature: rs.fn(),
         removeFeature: rs.fn(),
         activateReference: rs.fn((_featureId: string, _key: string) => {}),
+        editFeature: rs.fn((_featureId: string) => {}),
     } as unknown as INode & IFeatureListNode;
 }
 
@@ -269,6 +270,30 @@ describe("FeatureListProperty", () => {
         expect(showDialogMock.calls.length).toBe(0);
         expect(node.removeFeature).toHaveBeenCalledWith("b1");
         expect(document.body.querySelector(".ctx-menu")).toBeNull();
+    });
+
+    test("an editable feature's menu starts with Edit, which reopens its interactive session", () => {
+        const node = featureNode([], { editable: true });
+        const prop = new FeatureListProperty(createMockDocument(), node);
+        const menu = openMenu(prop);
+
+        expect(menu.querySelectorAll(".ctx-item").length).toBe(4);
+        clickMenuItem(menu, 0);
+        expect(node.editFeature).toHaveBeenCalledWith("b1");
+    });
+
+    test("double-clicking an editable row header reopens its session; other rows do nothing", () => {
+        const doubleClick = (prop: FeatureListProperty) =>
+            (
+                mustQuery<HTMLElement>(prop, ".fl-header") as unknown as { _ondblclick: () => void }
+            )._ondblclick();
+        const editable = featureNode([], { editable: true });
+        doubleClick(new FeatureListProperty(createMockDocument(), editable));
+        expect(editable.editFeature).toHaveBeenCalledWith("b1");
+
+        const plain = featureNode([]);
+        doubleClick(new FeatureListProperty(createMockDocument(), plain));
+        expect(plain.editFeature).not.toHaveBeenCalled();
     });
 
     test("a right-click on a row header opens the same menu at the pointer", () => {

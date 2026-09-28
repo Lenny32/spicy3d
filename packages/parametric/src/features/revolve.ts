@@ -75,16 +75,9 @@ const revolveHandler: FeatureHandler<RevolveFeatureData> = {
 
         const angle = resolveUnitSpec(feature.angle, context.scope, ANGLE_UNITS);
         if (!angle.isOk) return Result.err(angle.error);
-        let axis: Line;
-        let anchor: EdgeRef | undefined;
-        if (feature.constructionAxisRef) {
-            const resolved = resolveConstructionRef(context.document, feature.constructionAxisRef);
-            if (!resolved.isOk) return Result.err(resolved.error);
-            if (resolved.value.kind !== "axis") return Result.err("Construction reference is not an axis");
-            axis = new Line({ point: resolved.value.origin, direction: resolved.value.direction });
-        } else {
-            ({ axis, anchor } = resolveAxis(feature, context));
-        }
+        const resolvedAxis = resolveRevolveAxis(feature, context);
+        if (!resolvedAxis.isOk) return Result.err(resolvedAxis.error);
+        const { axis, anchor } = resolvedAxis.value;
         const profiles = resolveProfiles(sketch, feature.profiles);
         if (!profiles.isOk) return Result.err(profiles.error);
         const tracking = context.tracking;
@@ -107,6 +100,25 @@ const revolveHandler: FeatureHandler<RevolveFeatureData> = {
         return revolveTracked(feature, sketch, axis, angle.value, profiles.value, tracking);
     },
 };
+
+/**
+ * The world-space axis the revolve sweeps around for `context`: a construction axis when the
+ * feature holds one (an invalid one fails the revolve), otherwise the picked edge re-matched
+ * live (`resolveAxis`), with the refreshed edge anchor when that match succeeded. Shared by the
+ * evaluation and the angle handle of the edit session, so both turn around the same line.
+ */
+export function resolveRevolveAxis(
+    feature: RevolveFeatureData,
+    context: FeatureContext,
+): Result<{ axis: Line; anchor?: EdgeRef }> {
+    if (!feature.constructionAxisRef) return Result.ok(resolveAxis(feature, context));
+    const resolved = resolveConstructionRef(context.document, feature.constructionAxisRef);
+    if (!resolved.isOk) return Result.err(resolved.error);
+    if (resolved.value.kind !== "axis") return Result.err("Construction reference is not an axis");
+    return Result.ok({
+        axis: new Line({ point: resolved.value.origin, direction: resolved.value.direction }),
+    });
+}
 
 /**
  * The axis as a live reference: the fingerprinted edge is re-matched against the source node's

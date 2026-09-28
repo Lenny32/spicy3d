@@ -1,14 +1,9 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import {
-    AsyncController,
-    CancelableCommand,
-    command,
-    type IApplication,
-    isCancelableCommand,
-} from "@spicy3d/core";
+import { AsyncController, CancelableCommand, command } from "@spicy3d/core";
 import type { ParametricBodyNode } from "../parametricBodyNode";
+import { startSessionCommand } from "./featureEditRegistry";
 
 /**
  * Runs a feature-row reselect pick (see `ParametricBodyNode.reselectSession`) as a
@@ -38,30 +33,11 @@ export class ReselectFeatureCommand extends CancelableCommand {
         await this.body.reselectSession(this.featureId, this.controller);
     }
 
-    /**
-     * Launches the session outside the CommandStore. Mirrors CommandService's
-     * guard: a running cancelable command (including a previous reselect) is
-     * cancelled first, a non-cancelable one refuses the start. `executingCommand`
-     * is cleared only when it still holds this command — a command started via
-     * CommandService in the meantime (which cancelled this one and awaited its
-     * cleanup) owns the slot.
-     */
+    /** Launches the session outside the CommandStore (see `startSessionCommand`). */
     static async start(body: ParametricBodyNode, featureId: string): Promise<void> {
-        const app = body.document.application;
-        const running = app.executingCommand;
-        if (running !== undefined) {
-            if (!isCancelableCommand(running)) return;
-            await running.cancel();
-        }
-        await ReselectFeatureCommand.run(app, new ReselectFeatureCommand(body, featureId));
-    }
-
-    private static async run(app: IApplication, command: ReselectFeatureCommand): Promise<void> {
-        app.executingCommand = command;
-        try {
-            await command.execute(app);
-        } finally {
-            if (app.executingCommand === command) app.executingCommand = undefined;
-        }
+        await startSessionCommand(
+            body.document.application,
+            () => new ReselectFeatureCommand(body, featureId),
+        );
     }
 }

@@ -29,7 +29,15 @@ import {
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { planeOfFace } from "../sketch/planeRef";
 import { SketchNode } from "../sketch/sketchNode";
-import { ARROW_HOVER_TOLERANCE, ARROW_LENGTH, distanceToSegment, pxSizedArrowLength } from "./arrowHandle";
+import {
+    ARROW_COLOR,
+    ARROW_HOVER_COLOR,
+    ARROW_HOVER_TOLERANCE,
+    ARROW_LENGTH,
+    arrowMeshes,
+    distanceToSegment,
+    pxSizedArrowLength,
+} from "./arrowHandle";
 import { prioritizeSketchFaces } from "./profileFaceSort";
 
 const DRAG_THRESHOLD_SQ = 9; // px², below this a press-release is a click, not a drag
@@ -57,6 +65,39 @@ export function extrudeArrowSegment(state: ExtrudeDragState): { start: XYZ; end:
 }
 
 /**
+ * The arrow renderer both extrude sessions (create and edit) hand the drag handler. The
+ * geometry is fixed (cylinder shaft + cone head), so it is meshed once per direction+color at
+ * the origin and cached; each call returns scaled, translated copies.
+ */
+export function createExtrudeArrowMesher(): (state: ExtrudeDragState) => ShapeMeshData[] {
+    const cache = new Map<string, ShapeMeshData[]>();
+    return (state) => {
+        const color = state.arrowHovered ? ARROW_HOVER_COLOR : ARROW_COLOR;
+        const { start, end } = extrudeArrowSegment(state);
+        const dir = end.sub(start).normalize()!;
+        const key = `${dir.x},${dir.y},${dir.z},${color}`;
+        let meshes = cache.get(key);
+        if (meshes === undefined) {
+            meshes = arrowMeshes(XYZ.zero, dir, ARROW_LENGTH, color);
+            cache.set(key, meshes);
+        }
+        const scale = (state.arrowLength ?? ARROW_LENGTH) / ARROW_LENGTH;
+        return meshes.map((mesh) => ({ ...mesh, position: scaledAt(mesh.position, start, scale) }));
+    };
+}
+
+/** Uniformly scales the canonical geometry and translates it to `offset`. */
+function scaledAt(data: Float32Array, offset: XYZ, scale: number): Float32Array {
+    const out = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i += 3) {
+        out[i] = data[i] * scale + offset.x;
+        out[i + 1] = data[i + 1] * scale + offset.y;
+        out[i + 2] = data[i + 2] * scale + offset.z;
+    }
+    return out;
+}
+
+/**
  * Mutable state of a drag session. The handler updates it when the user drags the
  * arrow or clicks another profile face; the command reads it through the callbacks
  * below so the preview always reflects the live face set.
@@ -75,6 +116,11 @@ export interface ExtrudeDragState {
     arrowHovered: boolean;
     /** World-space arrow length, adapted by the handler so the arrow is zoom-independent. */
     arrowLength?: number;
+    /**
+     * True while the depth is being dragged (arrow held, or click-move-click armed): a preview
+     * can afford less then, and gets rebuilt once more when the drag settles (editing only).
+     */
+    dragging?: boolean;
 }
 
 export interface ExtrudePreview {
@@ -107,6 +153,13 @@ export interface ExtrudeDragData {
     onDone?(): void;
     /** The handler reports the signed depth so the command syncs its depth input. */
     onDist?(dist: number): void;
+    /**
+     * Editing an existing extrude: the profiles are the feature's own (re-picking them is
+     * "Reselect"), so clicks never switch or toggle faces and nothing hovers; leaving the
+     * click-move mode goes back to the stored depth instead of zero; and the preview is
+     * rebuilt once more when a drag settles (see `ExtrudeDragState.dragging`).
+     */
+    editing?: boolean;
 }
 
 /** Outward plane of a picked solid face, in world coordinates. */
@@ -232,6 +285,7 @@ export class ExtrudeDragHandler implements IEventHandler {
                 const dy = event.offsetY - this._downY!;
                 if (dx * dx + dy * dy <= DRAG_THRESHOLD_SQ) return;
                 this._dragging = true;
+                this.state.dragging = true;
                 this._grabOffset = this.projectDist(view, event) - this.state.dist;
                 this.clearHover();
             }
@@ -261,9 +315,11 @@ export class ExtrudeDragHandler implements IEventHandler {
         this._downX = undefined;
         this._downY = undefined;
         this._dragging = false;
+        this.state.dragging = false;
 
         if (wasDragging && Math.abs(this.state.dist) >= Precision.Float) {
             this.commitView = view;
+            this.settle(view);
             return;
         }
         // A plain click on the arrow starts the click-move-click gesture; Shift keeps
@@ -278,8 +334,10 @@ export class ExtrudeDragHandler implements IEventHandler {
     /** The second click of click-move-click: commits a non-zero depth, else just leaves the mode. */
     private finishMoveMode(view: IView) {
         this._awaitingClick = false;
+        this.state.dragging = false;
         if (Math.abs(this.state.dist) >= Precision.Float) {
             this.commitView = view;
+            this.settle(view);
         } else {
             // Second click landed at (near) zero depth: just leave the move mode.
             this.setArrowHover(view, false);
@@ -369,6 +427,7 @@ export class ExtrudeDragHandler implements IEventHandler {
     /** Enters click-move-click mode: grabs the current projection so the depth does not jump. */
     private enterMoveMode(view: IView, event: PointerEvent) {
         this._awaitingClick = true;
+        this.state.dragging = true;
         this._grabOffset = this.projectDist(view, event) - this.state.dist;
         this.clearHover();
         this.setArrowHover(view, true);
@@ -377,12 +436,20 @@ export class ExtrudeDragHandler implements IEventHandler {
     /** Leaves click-move-click mode without committing, resetting the preview depth. */
     private exitMoveMode(view: IView) {
         this._awaitingClick = false;
-        this.state.dist = 0;
-        this.data.onDist?.(0);
+        this.state.dragging = false;
+        // Editing goes back to the stored depth; creating has none to go back to.
+        const rest = this.data.editing ? (this.data.depth ?? 0) : 0;
+        this.state.dist = rest;
+        this.data.onDist?.(rest);
         this.setArrowHover(view, false);
         this.refreshTempShapes(view);
         PubSub.default.pub("clearFloatTip");
         view.document.visual.update();
+    }
+
+    /** A drag came to rest: editing rebuilds the preview at full depth (see `dragging`). */
+    private settle(view: IView) {
+        if (this.data.editing) this.refreshTempShapes(view);
     }
 
     private updateDrag(view: IView, event: PointerEvent) {
@@ -400,6 +467,8 @@ export class ExtrudeDragHandler implements IEventHandler {
     }
 
     private handleClick(view: IView, event: PointerEvent) {
+        // Editing keeps the feature's own profiles (see `ExtrudeDragData.editing`).
+        if (this.data.editing) return;
         const face = this.detectProfileFace(view, event);
         if (face === undefined) return;
 
@@ -468,6 +537,7 @@ export class ExtrudeDragHandler implements IEventHandler {
             return;
         }
         this.setArrowHover(view, false);
+        if (this.data.editing) return;
 
         const face = this.detectProfileFace(view, event);
         if (face === this._hovered) return;
@@ -533,6 +603,7 @@ export class ExtrudeDragHandler implements IEventHandler {
             this.state.dist = this.state.dist < -Precision.Float ? -value : value;
             this.data.onDist?.(this.state.dist);
             this.commitView = view;
+            this.settle(view);
             return Result.ok(text);
         });
     }

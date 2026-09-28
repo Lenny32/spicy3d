@@ -2,4 +2,5 @@
 // See LICENSE file in the project root for full license information.
 
 export * from "./autosaveSelector";
+export * from "./featureEditPreviewSelector";
 export * from "./home";

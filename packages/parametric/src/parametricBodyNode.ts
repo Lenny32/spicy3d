@@ -28,6 +28,7 @@ import {
     Transaction,
     withConstructionFeaturePosition,
 } from "@spicy3d/core";
+import { hasFeatureEditor, startFeatureEdit } from "./commands/featureEditRegistry";
 import { ReselectFeatureCommand } from "./commands/reselectCommand";
 import { EdgeReselectSession, ProfileReselectSession } from "./commands/reselectSession";
 import { evaluateFeature, type FeatureData, featureHandler, type ShapeTracking } from "./features";
@@ -307,6 +308,7 @@ export class ParametricBodyNode
                 error: this._featureErrors.get(feature.id),
                 warning: this._featureWarnings.get(feature.id),
                 reselectable: handler?.reselectable === true,
+                editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
                 parameters: handler?.parameters(feature) ?? [],
             };
@@ -388,6 +390,28 @@ export class ParametricBodyNode
 
     removeFeature(featureId: string): void {
         this.setFeaturesEmitShapeChanged(this.features.filter((feature) => feature.id !== featureId));
+    }
+
+    // ------------------------------------------------------------------ Interactive editing
+
+    /**
+     * Reopens a feature in the same interactive session that created it — the extrude's drag
+     * arrow, the fillet's edge pick with its value arrow, the revolve's angle handle — seeded
+     * with the stored values. Runs as the application's executing command (see
+     * `startFeatureEdit`), so starting any other command cancels it cleanly.
+     */
+    async editFeature(featureId: string): Promise<void> {
+        await startFeatureEdit(this, featureId);
+    }
+
+    /**
+     * What replaying the features after `index` cost on their last evaluation (ms), from the
+     * cached timings — an edit session's guess at whether a live full-chain preview keeps up
+     * with a drag. Cache entries exist only for evaluated (unsuppressed) features, in order.
+     */
+    rebuildCostAfter(index: number): number {
+        const start = this.features.slice(0, index + 1).filter((feature) => !feature.suppressed).length;
+        return this._timeline.evaluationMsFrom(start);
     }
 
     // ------------------------------------------------------------------ Re-picking referenced shapes
@@ -883,6 +907,7 @@ export class ParametricBodyNode
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
+        const started = performance.now();
         const result = evaluateFeature(feature, {
             document: this.document,
             host: this,
@@ -890,6 +915,7 @@ export class ParametricBodyNode
             scope,
             tracking,
         });
+        const evaluationMs = performance.now() - started;
         if (!result.isOk) return Result.err(result.error);
         // A handler that cannot track (e.g. the kernel lacks history) leaves the
         // output empty — ids stay undefined from here on rather than guessing.
@@ -907,6 +933,7 @@ export class ParametricBodyNode
             shape: output.shape,
             faceIds: output.faceIds,
             edgeIds: output.edgeIds,
+            evaluationMs,
         });
         return Result.ok(output);
     }

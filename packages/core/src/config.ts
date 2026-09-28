@@ -12,6 +12,10 @@ export const DefaultDarkEdgeColor = 0xeeeeee;
 export const DefaultLightGridColor = 0x303030;
 export const DefaultDarkGridColor = 0xd0d0d0;
 
+/** See `Config.featureEditPreview`. */
+export const FEATURE_EDIT_PREVIEW_MODES = ["auto", "live", "rollback"] as const;
+export type FeatureEditPreviewMode = (typeof FEATURE_EDIT_PREVIEW_MODES)[number];
+
 export class VisualItemConfig extends Observable {
     defaultFaceColor = 0xdedede;
     profileFaceColor = 0x6fa8e0;
@@ -123,6 +127,20 @@ export class Config extends Observable {
     }
     set navigation3D(value: Navigation3DType) {
         this.setProperty("navigation3D", value);
+    }
+
+    /**
+     * What the viewport shows while a feature is edited with its handles: `live` replays every
+     * later step on each change (the true final model), `rollback` shows the body as of the
+     * edited step only, `auto` goes live whenever the later steps rebuild fast enough.
+     */
+    @serialize()
+    get featureEditPreview(): FeatureEditPreviewMode {
+        return this.getPrivateValue("featureEditPreview", "auto");
+    }
+    set featureEditPreview(value: FeatureEditPreviewMode) {
+        if (!FEATURE_EDIT_PREVIEW_MODES.includes(value)) return;
+        this.setProperty("featureEditPreview", value);
     }
 
     @serialize()
