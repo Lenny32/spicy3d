@@ -2,9 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import {
-    AsyncController,
+    Annotation,
     CancelableCommand,
     Combobox,
+    ConstructionNode,
     command,
     documentLengthUnit,
     download,
@@ -20,8 +21,7 @@ import {
     property,
     Result,
     readFilesAsync,
-    SelectNodeStep,
-    type VisualNode,
+    VisualNode,
 } from "@spicy3d/core";
 import { importFiles } from "../utils";
 
@@ -127,7 +127,7 @@ export class Export extends CancelableCommand {
     protected async executeAsync() {
         const nodes = await this.selectNodesAsync();
         if (!nodes || nodes.length === 0) {
-            PubSub.default.pub("showToast", "toast.select.noSelected");
+            PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
             return;
         }
 
@@ -158,7 +158,7 @@ export class Export extends CancelableCommand {
             lengthUnit: this.outputUnit,
         });
         if (!data) return;
-        download(data, `${nodes[0].name}${this.suffix}`);
+        download(data, `${this.fileBaseName ?? nodes[0].name}${this.suffix}`);
     }
 
     // Browsers block multiple automatic downloads, so pack the files into one zip.
@@ -175,7 +175,7 @@ export class Export extends CancelableCommand {
             zip.file(this.uniqueFileName(node.name, usedNames), new Blob(data));
         }
 
-        download([await zip.generateAsync({ type: "blob" })], `${nodes[0].name}.zip`);
+        download([await zip.generateAsync({ type: "blob" })], `${this.fileBaseName ?? nodes[0].name}.zip`);
     }
 
     private uniqueFileName(nodeName: string, usedNames: Set<string>) {
@@ -188,14 +188,30 @@ export class Export extends CancelableCommand {
         return fileName;
     }
 
-    private async selectNodesAsync() {
-        this.controller = new AsyncController();
-        const step = new SelectNodeStep("prompt.select.models", { multiple: true, keepSelection: true });
-        const data = await step.execute(this.application.activeView?.document!, this.controller);
-        if (!data?.nodes) {
-            PubSub.default.pub("showToast", "prompt.select.noModelSelected");
-            return undefined;
-        }
-        return data.nodes;
+    /** Set when the whole model is exported: the files are named after the document. */
+    private fileBaseName: string | undefined;
+
+    /**
+     * The selected models, or — with nothing selected — every visible model of the document, so an
+     * export without a selection writes the full model. Construction geometry and annotations are
+     * references, not part of the model, and stay out.
+     */
+    private async selectNodesAsync(): Promise<VisualNode[] | undefined> {
+        const document = this.application.activeView?.document;
+        if (!document) return undefined;
+        const selected = document.selection.getSelectedVisualNodes();
+        if (selected.length > 0) return selected;
+
+        this.fileBaseName = document.name;
+        return document.modelManager
+            .findNodes()
+            .filter(
+                (x): x is VisualNode =>
+                    x instanceof VisualNode &&
+                    !(x instanceof ConstructionNode) &&
+                    !(x instanceof Annotation) &&
+                    x.visible &&
+                    x.parentVisible,
+            );
     }
 }

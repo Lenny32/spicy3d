@@ -3,14 +3,14 @@
 
 import { describe, expect, rs, test } from "@rstest/core";
 import {
-    AsyncController,
     CancelableCommand,
+    ConstructionNode,
     getCurrentApplication,
-    type IApplication,
+    type INode,
     PropertyUtils,
     PubSub,
-    SelectNodeStep,
     setCurrentApplication,
+    VisualNode,
 } from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { Export, Import } from "../../src/commands/importExport";
@@ -142,17 +142,74 @@ describe("Export", () => {
     });
 
     describe("selectNodesAsync", () => {
-        test("should create AsyncController and SelectNodeStep", async () => {
-            const cmd = new Export();
+        /** A document holding `nodes` in its model tree, with `selected` selected. */
+        function exportDocument(nodes: INode[], selected: VisualNode[] = []) {
             const doc = createMockDocument();
-            (doc as any).picker = {
-                pickNode: () => Promise.resolve([]),
-            };
-            (cmd as any)._application = { activeView: { document: doc } };
+            (doc as any).name = "Project";
+            (doc as any).modelManager = { findNodes: () => nodes };
+            (doc as any).selection = { getSelectedVisualNodes: () => selected };
+            return doc;
+        }
 
-            const result = await (cmd as any).selectNodesAsync();
-            // When no nodes are picked, it should publish a toast and return undefined
-            expect(result).toBeUndefined();
+        /** An instance of `type` without its constructor; own fields shadow the node's accessors. */
+        function stubNode<T extends object>(
+            type: { prototype: T },
+            name: string,
+            visible = true,
+            parentVisible = true,
+        ): T {
+            return Object.create(type.prototype, {
+                name: { value: name },
+                visible: { value: visible },
+                parentVisible: { value: parentVisible },
+            });
+        }
+
+        function visualNode(name: string, visible = true, parentVisible = true): VisualNode {
+            return stubNode(VisualNode, name, visible, parentVisible);
+        }
+
+        test("exports the selection when there is one, named after its first node", async () => {
+            const a = visualNode("a");
+            const b = visualNode("b");
+            const cmd = new Export();
+            (cmd as any)._application = { activeView: { document: exportDocument([a, b], [b]) } };
+
+            expect(await (cmd as any).selectNodesAsync()).toEqual([b]);
+            expect((cmd as any).fileBaseName).toBeUndefined();
+        });
+
+        test("exports every visible model, named after the document, when nothing is selected", async () => {
+            const shown = visualNode("shown");
+            const hidden = visualNode("hidden", false);
+            const inHiddenGroup = visualNode("inHiddenGroup", true, false);
+            const plane = stubNode(ConstructionNode, "plane");
+            const group = { name: "group", visible: true, parentVisible: true } as unknown as INode;
+            const cmd = new Export();
+            (cmd as any)._application = {
+                activeView: { document: exportDocument([group, shown, hidden, inHiddenGroup, plane]) },
+            };
+
+            expect(await (cmd as any).selectNodesAsync()).toEqual([shown]);
+            expect((cmd as any).fileBaseName).toBe("Project");
+        });
+
+        test("names the files after the document when the whole model is exported", async () => {
+            const ctx = setupExportContext();
+            try {
+                const cmd = new Export();
+                cmd.merge = false;
+                (ctx.app.activeView as any).document = exportDocument([visualNode("a"), visualNode("b")]);
+                (cmd as any)._application = ctx.app;
+
+                await (cmd as any).executeAsync();
+                await ctx.permanentCallback!();
+
+                expect(ctx.exportedNames).toEqual(["a", "b"]);
+                expect(ctx.downloads).toEqual(["Project.zip"]);
+            } finally {
+                ctx.restore();
+            }
         });
     });
 
