@@ -32,6 +32,10 @@ export class VisualItemConfig extends Observable {
     temporaryVertexSize = 5;
     temporaryVertexColor = 0x33ff33;
     temporaryEdgeColor = 0x33ff33;
+    /** The tool volume a cut removes, drawn translucent over the previewed result. */
+    cutPreviewColor = 0xe53935;
+    /** The volume a join adds, a faint tint over the previewed result. */
+    joinPreviewColor = 0x43a047;
 
     get defaultEdgeColor() {
         return this.getPrivateValue("defaultEdgeColor", DefaultLightEdgeColor);

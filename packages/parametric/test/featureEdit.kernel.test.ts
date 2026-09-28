@@ -17,6 +17,7 @@ import {
     Plane,
     ShapeTypes,
     Signal,
+    VisualConfig,
     type VisualShapeData,
     XYZ,
 } from "@spicy3d/core";
@@ -330,6 +331,24 @@ describe("feature edit sessions", () => {
         });
         await body.editFeature("e2");
         expect((body.features[1] as ExtrudeFeatureData).operation).toBe("cut");
+    });
+
+    test("extrude: a join tints its tool, a cut draws it in red over the preview", async () => {
+        const { doc, app, drive } = setup();
+        const body = blockWithBoss(doc);
+        const setMeshColor = rs.spyOn(doc.visual.context, "setMeshColor");
+        let colorsAtStart: number[] = [];
+        drive((_handler, controller) => {
+            colorsAtStart = setMeshColor.mock.calls.map((call) => call[1]);
+            setMeshColor.mockClear();
+            (app.executingCommand as ExtrudeEditCommand).operation = "option.command.operation.cut";
+            controller.cancel();
+        });
+
+        await body.editFeature("e2");
+
+        expect(colorsAtStart).toEqual([VisualConfig.joinPreviewColor]);
+        expect(setMeshColor.mock.calls.map((call) => call[1])).toEqual([VisualConfig.cutPreviewColor]);
     });
 
     test("revolve: the handle starts at the stored angle and commits the new one", async () => {

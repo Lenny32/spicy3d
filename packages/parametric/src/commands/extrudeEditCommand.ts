@@ -37,6 +37,7 @@ import {
     showPreviewProblem,
 } from "./featureEditPreview";
 import { registerFeatureEditor } from "./featureEditRegistry";
+import { type PreviewOverlay, toolOverlay } from "./toolOverlay";
 
 /** Where the drag arrow sits: on the swept profile, along the extrude direction (world space). */
 interface ExtrudeAxis {
@@ -189,18 +190,38 @@ export class ExtrudeEditCommand extends CancelableCommand {
         };
     }
 
-    /** The body with the edited extrude; the body itself is hidden while the preview stands in. */
+    /**
+     * The body with the edited extrude; the body itself is hidden while the preview stands in.
+     * A cut or join draws its tool over it, styled as when the extrude was created.
+     */
     private buildPreview(
         body: ParametricBodyNode,
         feature: ExtrudeFeatureData,
         preview: FeatureChainPreview,
         dragging: boolean,
     ): ExtrudePreview {
-        const result = preview.evaluate(this.editedFeature(feature), dragging);
+        const edited = this.editedFeature(feature);
+        const result = preview.evaluate(edited, dragging);
         showPreviewProblem(result.error);
         if (result.shape === undefined) return { meshes: [] };
         const meshes = previewMeshes(body, result.shape);
-        return meshes === undefined ? { meshes: [] } : { meshes, hide: [body] };
+        if (meshes === undefined) return { meshes: [] };
+        const overlay = this.toolOverlayOf(body, edited, preview);
+        return { meshes, hide: [body], ...(overlay === undefined ? {} : { overlays: [overlay] }) };
+    }
+
+    /** The edited extrude's tool — the feature without its operation, on the entering state. */
+    private toolOverlayOf(
+        body: ParametricBodyNode,
+        edited: ExtrudeFeatureData,
+        preview: FeatureChainPreview,
+    ): PreviewOverlay | undefined {
+        const { operation, ...prism } = edited;
+        if (operation !== "cut" && operation !== "fuse") return undefined;
+        const tool = preview.evaluateStep(prism);
+        if (!tool.isOk) return undefined;
+        const meshes = previewMeshes(body, tool.value);
+        return meshes === undefined ? undefined : toolOverlay(operation, meshes[0], meshes[1]);
     }
 
     /** The feature with the session's values; unset options are left out as the create command does. */
