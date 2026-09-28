@@ -3,6 +3,7 @@
 
 import { type IDocument, type IShape, Matrix4, Result, ShapeNode } from "@spicy3d/core";
 import { combineWithTool, extrudeToolShape } from "./extrude";
+import { extentDependencies, extentNodeIds, toObjectExtents } from "./extrudeExtent";
 import {
     type ExtrudeFeatureData,
     type ExtrudeTargetFeatureData,
@@ -33,6 +34,10 @@ import {
  *   suppressed extrude has no effect on any body.
  * - **Scope.** Only sketch extrudes: a press-pull's tool is swept off its host's own chain
  *   state, which another body cannot replay.
+ * - **Extents** (`extrudeExtent.ts`) are honoured the same way here as in the host: through all
+ *   passes through this body (its input bounds the tool); a to-object face on this body resolves
+ *   on its input, one on the host on the host's state entering the extrude — so every target is
+ *   cut down to the same face. The face's body is watched too (`nodeIds`).
  */
 
 /** A body with a feature list — structurally, so this module need not import the node class. */
@@ -87,6 +92,22 @@ export function withLinkedExtrudeOverride<T>(
     }
 }
 
+/**
+ * What the linked extrude's to-object faces read, seen from the body holding `link` (see
+ * `extentDependencies`): a face on that body resolves on its input, which the cache compares.
+ */
+function linkedExtentDependencies(
+    document: IDocument,
+    link: ExtrudeTargetFeatureData,
+    linked: LinkedExtrude,
+): { refIds: string[]; key: string[] } {
+    if (toObjectExtents(linked.feature).length === 0) return { refIds: [], key: [] };
+    const self = document.modelManager.findNode(
+        (n) => isFeatureListHost(n) && n.features.some((x) => x.id === link.id),
+    );
+    return extentDependencies(document, linked.host.id, linked.feature, self?.id ?? "");
+}
+
 /** The input unchanged, its ids carried through, for an entry that has nothing to apply. */
 function passThrough(context: FeatureContext): Result<IShape> {
     if (context.input === undefined) return Result.err("Extrude target requires a preceding feature");
@@ -109,7 +130,13 @@ const extrudeTargetHandler: FeatureHandler<ExtrudeTargetFeatureData> = {
     display: "command.feature.extrudeTarget",
     icon: "icon-prism",
 
-    nodeIds: (feature) => [feature.bodyId],
+    // Also the bodies of the extrude's to-object faces: moving one changes the tool here even when
+    // the host's own result stays the same.
+    nodeIds: (feature, document) => {
+        const linked = document === undefined ? undefined : linkedExtrude(document, feature);
+        const faces = linked === undefined ? [] : extentNodeIds(linked.feature);
+        return [...new Set([feature.bodyId, ...faces])];
+    },
 
     references: (feature) => [
         { key: "bodyId", display: "features.extrudeTarget.host", nodeId: feature.bodyId },
@@ -118,12 +145,17 @@ const extrudeTargetHandler: FeatureHandler<ExtrudeTargetFeatureData> = {
     cacheKey: (feature, document) => {
         const linked = linkedExtrude(document, feature);
         if (linked === undefined) return "missing";
-        return JSON.stringify([linked.feature, linked.host.worldTransform().toArray()]);
+        const { key } = linkedExtentDependencies(document, feature, linked);
+        return JSON.stringify([linked.feature, linked.host.worldTransform().toArray(), key]);
     },
 
     cacheRefIds: (feature, document) => {
-        const sketchId = linkedExtrude(document, feature)?.feature.sketchId;
-        return sketchId === undefined ? [] : [sketchId];
+        const linked = linkedExtrude(document, feature);
+        const sketchId = linked?.feature.sketchId;
+        const refs = sketchId === undefined ? [] : [sketchId];
+        if (linked === undefined) return refs;
+        const { refIds } = linkedExtentDependencies(document, feature, linked);
+        return [...new Set([...refs, ...refIds])];
     },
 
     parameters: () => [],
@@ -138,9 +170,21 @@ const extrudeTargetHandler: FeatureHandler<ExtrudeTargetFeatureData> = {
         if (extrude === null || extrude === undefined || extrude.suppressed) return passThrough(context);
         if (extrude.operation === undefined) return Result.err("Linked extrude has no join/cut/intersect");
 
-        const tool = extrudeToolShape(extrude, { ...context, host: linked.host, input: undefined });
-        if (!tool.isOk) return Result.err(tool.error);
         const matrix = hostToBody(linked.host, context);
+        // Through all goes through this body: its input bounds the tool (in the host's space).
+        const back = matrix?.invert();
+        const bounds = back === undefined ? context.input : context.input.transformedMul(back);
+        let tool: Result<IShape>;
+        try {
+            tool = extrudeToolShape(
+                extrude,
+                { ...context, host: linked.host, input: undefined, tracking: undefined },
+                { current: context, bounds: [bounds] },
+            );
+        } finally {
+            if (bounds !== context.input) bounds.dispose();
+        }
+        if (!tool.isOk) return Result.err(tool.error);
         const placed = matrix === undefined ? tool.value : tool.value.transformedMul(matrix);
         try {
             return combineWithTool(feature.id, extrude.operation, context, placed);

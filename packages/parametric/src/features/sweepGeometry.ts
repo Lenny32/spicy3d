@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { BoundingBox, type IFace, type IShape, Matrix4, Precision, Result, type XYZ } from "@spicy3d/core";
+import { type SweepSide, sweepSide } from "./extrudeExtent";
 import type { ResolvedProfile } from "./profileBuilder";
 
 /**
@@ -17,19 +18,23 @@ import type { ResolvedProfile } from "./profileBuilder";
  * own preview.
  */
 
-/** Sweeps every profile along each direction and merges touching prisms (see `fuseProfiles`). */
-export function extrudePlain(profiles: ResolvedProfile[], vecs: XYZ[], offsetVec: XYZ): Result<IShape> {
+/** Sweeps every profile along each side and merges touching prisms (see `fuseProfiles`). */
+export function extrudePlain(
+    profiles: ResolvedProfile[],
+    sides: SweepSide[],
+    offsetVec: XYZ,
+): Result<IShape> {
     return sweepFaces(
         profiles.map(({ face }) => face),
-        () => vecs,
+        () => sides,
         () => offsetVec,
     );
 }
 
-/** Sweeps each face along its own vectors (`vecsOf`) and merges touching prisms. */
+/** Sweeps each face along its own sides (`sidesOf`, see `extrudeExtent.ts`) and merges touching prisms. */
 export function sweepFaces(
     faces: IFace[],
-    vecsOf: (face: IFace) => XYZ[],
+    sidesOf: (face: IFace) => SweepSide[],
     offsetOf: (face: IFace) => XYZ,
 ): Result<IShape> {
     const shapes: IShape[] = [];
@@ -37,8 +42,8 @@ export function sweepFaces(
     try {
         for (const face of faces) {
             const sweptFace = translateFace(face, offsetOf(face), owned);
-            for (const vec of vecsOf(face)) {
-                const shape = shapeFactory.prism(sweptFace, vec);
+            for (const side of sidesOf(face)) {
+                const shape = sweepSide(sweptFace, side);
                 if (!shape.isOk) {
                     shapes.forEach((x) => x.dispose());
                     return Result.err(shape.error);

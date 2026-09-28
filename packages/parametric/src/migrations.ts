@@ -8,8 +8,10 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * `EdgeRef`/`ProfileRef` inside them).
  * 2: `extrudeTarget` features (an extrude acting on other bodies than its host) — a build reading only
  * v1 would fail those bodies with "Unknown feature type".
+ * 3: extrude extents (`extent` / `secondExtent`: to object, through all) — a build reading only v2 would
+ * ignore them and sweep the blind `depth` instead.
  */
-export const PARAMETRIC_FORMAT_VERSION = 2;
+export const PARAMETRIC_FORMAT_VERSION = 3;
 /** Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references). */
 export const SKETCH_FORMAT_VERSION = 1;
 
@@ -22,3 +24,7 @@ registerDocumentModule("sketch", SKETCH_FORMAT_VERSION);
 
 // parametric 1 → 2: the `extrudeTarget` feature type is new; every v1 feature list is a valid v2 one.
 registerMigration("parametric", 1, (document) => document);
+
+// parametric 2 → 3: extrudes gain optional extents; an absent `extent` is a blind distance, exactly what
+// every v2 extrude is — no data to rewrite.
+registerMigration("parametric", 2, (document) => document);

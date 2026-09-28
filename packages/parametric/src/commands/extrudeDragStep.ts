@@ -20,6 +20,7 @@ import {
     parseLength,
     Result,
     type ShapeMeshData,
+    ShapeNode,
     ShapeTypes,
     type SnapResult,
     type VisualShapeData,
@@ -167,6 +168,17 @@ export interface ExtrudeDragData {
     /** The handler reports the signed depth so the command syncs its depth input. */
     onDist?(dist: number): void;
     /**
+     * A non-distance extent (to object, through all): the depth is not dragged — no arrow, no
+     * drag or typed length — and the preview and confirm do not wait for a depth.
+     */
+    depthLocked?(): boolean;
+    /** False while the extent still lacks what it needs (a to-object face): confirming waits. */
+    extentReady?(): boolean;
+    /** True while a plain click picks the face to extrude up to ("To object"). */
+    picksExtentFace?(): boolean;
+    /** The face clicked for a to-object extent (any solid face); true when taken. */
+    pickExtentFace?(face: VisualShapeData): boolean;
+    /**
      * Editing an existing extrude: the profiles are the feature's own (re-picking them is
      * "Reselect"), so clicks never switch or toggle faces and nothing hovers; leaving the
      * click-move mode goes back to the stored depth instead of zero; and the preview is
@@ -192,6 +204,8 @@ export function planeOfPickedFace(face: VisualShapeData): Plane {
  * Shift+click toggles a face of the current node, and Ctrl/Cmd+click on a body adds it to or
  * removes it from the bodies the extrude acts on. Typing a number enters an exact length. Confirm (button/Enter)
  * commits once a non-zero depth exists; Escape cancels (exiting click-move mode first).
+ * A non-distance extent (to object, through all) hides the arrow and ignores the depth gestures;
+ * with "To object", a plain click on any solid face picks the face to extrude up to.
  */
 export class ExtrudeDragStep implements IStep {
     constructor(
@@ -289,9 +303,16 @@ export class ExtrudeDragHandler implements IEventHandler {
         data.onReady?.(this);
     }
 
+    /** A non-distance extent: no arrow and no depth gestures (see `ExtrudeDragData.depthLocked`). */
+    private get depthLocked(): boolean {
+        return this.data.depthLocked?.() === true;
+    }
+
     pointerMove(view: IView, event: PointerEvent): void {
         this.trackCamera(view);
-        if (this._awaitingClick) {
+        if (this.depthLocked) {
+            this.updateHover(view, event);
+        } else if (this._awaitingClick) {
             this.updateDrag(view, event);
         } else if (this._downX !== undefined) {
             if (!this._dragging) {
@@ -325,7 +346,7 @@ export class ExtrudeDragHandler implements IEventHandler {
             return;
         }
         if (this._downX === undefined) return;
-        const wasDragging = this._dragging;
+        const wasDragging = this._dragging && !this.depthLocked;
         this._downX = undefined;
         this._downY = undefined;
         this._dragging = false;
@@ -338,7 +359,12 @@ export class ExtrudeDragHandler implements IEventHandler {
         }
         // A plain click on the arrow starts the click-move-click gesture; Shift and Ctrl
         // keep their toggle meaning even on the arrow.
-        if (!event.shiftKey && !isToggleSelectEvent(event) && this.isOverArrow(view, event)) {
+        if (
+            !this.depthLocked &&
+            !event.shiftKey &&
+            !isToggleSelectEvent(event) &&
+            this.isOverArrow(view, event)
+        ) {
             this.enterMoveMode(view, event);
             return;
         }
@@ -425,9 +451,15 @@ export class ExtrudeDragHandler implements IEventHandler {
         } as unknown as AsyncController);
     }
 
-    /** Confirms the extrude once a non-zero depth exists; a zero depth is a no-op. */
+    /**
+     * Confirms the extrude once a non-zero depth exists (a zero depth is a no-op) — or, for a
+     * non-distance extent, once the extent has what it needs.
+     */
     private confirm() {
-        if (Math.abs(this.state.dist) >= Precision.Float) {
+        const ready = this.depthLocked
+            ? this.data.extentReady?.() !== false
+            : Math.abs(this.state.dist) >= Precision.Float;
+        if (ready) {
             // The button/Enter has no pointer event to provide the view, so fall back to
             // the active view; without it the step returns undefined and the command
             // closes as if cancelled (e.g. confirming a cached depth without dragging).
@@ -487,8 +519,12 @@ export class ExtrudeDragHandler implements IEventHandler {
      * `ExtrudeDragData.editing`), so only the target toggle applies there.
      */
     private handleClick(view: IView, event: PointerEvent) {
-        const face = this.data.editing ? undefined : this.detectProfileFace(view, event);
         const toggle = event.shiftKey || isToggleSelectEvent(event);
+        if (!toggle && this.data.picksExtentFace?.() === true) {
+            this.pickExtentFaceAt(view, event);
+            return;
+        }
+        const face = this.data.editing ? undefined : this.detectProfileFace(view, event);
         const profileToggle =
             face !== undefined &&
             toggle &&
@@ -511,6 +547,22 @@ export class ExtrudeDragHandler implements IEventHandler {
         this.refreshTempShapes(view);
         this.document.selection.setSelectedShapes(this.state.faces, SELECTED_PROFILE_STATE, false);
         view.document.visual.update();
+    }
+
+    /** "To object": the solid face under the pointer becomes the face to extrude up to. */
+    private pickExtentFaceAt(view: IView, event: PointerEvent) {
+        const face = this.detectExtentFace(view, event);
+        if (face === undefined || this.data.pickExtentFace?.(face) !== true) return;
+        this.clearHover();
+        this.refreshTempShapes(view);
+        view.document.visual.update();
+    }
+
+    /** Any face of a solid (not a sketch) — planar or curved — under the pointer. */
+    private detectExtentFace(view: IView, event: PointerEvent): VisualShapeData | undefined {
+        return view
+            .detectShapes(ShapeTypes.face, event.offsetX, event.offsetY)
+            .find((x) => x.owner.node instanceof ShapeNode && !(x.owner.node instanceof SketchNode));
     }
 
     /**
@@ -577,9 +629,10 @@ export class ExtrudeDragHandler implements IEventHandler {
             return;
         }
         this.setArrowHover(view, false);
-        if (this.data.editing) return;
+        const picksExtent = this.data.picksExtentFace?.() === true;
+        if (this.data.editing && !picksExtent) return;
 
-        const face = this.detectProfileFace(view, event);
+        const face = picksExtent ? this.detectExtentFace(view, event) : this.detectProfileFace(view, event);
         if (face === this._hovered) return;
 
         this.clearHover();
@@ -595,8 +648,9 @@ export class ExtrudeDragHandler implements IEventHandler {
         view.update();
     }
 
-    /** Screen-space hit test against the arrow shaft segment. */
+    /** Screen-space hit test against the arrow shaft segment (none while the depth is locked). */
     private isOverArrow(view: IView, event: PointerEvent): boolean {
+        if (this.depthLocked) return false;
         const { start, end } = extrudeArrowSegment(this.state);
         const a = view.worldToScreen(start);
         const b = view.worldToScreen(end);
@@ -632,6 +686,7 @@ export class ExtrudeDragHandler implements IEventHandler {
     }
 
     private handleNumericInput(view: IView, event: KeyboardEvent) {
+        if (this.depthLocked) return;
         if (!["#", "-", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(event.key)) return;
 
         PubSub.default.pub("showInput", event.key, (text: string) => {
@@ -655,7 +710,7 @@ export class ExtrudeDragHandler implements IEventHandler {
         }
         this._previewIds = [];
         this.restoreHiddenNodes();
-        if (Math.abs(this.state.dist) >= Precision.Float) {
+        if (this.depthLocked || Math.abs(this.state.dist) >= Precision.Float) {
             const preview = this.data.buildPreview(this.state);
             const context = this.document.visual.context;
             for (const mesh of preview.meshes) {
@@ -731,6 +786,10 @@ export class ExtrudeDragHandler implements IEventHandler {
             this.document.visual.context.removeMesh(id);
         }
         this._arrowIds = [];
+        if (this.depthLocked) {
+            this.document.visual.update();
+            return;
+        }
         const context = this.document.visual.context;
         for (const mesh of this.data.meshArrow(this.state)) {
             this._arrowIds.push(context.displayMesh([mesh], { meshOpacity: 1, onTop: true }));

@@ -5,42 +5,59 @@ import { DocumentMigrations, migrateDocument } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import { PARAMETRIC_FORMAT_VERSION } from "../src/migrations";
 
-describe("parametric format 2 (extrudeTarget features)", () => {
+function fixture(name: string) {
+    const found = loadDocumentFixtures().find((x) => x.name === name);
+    expect(found).not.toBeUndefined();
+    return found!;
+}
+
+describe("parametric format 3 (extrude extents)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(2);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(2);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(3);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(3);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
-    test("a parametric 1 document migrates with its feature lists untouched", () => {
-        const fixture = loadDocumentFixtures().find((x) => x.name === "v1/rich.json");
-        expect(fixture).not.toBeUndefined();
-        expect(fixture!.data["moduleVersions"]).toMatchObject({ parametric: 1 });
-        const original = structuredClone(fixture!.data);
+    test.each([
+        ["v1/rich.json", 1],
+        ["v1/parametric2-extrude-targets.json", 2],
+    ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
+        const { data } = fixture(name);
+        expect(data["moduleVersions"]).toMatchObject({ parametric: version });
+        const original = structuredClone(data);
 
-        const migrated = migrateDocument(fixture!.data);
+        const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 2 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 3 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
-        expect(fixture!.data).toEqual(original);
+        expect(data).toEqual(original);
     });
 
-    test("a parametric 2 document with extrude targets needs no migration", () => {
-        const fixture = loadDocumentFixtures().find((x) => x.name === "v1/parametric2-extrude-targets.json");
-        expect(fixture).not.toBeUndefined();
+    test("an extrude without an extent is still a blind distance after migrating", () => {
+        const { data } = fixture("v1/parametric2-extrude-targets.json");
 
-        const migrated = migrateDocument(fixture!.data);
+        const migrated = migrateDocument(data);
+
+        const left = (migrated.value["models"] as any).nodes.find((x: any) => x.id === "body-left");
+        const slot = JSON.parse(left.featuresJson)[1];
+        expect(slot).toMatchObject({ id: "feature-slot", type: "extrude", depth: -5, operation: "cut" });
+        expect(slot.extent).toBeUndefined();
+    });
+
+    test("a parametric 3 document with extents needs no migration", () => {
+        const { data } = fixture("v1/parametric3-extrude-extents.json");
+        expect(data["moduleVersions"]).toMatchObject({ parametric: 3 });
+
+        const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["models"]).toEqual(fixture!.data["models"]);
-        const right = (migrated.value["models"] as any).nodes.find((x: any) => x.id === "body-right");
-        expect(JSON.parse(right.featuresJson)[1]).toEqual({
-            id: "feature-slot-target",
-            type: "extrudeTarget",
-            bodyId: "body-left",
-            featureId: "feature-slot",
-        });
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const extents = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "ParametricBodyNode")
+            .flatMap((x: any) => JSON.parse(x.featuresJson))
+            .flatMap((x: any) => (x.extent === undefined ? [] : [x.extent.type]));
+        expect(extents.sort()).toEqual(["throughAll", "toObject"]);
     });
 });

@@ -179,6 +179,120 @@ describe("sketch and extrude", () => {
     });
 });
 
+describe("extrude extents", () => {
+    /** The plate plus a sketch on its top face, and the indexes of its top and bottom faces. */
+    function plateWithTopSketch(doc: TestDocument, depth = 20) {
+        const body = createdBody(doc, run(doc, plate(depth)), "b1");
+        const faces = body.shape.unchecked()!.findSubShapes(ShapeTypes.face) as IFace[];
+        const topIndex = faces.findIndex((face) => face.normal(0, 0)[1].z > 1 - 1e-6);
+        const bottomIndex = faces.findIndex((face) => face.normal(0, 0)[1].z < -1 + 1e-6);
+        expect(topIndex).toBeGreaterThanOrEqual(0);
+        expect(bottomIndex).toBeGreaterThanOrEqual(0);
+        return { body, topIndex, bottomIndex };
+    }
+
+    test("a cut up to the bottom face follows the plate when it grows", () => {
+        const doc = newDoc();
+        const { body, topIndex, bottomIndex } = plateWithTopSketch(doc);
+        run(doc, [
+            {
+                op: "sketch",
+                id: "s2",
+                plane: { nodeId: body.id, faceIndex: topIndex },
+                entities: rect(10, 10, 20, 20),
+            },
+            {
+                op: "extrude",
+                id: "hole",
+                sketch: "s2",
+                depth: 0,
+                body: body.id,
+                operation: "cut",
+                extent: { type: "toObject", face: { nodeId: body.id, faceIndex: bottomIndex } },
+            },
+        ]);
+        expectClean(body);
+        expect(Math.abs(body.shape.value.volume())).toBeCloseTo(40 * 30 * 20 - 100 * 20, 3);
+
+        const features = body.features;
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: features[0].id,
+                action: "setParameter",
+                key: "depth",
+                value: 35,
+            },
+        ]);
+        expectClean(body);
+        expect(Math.abs(body.shape.value.volume())).toBeCloseTo(40 * 30 * 35 - 100 * 35, 3);
+    });
+
+    test("through all is stored as its extent type", () => {
+        const doc = newDoc();
+        const { body, topIndex } = plateWithTopSketch(doc);
+        run(doc, [
+            {
+                op: "sketch",
+                id: "s2",
+                plane: { nodeId: body.id, faceIndex: topIndex },
+                entities: rect(10, 10, 20, 20),
+            },
+            {
+                op: "extrude",
+                id: "hole",
+                sketch: "s2",
+                depth: -1,
+                body: body.id,
+                operation: "cut",
+                extent: "throughAll",
+            },
+        ]);
+        expectClean(body);
+        expect(body.features.at(-1)).toMatchObject({ extent: { type: "throughAll" } });
+        expect(Math.abs(body.shape.value.volume())).toBeCloseTo(40 * 30 * 20 - 100 * 20, 3);
+    });
+
+    test("a face index out of range and a second extent without symmetric are refused", () => {
+        const doc = newDoc();
+        const { body, topIndex } = plateWithTopSketch(doc);
+        const sketch: ParametricOp = {
+            op: "sketch",
+            id: "s2",
+            plane: { nodeId: body.id, faceIndex: topIndex },
+            entities: rect(10, 10, 20, 20),
+        };
+        const outOfRange = runExpectingFailure(doc, [
+            sketch,
+            {
+                op: "extrude",
+                id: "hole",
+                sketch: "s2",
+                depth: 0,
+                body: body.id,
+                operation: "cut",
+                extent: { type: "toObject", face: { nodeId: body.id, faceIndex: 99 } },
+            },
+        ]);
+        expect(outOfRange).toContain("faceIndex 99 is out of range");
+        const lonely = runExpectingFailure(doc, [
+            sketch,
+            {
+                op: "extrude",
+                id: "hole",
+                sketch: "s2",
+                depth: 1,
+                body: body.id,
+                operation: "cut",
+                secondExtent: "throughAll",
+            },
+        ]);
+        expect(lonely).toContain('it needs "symmetric": true');
+        expect(body.features).toHaveLength(1);
+    });
+});
+
 describe("feature list editing", () => {
     test("a depth edit carries the geometry and editing back restores it exactly", () => {
         const doc = newDoc();

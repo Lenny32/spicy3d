@@ -858,3 +858,100 @@ describe("ExtrudeDragStep", () => {
         expect(await promise).toBeUndefined();
     });
 });
+
+describe("ExtrudeDragHandler with a non-distance extent", () => {
+    let doc: TestDocument;
+    let sketch: SketchNode;
+    let controller: AsyncController;
+
+    beforeEach(() => {
+        doc = new TestDocument();
+        doc.visual = createMockVisualWithDocument(doc);
+        sketch = new SketchNode({ document: doc, plane: Plane.XY, data: { entities: [], constraints: [] } });
+        controller = new AsyncController();
+    });
+
+    afterEach(() => {
+        controller.dispose();
+    });
+
+    function lockedData(ready: () => boolean, picks = false): ExtrudeDragData {
+        return {
+            node: sketch,
+            faces: [],
+            origin: XYZ.zero,
+            normal: XYZ.unitZ,
+            anchor: new XYZ({ x: 1, y: 1, z: 0 }),
+            buildPreview: rs.fn((_state: any) => ({ meshes: [fakeMesh()] })),
+            meshArrow: rs.fn((_state: any) => [fakeMesh()]),
+            depthLocked: () => true,
+            extentReady: ready,
+            picksExtentFace: () => picks,
+            pickExtentFace: rs.fn((_face: any) => true),
+        };
+    }
+
+    const confirmControlOf = (pub: { mock: { calls: unknown[][] } }) =>
+        pub.mock.calls.find((x) => x[0] === "showSelectionControl")?.[1] as { success(): void };
+
+    test("draws no arrow, previews at zero depth and confirms once the extent is ready", () => {
+        const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
+        let ready = false;
+        const data = lockedData(() => ready);
+        try {
+            const handler = new ExtrudeDragHandler(doc, controller, data);
+            expect(data.meshArrow).not.toHaveBeenCalled();
+            expect(data.buildPreview).toHaveBeenCalled();
+            expect(handler.state.dist).toBe(0);
+
+            confirmControlOf(pub).success();
+            expect(controller.result).toBeUndefined();
+
+            ready = true;
+            confirmControlOf(pub).success();
+            expect(controller.result?.status).toBe("success");
+        } finally {
+            pub.mockRestore();
+        }
+    });
+
+    test("ignores the depth gestures: a drag leaves the depth at zero", () => {
+        const data = lockedData(() => true);
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const view = createHandlerMockView({
+            document: doc,
+            rayAt: (mx: number) =>
+                new Ray({ point: new XYZ({ x: 0, y: 0, z: mx - 113 }), direction: XYZ.unitX }),
+        });
+
+        handler.pointerDown(view, createPointerEvent({ offsetX: 100, offsetY: 200 }));
+        handler.pointerMove(view, createPointerEvent({ offsetX: 140, offsetY: 200 }));
+        handler.pointerUp(view, createPointerEvent({ offsetX: 140, offsetY: 200 }));
+
+        expect(handler.state.dist).toBe(0);
+        handler.dispose();
+    });
+
+    test("to object: a plain click on a solid face picks it, a sketch face is not offered", () => {
+        const data = lockedData(() => true, true);
+        const handler = new ExtrudeDragHandler(doc, controller, data);
+        const body = new ParametricBodyNode({ document: doc, features: [] });
+        const bodyFace = faceData(body, [3]);
+        const sketchFace = faceData(sketch, [0]);
+
+        const sketchOnly = createHandlerMockView({ document: doc, detectShapes: () => [sketchFace] });
+        handler.pointerDown(sketchOnly, createPointerEvent());
+        handler.pointerUp(sketchOnly, createPointerEvent());
+        expect(data.pickExtentFace).not.toHaveBeenCalled();
+
+        const view = createHandlerMockView({ document: doc, detectShapes: () => [sketchFace, bodyFace] });
+        handler.pointerDown(view, createPointerEvent());
+        handler.pointerUp(view, createPointerEvent());
+
+        expect(data.pickExtentFace).toHaveBeenCalledWith(bodyFace);
+        // The profiles stay as they were: the click picked the extent, not a profile.
+        expect(handler.state.node).toBe(sketch);
+        expect(handler.state.faces).toEqual([]);
+        handler.dispose();
+    });
+});

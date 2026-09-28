@@ -69,7 +69,40 @@ export interface ExtrudeFeatureData extends FeatureBase {
      * empty extrudes every closed profile of the sketch.
      */
     readonly profiles?: ProfileRef[];
+    /**
+     * Where the extrusion ends (Fusion's extent types, parametric format 3); absent = a blind
+     * `depth`. For a symmetric extrude it is the extent of both sides unless `secondExtent`
+     * is set. See `extrudeExtent.ts`.
+     */
+    readonly extent?: ExtrudeExtent;
+    /**
+     * Two-sided extrude: the extent of the second side (opposite the first), read only when
+     * `symmetric` is set. A `distance` second side uses `depth`. Absent: the second side
+     * mirrors the first.
+     */
+    readonly secondExtent?: ExtrudeExtent;
 }
+
+/**
+ * How far an extrude sweeps (parametric format 3):
+ * - `distance` — the signed `depth` (the default when a feature has no extent);
+ * - `toObject` — up to a face of this or another body, on any surface; `face` is a fingerprint
+ *   in world coordinates with the face's tracked id (like a press-pull source face), re-matched
+ *   on every rebuild; `nodeId` is the body the face belongs to (absent = the body hosting the
+ *   extrude, matched on the chain state entering it); `offset` moves the end along the extrude
+ *   direction (positive = past the face);
+ * - `throughAll` — through the whole of every body the extrude acts on, in the direction of
+ *   `depth`'s sign.
+ */
+export type ExtrudeExtent =
+    | { readonly type: "distance" }
+    | {
+          readonly type: "toObject";
+          readonly face: ProfileRef;
+          readonly nodeId?: string;
+          readonly offset?: ParameterValue;
+      }
+    | { readonly type: "throughAll" };
 
 export interface RevolveFeatureData extends FeatureBase {
     readonly type: "revolve";
@@ -184,6 +217,12 @@ export interface ShapeTracking {
      * them back into the feature, same re-anchoring contract as `resolvedProfiles`.
      */
     resolvedEdges?: EdgeRef[];
+    /**
+     * Set by a handler that references single faces by field (an extrude's `extent` /
+     * `secondExtent` target face) to the refs it matched this run, by field name; same
+     * re-anchoring contract as `resolvedProfiles`.
+     */
+    resolvedFaces?: Record<string, ProfileRef>;
 }
 
 /**
@@ -291,14 +330,18 @@ export interface FeatureHandler<F extends FeatureData = any> {
     /** Set when the user can re-pick the shapes the feature references (e.g. edges). */
     readonly reselectable?: boolean;
     evaluate(feature: F, context: FeatureContext): Result<IShape>;
-    /** Ids of nodes this feature references — the body watches them for changes. */
-    nodeIds(feature: F): string[];
+    /**
+     * Ids of nodes this feature references — the body watches them for changes. `document`
+     * (always passed by the body) lets a feature name nodes another body's data points it at
+     * (an `extrudeTarget` entry watches its extrude's to-object face body).
+     */
+    nodeIds(feature: F, document?: IDocument): string[];
     /**
      * What the evaluation reads from other nodes besides their shapes (e.g. another body's
      * feature data), folded into the body's cache key so a change there re-evaluates the
      * feature. Absent: the feature's own payload is the whole key.
      */
-    cacheKey?(feature: F, document: IDocument): string;
+    cacheKey?(feature: F, document: IDocument): string | undefined;
     /**
      * The nodes whose shape (and placement) a cached result depends on; defaults to
      * `nodeIds`. A feature that watches a node only to hear about its data changes (see
@@ -321,7 +364,14 @@ export interface FeatureHandler<F extends FeatureData = any> {
      * handler knows where its refs live; a feature whose entry is absent is
      * returned unchanged.
      */
-    applyResolvedRefs?(feature: F, refs: { resolvedProfiles?: ProfileRef[]; resolvedEdges?: EdgeRef[] }): F;
+    applyResolvedRefs?(
+        feature: F,
+        refs: {
+            resolvedProfiles?: ProfileRef[];
+            resolvedEdges?: EdgeRef[];
+            resolvedFaces?: Record<string, ProfileRef>;
+        },
+    ): F;
 }
 
 const handlers = new Map<string, FeatureHandler>();

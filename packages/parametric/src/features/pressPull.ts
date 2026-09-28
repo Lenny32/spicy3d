@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IFace, type IShape, Result } from "@spicy3d/core";
+import type { ResolvedExtents } from "./extrudeExtent";
 import type { ExtrudeFeatureData, FeatureContext } from "./feature";
 import { captureProfileRef } from "./profileRef";
 import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher";
@@ -21,12 +22,12 @@ import { sweepFaces } from "./sweepGeometry";
 
 /**
  * Press-pull from planar faces of an existing body: every matched face sweeps along its own
- * live outward normal. See `matchSourceFaceIndexes` for which faces those are.
+ * live outward normal, ended by the feature's extents. See `matchSourceFaceIndexes` for which faces those are.
  */
 export function extrudeFromSourceFaces(
     feature: ExtrudeFeatureData & { source: NonNullable<ExtrudeFeatureData["source"]> },
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> {
     const resolved = resolveSourceFaces(feature.source, context);
@@ -52,10 +53,7 @@ export function extrudeFromSourceFaces(
         }
         return sweepFaces(
             matched.value.indexes.map((index) => worldFaces[index]),
-            (face) => {
-                const vec = face.normal(0, 0)[1].multiply(depth);
-                return feature.symmetric === true ? [vec, vec.multiply(-1)] : [vec];
-            },
+            (face) => extents.sidesAlong(face.normal(0, 0)[1]),
             (face) => face.normal(0, 0)[1].multiply(startOffset),
         );
     } finally {

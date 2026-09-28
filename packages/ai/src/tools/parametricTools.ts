@@ -228,6 +228,14 @@ const OPS_SCHEMA = {
         depth: { description: "Extrude distance in mm (a number or an expression)" },
         symmetric: { type: "boolean", description: "Extrude by `depth` in both directions" },
         startOffset: { description: "Distance the extrusion starts away from the profile plane" },
+        extent: {
+            description:
+                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
+        },
+        secondExtent: {
+            description:
+                "Extrude only, with symmetric: true: the second side's extent (same forms as extent); a distance second side uses depth.",
+        },
         axis: {
             type: "object",
             description:
