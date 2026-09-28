@@ -78,7 +78,7 @@ function collectRestoreDependencies(
     for (const body of bodies) {
         const deps = new Set<ParametricBodyNode>();
         for (const feature of body.features) {
-            for (const id of featureHandler(feature.type)?.nodeIds(feature) ?? []) {
+            for (const id of featureHandler(feature.type)?.nodeIds(feature, body.document) ?? []) {
                 // a self-reference (press-pull on an own face) carries no dependency
                 if (id === body.id) continue;
                 const source = byId.get(id);
@@ -177,7 +177,7 @@ function firstReferencingFeatureIndex(
 ): number | undefined {
     const features = body.features;
     for (let index = 0; index < features.length; index++) {
-        const ids = featureHandler(features[index].type)?.nodeIds(features[index]) ?? [];
+        const ids = featureHandler(features[index].type)?.nodeIds(features[index], body.document) ?? [];
         if (ids.some((id) => id !== body.id && downstream.has(id))) return index;
     }
     return undefined;

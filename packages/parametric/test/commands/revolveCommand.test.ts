@@ -16,6 +16,7 @@ import {
     XYZ,
 } from "@spicy3d/core";
 import { createMockApplication, createMockSelection, TestDocument } from "@spicy3d/core/test-utils";
+import { RevolveAngleStep } from "../../src/commands/revolveAngleStep";
 import { RevolveFeatureCommand } from "../../src/commands/revolveCommand";
 import type { RevolveFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
@@ -171,7 +172,9 @@ describe("RevolveFeatureCommand axis step", () => {
         const cmd = new RevolveFeatureCommand() as any;
         cmd.stepDatas = [{ shapes: [], nodes: [sketch], type: "node" }];
         const steps = cmd.getSteps();
-        expect(steps.length).toBe(2);
+        // Profiles, axis, then the angle handle.
+        expect(steps.length).toBe(3);
+        expect(steps[2]).toBeInstanceOf(RevolveAngleStep);
         return steps[1];
     }
 
@@ -251,7 +254,7 @@ describe("RevolveFeatureCommand execution", () => {
         return { restoreFactory, doc, sketch, axisNode, cmd };
     }
 
-    test("commits immediately with the angle from the options tab", () => {
+    test("commits the angle set in the options tab or with the handle", () => {
         const { restoreFactory, doc, sketch, axisNode, cmd } = scenario(90);
         try {
             (cmd as any).executeMainTask();

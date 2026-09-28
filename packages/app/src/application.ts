@@ -173,7 +173,7 @@ export class Application extends Observable implements IApplication {
                     await this.pluginManager.loadFromFile(pluginFile);
                 }
             },
-            "toast.excuting{0}",
+            "toast.executing{0}",
             I18n.translate("command.doc.open"),
         );
     }
@@ -189,7 +189,7 @@ export class Application extends Observable implements IApplication {
                     document?.application.activeView?.cameraController.fitContent();
                 }
             },
-            "toast.excuting{0}",
+            "toast.executing{0}",
             I18n.translate("command.doc.open"),
         );
     }

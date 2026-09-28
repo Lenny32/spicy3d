@@ -43,6 +43,10 @@ function applyProps(el: HTMLElement, props: any, opts: ElementMockOptions): void
     if (props.title) el.title = String(props.title);
     if (props.textContent !== undefined && typeof props.textContent !== "object") {
         el.textContent = String(props.textContent);
+    } else if (props.textContent !== undefined) {
+        // A Binding / Localize: keep it so tests can assert (or attach) what was passed in.
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        (el as any)._textContent = props.textContent;
     }
     if (props.type) (el as HTMLInputElement).type = String(props.type);
     if (typeof props.value === "string") (el as HTMLInputElement).value = props.value;

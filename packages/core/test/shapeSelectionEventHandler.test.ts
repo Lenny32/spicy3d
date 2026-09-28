@@ -701,4 +701,48 @@ describe("SubshapeSelectionHandler", () => {
             expect(passedState).toBe(VisualStates.edgeSelected);
         });
     });
+
+    describe("Ctrl/Cmd toggling in a single pick (toggleWithModifier)", () => {
+        /** Clicks a detected shape with `init` modifiers; returns the toggle flag and whether the pick finished. */
+        function clickWith(init: Partial<PointerEventInit>, toggleWithModifier: boolean, multiMode = false) {
+            const controller = new AsyncController();
+            let finished = false;
+            controller.onCompleted(() => {
+                finished = true;
+            });
+            const { handler, view, selection } = setupSubshapeSelectionHandler({ controller, multiMode });
+            handler.toggleWithModifier = toggleWithModifier;
+            view.detectShapes = () => [createVisualShapeData()];
+            const toggles: boolean[] = [];
+            selection.setSelectedShapes = (_shapes, _state, toggle) => {
+                toggles.push(toggle);
+                return 1;
+            };
+
+            handler.pointerDown(view, createPointerEvent({ pointerId: 1, ...init }));
+            handler.pointerMove(view, createPointerEvent({ pointerId: 1, buttons: 1, ...init }));
+            handler.pointerUp(view, createPointerEvent({ pointerId: 1, ...init }));
+            return { toggles, finished };
+        }
+
+        test.each([
+            { name: "Ctrl", init: { ctrlKey: true } },
+            { name: "Cmd", init: { metaKey: true } },
+        ])("$name+click toggles the shape and keeps the pick open", ({ init }) => {
+            expect(clickWith(init, true)).toEqual({ toggles: [true], finished: false });
+        });
+
+        test("a plain click replaces the selection and finishes", () => {
+            expect(clickWith({}, true)).toEqual({ toggles: [false], finished: true });
+        });
+
+        test("without the opt-in a Ctrl+click still picks one shape and finishes", () => {
+            expect(clickWith({ ctrlKey: true }, false)).toEqual({ toggles: [false], finished: true });
+        });
+
+        test("multi mode keeps toggling on every click, with or without Ctrl", () => {
+            expect(clickWith({}, false, true)).toEqual({ toggles: [true], finished: false });
+            expect(clickWith({ ctrlKey: true }, true, true)).toEqual({ toggles: [true], finished: false });
+        });
+    });
 });

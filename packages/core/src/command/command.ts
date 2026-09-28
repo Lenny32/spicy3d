@@ -152,8 +152,17 @@ export abstract class CancelableCommand extends Observable implements ICancelabl
         this._isCompleted = true;
     }
 
+    /**
+     * Whether `property` is carried over from the previous run of a command (the default).
+     * A command opts a property out when each run must start from its own default.
+     */
+    protected isPropertyCached(_property: Property): boolean {
+        return true;
+    }
+
     private readProperties() {
         PropertyUtils.getProperties(this).forEach((x) => {
+            if (!this.isPropertyCached(x)) return;
             const key = this.cacheKeyOfProperty(x);
             if (CancelableCommand._propertiesCache.has(key)) {
                 this.setPrivateValue(key as keyof this, CancelableCommand._propertiesCache.get(key));
@@ -163,6 +172,7 @@ export abstract class CancelableCommand extends Observable implements ICancelabl
 
     private saveProperties() {
         PropertyUtils.getProperties(this).forEach((x) => {
+            if (!this.isPropertyCached(x)) return;
             const key = this.cacheKeyOfProperty(x);
             const prop = (this as any)[key];
             if (typeof prop === "function") return;

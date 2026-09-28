@@ -119,6 +119,37 @@ export interface IShapeFactory {
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape>;
     prismTracked?(shape: IShape, vec: XYZ): Result<TrackedShape>;
+    /**
+     * Tool prism of the planar `profile` face(s) along `direction` (only its sense counts),
+     * ending on `untilFace` moved by `offset` along the direction — any surface: planar,
+     * tilted, curved, of this body or another. The face itself bounds the prism when it
+     * intercepts the whole profile, else its untrimmed surface does (a plane extended, a
+     * cylinder closed). The result is a tool like `prismTracked`'s, combined with a body
+     * through the tracked booleans (join/cut); two-sided extents call it once per side.
+     * Same channels as `prismTracked`: `faceMap`/`edgeMap`/`faceEdgeMap` relative to the
+     * profile, `capFaces` = the pieces lying on the target surface — so the ids stay stable
+     * when the target moves or resizes. Errors (never a kernel abort): zero or in-plane
+     * direction, a target that is not a face or has no surface, a target parallel to the
+     * direction, behind the profile, or not bounding it.
+     */
+    prismUntilTracked?(
+        profile: IShape,
+        direction: XYZ,
+        untilFace: IFace,
+        offset?: number,
+    ): Result<TrackedShape>;
+    /**
+     * Tool prism of `profile` along `direction` through everything in `bounds`: it ends on
+     * the plane normal to the direction at their farthest point (`flush`, for a join) or
+     * past it (default, for a cut). The end face is flat and reported in `capFaces`; other
+     * channels as `prismTracked`. Errors when nothing of `bounds` lies ahead of the profile.
+     */
+    prismThruAllTracked?(
+        profile: IShape,
+        direction: XYZ,
+        bounds: IShape[],
+        flush?: boolean,
+    ): Result<TrackedShape>;
     revolveTracked?(profile: IShape, axis: Line, angle: number): Result<TrackedShape>;
     booleanCommonTracked?(shape1: IShape[], shape2: IShape[]): Result<TrackedShape>;
     booleanCutTracked?(shape1: IShape[], shape2: IShape[]): Result<TrackedShape>;

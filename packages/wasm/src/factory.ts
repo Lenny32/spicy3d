@@ -612,6 +612,28 @@ export class ShapeFactory implements IShapeFactory {
             "Prism Error",
         );
     }
+
+    prismUntilTracked(profile: IShape, direction: XYZ, untilFace: IFace, offset = 0): Result<TrackedShape> {
+        return convertTrackedShapeResult(
+            wasm.ShapeFactory.prismUntilTracked,
+            [ensureOccShape(profile)[0], direction, ensureOccShape(untilFace)[0], offset],
+            "Prism Error",
+        );
+    }
+
+    prismThruAllTracked(
+        profile: IShape,
+        direction: XYZ,
+        bounds: IShape[],
+        flush = false,
+    ): Result<TrackedShape> {
+        return convertTrackedShapeResult(
+            wasm.ShapeFactory.prismThruAllTracked,
+            [ensureOccShape(profile)[0], direction, ensureOccShape(bounds), flush],
+            "Prism Error",
+        );
+    }
+
     pushPull(shape: IShape, face: IShape, vec: XYZ): Result<IShape> {
         if (vec.length() === 0) {
             return Result.err(`The vector length is 0, the prism cannot be created.`);

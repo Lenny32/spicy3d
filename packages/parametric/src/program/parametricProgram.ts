@@ -24,8 +24,10 @@ import {
 } from "@spicy3d/core";
 import { isBodyTrackingNode } from "../features/bodyTracking";
 import { captureEdgeRef } from "../features/edgeRef";
+import { captureExtentFaceRef } from "../features/extrudeExtent";
 import type {
     BooleanOperation,
+    ExtrudeExtent,
     ExtrudeFeatureData,
     FeatureData,
     RevolveFeatureData,
@@ -151,7 +153,22 @@ export interface ExtrudeOp {
     /** Omit to create a new body; otherwise the body to append the feature to. */
     body?: string;
     operation?: BooleanOperation;
+    /** Where the extrusion ends (default: `depth`); with `symmetric`, both sides unless `secondExtent`. */
+    extent?: ExtrudeExtentSpec;
+    /** Two-sided: the second side's extent (needs `symmetric`); a `distance` second side uses `depth`. */
+    secondExtent?: ExtrudeExtentSpec;
 }
+
+/**
+ * An extrude extent as a program writes it: `"distance"` / `"throughAll"` (or `{ type }`), or up to a
+ * face of a node (`faceIndex` into its current faces, findSubShapes order) moved by `offset` along the
+ * extrude direction.
+ */
+export type ExtrudeExtentSpec =
+    | "distance"
+    | "throughAll"
+    | { type: "distance" | "throughAll" }
+    | { type: "toObject"; face: { nodeId: string; faceIndex: number }; offset?: ParameterValue };
 
 export interface RevolveOp {
     op: "revolve";
@@ -562,6 +579,16 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
 
     // `profiles` is deliberately left out: an absent list extrudes every closed profile
     // of the sketch, which is what a whole-sketch extrude means.
+    if (op.secondExtent !== undefined && op.symmetric !== true) {
+        throw new Error(
+            '"secondExtent" is the second side of a two-sided extrude: it needs "symmetric": true',
+        );
+    }
+    const extent = op.extent === undefined ? undefined : resolveExtent(state, op.extent, "extent", scope);
+    const secondExtent =
+        op.secondExtent === undefined
+            ? undefined
+            : resolveExtent(state, op.secondExtent, "secondExtent", scope);
     const feature: ExtrudeFeatureData = {
         id: Id.generate(),
         type: "extrude",
@@ -569,6 +596,8 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         depth: op.depth,
         ...(op.symmetric === true ? { symmetric: true } : {}),
         ...(op.startOffset !== undefined ? { startOffset: op.startOffset } : {}),
+        ...(extent === undefined || extent.type === "distance" ? {} : { extent }),
+        ...(secondExtent === undefined ? {} : { secondExtent }),
     };
     if (op.body === undefined) {
         createBody(state, op.id, op.name, [feature], () => {
@@ -584,6 +613,49 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
     // An op that edits a body is registered as another name for it, so a later op can
     // reference the result of this one the same way it references a freshly built body.
     state.refs.set(op.id, body.id);
+}
+
+/** A program's extent spec as feature data: a to-object face captured like the interactive pick. */
+function resolveExtent(state: State, given: ExtrudeExtentSpec, what: string, scope: Scope): ExtrudeExtent {
+    const type = typeof given === "string" ? given : given?.type;
+    if (type === "distance" || type === "throughAll") return { type };
+    if (type !== "toObject" || typeof given !== "object") {
+        throw new Error(
+            `"${what}" must be "distance", "throughAll" or { type: "toObject", face: { nodeId, faceIndex } }`,
+        );
+    }
+    const spec = given as Extract<ExtrudeExtentSpec, { type: "toObject" }>;
+    if (typeof spec.face?.faceIndex !== "number") {
+        throw new Error(`"${what}.face" must be { nodeId, faceIndex }`);
+    }
+    if (spec.offset !== undefined) ensureUnit(spec.offset, scope, LENGTH_UNITS, `${what}.offset`);
+    const host = resolveNode(state, spec.face?.nodeId, `${what}.face.nodeId`);
+    if (!(host instanceof ShapeNode) || !host.shape.isOk) {
+        throw new Error(`node "${spec.face.nodeId}" has no valid shape to extrude up to`);
+    }
+    const faces = host.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const local = faces[spec.face.faceIndex];
+    if (local === undefined) {
+        throw new Error(
+            `faceIndex ${spec.face.faceIndex} is out of range on "${spec.face.nodeId}" (0..${faces.length - 1})`,
+        );
+    }
+    // Target faces are captured in world coordinates with their tracked id, like press-pull faces.
+    const transform = host.worldTransform();
+    const isIdentity = transform.equals(Matrix4.identity());
+    const world = isIdentity ? local : (local.transformedMul(transform) as IFace);
+    try {
+        const faceId = isBodyTrackingNode(host) ? host.faceIdAt(spec.face.faceIndex) : undefined;
+        const shared = host instanceof ParametricBodyNode && host.faceIdIsShared(faceId);
+        return {
+            type: "toObject",
+            nodeId: host.id,
+            face: captureExtentFaceRef(world, faceId, shared),
+            ...(spec.offset !== undefined ? { offset: spec.offset } : {}),
+        };
+    } finally {
+        if (!isIdentity) world.dispose();
+    }
 }
 
 function runRevolveOp(state: State, op: RevolveOp): void {

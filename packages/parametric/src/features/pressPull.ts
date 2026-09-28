@@ -1,7 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IShape, Result } from "@spicy3d/core";
+import { type IFace, type IShape, Result } from "@spicy3d/core";
+import type { ResolvedExtents } from "./extrudeExtent";
 import type { ExtrudeFeatureData, FeatureContext } from "./feature";
 import { captureProfileRef } from "./profileRef";
 import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher";
@@ -21,12 +22,12 @@ import { sweepFaces } from "./sweepGeometry";
 
 /**
  * Press-pull from planar faces of an existing body: every matched face sweeps along its own
- * live outward normal. See `matchSourceFaceIndexes` for which faces those are.
+ * live outward normal, ended by the feature's extents. See `matchSourceFaceIndexes` for which faces those are.
  */
 export function extrudeFromSourceFaces(
     feature: ExtrudeFeatureData & { source: NonNullable<ExtrudeFeatureData["source"]> },
     context: FeatureContext,
-    depth: number,
+    extents: ResolvedExtents,
     startOffset: number,
 ): Result<IShape> {
     const resolved = resolveSourceFaces(feature.source, context);
@@ -52,13 +53,30 @@ export function extrudeFromSourceFaces(
         }
         return sweepFaces(
             matched.value.indexes.map((index) => worldFaces[index]),
-            (face) => {
-                const vec = face.normal(0, 0)[1].multiply(depth);
-                return feature.symmetric === true ? [vec, vec.multiply(-1)] : [vec];
-            },
+            (face) => extents.sidesAlong(face.normal(0, 0)[1]),
             (face) => face.normal(0, 0)[1].multiply(startOffset),
         );
     } finally {
         owned.forEach((x) => x.dispose());
     }
+}
+
+/**
+ * The faces a press-pull sweeps right now, in world coordinates — what an edit session anchors
+ * its drag arrow on. `dispose` releases the transformed copies once the caller is done.
+ */
+export function pressPullFaces(
+    feature: ExtrudeFeatureData & { source: NonNullable<ExtrudeFeatureData["source"]> },
+    context: FeatureContext,
+): Result<{ faces: IFace[]; dispose(): void }> {
+    const resolved = resolveSourceFaces(feature.source, context);
+    if (!resolved.isOk) return Result.err(resolved.error);
+    const { worldFaces, faceIds, owned } = resolved.value;
+    const dispose = () => owned.forEach((x) => x.dispose());
+    const matched = matchSourceFaceIndexes(worldFaces, faceIds, feature.source.profiles);
+    if (!matched.isOk) {
+        dispose();
+        return Result.err(matched.error);
+    }
+    return Result.ok({ faces: matched.value.indexes.map((index) => worldFaces[index]), dispose });
 }

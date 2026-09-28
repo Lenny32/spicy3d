@@ -30,6 +30,7 @@ import {
     Transaction,
     withConstructionFeaturePosition,
 } from "@spicy3d/core";
+import { hasFeatureEditor, startFeatureEdit } from "./commands/featureEditRegistry";
 import { ReselectFeatureCommand } from "./commands/reselectCommand";
 import { EdgeReselectSession, ProfileReselectSession } from "./commands/reselectSession";
 import { evaluateFeature, type FeatureData, featureHandler, type ShapeTracking } from "./features";
@@ -95,6 +96,7 @@ interface FeatureStepOutput {
     readonly resolvedProfiles?: ProfileRef[];
     /** Edge anchors the feature actually matched this run — re-anchored into the feature. */
     readonly resolvedEdges?: EdgeRef[];
+    readonly resolvedFaces?: Record<string, ProfileRef>;
 }
 
 export interface ParametricBodyNodeOptions {
@@ -388,6 +390,7 @@ export class ParametricBodyNode
                 error: this._featureErrors.get(feature.id),
                 warning: this._featureWarnings.get(feature.id),
                 reselectable: handler?.reselectable === true,
+                editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
                 parameters: handler?.parameters(feature) ?? [],
             };
@@ -467,8 +470,43 @@ export class ParametricBodyNode
         this.setProperty("featuresJson", JSON.stringify(features));
     }
 
+    /**
+     * Removes the feature. An extrude that also acts on other bodies takes its
+     * `extrudeTarget` entries there along (same undo step when the caller transacts), so
+     * removing it undoes its effect everywhere instead of leaving them failing.
+     */
     removeFeature(featureId: string): void {
         this.setFeaturesEmitShapeChanged(this.features.filter((feature) => feature.id !== featureId));
+        for (const node of this.document.modelManager.findNodes((n) => n instanceof ParametricBodyNode)) {
+            const body = node as ParametricBodyNode;
+            if (body === this) continue;
+            const kept = body.features.filter(
+                (x) => !(x.type === "extrudeTarget" && x.bodyId === this.id && x.featureId === featureId),
+            );
+            if (kept.length !== body.features.length) body.setFeaturesEmitShapeChanged(kept);
+        }
+    }
+
+    // ------------------------------------------------------------------ Interactive editing
+
+    /**
+     * Reopens a feature in the same interactive session that created it — the extrude's drag
+     * arrow, the fillet's edge pick with its value arrow, the revolve's angle handle — seeded
+     * with the stored values. Runs as the application's executing command (see
+     * `startFeatureEdit`), so starting any other command cancels it cleanly.
+     */
+    async editFeature(featureId: string): Promise<void> {
+        await startFeatureEdit(this, featureId);
+    }
+
+    /**
+     * What replaying the features after `index` cost on their last evaluation (ms), from the
+     * cached timings — an edit session's guess at whether a live full-chain preview keeps up
+     * with a drag. Cache entries exist only for evaluated (unsuppressed) features, in order.
+     */
+    rebuildCostAfter(index: number): number {
+        const start = this.features.slice(0, index + 1).filter((feature) => !feature.suppressed).length;
+        return this._timeline.evaluationMsFrom(start);
     }
 
     // ------------------------------------------------------------------ Re-picking referenced shapes
@@ -832,6 +870,7 @@ export class ParametricBodyNode
         const nextCache: FeatureCacheEntry[] = [];
         const resolvedProfiles = new Map<string, ProfileRef[]>();
         const resolvedEdges = new Map<string, EdgeRef[]>();
+        const resolvedFaces = new Map<string, Record<string, ProfileRef>>();
         const features = this.features;
         const stop = this._rollbackIndex ?? features.length;
         // Sketches already re-resolved this run (see followReferencedSketches): a
@@ -919,6 +958,9 @@ export class ParametricBodyNode
                 if (step.value.resolvedEdges !== undefined) {
                     resolvedEdges.set(feature.id, step.value.resolvedEdges);
                 }
+                if (step.value.resolvedFaces !== undefined) {
+                    resolvedFaces.set(feature.id, step.value.resolvedFaces);
+                }
             }
             if (!run.current()) {
                 run.cancelReason = "document-edit";
@@ -939,7 +981,7 @@ export class ParametricBodyNode
             );
             this._displayRollbackIndex = this._rollbackIndex;
             committed = true;
-            this.refreshAnchoredRefs(resolvedProfiles, resolvedEdges);
+            this.refreshAnchoredRefs(resolvedProfiles, resolvedEdges, resolvedFaces);
             // Match the anchors just written back, otherwise an unchanged restore misses.
             let cacheIndex = 0;
             for (const feature of this.features.slice(0, stop)) {
@@ -1008,7 +1050,7 @@ export class ParametricBodyNode
     /** True when any feature of this body names `nodeId` — a sketch or a press-pull source. */
     private references(nodeId: string): boolean {
         return this.features.some((feature) =>
-            (featureHandler(feature.type)?.nodeIds(feature) ?? []).includes(nodeId),
+            (featureHandler(feature.type)?.nodeIds(feature, this.document) ?? []).includes(nodeId),
         );
     }
 
@@ -1020,7 +1062,9 @@ export class ParametricBodyNode
     /** Every node id the feature list reads, watched or not — a missing one is never watched. */
     private referencedIds(): Set<string> {
         return new Set(
-            this.features.flatMap((feature) => featureHandler(feature.type)?.nodeIds(feature) ?? []),
+            this.features.flatMap(
+                (feature) => featureHandler(feature.type)?.nodeIds(feature, this.document) ?? [],
+            ),
         );
     }
 
@@ -1094,7 +1138,7 @@ export class ParametricBodyNode
      * memoizing would freeze the fallback resolution for the whole run.
      */
     private followReferencedSketches(feature: FeatureData, followedSketches: Set<string>): void {
-        for (const id of featureHandler(feature.type)?.nodeIds(feature) ?? []) {
+        for (const id of featureHandler(feature.type)?.nodeIds(feature, this.document) ?? []) {
             if (id === this.id || followedSketches.has(id)) continue;
             const node = this.document.modelManager.findNode((n) => n.id === id);
             if (!(node instanceof SketchNode) || node.editingSession) {
@@ -1178,6 +1222,7 @@ export class ParametricBodyNode
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
+        const started = performance.now();
         const result = evaluateFeature(feature, {
             document: this.document,
             host: this,
@@ -1185,6 +1230,7 @@ export class ParametricBodyNode
             scope,
             tracking,
         });
+        const evaluationMs = performance.now() - started;
         if (!result.isOk) return Result.err(result.error);
         // A handler that cannot track (e.g. the kernel lacks history) leaves the
         // output empty — ids stay undefined from here on rather than guessing.
@@ -1194,6 +1240,7 @@ export class ParametricBodyNode
             edgeIds: tracking.outputEdgeIds.length > 0 ? tracking.outputEdgeIds : undefined,
             resolvedProfiles: tracking.resolvedProfiles,
             resolvedEdges: tracking.resolvedEdges,
+            resolvedFaces: tracking.resolvedFaces,
         };
         nextCache.push({
             json: key,
@@ -1202,13 +1249,16 @@ export class ParametricBodyNode
             shape: output.shape,
             faceIds: output.faceIds,
             edgeIds: output.edgeIds,
+            evaluationMs,
         });
         return Result.ok(output);
     }
 
     /** Cache keys include the scope snapshot so a variable change invalidates dependents. */
     private cacheKey(feature: FeatureData, scope: Scope): string {
-        return scope.size === 0 ? JSON.stringify(feature) : JSON.stringify([feature, [...scope]]);
+        const extra = featureHandler(feature.type)?.cacheKey?.(feature, this.document);
+        const own = extra === undefined ? feature : [feature, extra];
+        return scope.size === 0 ? JSON.stringify(own) : JSON.stringify([own, [...scope]]);
     }
 
     /** The cached entry for `index`, when the feature data, the input and the refs all still match. */
@@ -1238,7 +1288,10 @@ export class ParametricBodyNode
 
     private snapshotNodeRefs(feature: FeatureData): Map<string, RefSnapshot> {
         const refs = new Map<string, RefSnapshot>();
-        for (const id of featureHandler(feature.type)?.nodeIds(feature) ?? []) {
+        const handler = featureHandler(feature.type);
+        const ids =
+            handler?.cacheRefIds?.(feature, this.document) ?? handler?.nodeIds(feature, this.document) ?? [];
+        for (const id of ids) {
             // A feature may reference the host itself (e.g. an extrude sourced on one
             // of its own faces) — the input-identity check already covers that.
             if (id === this.id) continue;
@@ -1291,13 +1344,15 @@ export class ParametricBodyNode
     private refreshAnchoredRefs(
         profiles: ReadonlyMap<string, ProfileRef[]>,
         edges: ReadonlyMap<string, EdgeRef[]>,
+        faces: ReadonlyMap<string, Record<string, ProfileRef>>,
     ): void {
-        if (profiles.size === 0 && edges.size === 0) return;
+        if (profiles.size === 0 && edges.size === 0 && faces.size === 0) return;
         let changed = false;
         const features = this.features.map((feature) => {
             const next = featureHandler(feature.type)?.applyResolvedRefs?.(feature, {
                 resolvedProfiles: profiles.get(feature.id),
                 resolvedEdges: edges.get(feature.id),
+                resolvedFaces: faces.get(feature.id),
             });
             // Untouched features skip the stringify pair — the common case.
             if (next === undefined || next === feature) return feature;
@@ -1322,7 +1377,7 @@ export class ParametricBodyNode
     private syncWatchedNodes(): void {
         const wanted = new Set(
             this.features
-                .flatMap((f) => featureHandler(f.type)?.nodeIds(f) ?? [])
+                .flatMap((f) => featureHandler(f.type)?.nodeIds(f, this.document) ?? [])
                 // Never watch ourselves — a self-referencing feature (e.g. an extrude
                 // sourced on the body's own face) would re-evaluate on every rebuild.
                 .filter((id) => id !== this.id),

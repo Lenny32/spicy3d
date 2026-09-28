@@ -30,6 +30,7 @@ import {
 import { a, button, collection, div, img, input, label, span, svg } from "@spicy3d/element";
 import { type ContextMenuEntry, showContextMenu } from "../contextMenu";
 import { AutosaveSelector } from "./autosaveSelector";
+import { FeatureEditPreviewSelector } from "./featureEditPreviewSelector";
 import style from "./home.module.css";
 import { LanguageSelector } from "./languageSelector";
 import { Navigation3DSelector } from "./navigation3DSelector";
@@ -222,6 +223,14 @@ export class Home extends HTMLElement {
                     textContent: new Localize("autosave.setting"),
                 }),
                 div({ className: style.settingControl }, new AutosaveSelector()),
+            ),
+            div(
+                { className: style.settingItem },
+                span({
+                    className: style.settingLabel,
+                    textContent: new Localize("featureEdit.preview"),
+                }),
+                div({ className: style.settingControl }, FeatureEditPreviewSelector({})),
             ),
         );
     }
@@ -752,7 +761,7 @@ export class Home extends HTMLElement {
                     const document = await this.app.openDocument(item.id, repository);
                     document?.application.activeView?.cameraController.fitContent();
                 },
-                "toast.excuting{0}",
+                "toast.executing{0}",
                 I18n.translate("command.doc.open"),
             );
         }

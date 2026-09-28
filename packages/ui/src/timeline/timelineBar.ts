@@ -177,13 +177,15 @@ export class TimelineBar extends HTMLElement {
     };
 
     /**
-     * Opens the step for editing: a feature in the body's feature list, with its parameters; a
-     * node in the property panel, and what double-clicking it in the tree opens (a sketch enters
-     * its editing session).
+     * Opens the step for editing: a feature that can be, in the interactive session it was
+     * created with (its drag handles, a live preview), otherwise in the body's feature list with
+     * its parameters; a node in the property panel, and what double-clicking it in the tree opens
+     * (a sketch enters its editing session).
      */
     private edit(entry: TimelineEntry) {
         this.select(entry);
         if (entry.kind === "node") this.open(entry.node);
+        else if (entry.feature.editable) entry.node.editFeature?.(entry.feature.id);
     }
 
     private open(node: INode) {

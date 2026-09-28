@@ -3,6 +3,7 @@
 
 import {
     assembleManifest,
+    DocumentMigrations,
     deepFreeze,
     type MergeResult,
     mergeDocuments,
@@ -98,7 +99,7 @@ function baseDocument(seed: number): Serialized {
     const doc: Json = {
         __cla$$__: "Document",
         formatVersion: 1,
-        moduleVersions: { parametric: 1, sketch: 1 },
+        moduleVersions: DocumentMigrations.moduleVersions(),
         id: "prop-doc",
         name: "Generated",
         models: {

@@ -8,14 +8,17 @@ import {
     type IStep,
     Matrix4,
     Plane,
+    PropertyUtils,
     Result,
     type ShapeType,
     ShapeTypes,
+    VisualConfig,
     XYZ,
 } from "@spicy3d/core";
 import { createMockApplication, nearestOnSegment, TestDocument } from "@spicy3d/core/test-utils";
-import { ExtrudeFeatureCommand } from "../../src/commands/extrudeCommand";
+import { ExtrudeFeatureCommand, OPERATION_AUTO } from "../../src/commands/extrudeCommand";
 import { SELECTED_PROFILE_STATE } from "../../src/commands/extrudeDragStep";
+import { CUT_TOOL_OPACITY, JOIN_TINT_OPACITY } from "../../src/commands/toolOverlay";
 import type { ExtrudeFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import type { SketchData } from "../../src/sketch/sketchModel";
@@ -231,6 +234,22 @@ describe("ExtrudeFeatureCommand profile step", () => {
         expect(result!.shapes).toEqual([planar]);
     });
 
+    test("Ctrl-gathered faces go on together, those of other nodes than the first one's left out", async () => {
+        mockSelection([], []);
+        const second = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { entities: [], constraints: [] },
+        });
+        const picked = [faceData(sketch), faceData(second), faceData(sketch)];
+        doc.picker = { pickShape: rs.fn(() => Promise.resolve(picked)) } as any;
+
+        const result = await profileStep().execute(doc, new AsyncController());
+
+        expect(result!.nodes![0]).toBe(sketch);
+        expect(result!.shapes).toEqual([picked[0], picked[2]]);
+    });
+
     test("picks faces interactively when nothing usable is selected", async () => {
         mockSelection([], []);
         const picked = [faceData(sketch)];
@@ -243,13 +262,15 @@ describe("ExtrudeFeatureCommand profile step", () => {
         const options = pickShape.mock.calls[0][2] as any;
         expect(options.shapeType).toBe(ShapeTypes.face);
         expect(options.multi).toBe(false);
+        // Ctrl/Cmd+click gathers several profiles before going on.
+        expect(options.toggleWithModifier).toBe(true);
         // Only planar faces are pickable — solid press-pull needs a plane.
         const planar = { surface: () => ({ isPlanar: () => true }) };
         const curved = { surface: () => ({ isPlanar: () => false }) };
         expect(options.shapeFilter.allow(planar, Matrix4.identity())).toBe(true);
         expect(options.shapeFilter.allow(curved, Matrix4.identity())).toBe(false);
         expect(result!.nodes![0]).toBe(sketch);
-        expect(result!.shapes).toBe(picked);
+        expect(result!.shapes).toEqual(picked);
         // A sketch drawn on a solid face is coplanar with it, so the viewport reports the
         // two in an order that flips as the pointer moves: the sketch has to lead.
         const bodyFace = faceData(new ParametricBodyNode({ document: doc, features: [] }));
@@ -415,12 +436,19 @@ describe("ExtrudeFeatureCommand consumption", () => {
             uv: new Float32Array(),
         };
         const touchingBox = () => new BoundingBox({ x: 0, y: 0, z: 0 }, { x: 2, y: 2, z: 2 });
-        const prism = { dispose: rs.fn(), boundingBox: touchingBox };
+        const prism = {
+            dispose: rs.fn(),
+            boundingBox: touchingBox,
+            volume: () => 8,
+            extremaDistance: () => 0,
+            mesh: { faces: faceMesh, edges: undefined },
+        };
         const booleanResult = { dispose: rs.fn(), mesh: { faces: faceMesh, edges: undefined } };
         const fuseFn = rs.fn(() => Result.ok(booleanResult));
         const restoreFactory = mockShapeFactory({
             prism: rs.fn(() => Result.ok(prism)),
             booleanFuse: fuseFn,
+            booleanCommon: () => Result.ok({ volume: () => 8, dispose: () => {} }),
         });
         try {
             const app = createMockApplication();
@@ -455,6 +483,10 @@ describe("ExtrudeFeatureCommand consumption", () => {
             // that node, so the preview is not drawn over geometry it duplicates.
             expect(preview.hide).toEqual([target]);
             expect(preview.meshes).toEqual([faceMesh]);
+            // The added volume is tinted faintly over the result.
+            expect(preview.overlays).toEqual([
+                { meshes: [faceMesh], color: VisualConfig.joinPreviewColor, opacity: JOIN_TINT_OPACITY },
+            ]);
             expect(prism.dispose).toHaveBeenCalled();
             expect(booleanResult.dispose).toHaveBeenCalled();
         } finally {
@@ -526,10 +558,14 @@ describe("ExtrudeFeatureCommand consumption", () => {
                     dispose: () => {},
                     findSubShapes: () => [],
                     boundingBox: () => box,
+                    volume: () => 1,
+                    extremaDistance: () => 0,
                     mesh: { edges: { range: [] } },
                 });
             },
             booleanFuse: () => Result.ok(fusedShape),
+            // Shares the box's volume: the command's prism goes into the target.
+            booleanCommon: () => Result.ok({ volume: () => 1, dispose: () => {} }),
         });
         const app = createMockApplication();
         const doc = new TestDocument({ application: app });
@@ -757,12 +793,18 @@ describe("ExtrudeFeatureCommand consumption", () => {
             dispose: rs.fn(),
             boundingBox: () => new BoundingBox({ x: 0, y: 0, z: 1 }, { x: 1, y: 1, z: 7 }),
             findSubShapes: () => [],
+            volume: () => 7,
+            extremaDistance: () => 0,
             mesh: { edges: { range: [] } },
         };
+        // The common volume of the press-pull prism and its source body: 0 = pulled out.
+        const common = { volume: 0 };
         const restoreFactory = mockShapeFactory({
             combine: () => Result.ok(bodyShape),
             prism: () => Result.ok(prismShape),
             booleanFuse: () => Result.ok(prismShape),
+            booleanCut: () => Result.ok(prismShape),
+            booleanCommon: () => Result.ok({ volume: () => common.volume, dispose: () => {} }),
         });
         const app = createMockApplication();
         const doc = new TestDocument({ application: app });
@@ -789,12 +831,13 @@ describe("ExtrudeFeatureCommand consumption", () => {
                 type: "input",
             },
         ];
-        return { restoreFactory, doc, body, topFace, cmd };
+        return { restoreFactory, doc, body, topFace, cmd, common };
     }
 
     test("a body face extrudes into a standalone body referencing the source node", () => {
         const { restoreFactory, doc, body, cmd } = bodyFaceScenario();
         try {
+            cmd.operation = "option.command.operation.new";
             (cmd as any).executeMainTask();
 
             const created = doc.modelManager.findNode(
@@ -817,6 +860,7 @@ describe("ExtrudeFeatureCommand consumption", () => {
     test("a start offset is recorded on the committed feature", () => {
         const { restoreFactory, doc, body, cmd } = bodyFaceScenario();
         try {
+            cmd.operation = "option.command.operation.new";
             cmd.startOffset = 3;
 
             (cmd as any).executeMainTask();
@@ -852,5 +896,213 @@ describe("ExtrudeFeatureCommand consumption", () => {
         } finally {
             restoreFactory();
         }
+    });
+
+    test.each([
+        { name: "pulled out of the body joins it", commonVolume: 0, operation: "fuse" },
+        { name: "pushed into the body cuts it", commonVolume: 3, operation: "cut" },
+    ])("Auto press-pull: $name", ({ commonVolume, operation }) => {
+        const { restoreFactory, doc, body, cmd, common } = bodyFaceScenario();
+        try {
+            common.volume = commonVolume;
+            const addNode = rs.spyOn(doc.modelManager, "addNode");
+            expect(cmd.operation).toBe(OPERATION_AUTO);
+
+            (cmd as any).executeMainTask();
+
+            // The source body is the one the prism meets: the feature lands on it, resolved.
+            expect(addNode).not.toHaveBeenCalled();
+            expect(body.features).toHaveLength(1);
+            expect(body.features[0]).toMatchObject({
+                type: "extrude",
+                operation,
+                source: { nodeId: body.id },
+            });
+        } finally {
+            restoreFactory();
+        }
+    });
+});
+
+describe("ExtrudeFeatureCommand Auto operation", () => {
+    const faceMesh = (tag: number) => ({
+        range: [],
+        index: new Uint32Array([tag]),
+        position: new Float32Array(),
+        normal: new Float32Array(),
+        uv: new Float32Array(),
+        color: 0xdedede,
+    });
+    const edgeMesh = { range: [], lineType: "solid", position: new Float32Array() };
+
+    /**
+     * A target body (unit box) and a command whose single prism has `prismBox`; the kernel's
+     * common volume and minimum distance of the prism against the body are `contact`.
+     */
+    function autoScenario(prismBox: BoundingBox, contact: { volume: number; distance: number }) {
+        const toolFaces = faceMesh(1);
+        const resultFaces = faceMesh(2);
+        const prism = {
+            dispose: rs.fn(),
+            boundingBox: () => prismBox,
+            volume: () => 4,
+            extremaDistance: rs.fn((_other: unknown) => contact.distance),
+            mesh: { faces: toolFaces, edges: edgeMesh },
+        };
+        const result = { dispose: rs.fn(), mesh: { faces: resultFaces, edges: undefined } };
+        const booleanCut = rs.fn((_a: unknown[], _b: unknown[]) => Result.ok(result));
+        const booleanFuse = rs.fn((_a: unknown[], _b: unknown[], _simplify: boolean) => Result.ok(result));
+        const booleanCommon = rs.fn((_a: unknown[], _b: unknown[]) =>
+            Result.ok({ volume: () => contact.volume, dispose: () => {} }),
+        );
+        const restoreFactory = mockShapeFactory({
+            prism: () => Result.ok(prism),
+            booleanCut,
+            booleanFuse,
+            booleanCommon,
+        });
+        const app = createMockApplication();
+        const doc = new TestDocument({ application: app });
+        (app as any).activeView = { document: doc };
+        const target = new ParametricBodyNode({ document: doc, features: [] });
+        (target as any)._shape = Result.ok({
+            shapeType: ShapeTypes.solid,
+            isEqual: () => false,
+            boundingBox: () => new BoundingBox({ x: 0, y: 0, z: 0 }, { x: 2, y: 2, z: 2 }),
+        });
+        doc.modelManager.addNode(target);
+        const cmd = new ExtrudeFeatureCommand();
+        (cmd as any)._application = app;
+        const state = {
+            dist: 5,
+            normal: XYZ.unitZ,
+            faces: [{ shape: { shapeType: ShapeTypes.face }, transform: Matrix4.identity() }],
+            node: new SketchNode({ document: doc, plane: Plane.XY, data: { entities: [], constraints: [] } }),
+        };
+        const preview = () => (cmd as any).buildPreview(state);
+        return { restoreFactory, cmd, target, prism, preview, booleanCut, booleanFuse, booleanCommon };
+    }
+
+    const inside = new BoundingBox({ x: 0.5, y: 0.5, z: 0.5 }, { x: 1.5, y: 1.5, z: 1.5 });
+    const above = new BoundingBox({ x: 0, y: 0, z: 2 }, { x: 2, y: 2, z: 7 });
+    const far = new BoundingBox({ x: 10, y: 10, z: 10 }, { x: 12, y: 12, z: 12 });
+
+    test("is the default of a new extrude", () => {
+        expect(new ExtrudeFeatureCommand().operation).toBe(OPERATION_AUTO);
+    });
+
+    test("an extrusion into the body's material previews a cut with the tool in red on top", () => {
+        const s = autoScenario(inside, { volume: 1, distance: 0 });
+        try {
+            const preview = s.preview();
+
+            expect(s.booleanCut).toHaveBeenCalledTimes(1);
+            expect(s.booleanFuse).not.toHaveBeenCalled();
+            expect(preview.meshes).toEqual([faceMesh(2)]);
+            expect(preview.hide).toEqual([s.target]);
+            expect(preview.overlays).toEqual([
+                {
+                    meshes: [faceMesh(1), edgeMesh],
+                    color: VisualConfig.cutPreviewColor,
+                    opacity: CUT_TOOL_OPACITY,
+                    onTop: true,
+                },
+            ]);
+            expect(s.cmd.autoOperationLabel).toBe("option.command.operation.auto.cut");
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("an extrusion touching the body and growing outward previews a join with a faint tint", () => {
+        const s = autoScenario(above, { volume: 0, distance: 0 });
+        try {
+            const preview = s.preview();
+
+            expect(s.booleanFuse).toHaveBeenCalledTimes(1);
+            expect(s.booleanCut).not.toHaveBeenCalled();
+            expect(preview.hide).toEqual([s.target]);
+            expect(preview.overlays).toEqual([
+                { meshes: [faceMesh(1)], color: VisualConfig.joinPreviewColor, opacity: JOIN_TINT_OPACITY },
+            ]);
+            expect(s.cmd.autoOperationLabel).toBe("option.command.operation.auto.join");
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("an extrusion apart from every body previews a new body without any boolean", () => {
+        const s = autoScenario(far, { volume: 0, distance: 8 });
+        try {
+            const preview = s.preview();
+
+            // The bounding boxes are apart: the kernel is not even asked.
+            expect(s.booleanCommon).not.toHaveBeenCalled();
+            expect(s.prism.extremaDistance).not.toHaveBeenCalled();
+            expect(preview.meshes).toEqual([faceMesh(1), edgeMesh]);
+            expect(preview.hide).toBeUndefined();
+            expect(preview.overlays).toBeUndefined();
+            expect(s.cmd.autoOperationLabel).toBe("option.command.operation.auto.new");
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("overlapping boxes whose shapes stay apart are a new body, not a join", () => {
+        const s = autoScenario(inside, { volume: 0, distance: 0.5 });
+        try {
+            const preview = s.preview();
+
+            expect(s.booleanCommon).toHaveBeenCalledTimes(1);
+            expect(preview.hide).toBeUndefined();
+            expect(s.cmd.autoOperationLabel).toBe("option.command.operation.auto.new");
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("an explicit operation overrides Auto, and choosing Auto again re-detects", () => {
+        const s = autoScenario(inside, { volume: 1, distance: 0 });
+        try {
+            s.cmd.operation = "option.command.operation.join";
+            s.preview();
+            expect(s.booleanFuse).toHaveBeenCalledTimes(1);
+            expect(s.booleanCut).not.toHaveBeenCalled();
+
+            s.cmd.operation = OPERATION_AUTO;
+            s.preview();
+            expect(s.booleanCut).toHaveBeenCalledTimes(1);
+            expect(s.cmd.autoOperationLabel).toBe("option.command.operation.auto.cut");
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("hidden bodies are left alone by Auto", () => {
+        const s = autoScenario(inside, { volume: 1, distance: 0 });
+        try {
+            s.target.visible = false;
+
+            const preview = s.preview();
+
+            expect(s.booleanCut).not.toHaveBeenCalled();
+            expect(preview.hide).toBeUndefined();
+        } finally {
+            s.restoreFactory();
+        }
+    });
+
+    test("the operation choice is not carried over to the next extrude", () => {
+        const operation = PropertyUtils.getProperty(ExtrudeFeatureCommand.prototype, "operation")!;
+        const depth = PropertyUtils.getProperty(ExtrudeFeatureCommand.prototype, "depth")!;
+        const cmd = new ExtrudeFeatureCommand();
+        expect((cmd as any).isPropertyCached(operation)).toBe(false);
+        expect((cmd as any).isPropertyCached(depth)).toBe(true);
+    });
+
+    test("the options tab's Auto item reads the command's resolved label", () => {
+        const combobox = PropertyUtils.getProperty(ExtrudeFeatureCommand.prototype, "operation")!.combobox!;
+        expect(combobox.items.at(0)).toBe(OPERATION_AUTO);
+        expect(combobox.liveLabels.get(OPERATION_AUTO)).toBe("autoOperationLabel");
     });
 });

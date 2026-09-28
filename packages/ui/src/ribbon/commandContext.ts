@@ -259,11 +259,17 @@ export class CommandContext extends HTMLElement implements IDisposable {
         const valueIndex = combobox.items.indexOf((this.command as any)[g.name]);
         const selectedIndex = valueIndex < 0 ? combobox.selectedIndex : valueIndex;
         const options = combobox.items.map((item, index) => {
+            const liveLabel = combobox.liveLabels.get(item);
             return option({
                 selected: index === selectedIndex,
-                textContent: I18n.isI18nKey(item)
-                    ? new Localize(item)
-                    : (combobox.converter?.convert(item).unchecked() ?? String(item)),
+                textContent:
+                    liveLabel !== undefined
+                        ? new Binding(this.command as any, liveLabel, {
+                              convert: (key: I18nKeys) => Result.ok(I18n.translate(key)),
+                          })
+                        : I18n.isI18nKey(item)
+                          ? new Localize(item)
+                          : (combobox.converter?.convert(item).unchecked() ?? String(item)),
             });
         });
 

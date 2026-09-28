@@ -19,6 +19,15 @@ const SelectionRectStyle = `
     height: 0px;
 `;
 
+/**
+ * True when a click adds to / removes from the current selection instead of replacing it:
+ * Ctrl, or Cmd on macOS (the model tree's convention). Shift keeps whatever meaning each
+ * handler gives it.
+ */
+export function isToggleSelectEvent(event: Pick<MouseEvent, "ctrlKey" | "metaKey">): boolean {
+    return event.ctrlKey === true || event.metaKey === true;
+}
+
 interface SelectionRect {
     element: HTMLElement;
     clientX: number;
@@ -81,6 +90,11 @@ export abstract class SelectionHandler implements IEventHandler {
         return false;
     }
 
+    /** In single mode, returning true keeps the pick open after this click (see `SubshapeSelectionHandler`). */
+    protected keepsSelecting(_event: PointerEvent): boolean {
+        return false;
+    }
+
     pointerDown(view: IView, event: PointerEvent): void {
         event.preventDefault();
         if (event.button === 0 && event.isPrimary) {
@@ -130,7 +144,8 @@ export abstract class SelectionHandler implements IEventHandler {
             const count = this.select(view, event);
             this.cleanHighlights();
             view.update();
-            if (count > 0 && (!this.multiMode || this.canFinishSelection())) this.controller?.success();
+            const finish = this.multiMode ? this.canFinishSelection() : !this.keepsSelecting(event);
+            if (count > 0 && finish) this.controller?.success();
         }
         this.pointerEventMap.delete(event.pointerId);
     }

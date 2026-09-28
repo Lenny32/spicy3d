@@ -42,6 +42,12 @@ export interface FeatureCacheEntry {
      */
     readonly faceIds?: string[];
     readonly edgeIds?: string[];
+    /**
+     * How long the kernel took to evaluate the feature, in milliseconds — kept from the run
+     * that computed it (a reused entry keeps its original timing). What an edit session reads
+     * to guess whether replaying the later steps is fast enough to preview live.
+     */
+    readonly evaluationMs?: number;
 }
 
 /** Which of the two tracked id arrays a query addresses. */
@@ -86,6 +92,19 @@ export class BodyTimeline {
 
     entryAt(index: number): FeatureCacheEntry | undefined {
         return this._preview?.[index] ?? this._cache[index];
+    }
+
+    /**
+     * Summed evaluation time (ms) of the cached entries from `start` on — what replaying
+     * those features cost the last time each was computed. Entries without a timing (or not
+     * cached, e.g. suppressed) count as free.
+     */
+    evaluationMsFrom(start: number): number {
+        let total = 0;
+        for (let index = Math.max(0, start); index < this._cache.length; index++) {
+            total += this._cache[index].evaluationMs ?? 0;
+        }
+        return total;
     }
 
     /**

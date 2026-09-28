@@ -50,6 +50,11 @@ export interface FeatureItem {
     readonly warning?: string;
     /** Set when the feature's shape references (e.g. fillet edges) can be re-picked. */
     readonly reselectable?: boolean;
+    /**
+     * Set when the feature can be reopened in its interactive editing session (the handles it
+     * was created with) — see `IFeatureListNode.editFeature`.
+     */
+    readonly editable?: boolean;
     /** Nodes this feature holds (e.g. its sketch), shown as link rows above the parameters. */
     readonly references?: readonly FeatureReference[];
     readonly parameters: readonly FeatureParameter[];
@@ -72,6 +77,11 @@ export interface IFeatureListNode {
     removeFeature(featureId: string): void;
     /** Re-picks the shapes a feature references (e.g. the edges of a fillet). */
     reselectShapes?(featureId: string): void;
+    /**
+     * Reopens a feature in the interactive session it was created with (drag handles, live
+     * preview), seeded with its stored values; only for items marked `editable`.
+     */
+    editFeature?(featureId: string): void;
     /**
      * Opens the node one of the feature's references points at (e.g. entering the
      * sketch an extrude consumes). `key` is the reference's own key, as reported in
