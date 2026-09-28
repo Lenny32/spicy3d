@@ -20,10 +20,10 @@ import {
     MultistepCommand,
     type ParameterValue,
     Precision,
+    type Property,
     PubSub,
     property,
     Result,
-    type ShapeMeshData,
     ShapeTypes,
     ShapeTypeUtils,
     type SnapResult,
@@ -38,6 +38,7 @@ import { captureProfileRef } from "../features/profileRef";
 import { fuseProfiles } from "../features/sweepGeometry";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { SketchNode } from "../sketch/sketchNode";
+import { autoOperation, findExtrudeTarget } from "./extrudeContact";
 import {
     createExtrudeArrowMesher,
     type ExtrudeDragHandler,
@@ -48,8 +49,25 @@ import {
     SELECTED_PROFILE_STATE,
 } from "./extrudeDragStep";
 import { prioritizeSketchFaces } from "./profileFaceSort";
+import { toolOverlay } from "./toolOverlay";
 
 const OPERATION_NEW: I18nKeys = "option.command.operation.new";
+
+/** The Auto operation: join/cut/new resolved from how the extrusion meets the bodies. */
+export const OPERATION_AUTO: I18nKeys = "option.command.operation.auto";
+
+/** What the Auto item reads once resolved ("Auto (Cut)"); keyed by the resolved operation. */
+const AUTO_LABELS: Record<"cut" | "fuse" | "new", I18nKeys> = {
+    cut: "option.command.operation.auto.cut",
+    fuse: "option.command.operation.auto.join",
+    new: "option.command.operation.auto.new",
+};
+
+/** The operation an extrude resolved to, and the body it combines with (none for a new body). */
+interface ResolvedOperation {
+    readonly operation?: BooleanOperation;
+    readonly target?: ParametricBodyNode;
+}
 
 /** Maps the command's operation dropdown values to boolean operations; new has none. */
 export const EXTRUDE_OPERATIONS: Record<string, BooleanOperation> = {
@@ -186,20 +204,35 @@ export class SelectSketchProfilesStep implements IStep {
 
 @command({ key: "feature.extrude", icon: "icon-prism" })
 export class ExtrudeFeatureCommand extends MultistepCommand {
+    /**
+     * Auto (the default of every new extrude) resolves live while dragging — see
+     * `resolveOperation`; any other choice overrides it, and choosing Auto again re-detects.
+     */
     @property("option.command.operation", {
         combobox: Combobox.from([
+            OPERATION_AUTO,
             OPERATION_NEW,
             "option.command.operation.join",
             "option.command.operation.cut",
             "option.command.operation.intersect",
-        ] satisfies I18nKeys[]),
+        ] satisfies I18nKeys[]).withLiveLabel(OPERATION_AUTO, "autoOperationLabel"),
     })
     get operation(): I18nKeys {
-        return this.getPrivateValue("operation", OPERATION_NEW);
+        return this.getPrivateValue("operation", OPERATION_AUTO);
     }
     set operation(value: I18nKeys) {
         this.setProperty("operation", value);
         this._dragHandler?.refresh();
+    }
+
+    /** The Auto item's label in the options tab: "Auto" until resolved, then e.g. "Auto (Cut)". */
+    get autoOperationLabel(): I18nKeys {
+        return this.getPrivateValue("autoOperationLabel", OPERATION_AUTO);
+    }
+
+    /** Every extrude starts in Auto: an explicit choice is for this extrude only. */
+    protected override isPropertyCached(property: Property): boolean {
+        return property.name !== "operation";
     }
 
     @property("option.command.symmetric")
@@ -307,9 +340,10 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
      * Meshes the extruded prism as solid faces plus outline edges, previewing the final
      * body. Multiple profiles go through the same `fuseProfiles` merge as the feature
      * (touching prisms become one solid), so the preview matches the committed result.
-     * Symmetric extrusion previews both directions. A join/cut/intersect operation
-     * previews the boolean result against the intersecting target body, standing in for
-     * that body's display for the duration of the drag.
+     * Symmetric extrusion previews both directions. A join/cut/intersect — explicit or
+     * resolved by Auto — previews the boolean result against the target body, standing in
+     * for that body's display for the duration of the drag, with the tool drawn over it
+     * (a cut's removed volume in translucent red, see `toolOverlay`).
      */
     private readonly buildPreview = (state: ExtrudeDragState): ExtrudePreview => {
         if (Math.abs(state.dist) < Precision.Float) return { meshes: [] };
@@ -321,35 +355,72 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             const offsetOf = this.offsetVectorOf(state.node, state.normal);
             const merged = ExtrudeFeatureCommand.buildPrisms(faces, vecsOf, offsetOf);
             if (!merged.isOk) throw merged.error;
-            const preview = this.applyOperationPreview(merged.value);
-            const { faces: faceMesh, edges } = preview.shape.mesh;
-            preview.shape.dispose();
-            if (faceMesh === undefined) throw new Error("Failed to mesh the extrude preview");
-            return {
-                meshes: edges === undefined ? [faceMesh] : [faceMesh, edges],
-                hide: preview.target === undefined ? undefined : [preview.target],
-            };
+            const tool = merged.value;
+            try {
+                return this.operationPreview((state.node as SketchNode | ParametricBodyNode).document, tool);
+            } finally {
+                tool.dispose();
+            }
         } finally {
             owned.forEach((x) => x.dispose());
         }
     };
 
     /**
-     * Applies the operation's boolean to the preview prism: join/cut/intersect against
-     * the intersecting target body, which the result stands in for — the same `target`
-     * the commit appends the feature to, so the preview and the committed body agree on
-     * what is being modified. "new", or no intersecting target, keeps the prism. The
-     * returned shape is owned by the caller.
+     * The preview of `tool` (not disposed here): the boolean result against the resolved
+     * target body, which it stands in for, plus the tool overlay; the tool alone for a new
+     * body or when the boolean fails.
      */
-    private applyOperationPreview(prism: IShape): { shape: IShape; target?: ParametricBodyNode } {
+    private operationPreview(document: IDocument, tool: IShape): ExtrudePreview {
+        const { operation, target } = this.resolveOperation(document, tool);
+        if (operation === undefined || target === undefined) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
+        const result = this.booleanPreview(operation, target, tool);
+        if (!result.isOk) return ExtrudeFeatureCommand.meshesOf(tool.mesh);
+        try {
+            // Intersect keeps only the overlap: there is no tool volume to show besides it.
+            const overlay = operation === "common" ? undefined : this.toolOverlayOf(operation, tool);
+            return {
+                ...ExtrudeFeatureCommand.meshesOf(result.value.mesh),
+                hide: [target],
+                ...(overlay === undefined ? {} : { overlays: [overlay] }),
+            };
+        } finally {
+            result.value.dispose();
+        }
+    }
+
+    private toolOverlayOf(operation: BooleanOperation, tool: IShape) {
+        const { faces, edges } = tool.mesh;
+        return toolOverlay(operation, faces, edges);
+    }
+
+    private static meshesOf(mesh: IShape["mesh"]): ExtrudePreview {
+        const { faces, edges } = mesh;
+        if (faces === undefined) throw new Error("Failed to mesh the extrude preview");
+        return { meshes: edges === undefined ? [faces] : [faces, edges] };
+    }
+
+    /**
+     * The operation this extrude applies with `tool` as its prism, and the body it applies
+     * to — shared by the preview and the commit, so both agree on what is modified:
+     * - Auto: into a body's material = cut, touching one and growing outward = join, no
+     *   contact = new body (see `extrudeContact.ts`); hidden bodies are left alone. The
+     *   options tab's Auto item follows the resolution ("Auto (Cut)").
+     * - join/cut/intersect: against the body the tool goes into (else touches); without
+     *   one the extrude is a new body.
+     * - new: always a new body.
+     */
+    private resolveOperation(document: IDocument, tool: IShape): ResolvedOperation {
+        if (this.operation === OPERATION_AUTO) {
+            const target = findExtrudeTarget(document, tool);
+            const operation = autoOperation(target);
+            this.setProperty("autoOperationLabel", AUTO_LABELS[operation ?? "new"]);
+            return operation === undefined ? {} : { operation, target: target?.node };
+        }
         const operation = EXTRUDE_OPERATIONS[this.operation];
-        if (operation === undefined) return { shape: prism };
-        const target = this.findIntersectingNode(prism.boundingBox());
-        if (target === undefined) return { shape: prism };
-        const result = this.booleanPreview(operation, target, prism);
-        if (!result.isOk) return { shape: prism };
-        prism.dispose();
-        return { shape: result.value, target };
+        if (operation === undefined) return {};
+        const target = findExtrudeTarget(document, tool, { includeHidden: true });
+        return target === undefined ? {} : { operation, target: target.node };
     }
 
     /** The boolean of the preview prism against the target body's current shape. */
@@ -366,16 +437,6 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             default:
                 return shapeFactory.booleanFuse([target.shape.value], [prism], true);
         }
-    }
-
-    /** The first parametric body whose bounding box intersects `box` (bounds-only check). */
-    private findIntersectingNode(box: BoundingBox): ParametricBodyNode | undefined {
-        return this.document.modelManager.findNode(
-            (target) =>
-                target instanceof ParametricBodyNode &&
-                target.shape.isOk &&
-                BoundingBox.isIntersect(box, target.shape.value.boundingBox()),
-        ) as ParametricBodyNode | undefined;
     }
 
     /** Faces to preview: the picked faces in world coordinates, or the whole sketch's outer profiles. */
@@ -537,9 +598,10 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     }
 
     /**
-     * Join/cut/intersect: the feature is appended to the auto-detected intersecting
-     * body and combines with its shape (Fusion-style); without an intersection (or for
-     * "new") the extrude becomes a standalone body.
+     * Join/cut/intersect (explicit or resolved by Auto): the feature is appended to the
+     * target body and combines with its shape (Fusion-style); without a target (or for
+     * "new") the extrude becomes a standalone body. The stored feature keeps the resolved
+     * operation — Auto never reaches the file.
      */
     private commitFeature(
         node: SketchNode | ParametricBodyNode,
@@ -548,9 +610,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         normal: XYZ,
         worldFaces: IFace[],
     ): void {
-        const operation = EXTRUDE_OPERATIONS[this.operation];
-        const target =
-            operation === undefined ? undefined : this.findIntersectingBody(node, depth, normal, worldFaces);
+        const { operation, target } = this.resolveCommitted(node, depth, normal, worldFaces);
         if (operation !== undefined && target !== undefined) {
             target.setFeaturesEmitShapeChanged([...target.features, { ...feature, operation }]);
         } else {
@@ -560,22 +620,18 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         }
     }
 
-    /**
-     * The join/cut/intersect target, auto-detected: the first parametric body whose
-     * bounding box intersects the prism's. (Bounds only — a real interference check
-     * would cost a boolean per candidate; overlapping boxes with disjoint geometry just
-     * produce a no-op boolean.)
-     */
-    private findIntersectingBody(
+    /** `resolveOperation` for the committed depth: rebuilds the prism the preview showed. */
+    private resolveCommitted(
         node: SketchNode | ParametricBodyNode,
         depth: number,
         normal: XYZ,
         worldFaces: IFace[],
-    ): ParametricBodyNode | undefined {
+    ): ResolvedOperation {
+        if (this.operation === OPERATION_NEW) return {};
         let faces = worldFaces;
         if (node instanceof SketchNode && faces.length === 0) {
             const profiles = sketchProfiles(node);
-            if (!profiles.isOk) return undefined;
+            if (!profiles.isOk) return {};
             faces = profiles.value.outer;
         }
         const built = ExtrudeFeatureCommand.buildPrisms(
@@ -583,9 +639,9 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             this.sweepVectorsOf(node, normal, depth),
             this.offsetVectorOf(node, normal),
         );
-        if (!built.isOk) return undefined;
+        if (!built.isOk) return {};
         try {
-            return this.findIntersectingNode(built.value.boundingBox());
+            return this.resolveOperation(node.document, built.value);
         } finally {
             built.value.dispose();
         }

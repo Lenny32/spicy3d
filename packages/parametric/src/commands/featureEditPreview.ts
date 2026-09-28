@@ -110,6 +110,21 @@ export class FeatureChainPreview {
         return tail;
     }
 
+    /**
+     * `feature` alone on the state entering the edited one — never the later steps. An edit
+     * session uses it for what the preview draws besides the body, e.g. an extrude's tool
+     * volume (the feature without its operation). The shape is owned by the caller.
+     */
+    evaluateStep(feature: FeatureData): Result<IShape> {
+        if (this.index > 0 && this.entering === undefined) {
+            return Result.err("The steps before this feature failed to rebuild");
+        }
+        const scope = this.body.document.variables.evaluate().scope;
+        const input = this.entering?.shape;
+        const step = this.step(feature, this.index, input, this.entering, scope);
+        return step.isOk ? Result.ok(this.owned(step.value.shape, input)) : Result.err(step.error);
+    }
+
     /** Replays the features after the edited one on its output. */
     private replayTail(
         edited: { shape: IShape; state: FeatureTimelineState },

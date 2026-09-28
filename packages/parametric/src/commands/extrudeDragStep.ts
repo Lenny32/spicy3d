@@ -39,6 +39,7 @@ import {
     pxSizedArrowLength,
 } from "./arrowHandle";
 import { prioritizeSketchFaces } from "./profileFaceSort";
+import type { PreviewOverlay } from "./toolOverlay";
 
 const DRAG_THRESHOLD_SQ = 9; // px², below this a press-release is a click, not a drag
 
@@ -132,6 +133,11 @@ export interface ExtrudePreview {
      * ghost over the geometry it replaces instead of as the geometry itself.
      */
     hide?: INode[];
+    /**
+     * Translucent colored meshes drawn over `meshes` — a cut's tool volume in red, so the
+     * preview shows what is taken away and not only the hole it leaves (see `toolOverlay`).
+     */
+    overlays?: PreviewOverlay[];
 }
 
 export interface ExtrudeDragData {
@@ -617,8 +623,18 @@ export class ExtrudeDragHandler implements IEventHandler {
         this.restoreHiddenNodes();
         if (Math.abs(this.state.dist) >= Precision.Float) {
             const preview = this.data.buildPreview(this.state);
+            const context = this.document.visual.context;
             for (const mesh of preview.meshes) {
-                this._previewIds.push(this.document.visual.context.displayMesh([mesh], { meshOpacity: 1 }));
+                this._previewIds.push(context.displayMesh([mesh], { meshOpacity: 1 }));
+            }
+            for (const overlay of preview.overlays ?? []) {
+                const id = context.displayMesh(overlay.meshes, {
+                    meshOpacity: overlay.opacity,
+                    lineOpacity: overlay.opacity,
+                    onTop: overlay.onTop,
+                });
+                context.setMeshColor(id, overlay.color);
+                this._previewIds.push(id);
             }
             for (const node of preview.hide ?? []) {
                 this.document.visual.context.setVisible(node, false);
@@ -665,8 +681,8 @@ export class ExtrudeDragHandler implements IEventHandler {
 
     /**
      * Brings back the nodes the displayed preview hid. Each goes back to what its own
-     * flags say rather than to visible: `findIntersectingNode` filters on geometry only,
-     * so a hidden body can be the preview's target.
+     * flags say rather than to visible: an explicit join/cut/intersect targets hidden
+     * bodies too (`findExtrudeTarget` with `includeHidden`), so one can be the preview's target.
      */
     private restoreHiddenNodes() {
         for (const node of this._hidden) {

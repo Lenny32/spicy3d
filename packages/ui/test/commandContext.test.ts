@@ -9,6 +9,7 @@ import {
     I18n,
     LENGTH_UNITS,
     Observable,
+    PathBinding,
     PropertyUtils,
     PubSub,
     property,
@@ -45,6 +46,7 @@ const CMD_KEY = "test.context.command";
 const CANCEL_CMD_KEY = "test.context.cancelable";
 const MATERIAL_CMD_KEY = "test.context.material";
 const LENGTH_CMD_KEY = "test.context.length";
+const LIVE_CMD_KEY = "test.context.live";
 
 class TestCommand extends Observable {
     async execute() {}
@@ -109,6 +111,31 @@ class TestCommand extends Observable {
     @property("test.action" as I18nKeys)
     action() {
         this.actionCalled++;
+    }
+}
+
+/** A combobox whose "auto" item reads its label from the command (see `Combobox.withLiveLabel`). */
+class LiveLabelCommand extends Observable {
+    async execute() {}
+
+    @property("test.live" as I18nKeys, {
+        combobox: Combobox.from(["test.live.auto", "test.live.other"]).withLiveLabel(
+            "test.live.auto",
+            "autoLabel",
+        ),
+    })
+    get choice() {
+        return this.getPrivateValue("choice", "test.live.auto");
+    }
+    set choice(value: string) {
+        this.setProperty("choice", value);
+    }
+
+    get autoLabel(): string {
+        return this.getPrivateValue("autoLabel", "test.live.auto");
+    }
+    set autoLabel(value: string) {
+        this.setProperty("autoLabel", value);
     }
 }
 
@@ -370,6 +397,35 @@ describe("CommandContext", () => {
                 combobox.selectedIndex = originalIndex;
             }
         });
+    });
+
+    test("a live-labelled combobox item follows the command's label property", () => {
+        I18n.combineTranslation("en", {
+            "test.live.auto": "Auto",
+            "test.live.auto.cut": "Auto (Cut)",
+            "test.live.other": "Other",
+        });
+        CommandStore.registerCommand(LiveLabelCommand, { key: LIVE_CMD_KEY, icon: "icon-ctx" });
+        try {
+            const command = new LiveLabelCommand();
+            const ctx = track(new CommandContext(command));
+            const options = mustQuery<HTMLSelectElement>(ctx, "select").querySelectorAll("option");
+            expect(options).toHaveLength(2);
+            const binding = (options[0] as any)._textContent;
+            expect(binding).toBeInstanceOf(PathBinding);
+            const shown = { textContent: "" };
+            binding.setBinding(shown, "textContent");
+            expect(shown.textContent).toBe("Auto");
+
+            command.autoLabel = "test.live.auto.cut";
+
+            expect(shown.textContent).toBe("Auto (Cut)");
+            // Other items keep their static label.
+            expect((options[1] as any)._textContent).not.toBeInstanceOf(PathBinding);
+            binding.removeBinding();
+        } finally {
+            CommandStore.unregisterCommand(LIVE_CMD_KEY);
+        }
     });
 
     describe("dependent property visibility", () => {

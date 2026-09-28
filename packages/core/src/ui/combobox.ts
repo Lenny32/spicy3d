@@ -30,4 +30,17 @@ export class Combobox<T> extends Observable {
     }
 
     readonly items = new ObservableCollection<T>();
+
+    /**
+     * Items whose label is read live from a property of the object showing the combobox
+     * (a command) instead of from the item itself — the property holds the `I18nKeys` to
+     * display, e.g. an "Auto" item that reads "Auto (Cut)" once the command resolved it.
+     */
+    readonly liveLabels = new Map<T, string>();
+
+    /** Labels `item` with the owner's `property` (see `liveLabels`). */
+    withLiveLabel(item: T, property: string): this {
+        this.liveLabels.set(item, property);
+        return this;
+    }
 }
