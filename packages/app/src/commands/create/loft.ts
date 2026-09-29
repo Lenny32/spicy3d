@@ -28,6 +28,7 @@ import { selectedWholeShapeNodes } from "../createCommand";
 
 @command({
     key: "create.loft",
+    helpText: "tooltip.create.loft",
     icon: "icon-loft",
 })
 export class LoftCommand extends CancelableCommand {

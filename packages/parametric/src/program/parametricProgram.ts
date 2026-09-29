@@ -5,6 +5,8 @@ import {
     ANGLE_UNITS,
     ConstructionNode,
     type ConstructionRef,
+    Continuities,
+    type Continuity,
     type FeatureItem,
     type IDocument,
     Id,
@@ -30,6 +32,7 @@ import type {
     ExtrudeExtent,
     ExtrudeFeatureData,
     FeatureData,
+    LoftFeatureData,
     RevolveFeatureData,
 } from "../features/feature";
 import { ParametricBodyNode } from "../parametricBodyNode";
@@ -77,6 +80,7 @@ export type ParametricOp =
     | ConstructionInfoOp
     | ExtrudeOp
     | RevolveOp
+    | LoftOp
     | FilletChamferOp
     | BooleanOp
     | EditFeatureOp
@@ -185,6 +189,21 @@ export interface RevolveOp {
         | { nodeId: string; edgeIndex: number };
     /** Degrees. Defaults to 360. Always starts a new body — revolve has no join/cut form. */
     angle?: ParameterValue;
+}
+
+/** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
+export interface LoftOp {
+    op: "loft";
+    id: string;
+    name?: string;
+    /** Sketch op ids or existing sketch node ids, at least two; each sketch must hold a single profile. */
+    sections: string[];
+    /** Capped ends (default); false = an open surface. */
+    solid?: boolean;
+    /** Straight faces between consecutive sections; default smooth. */
+    ruled?: boolean;
+    /** A smooth loft's surface continuity (default "c2"). */
+    continuity?: Continuity;
 }
 
 export interface FilletChamferOp {
@@ -334,6 +353,9 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "revolve":
             runRevolveOp(state, op);
+            break;
+        case "loft":
+            runLoftOp(state, op);
             break;
         case "fillet":
         case "chamfer":
@@ -668,6 +690,29 @@ function runRevolveOp(state: State, op: RevolveOp): void {
     };
     createBody(state, op.id, op.name, [feature], () => {
         sketch.visible = false;
+    });
+}
+
+function runLoftOp(state: State, op: LoftOp): void {
+    if (!Array.isArray(op.sections) || op.sections.length < 2) {
+        throw new Error('"sections" must list at least two sketches, in loft order');
+    }
+    if (op.continuity !== undefined && !(Continuities as readonly string[]).includes(op.continuity)) {
+        throw new Error(`"continuity" must be one of ${Continuities.join(", ")}`);
+    }
+    const sketches = op.sections.map((section) => resolveSketch(state, section));
+    const feature: LoftFeatureData = {
+        id: Id.generate(),
+        type: "loft",
+        sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
+        ...(op.solid === false ? { solid: false } : {}),
+        ...(op.ruled === true ? { ruled: true } : {}),
+        ...(op.ruled === true || op.continuity === undefined || op.continuity === "c2"
+            ? {}
+            : { continuity: op.continuity }),
+    };
+    createBody(state, op.id, op.name, [feature], () => {
+        for (const sketch of sketches) sketch.visible = false;
     });
 }
 

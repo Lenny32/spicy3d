@@ -22,6 +22,7 @@ import { CreateFromSelectionCommand } from "../createCommand";
 
 @command({
     key: "create.revol",
+    helpText: "tooltip.create.revol",
     icon: "icon-revolve",
 })
 export class Revolve extends CreateFromSelectionCommand {

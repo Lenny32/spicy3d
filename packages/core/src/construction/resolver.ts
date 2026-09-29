@@ -4,6 +4,7 @@
 import type { IDocument } from "../document";
 import { Result } from "../foundation";
 import { Matrix4, Plane, XYZ } from "../math";
+import { featureSketchIds } from "../merge/integrity";
 import { GeometryNode, type INode, ShapeNode } from "../model";
 import { CurveUtils, type IEdge, type IFace, type IShape, type IVertex, ShapeTypes } from "../shape";
 import type { ConstructionNode } from "./node";
@@ -480,8 +481,7 @@ export function validateConstructionDefinition(
         for (let index = 0; index < features.length; index++) {
             const feature = features[index] as Record<string, unknown>;
             const datumSources = datumIds(feature["constructionAxisRef"]);
-            const sketchId = feature["sketchId"];
-            if (typeof sketchId === "string") {
+            for (const sketchId of featureSketchIds(feature)) {
                 const sketch = document.modelManager.findNode((node) => node.id === sketchId) as
                     | (INode & { constructionPlaneRef?: ConstructionRef })
                     | undefined;

@@ -119,10 +119,20 @@ describe("mergeRibbonProfiles", () => {
             "sketch.create",
             "feature.extrude",
             "feature.revolve",
+            "feature.loft",
             "create.sweep",
-            "create.loft",
         ]);
         expect(create.collapsedItems?.[0]).toBe("sketch.enter");
+    });
+
+    test("with parametric, the direct loft moves to the collapsed items behind the parametric one", () => {
+        const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
+        const create = findGroup(merged, "ribbon.tab.solid", "ribbon.group.create");
+        expect(flattenItems(create.items)).not.toContain("create.loft");
+        expect(create.collapsedItems).toContain("create.loft");
+        // The base profile is left as it was.
+        const base = findGroup(DefaultRibbon, "ribbon.tab.solid", "ribbon.group.create");
+        expect(flattenItems(base.items)).toContain("create.loft");
     });
 
     test("with parametric, SOLID/MODIFY should lead with the feature commands", () => {

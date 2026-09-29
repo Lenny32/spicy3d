@@ -10,6 +10,7 @@ export * from "./extrude";
 export * from "./extrudeTarget";
 export * from "./feature";
 export * from "./historyCompletion";
+export * from "./loft";
 export * from "./operationIds";
 export * from "./pressPull";
 export * from "./profileBuilder";
