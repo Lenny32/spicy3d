@@ -134,9 +134,11 @@ describe("guardKernelModule", () => {
         behaviour = "abort";
         expect(() => module.FakeFactory.box()).toThrow(WebAssembly.RuntimeError);
         behaviour = "trap";
+        probeFails = true;
         expect(() => module.FakeFactory.box()).toThrow(
             "Kernel crashed (table index is out of bounds, after Aborted(undefined)); reload the page",
         );
+        expect(probe).toHaveBeenCalledTimes(2);
         expect(KernelState.current.status).toBe("crashed");
     });
 
@@ -145,13 +147,25 @@ describe("guardKernelModule", () => {
         "table index is out of bounds",
         "null function or function signature mismatch",
         "memory access out of bounds",
-    ])("the trap %s crashes the kernel", (message) => {
+    ])("the trap %s crashes the kernel when the probe fails", (message) => {
         behaviour = "trap";
         trapMessage = message;
+        probeFails = true;
         expect(() => module.FakeFactory.box()).toThrow(KernelCrashedError);
         expect(KernelState.current.status).toBe("crashed");
         // An earlier test's abort may be named after it.
         expect(KernelState.current.reason?.startsWith(message)).toBe(true);
+    });
+
+    test("a trap the module survives stays an ordinary error", () => {
+        behaviour = "trap";
+        trapMessage = "null function or function signature mismatch";
+        expect(() => module.FakeFactory.box()).toThrow(WebAssembly.RuntimeError);
+        expect(probe).toHaveBeenCalledTimes(1);
+        expect(KernelState.current.status).toBe("ok");
+
+        behaviour = "ok";
+        expect(module.FakeFactory.box()).toBe(42);
     });
 
     test("an abort reason keeps its parentheses, without the build hint", () => {
@@ -172,6 +186,7 @@ describe("guardKernelModule", () => {
         KernelState.current.onPropertyChanged(listener);
         try {
             behaviour = "trap";
+            probeFails = true;
             expect(() => new module.FakeShape()).toThrow(KernelCrashedError);
             expect(() => module.FakeFactory.box()).toThrow(KernelCrashedError);
             expect(KernelState.current.reason).toMatch(/^table index is out of bounds/);

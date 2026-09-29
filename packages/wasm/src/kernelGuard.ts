@@ -10,8 +10,8 @@ import { KernelCrashedError, KernelState, Logger, Result } from "@spicy3d/core";
  * left inconsistent and every later call traps ("table index is out of bounds"). The module cannot
  * be re-created either — every `OccShape` wraps a handle into it.
  *
- * So after an abort a small probe runs against the module: if it fails, or if any call traps later
- * (`unreachable`, `table index is out of bounds`), the kernel is recorded as crashed in core's
+ * So after an abort or a trap (`unreachable`, `table index is out of bounds`, …) a small probe runs
+ * against the module: if the probe fails, the kernel is recorded as crashed in core's
  * `KernelState` with the first message, and from then on nothing re-enters the module: every call
  * fails at once with one stable message ({@link KernelCrashedError}).
  *
@@ -19,7 +19,7 @@ import { KernelCrashedError, KernelState, Logger, Result } from "@spicy3d/core";
  * garbage-collected after a crash: console noise only, and it cannot be intercepted from JS.
  */
 
-/** Traps a sane module does not produce: the module is corrupted. */
+/** Traps that may mean a corrupted module; the probe decides. */
 const FATAL_TRAP =
     /unreachable|table index is out of bounds|null function or function signature mismatch|memory access out of bounds/i;
 
@@ -62,7 +62,7 @@ function crash(reason: string): KernelCrashedError {
     return new KernelCrashedError(KernelState.current.reason ?? reason);
 }
 
-/** Whether the module still answers after an abort (a failure inside the probe is not classified). */
+/** Whether the module still answers after an abort or trap (a failure inside the probe is not classified). */
 function survives(): boolean {
     if (!probe) return true;
     probing = true;
@@ -93,7 +93,13 @@ export function classifyKernelError(error: unknown): unknown {
         return crash(aborted);
     }
     if (isRuntimeError(error) && FATAL_TRAP.test(messageOf(error))) {
+        // A trap is not proof either: a null handle passed into a binding traps on its vtable call
+        // ("null function or function signature mismatch") and the module is fine afterwards.
         const trap = messageOf(error);
+        if (survives()) {
+            Logger.warn(`geometry kernel trapped (${trap}) and still answers`);
+            return error;
+        }
         return crash(lastAbort ? `${trap}, after ${lastAbort}` : trap);
     }
     return error;
@@ -155,8 +161,8 @@ const STATIC_SKIP = new Set(["prototype", "length", "name", "arguments", "caller
 
 export interface KernelGuardOptions {
     /**
-     * Run after an abort: throws when the module no longer works. Without one, only a later trap
-     * marks the kernel crashed.
+     * Run after an abort or a fatal-looking trap: throws when the module no longer works. Without
+     * one the kernel is never marked crashed.
      */
     probe?: () => void;
 }

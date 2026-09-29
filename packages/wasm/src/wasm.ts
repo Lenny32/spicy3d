@@ -18,8 +18,8 @@ export interface InitWasmOptions {
 }
 
 /**
- * Creates the kernel module with its crash detection (`kernelGuard.ts`): an abort the module does
- * not survive, or a trap, marks core's `KernelState` crashed, and no call re-enters it afterwards.
+ * Creates the kernel module with its crash detection (`kernelGuard.ts`): an abort or trap the module
+ * does not survive marks core's `KernelState` crashed, and no call re-enters it afterwards.
  */
 export async function initWasm(options?: InitWasmOptions) {
     const module = await MainModuleFactory({
