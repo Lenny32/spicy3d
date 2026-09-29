@@ -28,7 +28,7 @@ describe("ConvertToWire", () => {
         const data = (ConvertToWire as any).prototype.data;
         expect(data).not.toBeNull();
         expect(data.key).toBe("convert.toWire");
-        expect(data.icon).toBe("icon-toPoly");
+        expect(data.icon).toBe("icon-toWire");
     });
 
     test("shapeFilter should allow edges", () => {

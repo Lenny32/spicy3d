@@ -17,7 +17,7 @@ import { type INode, NodeUtils } from "./node";
 import { isNodeIcon } from "./nodeIcon";
 
 /** Shown for a node that declares no icon of its own. */
-const FALLBACK_ICON = "icon-box";
+const FALLBACK_ICON = "icon-shape";
 
 /** One step of the document's design history, as the timeline bar shows it. */
 export type TimelineEntry =

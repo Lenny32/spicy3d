@@ -17,7 +17,7 @@ describe("RefSegment", () => {
         const data = (RefSegment as any).prototype.data;
         expect(data).not.toBeNull();
         expect(data.key).toBe("create.refSegment");
-        expect(data.icon).toBe("icon-line");
+        expect(data.icon).toBe("icon-refSegment");
     });
 
     test("getSteps should return two steps", () => {

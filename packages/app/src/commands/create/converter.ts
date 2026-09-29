@@ -86,7 +86,7 @@ abstract class ConvertCommand extends CancelableCommand {
 
 @command({
     key: "convert.toWire",
-    icon: "icon-toPoly",
+    icon: "icon-toWire",
 })
 export class ConvertToWire extends ConvertCommand {
     protected override create(document: IDocument, models: ShapeNode[]): Result<GeometryNode> {

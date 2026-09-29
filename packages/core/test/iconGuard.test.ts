@@ -55,6 +55,6 @@ describe("icon guard", () => {
 
     test("the guard reads the sprite and scans the sources", () => {
         expect(spriteIcons().has("icon-box")).toBe(true);
-        expect(usedIcons().get("icon-setWorkingPlane")).toContain("packages/core/src/construction/node.ts");
+        expect(usedIcons().get("icon-constructionPlane")).toContain("packages/core/src/construction/node.ts");
     });
 });

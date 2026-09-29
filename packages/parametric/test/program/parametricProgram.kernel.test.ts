@@ -476,7 +476,7 @@ describe("model tree icons", () => {
         const sketch = doc.modelManager.findNodes((n) => n instanceof SketchNode)[0] as SketchNode;
 
         expect(sketch.icon).toBe("icon-sketchEdit");
-        expect(body.icon).toBe("icon-box");
+        expect(body.icon).toBe("icon-shape");
         expect(new FolderNode({ document: doc, name: "folder" }).icon).toBe("icon-folder");
         // The point of the contract: a sketch must not read as another solid.
         expect(sketch.icon).not.toBe(body.icon);

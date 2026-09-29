@@ -19,7 +19,7 @@ export const VERSION_KIND_ICONS: Record<VersionKind, string> = {
     manual: "icon-save",
     auto: "icon-history",
     merge: "icon-sync-alt",
-    restore: "icon-undo",
+    restore: "icon-restoreVersion",
     mcp: "icon-macro",
 };
 

@@ -42,7 +42,7 @@ describe("getItemData", () => {
             // biome-ignore lint/suspicious/noExplicitAny: testing runtime fallback for unknown command key
             const result = getItemData("unknown.command" as any);
             expect(result.command).toBe("unknown.command");
-            expect(result.icon).toBe("icon-box");
+            expect(result.icon).toBe("icon-command");
             expect(result.display).toBe("unknown.command");
         });
 

@@ -136,13 +136,13 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
     get icon(): string {
         switch (this.definition.kind) {
             case "ucs":
-                return "icon-alignWorkingPlane";
+                return "icon-ucs";
             default:
                 return this.definition.kind.startsWith("plane")
-                    ? "icon-setWorkingPlane"
+                    ? "icon-constructionPlane"
                     : this.definition.kind.startsWith("axis")
-                      ? "icon-line"
-                      : "icon-point";
+                      ? "icon-constructionAxis"
+                      : "icon-constructionPoint";
         }
     }
 
