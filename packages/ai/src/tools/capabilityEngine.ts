@@ -7,10 +7,12 @@ import {
     type IDocument,
     type IEdge,
     type IFace,
+    type INode,
     type IShape,
     type IWire,
     Line,
     Matrix4,
+    NodeUtils,
     Plane,
     Result,
     ShapeNode,
@@ -197,6 +199,9 @@ export const EDIT_METHODS: ReadonlySet<string> = new Set([
  * (transformedMul lives on IShape). Listed in the run_program method enum.
  */
 export const EXTRA_OP_METHODS = ["transformedMul"] as const;
+
+/** The query run as a derive op: its copy becomes a new scene node (see runClone). */
+const CLONE_METHOD = "shape.clone";
 
 function activeDocument(): IDocument {
     const doc = globalThis.app.activeView?.document;
@@ -907,7 +912,11 @@ function runTransformedMul(
     addCreatedNode(op, doc, localRefs, created, op.name ?? op.method, Result.ok(transformed));
 }
 
-/** Create the scene node for an op result, register its ref and report it as created. */
+/**
+ * Create the scene node for an op result, register its ref and report it as created. With
+ * `after`, the node goes right behind that node in its parent (same folder); otherwise into
+ * the model manager's current folder.
+ */
 function addCreatedNode(
     op: Op,
     doc: IDocument,
@@ -915,11 +924,45 @@ function addCreatedNode(
     created: CreatedNode[],
     name: string,
     shape: Result<IShape>,
-): void {
+    after?: INode,
+): EditableShapeNode {
     const node = new EditableShapeNode({ document: doc, name, shape });
-    doc.modelManager.addNode(node);
+    const parent = after?.parent;
+    if (after && parent && NodeUtils.isLinkedListNode(parent)) {
+        parent.insertAfter(after, node);
+    } else {
+        doc.modelManager.addNode(node);
+    }
     if (op.id) registerRef(doc, localRefs, op.id, { nodeId: node.id, kind: "shape", value: shape.value });
     created.push({ id: op.id, nodeId: node.id, name });
+    return node;
+}
+
+/**
+ * `shape.clone` is run as a derive op rather than a plain query: the copy becomes its own
+ * scene node next to the source and the op's ref is backed by that node. A ref still backed
+ * by the source node would make a later edit op (makeThickSolid, fillet, ...) on the "clone"
+ * consume — remove — the source. Node creation is recorded by the program's transaction, so a
+ * failing later op rolls the copy back together with its ref.
+ */
+function runClone(
+    cap: QueryCapability,
+    op: Op,
+    doc: IDocument,
+    localRefs: Map<string, LocalRef>,
+    created: CreatedNode[],
+    results: Record<string, unknown>,
+): void {
+    if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
+    if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
+
+    const entry = resolveQueryTarget(cap, op.target, doc, localRefs);
+    const copy = invokeMember(cap, entry.value as Record<string, unknown>, []) as IShape;
+    const source =
+        entry.nodeId === undefined ? undefined : doc.modelManager.findNodes((n) => n.id === entry.nodeId)[0];
+    const name = op.name ?? `${source?.name ?? "shape"}_copy`;
+    const node = addCreatedNode(op, doc, localRefs, created, name, Result.ok(copy), source);
+    results[op.id] = { ref: op.id, kind: "shape", nodeId: node.id };
 }
 
 function runOp(
@@ -937,7 +980,7 @@ function runOp(
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
     if (!cap) {
-        runQueryOp(op, doc, localRefs, results);
+        runQueryOp(op, doc, localRefs, created, results);
         return;
     }
     runShapeOp(cap, op, doc, factory, localRefs, created, removed, results);
@@ -947,6 +990,7 @@ function runQueryOp(
     op: Op,
     doc: IDocument,
     localRefs: Map<string, LocalRef>,
+    created: CreatedNode[],
     results: Record<string, unknown>,
 ): void {
     const query = queryCapabilities.find((c) => c.method === op.method);
@@ -954,6 +998,10 @@ function runQueryOp(
         throw new Error(
             `unknown method "${op.method}" — load_skill("modeling-api") lists the modeling methods and load_skill("shape-query") the query methods`,
         );
+    }
+    if (query.method === CLONE_METHOD) {
+        runClone(query, op, doc, localRefs, created, results);
+        return;
     }
     runQuery(query, op, doc, localRefs, results);
 }
@@ -1075,7 +1123,7 @@ function buildModelingTool(): Tool {
     return {
         name: "run_program",
         description:
-            'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results". The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it).',
+            'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results" (shape.clone also adds its copy as a new node, listed in "created", so edit ops on the clone never consume the source). The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it).',
         parameters: runProgramParameters(),
         handler: handleRunProgram,
     };

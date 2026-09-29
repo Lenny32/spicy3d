@@ -2,8 +2,18 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { BoundingBox, type IShape, Matrix4, Plane, Result, ShapeTypes } from "@spicy3d/core";
-import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
+import {
+    BoundingBox,
+    EditableShapeNode,
+    FolderNode,
+    type IDocument,
+    type IShape,
+    Matrix4,
+    Plane,
+    Result,
+    ShapeTypes,
+} from "@spicy3d/core";
+import { createMockApplication, createMockDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { buildCapabilityTools, summarizeRefIds } from "../src/tools/capabilityEngine";
 
 describe("capabilityEngine", () => {
@@ -1405,6 +1415,140 @@ describe("capabilityEngine", () => {
             } finally {
                 rs.unstubAllGlobals();
             }
+        });
+    });
+
+    // A real node tree: the clone's placement, the edit op's removal and the transaction's
+    // rollback are all node-tree behaviour.
+    describe("shape.clone", () => {
+        interface MockSolid {
+            label: string;
+            shapeType: number;
+            volume: () => number;
+            findSubShapes: () => { label: string; shapeType: number }[];
+            clone: () => MockSolid;
+        }
+
+        function solid(label: string): MockSolid {
+            return {
+                label,
+                shapeType: ShapeTypes.solid,
+                volume: () => 1000,
+                findSubShapes: () => [{ label: `${label}-face`, shapeType: ShapeTypes.face }],
+                clone: () => solid(`${label}-copy`),
+            };
+        }
+
+        function setup(factory: Record<string, unknown>) {
+            const doc = new TestDocument();
+            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            const folder = new FolderNode({ document: doc, name: "Parts" });
+            doc.modelManager.addNode(folder);
+            const skin = new EditableShapeNode({
+                document: doc,
+                name: "skin",
+                shape: Result.ok(solid("skin") as unknown as IShape),
+            });
+            folder.add(skin);
+            const app = createMockApplication({ shapeProvider: { factory } as any });
+            (app as any).activeView = { document: doc };
+            rs.stubGlobal("app", app);
+            return { doc, folder, skin };
+        }
+
+        function nodeById(doc: IDocument, id: string) {
+            return doc.modelManager.findNodes((n) => n.id === id)[0];
+        }
+
+        async function run(ops: Record<string, unknown>[]) {
+            const tool = buildCapabilityTools()[0];
+            return JSON.parse((await tool.handler({ ops })) as string);
+        }
+
+        afterEach(() => {
+            rs.unstubAllGlobals();
+        });
+
+        test("creates a visible node next to the source and backs the ref with it", async () => {
+            const { doc, folder, skin } = setup({});
+
+            const result = await run([{ id: "skc", method: "shape.clone", target: skin.id }]);
+
+            expect(result.created.length).toBe(1);
+            const createdEntry = result.created[0];
+            expect(createdEntry.id).toBe("skc");
+            expect(createdEntry.name).toBe("skin_copy");
+            expect(result.results.skc).toEqual({ ref: "skc", kind: "shape", nodeId: createdEntry.nodeId });
+
+            const copy = nodeById(doc, createdEntry.nodeId) as EditableShapeNode;
+            expect(copy).toBeInstanceOf(EditableShapeNode);
+            expect(copy.parent).toBe(folder);
+            expect(skin.nextSibling).toBe(copy);
+            expect(copy.visible).toBe(true);
+            expect((copy.shape.value as unknown as { label: string }).label).toBe("skin-copy");
+            expect(result.removed).toEqual([]);
+        });
+
+        test("an edit op on the clone consumes the clone, never the source", async () => {
+            const makeThickSolidBySimple = rs.fn((shape: IShape, _thickness: number) =>
+                Result.ok(solid(`${(shape as unknown as { label: string }).label}-thick`)),
+            );
+            const { doc, skin } = setup({ makeThickSolidBySimple });
+
+            const first = await run([
+                { id: "f", method: "shape.findSubShapes", target: skin.id, args: { subshapeType: "face" } },
+                { id: "skc", method: "shape.clone", target: skin.id },
+            ]);
+            const cloneNodeId = first.created[0].nodeId;
+
+            const second = await run([
+                { id: "t", method: "makeThickSolidBySimple", args: { shape: "skc", thickness: 1 } },
+            ]);
+
+            expect(makeThickSolidBySimple.mock.calls.length).toBe(1);
+            expect((makeThickSolidBySimple.mock.calls[0][0] as unknown as { label: string }).label).toBe(
+                "skin-copy",
+            );
+            expect(second.removed).toEqual([{ nodeId: cloneNodeId, name: "skin_copy" }]);
+            expect(nodeById(doc, cloneNodeId)).toBeUndefined();
+            expect(nodeById(doc, skin.id)).toBe(skin);
+
+            // The source's refs survive; the consumed clone's ref is dropped with its node.
+            const after = await run([
+                { id: "v", method: "shape.volume", target: skin.id },
+                { id: "ft", method: "shape.shapeType", target: "f#0" },
+            ]);
+            expect(after.results).toEqual({ v: 1000, ft: "face" });
+            await expect(run([{ id: "v2", method: "shape.volume", target: "skc" }])).rejects.toThrow(
+                "ai.error.unknownRef",
+            );
+        });
+
+        test("a failing later op rolls the clone node and its ref back", async () => {
+            const { doc, skin } = setup({});
+            const before = doc.modelManager.findNodes().map((n) => n.id);
+
+            await expect(
+                run([
+                    { id: "skc", method: "shape.clone", target: skin.id },
+                    { method: "transformedMul", args: {} },
+                ]),
+            ).rejects.toThrow("transformedMul requires args.shape");
+
+            expect(doc.modelManager.findNodes().map((n) => n.id)).toEqual(before);
+            expect(doc.modelManager.findNodes((n) => n.name === "skin_copy")).toEqual([]);
+            await expect(run([{ id: "v", method: "shape.volume", target: "skc" }])).rejects.toThrow(
+                "ai.error.unknownRef",
+            );
+        });
+
+        test("honours an explicit name", async () => {
+            const { doc, skin } = setup({});
+
+            const result = await run([{ id: "skc", method: "shape.clone", target: skin.id, name: "shell" }]);
+
+            expect(result.created[0].name).toBe("shell");
+            expect(nodeById(doc, result.created[0].nodeId)?.name).toBe("shell");
         });
     });
 });

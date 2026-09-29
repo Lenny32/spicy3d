@@ -118,6 +118,14 @@ const KNOWN_RETURN_ALIASES = {
         '"shape" | "compound" | "compoundSolid" | "solid" | "shell" | "face" | "wire" | "edge" | "vertex"',
 };
 
+// Queries whose run_program behaviour differs from the generic encoding of their return kind.
+// shape.clone is run by the engine as a derive op: the copy becomes its own scene node, so an
+// edit op on the clone consumes the clone, never the source.
+const QUERY_RETURN_DOCS = {
+    "shape.clone":
+        'independent copy as a NEW scene node "<source name>_copy" next to the source (listed in "created"; shape ref registered under the op id and backed by the new node — edit ops on it consume the copy, never the source)',
+};
+
 const SINGLE_SHAPE = new Set([
     "IShape",
     "ISolid",
@@ -447,7 +455,8 @@ const paramList = (params) =>
 function queryDocLine(c) {
     const returnStr = KNOWN_RETURN_ALIASES[c.returnStr] ?? c.returnStr;
     const returns =
-        c.returnKind === "data" || c.returnKind === "shapeType"
+        QUERY_RETURN_DOCS[c.method] ??
+        (c.returnKind === "data" || c.returnKind === "shapeType"
             ? returnStr.length > 140
                 ? "object (JSON)"
                 : returnStr.replace(/\s+/g, " ")
@@ -455,7 +464,7 @@ function queryDocLine(c) {
               ? "{ count, refs } — also registers sub-shape refs <id>#0..n"
               : c.returnKind === "mutate"
                 ? "null — mutates the target ref's geometry in place (re-applied on ref refresh)"
-                : `${c.returnKind.replace("Ref", "")} ref (registered under the op id)`;
+                : `${c.returnKind.replace("Ref", "")} ref (registered under the op id)`);
     return `${c.method}(target${c.params.length ? `, ${paramList(c.params)}` : ""}) -> ${returns}`;
 }
 
@@ -602,7 +611,7 @@ export const queryApiDoc = \`Shape query API (units: mm, angles: degrees — the
 - target: an op id, an existing node id, a sub-shape ref (q1#2), or a curve/surface ref.
 - Refs persist across run_program calls on the same document and re-resolve against the live shape; a ref whose source node was deleted fails with a clear error — re-run the query that produced it. At most 256 refs are kept per document: in a long session the oldest are evicted and later fail as "Unknown ref".
 - Every query op needs an "id"; its return value comes back in the response "results" under that id. Result encodings: data queries return the plain value; curve/surface-producing queries (edge.curve, face.surface, trimmedCurve.basisCurve, ...) return { ref, kind } where kind is "curve" or "surface" — pass ref as the target of follow-up queries, and only to members matching its kind; single-shape queries (wire.toFace, wire.offset, face.outerWire, edge.trim, ...) return { ref, kind: "shape" } — the ref works both as a query target and as a shape argument in creation ops; list queries (shape.findSubShapes, wire.edgeLoop) return { count, refs, kind: "shape" }; mutation queries (curve.reverse, trimmedCurve.setTrim, ...) return null and modify the target ref's geometry in place — the mutation is remembered and re-applied whenever the ref is re-resolved.
-- Query ops never consume or delete the referenced node, and never create scene nodes.
+- Query ops never consume or delete the referenced node, and never create scene nodes — except shape.clone, which adds the copy as a new node (reported in "created") so it is an independent input for later edit ops.
 - kind encodings: xyz={x,y,z}; plane/refOrPlane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} (XY-oriented through origin when normal is omitted) or, for refOrPlane, a shape ref string; line/refOrLine={point:{x,y,z},direction:{x,y,z}} or a ref string; matrix={array:[16 numbers, column-major]}; shapeType one of solid|shell|face|wire|edge|vertex|compound|compoundSolid (the plural is accepted too, and shape.findSubShapes' subshapeType may be left out — it then means edge); ref/curveRef/surfaceRef take a ref string.
 - Type hierarchy: circle/ellipse/hyperbola/parabola are conic; conic/line/bezierCurve/bsplineCurve/trimmedCurve/offsetCurve are curve — curve.* and conic.* members apply to those targets too. Surfaces likewise: cylindricalSurface/planeSurface/sphericalSurface/... are elementarySurface, and every *Surface is a surface. Use curve.curveType to check what a curve ref actually is.
 - edge.curve ALWAYS yields a trimmedCurve (it carries the edge's parameter range), even for a straight or circular edge.

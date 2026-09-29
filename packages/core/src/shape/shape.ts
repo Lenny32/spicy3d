@@ -39,6 +39,11 @@ export interface IShape extends IDisposable {
     section(shape: IShape | Plane): IShape;
     split(shapes: IShape[], tolerance?: number): IShape;
     reserve(): void;
+    /**
+     * An independent copy of this shape. Through run_program (`shape.clone`) the copy becomes
+     * its own scene node next to the source, so edit ops on the clone consume the copy, never
+     * the source.
+     */
     clone(): IShape;
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape;
     boundingBox(): BoundingBox;
