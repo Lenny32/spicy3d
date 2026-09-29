@@ -21,7 +21,6 @@ import {
     type Plane,
     Precision,
     Result,
-    ShapeTypes,
     type TrackedShape,
     type XYZ,
     type XYZLike,
@@ -39,6 +38,7 @@ import type {
 import { OccCurve } from "./curve";
 import { convertFromContinuity, getJoinType, getOffsetMode } from "./helper";
 import { guardKernelResults } from "./kernelGuard";
+import { prepareLoftSection } from "./loftSections";
 import { OccEdge, OccShape } from "./shape";
 
 function ensureOccShape(shapes: IShape | IShape[]): TopoDS_Shape[] {
@@ -798,23 +798,25 @@ export class ShapeFactory implements IShapeFactory {
             "MakeThickSolidByJoin",
         );
     }
-    loft(
-        sections: (IVertex | IEdge | IWire)[],
-        isSolid: boolean,
-        isRuled: boolean,
-        continuity: Continuity,
-    ): Result<IShape> {
-        for (let i = 0; i < sections.length; i++) {
-            const section = sections[i];
-            if (section.shapeType === ShapeTypes.edge) {
-                sections[i] = this.wire([section as IEdge]).value;
+    loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape> {
+        const prepared: IShape[] = [];
+        // Shapes built here (edge -> wire, chained compound, a face's outer wire), never the caller's.
+        const created: IShape[] = [];
+        try {
+            for (const [index, section] of sections.entries()) {
+                const result = prepareLoftSection(section, index, (edges) => this.wire(edges));
+                if (!result.isOk) return Result.err(result.error);
+                prepared.push(result.value);
+                if (result.value !== section) created.push(result.value);
             }
+            return convertShapeResult(
+                wasm.ShapeFactory.loft,
+                [ensureOccShape(prepared), isSolid, isRuled, convertFromContinuity(continuity)],
+                "Loft",
+            );
+        } finally {
+            for (const shape of created) shape.dispose();
         }
-        return convertShapeResult(
-            wasm.ShapeFactory.loft,
-            [ensureOccShape(sections), isSolid, isRuled, convertFromContinuity(continuity)],
-            "Loft",
-        );
     }
     curveProjection(curve: IEdge | IWire, targetFace: IFace, vec: XYZ): Result<IShape> {
         return convertShapeResult(

@@ -160,12 +160,13 @@ export interface IShapeFactory {
     chamfer2d(face: IFace, edge1: IEdge, edge2: IEdge, distance: number): Result<IFace>;
     filletEdge2d(edge1: IEdge, edge2: IEdge, radius: number): Result<IEdge[]>;
     chamferEdge2d(edge1: IEdge, edge2: IEdge, distance: number): Result<IEdge[]>;
-    loft(
-        sections: (IVertex | IEdge | IWire)[],
-        isSolid: boolean,
-        isRuled: boolean,
-        continuity: Continuity,
-    ): Result<IShape>;
+    /**
+     * Lofts through `sections` in order. A section is a vertex (only as the first or last),
+     * a wire, an edge, a face (its outer wire) or a compound of edges such as a
+     * sketch's loose entities, whose edges must form exactly ONE connected chain — several
+     * chains are an error naming the section. Open chains are valid sections.
+     */
+    loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(
         shape: IShape,

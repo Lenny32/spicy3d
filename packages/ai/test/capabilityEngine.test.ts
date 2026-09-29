@@ -815,6 +815,47 @@ describe("capabilityEngine", () => {
             }
         });
 
+        test("loft hands sketch-like compound nodes to the factory as they are and keeps them", async () => {
+            const lower = { shapeType: ShapeTypes.compound };
+            const upper = { shapeType: ShapeTypes.compound };
+            const loft = rs.fn((..._args: unknown[]) =>
+                Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape),
+            );
+            const { removed, addNode } = setup({ loft });
+            try {
+                const nodes = [lower, upper].map(
+                    (shape, i) =>
+                        new EditableShapeNode({
+                            document: createMockDocument(),
+                            name: `sketch${i}`,
+                            shape: Result.ok(shape as unknown as IShape),
+                        }),
+                );
+                for (const node of nodes) addNode(node);
+
+                const result = await run([
+                    {
+                        id: "skin",
+                        method: "loft",
+                        args: {
+                            sections: nodes.map((node) => node.id),
+                            isSolid: false,
+                            isRuled: true,
+                            continuity: "c0",
+                        },
+                    },
+                ]);
+
+                // The factory chains each compound's edges into the section wire itself.
+                expect(loft.mock.calls[0][0]).toEqual([lower, upper]);
+                expect((loft.mock.calls[0][0] as unknown[])[0]).toBe(lower);
+                expect(result.created.map((c: { id: string }) => c.id)).toEqual(["skin"]);
+                expect(removed).toEqual([]);
+            } finally {
+                rs.unstubAllGlobals();
+            }
+        });
+
         test("shape.shapeType reports the name, not the numeric bit flag", async () => {
             const solid = { shapeType: ShapeTypes.solid };
             const box = rs.fn(() => Result.ok(solid as unknown as IShape));

@@ -96,6 +96,7 @@
 #include <gp_Circ.hxx>
 #include <gp_Trsf.hxx>
 #include <set>
+#include <string>
 
 using namespace emscripten;
 
@@ -2160,28 +2161,65 @@ public:
         return ShapesResult { ShapeArray(buildEdgeTriple(newE1, chamferEdge, newE2)), true, "" };
     }
 
+    static const char* loftShapeTypeName(TopAbs_ShapeEnum type)
+    {
+        switch (type) {
+        case TopAbs_COMPOUND:
+            return "compound";
+        case TopAbs_COMPSOLID:
+            return "compound solid";
+        case TopAbs_SOLID:
+            return "solid";
+        case TopAbs_SHELL:
+            return "shell";
+        case TopAbs_FACE:
+            return "face";
+        case TopAbs_WIRE:
+            return "wire";
+        case TopAbs_EDGE:
+            return "edge";
+        case TopAbs_VERTEX:
+            return "vertex";
+        default:
+            return "shape";
+        }
+    }
+
     static ShapeResult loft(const ShapeArray& sections, bool isSolid, bool isRuled, GeomAbs_Shape continuity)
     {
         std::vector<TopoDS_Shape> shapeVector = emscripten::vecFromJSArray<TopoDS_Shape>(sections);
-        if (shapeVector.size() < 2) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to loft: at least 2 sections are required" };
-        }
-        if (shapeVector.size() == 2 && shapeVector[0].ShapeType() == TopAbs_VERTEX && shapeVector[1].ShapeType() == TopAbs_VERTEX) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to loft: must have at least 1 wires" };
-        }
 
         BRepOffsetAPI_ThruSections loftBuilder(isSolid, isRuled);
         if (!isRuled) {
             loftBuilder.SetContinuity(continuity);
         }
 
-        for (auto& profile : shapeVector) {
+        size_t accepted = 0;
+        size_t wires = 0;
+        for (size_t i = 0; i < shapeVector.size(); i++) {
+            const TopoDS_Shape& profile = shapeVector[i];
+            if (profile.IsNull()) {
+                return ShapeResult { TopoDS_Shape(), false, "Failed to loft: section " + std::to_string(i) + " is empty" };
+            }
             if (profile.ShapeType() == TopAbs_WIRE) {
                 loftBuilder.AddWire(TopoDS::Wire(profile));
+                wires++;
             } else if (profile.ShapeType() == TopAbs_VERTEX) {
                 loftBuilder.AddVertex(TopoDS::Vertex(profile));
+            } else {
+                return ShapeResult { TopoDS_Shape(), false,
+                    "Failed to loft: section " + std::to_string(i) + " is a " + loftShapeTypeName(profile.ShapeType())
+                        + "; only wires and vertices can be lofted" };
             }
+            accepted++;
         }
+        if (accepted < 2) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to loft: at least 2 sections are required" };
+        }
+        if (wires == 0) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to loft: must have at least 1 wires" };
+        }
+
         loftBuilder.Build();
         if (!loftBuilder.IsDone()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to loft" };

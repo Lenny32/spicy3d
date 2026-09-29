@@ -34,6 +34,10 @@ Flange (base plate + boss + bolt circle):
 5. copies: transformedMul rotate around the flange axis (axis {0,0,1} through the center) by 90/180/270 degrees, ids "h1".."h3" — transformedMul does NOT consume h0.
 6. cut: booleanCut(["body"], ["h0","h1","h2","h3"]) id "flange" — one op cuts all holes and consumes the tools.
 
+Loft through sketches:
+- run_program loft takes sketch node ids directly as sections: { method: "loft", id: "skin", args: { sections: ["<sketchA>", "<sketchB>"], isSolid: true, isRuled: false, continuity: "c2" } }. A sketch's loose edges are chained into the section wire for you — no scaffold wire ops. OPEN chains are fine (isSolid: false gives an open skin); a sketch with several separate chains (e.g. an outline plus a hole) is refused with "Section <i> has <n> separate edge chains": pick one with shape.findSubShapes + wire.
+- For CLOSED single-profile sketches the user may want to re-edit, prefer run_parametric's loft op (load_skill parametric-modeling): it follows the sketches when they change.
+
 Patterns / arrays:
 - Linear: transformedMul with translate = i * spacing per copy. Circular: transformedMul with rotate around the pattern axis. Create copies first, then one boolean op with all of them in shape2.
 
