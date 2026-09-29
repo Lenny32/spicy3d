@@ -396,14 +396,14 @@ describe("Command System", () => {
                 CommandStore.registerCommand(TestCommandClass, {
                     key: "test.command",
                     icon: "test-icon",
-                    helpText: "Test help text",
+                    helpText: "tooltip.feature.loft",
                 });
 
                 const data = CommandStore.getComandData("test.command");
                 expect(data).not.toBeNull();
                 expect(data?.key).toBe("test.command");
                 expect(data?.icon).toBe("test-icon");
-                expect(data?.helpText).toBe("Test help text");
+                expect(data?.helpText).toBe("tooltip.feature.loft");
             });
 
             test("should store command constructor in registry", () => {

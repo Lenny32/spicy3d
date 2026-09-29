@@ -29,7 +29,7 @@ import { showPreviewProblem } from "./featureEditPreview";
  * Creates a parametric body lofted through sketch profiles: the user picks one profile per
  * section, in loft order, and confirms. Every section stays a live reference to its sketch.
  */
-@command({ key: "feature.loft", icon: "icon-loft" })
+@command({ key: "feature.loft", helpText: "tooltip.feature.loft", icon: "icon-loft" })
 export class LoftFeatureCommand extends CancelableCommand {
     private readonly sections: { section: LoftSection; sketch: SketchNode; face: IFace }[] = [];
     private visual: number | undefined;
