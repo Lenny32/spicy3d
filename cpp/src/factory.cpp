@@ -1756,6 +1756,24 @@ public:
         return ShapeResult { result, true, "" };
     }
 
+    // Empty text = success. IsDone() alone accepts both a run that reported errors and
+    // an empty compound (common of disjoint bodies, cut removing everything).
+    static std::string booleanFailure(BRepAlgoAPI_BooleanOperation& boolOperater)
+    {
+        if (!boolOperater.IsDone() || boolOperater.HasErrors()) {
+            std::ostringstream oss;
+            boolOperater.DumpErrors(oss);
+            auto text = oss.str();
+            return text.empty() ? std::string("Boolean operation failed") : text;
+        }
+        const TopoDS_Shape& shape = boolOperater.Shape();
+        // Vertices, not faces: a boolean over curve operands legitimately yields edges only.
+        if (shape.IsNull() || !TopExp_Explorer(shape, TopAbs_VERTEX).More()) {
+            return "Boolean produced an empty shape";
+        }
+        return "";
+    }
+
     static ShapeResult booleanOperate(BRepAlgoAPI_BooleanOperation& boolOperater, const ShapeArray& args,
         const ShapeArray& tools)
     {
@@ -1768,10 +1786,9 @@ public:
         boolOperater.SetFuzzyValue(1e-6);
         boolOperater.Build();
 
-        if (!boolOperater.IsDone()) {
-            std::ostringstream oss;
-            boolOperater.DumpErrors(oss);
-            return ShapeResult { TopoDS_Shape(), false, oss.str() };
+        auto failure = booleanFailure(boolOperater);
+        if (!failure.empty()) {
+            return ShapeResult { TopoDS_Shape(), false, failure };
         }
 
         return ShapeResult { boolOperater.Shape(), true, "" };
@@ -1821,10 +1838,9 @@ public:
         boolOperater.SetFuzzyValue(1e-6);
         boolOperater.Build();
 
-        if (!boolOperater.IsDone()) {
-            std::ostringstream oss;
-            boolOperater.DumpErrors(oss);
-            return TrackedShapeResult { TopoDS_Shape(), false, oss.str(), { }, { } };
+        auto failure = booleanFailure(boolOperater);
+        if (!failure.empty()) {
+            return TrackedShapeResult { TopoDS_Shape(), false, failure, { }, { } };
         }
 
         // SimplifyResult runs after Build; it merges the unification into the history.

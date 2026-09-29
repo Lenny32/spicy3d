@@ -9,6 +9,7 @@ import {
     Matrix4,
     Result,
     ShapeNode,
+    type ShapeType,
     ShapeTypes,
     type TrackedShape,
 } from "@spicy3d/core";
@@ -63,14 +64,9 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
             if (context.tracking !== undefined && tracked !== undefined) {
                 return evaluateTracked(feature, context, tools.value, toolShapes, tracked);
             }
-            switch (feature.operation) {
-                case "common":
-                    return shapeFactory.booleanCommon([context.input], toolShapes);
-                case "cut":
-                    return shapeFactory.booleanCut([context.input], toolShapes);
-                default:
-                    return shapeFactory.booleanFuse([context.input], toolShapes, true);
-            }
+            const result = untrackedBoolean(feature.operation, context.input, toolShapes);
+            if (!result.isOk) return result;
+            return requireNonEmptyResult(feature.operation, context.input, result.value);
         } finally {
             owned.forEach((x) => x.dispose());
         }
@@ -105,6 +101,45 @@ function collectTools(feature: BooleanFeatureData, document: IDocument): Result<
     return Result.ok(tools);
 }
 
+function untrackedBoolean(operation: BooleanOperation, input: IShape, toolShapes: IShape[]): Result<IShape> {
+    switch (operation) {
+        case "common":
+            return shapeFactory.booleanCommon([input], toolShapes);
+        case "cut":
+            return shapeFactory.booleanCut([input], toolShapes);
+        default:
+            return shapeFactory.booleanFuse([input], toolShapes, true);
+    }
+}
+
+const EMPTY_RESULT_ERRORS: Record<BooleanOperation, string> = {
+    common: "Boolean common produced an empty shape: the tools do not intersect the body",
+    cut: "Boolean cut produced an empty shape: the tools remove the whole body",
+    fuse: "Boolean fuse produced an empty shape",
+};
+
+/** Whether `shape` holds at least one sub-shape of `type`; the probed wrappers are disposed. */
+function hasSubShape(shape: IShape, type: ShapeType): boolean {
+    const found = shape.findSubShapes(type);
+    found.forEach((x) => x.dispose());
+    return found.length > 0;
+}
+
+/**
+ * The kernel reports a boolean whose result is an empty compound as a success, so
+ * a common of disjoint bodies or a cut removing everything would silently leave an
+ * empty body. A solid input must keep at least one solid (a shell/face input at
+ * least one face); anything less is the feature's error. Only a topology walk,
+ * no validity check, so it is cheap enough to run on every evaluation.
+ */
+function requireNonEmptyResult(operation: BooleanOperation, input: IShape, result: IShape): Result<IShape> {
+    const required = [ShapeTypes.solid, ShapeTypes.face].find((type) => hasSubShape(input, type));
+    // An input without faces has nothing to lose; a null result has no sub-shapes at all.
+    if (required === undefined || hasSubShape(result, required)) return Result.ok(result);
+    result.dispose();
+    return Result.err(EMPTY_RESULT_ERRORS[operation]);
+}
+
 const TRACKED: Record<BooleanOperation, (factory: IShapeFactory) => TrackedMethod | undefined> = {
     common: (factory) => factory.booleanCommonTracked?.bind(factory),
     cut: (factory) => factory.booleanCutTracked?.bind(factory),
@@ -132,6 +167,8 @@ function evaluateTracked(
     }
     const result = tracked([input], toolShapes);
     if (!result.isOk) return Result.err(result.error);
+    const nonEmpty = requireNonEmptyResult(feature.operation, input, result.value.shape);
+    if (!nonEmpty.isOk) return nonEmpty;
     const { edgeMap, faceMap } = completeTrackedHistory([input, ...toolShapes], result.value);
     tracking.outputFaceIds = mapBooleanIds(
         feature.id,

@@ -480,6 +480,27 @@ describe("fillet and boolean", () => {
         expect(extent(body)).toEqual([0, 0, 0, 40, 30, 20]);
         expect(nodeIds(doc)).toContain(tool.id);
     });
+
+    test("a common with a disjoint tool fails and rolls the whole program back", () => {
+        const doc = newDoc();
+        const result = run(doc, plate(20));
+        const body = createdBody(doc, result, "b1");
+        const before = nodeIds(doc);
+
+        const message = runExpectingFailure(doc, [
+            { op: "sketch", id: "s2", plane: "XY", entities: rect(100, 100, 120, 120) },
+            { op: "extrude", id: "b2", sketch: "s2", depth: 20 },
+            { op: "boolean", id: "c1", body: body.id, operation: "common", tools: ["b2"] },
+        ]);
+
+        expect(message).toContain('op 2 ("boolean") failed');
+        expect(message).toContain("Boolean common produced an empty shape");
+        // Nothing kept: no tool sketch/body, no boolean feature, the plate untouched.
+        expect(nodeIds(doc)).toEqual(before);
+        expect(body.featureItems()).toHaveLength(1);
+        expectClean(body);
+        expect(extent(body)).toEqual([0, 0, 0, 40, 30, 20]);
+    });
 });
 
 describe("constraints", () => {
