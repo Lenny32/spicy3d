@@ -161,9 +161,27 @@ function trackLoft(
 
     tracking.outputEdgeIds = trackedIds(feature.id, edgeSeeds, edgeMap);
     tracking.outputFaceIds = outputFaces.map((face, index) => {
+        // A curved profile's mesh bounds can differ from its cap's exact bounds.
+        // Recognize end caps by their plane and area before the bbox matcher.
+        const cap = feature.solid === false ? undefined : capSection(face, sections);
+        if (cap !== undefined) return cap.seed;
         if (faceMap[index] >= 0) return sections[faceMap[index]].seed;
         const sectionEdge = lowestSectionEdge(face, outputEdges, edgeMap);
         return sectionEdge === undefined ? `${feature.id}:${index}` : edgeSeeds[sectionEdge];
+    });
+}
+
+/** Only the first and last sections can be caps; side faces must never inherit a cap's id. */
+function capSection(face: IFace, sections: readonly ResolvedLoftSection[]): ResolvedLoftSection | undefined {
+    if (!face.surface().isPlanar()) return undefined;
+    const [point, normal] = face.normal(0, 0);
+    const area = face.area();
+    return [sections[0], sections[sections.length - 1]].find(({ sketch, face: profile }) => {
+        const plane = sketch.plane;
+        if (!normal.isParallelTo(plane.normal)) return false;
+        if (Math.abs(point.sub(plane.origin).dot(plane.normal)) >= MATCH_TOLERANCE) return false;
+        const profileArea = profile.area();
+        return Math.abs(area - profileArea) / Math.max(Math.sqrt(profileArea), 1e-9) < MATCH_TOLERANCE;
     });
 }
 
