@@ -52,6 +52,7 @@
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 
+#include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BRepCheck_Analyzer.hxx>
@@ -600,8 +601,8 @@ public:
         double start(0.0), end(0.0);
         Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, start, end);
         if (curve.IsNull()) {
-            // A degenerate edge has no 3D curve to wrap. A C++ raise would abort the WASM
-            // module (exceptions are disabled), so report as a catchable JS Error instead.
+            // A degenerate edge has no 3D curve to wrap: report it as a catchable JS Error
+            // with a clearer message than the raise guardedEntry would catch.
             val::global("Error").new_(std::string("Edge.curve: degenerate edge has no 3D curve")).throw_();
         }
         Handle(Geom_TrimmedCurve) trimmedCurve = new Geom_TrimmedCurve(curve, start, end);
@@ -914,65 +915,65 @@ EMSCRIPTEN_BINDINGS(Shape)
         .field("hasHit", &InspectionRayResult::hasHit)
         .field("point", &InspectionRayResult::point);
     class_<Shape>("Shape")
-        .class_function("ptr", &Shape::ptr)
-        .class_function("boundingBox", &Shape::boundingBox)
-        .class_function("orientedBoundingBox", &Shape::orientedBoundingBox)
-        .class_function("extremaDistance", &Shape::extremaDistance)
-        .class_function("inspectionDistance", &Shape::inspectionDistance)
-        .class_function("inspectionCommonVolume", &Shape::inspectionCommonVolume)
-        .class_function("inspectionMass", &Shape::inspectionMass)
-        .class_function("inspectionSectionCaps", &Shape::inspectionSectionCaps)
-        .class_function("clean", &Shape::clean)
-        .class_function("clone", &Shape::clone)
-        .class_function("transformed", &Shape::transformed)
-        .class_function("findAncestor", &Shape::findAncestor)
-        .class_function("findSubShapes", &Shape::findSubShapes)
-        .class_function("getDirectSubShapes", &Shape::getDirectSubShapes)
-        .class_function("sectionSS", &Shape::sectionSS)
-        .class_function("sectionSP", &Shape::sectionSP)
-        .class_function("isClosed", &Shape::isClosed)
-        .class_function("splitShapes", &Shape::splitShapes)
-        .class_function("check", &Shape::check)
-        .class_function("checkFaces", &Shape::checkFaces)
-        .class_function("hlr", &Shape::hlr)
-        .class_function("shellSewing", &Shape::shellSewing)
-        .class_function("setTolerance", &Shape::setTolerance)
-        .class_function("volume", &Shape::volume);
+        .class_function("ptr", guardedEntry<&Shape::ptr>("Shape.ptr"))
+        .class_function("boundingBox", guardedEntry<&Shape::boundingBox>("Shape.boundingBox"))
+        .class_function("orientedBoundingBox", guardedEntry<&Shape::orientedBoundingBox>("Shape.orientedBoundingBox"))
+        .class_function("extremaDistance", guardedEntry<&Shape::extremaDistance>("Shape.extremaDistance"))
+        .class_function("inspectionDistance", guardedEntry<&Shape::inspectionDistance>("Shape.inspectionDistance"))
+        .class_function("inspectionCommonVolume", guardedEntry<&Shape::inspectionCommonVolume>("Shape.inspectionCommonVolume"))
+        .class_function("inspectionMass", guardedEntry<&Shape::inspectionMass>("Shape.inspectionMass"))
+        .class_function("inspectionSectionCaps", guardedEntry<&Shape::inspectionSectionCaps>("Shape.inspectionSectionCaps"))
+        .class_function("clean", guardedEntry<&Shape::clean>("Shape.clean"))
+        .class_function("clone", guardedEntry<&Shape::clone>("Shape.clone"))
+        .class_function("transformed", guardedEntry<&Shape::transformed>("Shape.transformed"))
+        .class_function("findAncestor", guardedEntry<&Shape::findAncestor>("Shape.findAncestor"))
+        .class_function("findSubShapes", guardedEntry<&Shape::findSubShapes>("Shape.findSubShapes"))
+        .class_function("getDirectSubShapes", guardedEntry<&Shape::getDirectSubShapes>("Shape.getDirectSubShapes"))
+        .class_function("sectionSS", guardedEntry<&Shape::sectionSS>("Shape.sectionSS"))
+        .class_function("sectionSP", guardedEntry<&Shape::sectionSP>("Shape.sectionSP"))
+        .class_function("isClosed", guardedEntry<&Shape::isClosed>("Shape.isClosed"))
+        .class_function("splitShapes", guardedEntry<&Shape::splitShapes>("Shape.splitShapes"))
+        .class_function("check", guardedEntry<&Shape::check>("Shape.check"))
+        .class_function("checkFaces", guardedEntry<&Shape::checkFaces>("Shape.checkFaces"))
+        .class_function("hlr", guardedEntry<&Shape::hlr>("Shape.hlr"))
+        .class_function("shellSewing", guardedEntry<&Shape::shellSewing>("Shape.shellSewing"))
+        .class_function("setTolerance", guardedEntry<&Shape::setTolerance>("Shape.setTolerance"))
+        .class_function("volume", guardedEntry<&Shape::volume>("Shape.volume"));
 
-    class_<Vertex>("Vertex").class_function("point", &Vertex::point);
+    class_<Vertex>("Vertex").class_function("point", guardedEntry<&Vertex::point>("Vertex.point"));
 
     class_<Edge>("Edge")
-        .class_function("fromCurve", &Edge::fromCurve, allow_raw_pointers())
-        .class_function("curve", &Edge::curve)
-        .class_function("curveLength", &Edge::curveLength)
-        .class_function("firstParameter", &Edge::firstParameter)
-        .class_function("lastParameter", &Edge::lastParameter)
-        .class_function("pointAt", &Edge::pointAt)
-        .class_function("startPoint", &Edge::startPoint)
-        .class_function("endPoint", &Edge::endPoint)
-        .class_function("ends", &Edge::ends)
-        .class_function("trim", &Edge::trim)
-        .class_function("intersect", &Edge::intersect)
-        .class_function("offset", &Edge::offset);
+        .class_function("fromCurve", guardedEntry<&Edge::fromCurve>("Edge.fromCurve"), allow_raw_pointers())
+        .class_function("curve", guardedEntry<&Edge::curve>("Edge.curve"))
+        .class_function("curveLength", guardedEntry<&Edge::curveLength>("Edge.curveLength"))
+        .class_function("firstParameter", guardedEntry<&Edge::firstParameter>("Edge.firstParameter"))
+        .class_function("lastParameter", guardedEntry<&Edge::lastParameter>("Edge.lastParameter"))
+        .class_function("pointAt", guardedEntry<&Edge::pointAt>("Edge.pointAt"))
+        .class_function("startPoint", guardedEntry<&Edge::startPoint>("Edge.startPoint"))
+        .class_function("endPoint", guardedEntry<&Edge::endPoint>("Edge.endPoint"))
+        .class_function("ends", guardedEntry<&Edge::ends>("Edge.ends"))
+        .class_function("trim", guardedEntry<&Edge::trim>("Edge.trim"))
+        .class_function("intersect", guardedEntry<&Edge::intersect>("Edge.intersect"))
+        .class_function("offset", guardedEntry<&Edge::offset>("Edge.offset"));
 
     class_<Wire>("Wire")
-        .class_function("offset", &Wire::offset)
-        .class_function("makeFace", &Wire::makeFace)
-        .class_function("edgeLoop", &Wire::edgeLoop);
+        .class_function("offset", guardedEntry<&Wire::offset>("Wire.offset"))
+        .class_function("makeFace", guardedEntry<&Wire::makeFace>("Wire.makeFace"))
+        .class_function("edgeLoop", guardedEntry<&Wire::edgeLoop>("Wire.edgeLoop"));
 
     class_<Face>("Face")
-        .class_function("inspectionTrimmedIso", &Face::inspectionTrimmedIso)
-        .class_function("inspectionUVBounds", &Face::inspectionUVBounds)
-        .class_function("inspectionRayHit", &Face::inspectionRayHit)
-        .class_function("area", &Face::area)
-        .class_function("offset", &Face::offset)
-        .class_function("outerWire", &Face::outerWire)
-        .class_function("surface", &Face::surface)
-        .class_function("normal", &Face::normal)
-        .class_function("intersectLine", &Face::intersectLine)
-        .class_function("curveOnSurface", &Face::curveOnSurface)
-        .class_function("containsPoint", &Face::containsPoint);
+        .class_function("inspectionTrimmedIso", guardedEntry<&Face::inspectionTrimmedIso>("Face.inspectionTrimmedIso"))
+        .class_function("inspectionUVBounds", guardedEntry<&Face::inspectionUVBounds>("Face.inspectionUVBounds"))
+        .class_function("inspectionRayHit", guardedEntry<&Face::inspectionRayHit>("Face.inspectionRayHit"))
+        .class_function("area", guardedEntry<&Face::area>("Face.area"))
+        .class_function("offset", guardedEntry<&Face::offset>("Face.offset"))
+        .class_function("outerWire", guardedEntry<&Face::outerWire>("Face.outerWire"))
+        .class_function("surface", guardedEntry<&Face::surface>("Face.surface"))
+        .class_function("normal", guardedEntry<&Face::normal>("Face.normal"))
+        .class_function("intersectLine", guardedEntry<&Face::intersectLine>("Face.intersectLine"))
+        .class_function("curveOnSurface", guardedEntry<&Face::curveOnSurface>("Face.curveOnSurface"))
+        .class_function("containsPoint", guardedEntry<&Face::containsPoint>("Face.containsPoint"));
 
     class_<Solid>("Solid")
-        .class_function("containsPoint", &Solid::containsPoint);
+        .class_function("containsPoint", guardedEntry<&Solid::containsPoint>("Solid.containsPoint"));
 }

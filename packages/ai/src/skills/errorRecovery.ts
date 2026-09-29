@@ -19,7 +19,7 @@ export const errorRecovery: Skill = {
 
 "The radius is too small." — the radius is at or below the kernel's minimum (1e-7 mm), i.e. effectively zero. Pass a positive radius.
 
-"Failed to fillet" / "Failed to chamfer" (or "Fillet Error: …") — the radius/distance is too large for the adjacent faces, or the picked edges are unsuitable. Query edge.length / face.area around the target and lower the value; typical cause is a radius larger than half the shortest adjacent edge.
+"Failed to fillet" / "Failed to chamfer" (or "Fillet failed: …" / "ShapeFactory.fillet: …") — the radius/distance is too large for the adjacent faces, or the picked edges are unsuitable. Query edge.length / face.area around the target and lower the value; typical cause is a radius larger than half the shortest adjacent edge.
 
 "The edges is empty." — fillet/chamfer needs edge indices: run shape.findSubShapes(target, edge) first and pick indices (ref e#3 -> index 3) by edge.ends geometry.
 
@@ -39,9 +39,9 @@ export const errorRecovery: Skill = {
 
 '<owner>.<name> does not apply to this target: it has no "<name>"' — the query asked for a member the target's kind does not have (a surface member on a face whose surface is another kind, most often). Curve owners are checked up front and fail with "requires a <type> curve" instead, so this is mostly surfaces: read the members the surface DOES have, or re-derive it (face.surface on the right face) and check with the family members first.
 
-"BooleanCut Error" / "BooleanFuse Error" / "BooleanCommon Error" (or a raw OCCT diagnostic) — the kernel could not complete the operation. Do not assume the cause: a disjoint fuse SUCCEEDS (it returns a compound of loose solids, not one solid — that is why booleanFuse is only for touching solids). Compare the operands with shape.boundingBox / shape.extremaDistance, check that both are solids of the expected size, fix placement (corner vs base-center vs true-center rules) or the operand choice, and retry.
+"BooleanCut failed: …" / "BooleanFuse failed: …" / "BooleanCommon failed: …" (or "ShapeFactory.booleanCut: …" and the like, a raw OCCT diagnostic) — the kernel could not complete the operation. Do not assume the cause: a disjoint fuse SUCCEEDS (it returns a compound of loose solids, not one solid — that is why booleanFuse is only for touching solids). Compare the operands with shape.boundingBox / shape.extremaDistance, check that both are solids of the expected size, fix placement (corner vs base-center vs true-center rules) or the operand choice, and retry.
 
-"To face failed" (wire.toFace) or "Failed to create prism" / "Prism Error: …" (prism) — the wire is not usable as a profile: polygon points must ALL lie on one plane and number at least 3 (fewer points or scattered 3D points produce an open/non-planar wire). Re-issue the corners on a single plane in perimeter order, repeating the first point as the last so the wire is closed.
+"To face failed" (wire.toFace) or "Failed to create prism" / "Prism failed: …" (prism) — the wire is not usable as a profile: polygon points must ALL lie on one plane and number at least 3 (fewer points or scattered 3D points produce an open/non-planar wire). Re-issue the corners on a single plane in perimeter order, repeating the first point as the last so the wire is closed.
 
 prism/revolve on a polygon wire returns a shell or breaks downstream booleans — the wire was not CLOSED (a closed one is turned into a face and sweeps a solid). Re-run polygon with the first point repeated as the last point, then extrude again.
 

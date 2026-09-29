@@ -4,7 +4,9 @@
 import { KernelCrashedError, KernelState, Logger, Result } from "@spicy3d/core";
 
 /**
- * The Release build aborts on any OCCT raise (`-sDISABLE_EXCEPTION_CATCHING=1`): the call throws
+ * The safety net under `cpp/src/guard.hpp`: a module built with `-fwasm-exceptions` catches OCCT
+ * raises and answers an error, so an abort is left to real crashes (out of memory, a C++ bug); one
+ * built with `-sDISABLE_EXCEPTION_CATCHING=1` aborts on any OCCT raise. Either way the call throws
  * `RuntimeError: Aborted(…)` with the C++ stack abandoned mid-operation. Often the module still
  * works afterwards (a fillet too large for its wall, and the next rebuild is fine), sometimes it is
  * left inconsistent and every later call traps ("table index is out of bounds"). The module cannot

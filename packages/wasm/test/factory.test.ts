@@ -756,12 +756,14 @@ describe("ShapeFactory — feature operations", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.fillet(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("Fillet Error");
+            expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
         });
 
-        test("the module survives that abort: the kernel is not reported crashed", () => {
+        test("the module survives that failure: the kernel is not reported crashed", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
-            expect(factory.fillet(boxValue, [999], 5).error).toContain("Aborted(");
+            const failed = factory.fillet(boxValue, [999], 5);
+            expect(failed.isOk).toBe(false);
+            expect(failed.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
             expect(KernelState.current.status).toBe("ok");
             expect(factory.fillet(boxValue, [0], 1).isOk).toBe(true);
         });
@@ -799,7 +801,7 @@ describe("ShapeFactory — feature operations", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.chamfer(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("Chamfer Error");
+            expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
         });
     });
 
@@ -1135,14 +1137,14 @@ describe("ShapeFactory — convertShapeResult error catching", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.fillet(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toContain("Fillet Error");
+        expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
     });
 
     test("should return error when WASM throws on chamfer with invalid edge", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.chamfer(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toContain("Chamfer Error");
+        expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
     });
 
     test("should throw error on removeSubShape with non-OccShape", () => {

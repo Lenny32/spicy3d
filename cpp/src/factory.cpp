@@ -4,6 +4,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BOPAlgo_BuilderFace.hxx>
@@ -36,6 +37,8 @@
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepOffset_Error.hxx>
+#include <BRepOffset_MakeOffset.hxx>
 #include <BRepOffset_Mode.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
@@ -149,6 +152,32 @@ struct TrackedShapeResult {
     // first and last shapes coincide and there is no distinct cap.
     std::vector<int> capFaces = { };
 };
+
+// Error results of a raise caught by guardedEntry (guard.hpp).
+ShapeResult failedResult(GuardTag<ShapeResult>, const std::string& error)
+{
+    return ShapeResult { TopoDS_Shape(), false, error };
+}
+
+RemoveFilletResult failedResult(GuardTag<RemoveFilletResult>, const std::string& error)
+{
+    return RemoveFilletResult { TopoDS_Shape(), false, error, ShapeArray(val::array()) };
+}
+
+ShapesResult failedResult(GuardTag<ShapesResult>, const std::string& error)
+{
+    return ShapesResult { ShapeArray(val::array()), false, error };
+}
+
+RegionsResult failedResult(GuardTag<RegionsResult>, const std::string& error)
+{
+    return RegionsResult { ShapeArray(val::array()), { }, { }, false, error };
+}
+
+TrackedShapeResult failedResult(GuardTag<TrackedShapeResult>, const std::string& error)
+{
+    return TrackedShapeResult { TopoDS_Shape(), false, error, { }, { } };
+}
 
 // Marks output sub-shapes identical to or derived (Modified/Generated — guarded, some
 // algorithms only implement Generated) from `inShape` with its input index. The map keeps
@@ -286,7 +315,7 @@ static std::vector<int> sweepCapFaces(BRepPrimAPI_MakeSweep& sweep, const TopoDS
 // cuts inside the feature, so its history mixes base and profile derivations (no clean
 // profile-relative channels), it controls the until-face extension itself (the face must
 // fully intercept the profile, no fallback), and its LocOpe internals raise in paths that
-// cannot be pre-checked — fatal with exception catching disabled in the Release build.
+// cannot be pre-checked (caught by guardedEntry now, but as an unexplained failure).
 
 using ShapeIndexMap = NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>;
 
@@ -1584,11 +1613,59 @@ public:
         return ShapeResult { makeSolid.Solid(), true, "" };
     }
 
+    // Empty text = the input can be made thick. BRepOffset raises (or loops) on invalid
+    // topology, so it is rejected up front with a readable message.
+    static std::string thickSolidInputError(const TopoDS_Shape& shape)
+    {
+        if (shape.IsNull()) {
+            return "Failed to create thick solid: the input shape is empty";
+        }
+        BRepCheck_Analyzer analyzer(shape);
+        if (!analyzer.IsValid()) {
+            return "Failed to create thick solid: the input shape is not valid (BRepCheck_Analyzer)";
+        }
+        return "";
+    }
+
+    static const char* offsetErrorName(BRepOffset_Error error)
+    {
+        switch (error) {
+        case BRepOffset_NoError:
+            // only called when IsDone() is false: the algorithm stopped without a status
+            return "no status reported";
+        case BRepOffset_UnknownError:
+            return "BRepOffset_UnknownError";
+        case BRepOffset_BadNormalsOnGeometry:
+            return "BRepOffset_BadNormalsOnGeometry";
+        case BRepOffset_C0Geometry:
+            return "BRepOffset_C0Geometry";
+        case BRepOffset_NullOffset:
+            return "BRepOffset_NullOffset";
+        case BRepOffset_NotConnectedShell:
+            return "BRepOffset_NotConnectedShell";
+        case BRepOffset_CannotTrimEdges:
+            return "BRepOffset_CannotTrimEdges";
+        case BRepOffset_CannotFuseVertices:
+            return "BRepOffset_CannotFuseVertices";
+        case BRepOffset_CannotExtentEdge:
+            return "BRepOffset_CannotExtentEdge";
+        case BRepOffset_UserBreak:
+            return "BRepOffset_UserBreak";
+        case BRepOffset_MixedConnectivity:
+            return "BRepOffset_MixedConnectivity";
+        }
+        return "BRepOffset_UnknownError";
+    }
+
     static ShapeResult makeThickSolidBySimple(const TopoDS_Shape& shape, double thickness)
     {
+        std::string inputError = thickSolidInputError(shape);
+        if (!inputError.empty()) {
+            return ShapeResult { TopoDS_Shape(), false, inputError };
+        }
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
         makeThickSolid.MakeThickSolidBySimple(shape, thickness);
-        if (!makeThickSolid.IsDone()) {
+        if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
@@ -1601,12 +1678,20 @@ public:
         const BRepOffset_Mode& mode,
         bool intersection)
     {
+        std::string inputError = thickSolidInputError(shape);
+        if (!inputError.empty()) {
+            return ShapeResult { TopoDS_Shape(), false, inputError };
+        }
         auto shapesList = shapeArrayToListOfShape(shapes);
 
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
         makeThickSolid.MakeThickSolidByJoin(shape, shapesList, thickness, 1e-6, mode, intersection, false, joinType);
         if (!makeThickSolid.IsDone()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
+            return ShapeResult { TopoDS_Shape(), false,
+                std::string("Failed to create thick solid: ") + offsetErrorName(makeThickSolid.MakeOffset().Error()) };
+        }
+        if (makeThickSolid.Shape().IsNull()) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: empty result" };
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }
@@ -2320,61 +2405,61 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .property("capFaces", &TrackedShapeResult::capFaces);
 
     class_<ShapeFactory>("ShapeFactory")
-        .class_function("box", &ShapeFactory::box)
-        .class_function("cone", &ShapeFactory::cone)
-        .class_function("sphere", &ShapeFactory::sphere)
-        .class_function("ellipsoid", &ShapeFactory::ellipsoid)
-        .class_function("ellipse", &ShapeFactory::ellipse)
-        .class_function("cylinder", &ShapeFactory::cylinder)
-        .class_function("pyramid", &ShapeFactory::pyramid)
-        .class_function("sweep", &ShapeFactory::sweep)
-        .class_function("revolve", &ShapeFactory::revolve)
-        .class_function("prism", &ShapeFactory::prism)
-        .class_function("pushPull", &ShapeFactory::pushPull)
-        .class_function("polygon", &ShapeFactory::polygon)
-        .class_function("circle", &ShapeFactory::circle)
-        .class_function("arc", &ShapeFactory::arc)
-        .class_function("bezier", &ShapeFactory::bezier)
-        .class_function("helix", &ShapeFactory::helix)
-        .class_function("rect", &ShapeFactory::rect)
-        .class_function("point", &ShapeFactory::point)
-        .class_function("line", &ShapeFactory::line)
-        .class_function("wire", &ShapeFactory::wire)
-        .class_function("face", &ShapeFactory::face)
-        .class_function("faceFromSurface", &ShapeFactory::faceFromSurface)
-        .class_function("facesFromEdges", &ShapeFactory::facesFromEdges)
-        .class_function("shell", &ShapeFactory::shell)
-        .class_function("solid", &ShapeFactory::solid)
-        .class_function("makeThickSolidBySimple", &ShapeFactory::makeThickSolidBySimple)
-        .class_function("makeThickSolidByJoin", &ShapeFactory::makeThickSolidByJoin)
-        .class_function("simplifyShape", &ShapeFactory::simplifyShape)
-        .class_function("booleanCommon", &ShapeFactory::booleanCommon)
-        .class_function("booleanCut", &ShapeFactory::booleanCut)
-        .class_function("booleanFuse", &ShapeFactory::booleanFuse)
-        .class_function("combine", &ShapeFactory::combine)
-        .class_function("fillet", &ShapeFactory::fillet)
-        .class_function("chamfer", &ShapeFactory::chamfer)
-        .class_function("revolveTracked", &ShapeFactory::revolveTracked)
-        .class_function("prismTracked", &ShapeFactory::prismTracked)
-        .class_function("prismUntilTracked", &ShapeFactory::prismUntilTracked)
-        .class_function("prismThruAllTracked", &ShapeFactory::prismThruAllTracked)
-        .class_function("booleanCommonTracked", &ShapeFactory::booleanCommonTracked)
-        .class_function("booleanCutTracked", &ShapeFactory::booleanCutTracked)
-        .class_function("booleanFuseTracked", &ShapeFactory::booleanFuseTracked)
-        .class_function("filletTracked", &ShapeFactory::filletTracked)
-        .class_function("chamferTracked", &ShapeFactory::chamferTracked)
-        .class_function("fillet2d", &ShapeFactory::fillet2d)
-        .class_function("chamfer2d", &ShapeFactory::chamfer2d)
-        .class_function("filletEdge2d", &ShapeFactory::filletEdge2d)
-        .class_function("chamferEdge2d", &ShapeFactory::chamferEdge2d)
-        .class_function("fixShape", &ShapeFactory::fixShape)
-        .class_function("fixSmallFace", &ShapeFactory::fixSmallFace)
-        .class_function("fixSolid", &ShapeFactory::fixSolid)
-        .class_function("loft", &ShapeFactory::loft)
-        .class_function("curveProjection", &ShapeFactory::curveProjection)
-        .class_function("removeFeature", &ShapeFactory::removeFeature)
-        .class_function("removeFillet", &ShapeFactory::removeFillet)
-        .class_function("removeSubShape", &ShapeFactory::removeSubShape)
-        .class_function("replaceSubShapes", &ShapeFactory::replaceSubShapes)
-        .class_function("sewing", &ShapeFactory::sewing);
+        .class_function("box", guardedEntry<&ShapeFactory::box>("ShapeFactory.box"))
+        .class_function("cone", guardedEntry<&ShapeFactory::cone>("ShapeFactory.cone"))
+        .class_function("sphere", guardedEntry<&ShapeFactory::sphere>("ShapeFactory.sphere"))
+        .class_function("ellipsoid", guardedEntry<&ShapeFactory::ellipsoid>("ShapeFactory.ellipsoid"))
+        .class_function("ellipse", guardedEntry<&ShapeFactory::ellipse>("ShapeFactory.ellipse"))
+        .class_function("cylinder", guardedEntry<&ShapeFactory::cylinder>("ShapeFactory.cylinder"))
+        .class_function("pyramid", guardedEntry<&ShapeFactory::pyramid>("ShapeFactory.pyramid"))
+        .class_function("sweep", guardedEntry<&ShapeFactory::sweep>("ShapeFactory.sweep"))
+        .class_function("revolve", guardedEntry<&ShapeFactory::revolve>("ShapeFactory.revolve"))
+        .class_function("prism", guardedEntry<&ShapeFactory::prism>("ShapeFactory.prism"))
+        .class_function("pushPull", guardedEntry<&ShapeFactory::pushPull>("ShapeFactory.pushPull"))
+        .class_function("polygon", guardedEntry<&ShapeFactory::polygon>("ShapeFactory.polygon"))
+        .class_function("circle", guardedEntry<&ShapeFactory::circle>("ShapeFactory.circle"))
+        .class_function("arc", guardedEntry<&ShapeFactory::arc>("ShapeFactory.arc"))
+        .class_function("bezier", guardedEntry<&ShapeFactory::bezier>("ShapeFactory.bezier"))
+        .class_function("helix", guardedEntry<&ShapeFactory::helix>("ShapeFactory.helix"))
+        .class_function("rect", guardedEntry<&ShapeFactory::rect>("ShapeFactory.rect"))
+        .class_function("point", guardedEntry<&ShapeFactory::point>("ShapeFactory.point"))
+        .class_function("line", guardedEntry<&ShapeFactory::line>("ShapeFactory.line"))
+        .class_function("wire", guardedEntry<&ShapeFactory::wire>("ShapeFactory.wire"))
+        .class_function("face", guardedEntry<&ShapeFactory::face>("ShapeFactory.face"))
+        .class_function("faceFromSurface", guardedEntry<&ShapeFactory::faceFromSurface>("ShapeFactory.faceFromSurface"))
+        .class_function("facesFromEdges", guardedEntry<&ShapeFactory::facesFromEdges>("ShapeFactory.facesFromEdges"))
+        .class_function("shell", guardedEntry<&ShapeFactory::shell>("ShapeFactory.shell"))
+        .class_function("solid", guardedEntry<&ShapeFactory::solid>("ShapeFactory.solid"))
+        .class_function("makeThickSolidBySimple", guardedEntry<&ShapeFactory::makeThickSolidBySimple>("ShapeFactory.makeThickSolidBySimple"))
+        .class_function("makeThickSolidByJoin", guardedEntry<&ShapeFactory::makeThickSolidByJoin>("ShapeFactory.makeThickSolidByJoin"))
+        .class_function("simplifyShape", guardedEntry<&ShapeFactory::simplifyShape>("ShapeFactory.simplifyShape"))
+        .class_function("booleanCommon", guardedEntry<&ShapeFactory::booleanCommon>("ShapeFactory.booleanCommon"))
+        .class_function("booleanCut", guardedEntry<&ShapeFactory::booleanCut>("ShapeFactory.booleanCut"))
+        .class_function("booleanFuse", guardedEntry<&ShapeFactory::booleanFuse>("ShapeFactory.booleanFuse"))
+        .class_function("combine", guardedEntry<&ShapeFactory::combine>("ShapeFactory.combine"))
+        .class_function("fillet", guardedEntry<&ShapeFactory::fillet>("ShapeFactory.fillet"))
+        .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
+        .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
+        .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
+        .class_function("prismUntilTracked", guardedEntry<&ShapeFactory::prismUntilTracked>("ShapeFactory.prismUntilTracked"))
+        .class_function("prismThruAllTracked", guardedEntry<&ShapeFactory::prismThruAllTracked>("ShapeFactory.prismThruAllTracked"))
+        .class_function("booleanCommonTracked", guardedEntry<&ShapeFactory::booleanCommonTracked>("ShapeFactory.booleanCommonTracked"))
+        .class_function("booleanCutTracked", guardedEntry<&ShapeFactory::booleanCutTracked>("ShapeFactory.booleanCutTracked"))
+        .class_function("booleanFuseTracked", guardedEntry<&ShapeFactory::booleanFuseTracked>("ShapeFactory.booleanFuseTracked"))
+        .class_function("filletTracked", guardedEntry<&ShapeFactory::filletTracked>("ShapeFactory.filletTracked"))
+        .class_function("chamferTracked", guardedEntry<&ShapeFactory::chamferTracked>("ShapeFactory.chamferTracked"))
+        .class_function("fillet2d", guardedEntry<&ShapeFactory::fillet2d>("ShapeFactory.fillet2d"))
+        .class_function("chamfer2d", guardedEntry<&ShapeFactory::chamfer2d>("ShapeFactory.chamfer2d"))
+        .class_function("filletEdge2d", guardedEntry<&ShapeFactory::filletEdge2d>("ShapeFactory.filletEdge2d"))
+        .class_function("chamferEdge2d", guardedEntry<&ShapeFactory::chamferEdge2d>("ShapeFactory.chamferEdge2d"))
+        .class_function("fixShape", guardedEntry<&ShapeFactory::fixShape>("ShapeFactory.fixShape"))
+        .class_function("fixSmallFace", guardedEntry<&ShapeFactory::fixSmallFace>("ShapeFactory.fixSmallFace"))
+        .class_function("fixSolid", guardedEntry<&ShapeFactory::fixSolid>("ShapeFactory.fixSolid"))
+        .class_function("loft", guardedEntry<&ShapeFactory::loft>("ShapeFactory.loft"))
+        .class_function("curveProjection", guardedEntry<&ShapeFactory::curveProjection>("ShapeFactory.curveProjection"))
+        .class_function("removeFeature", guardedEntry<&ShapeFactory::removeFeature>("ShapeFactory.removeFeature"))
+        .class_function("removeFillet", guardedEntry<&ShapeFactory::removeFillet>("ShapeFactory.removeFillet"))
+        .class_function("removeSubShape", guardedEntry<&ShapeFactory::removeSubShape>("ShapeFactory.removeSubShape"))
+        .class_function("replaceSubShapes", guardedEntry<&ShapeFactory::replaceSubShapes>("ShapeFactory.replaceSubShapes"))
+        .class_function("sewing", guardedEntry<&ShapeFactory::sewing>("ShapeFactory.sewing"));
 }
