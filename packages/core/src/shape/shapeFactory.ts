@@ -70,6 +70,10 @@ export interface IShapeFactory {
     shell(faces: IFace[]): Result<IShell>;
     solid(shells: IShell[]): Result<ISolid>;
     bezier(points: XYZLike[], weights?: number[]): Result<IEdge>;
+    /**
+     * @unit length radius pitch
+     * @unit angle angle
+     */
     helix(
         origin: XYZLike,
         normal: XYZLike,
@@ -80,11 +84,16 @@ export interface IShapeFactory {
     ): Result<IWire>;
     point(point: XYZLike): Result<IVertex>;
     line(start: XYZLike, end: XYZLike): Result<IEdge>;
+    /** @unit angle angle */
     arc(normal: XYZLike, center: XYZLike, start: XYZLike, angle: number): Result<IEdge>;
+    /** @unit length radius */
     circle(normal: XYZLike, center: XYZLike, radius: number): Result<IEdge>;
+    /** @unit length dx dy */
     rect(plane: Plane, dx: number, dy: number): Result<IFace>;
     polygon(points: XYZLike[]): Result<IWire>;
+    /** @unit length dx dy dz */
     box(plane: Plane, dx: number, dy: number, dz: number): Result<ISolid>;
+    /** @unit length majorRadius minorRadius */
     ellipse(
         normal: XYZLike,
         center: XYZLike,
@@ -92,22 +101,29 @@ export interface IShapeFactory {
         majorRadius: number,
         minorRadius: number,
     ): Result<IEdge>;
+    /** @unit length radius dz */
     cylinder(normal: XYZLike, center: XYZLike, radius: number, dz: number): Result<ISolid>;
+    /** @unit length radius radiusUp dz */
     cone(normal: XYZLike, center: XYZLike, radius: number, radiusUp: number, dz: number): Result<ISolid>;
+    /** @unit length radius */
     sphere(center: XYZLike, radius: number): Result<ISolid>;
+    /** @unit length dx dy dz */
     pyramid(plane: Plane, dx: number, dy: number, dz: number): Result<ISolid>;
     wire(edges: IEdge[]): Result<IWire>;
     prism(shape: IShape, vec: XYZ): Result<IShape>;
     pushPull(shape: IShape, face: IShape, vec: XYZ): Result<IShape>;
     fuse(bottom: IShape, top: IShape): Result<IShape>;
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
+    /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;
     booleanCut(shape1: IShape[], shape2: IShape[]): Result<IShape>;
     booleanFuse(shape1: IShape[], shape2: IShape[], simplifyShape: boolean): Result<IShape>;
     sewing(shapes: IShape[]): Result<IShape>;
     combine(shapes: IShape[]): Result<ICompound>;
+    /** @unit length thickness */
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape>;
+    /** @unit length thickness */
     makeThickSolidByJoin(
         shape: IShape,
         openFaces: IShape[],
@@ -116,7 +132,9 @@ export interface IShapeFactory {
         mode?: OffsetMode,
         intersection?: boolean,
     ): Result<IShape>;
+    /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
+    /** @unit length distance */
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape>;
     prismTracked?(shape: IShape, vec: XYZ): Result<TrackedShape>;
     /**
@@ -131,6 +149,7 @@ export interface IShapeFactory {
      * when the target moves or resizes. Errors (never a kernel abort): zero or in-plane
      * direction, a target that is not a face or has no surface, a target parallel to the
      * direction, behind the profile, or not bounding it.
+     * @unit length offset
      */
     prismUntilTracked?(
         profile: IShape,
@@ -150,15 +169,22 @@ export interface IShapeFactory {
         bounds: IShape[],
         flush?: boolean,
     ): Result<TrackedShape>;
+    /** @unit angle angle */
     revolveTracked?(profile: IShape, axis: Line, angle: number): Result<TrackedShape>;
     booleanCommonTracked?(shape1: IShape[], shape2: IShape[]): Result<TrackedShape>;
     booleanCutTracked?(shape1: IShape[], shape2: IShape[]): Result<TrackedShape>;
     booleanFuseTracked?(shape1: IShape[], shape2: IShape[]): Result<TrackedShape>;
+    /** @unit length radius */
     filletTracked?(shape: IShape, edges: number[], radius: number): Result<TrackedShape>;
+    /** @unit length distance */
     chamferTracked?(shape: IShape, edges: number[], distance: number): Result<TrackedShape>;
+    /** @unit length radius */
     fillet2d(face: IFace, edge1: IEdge, edge2: IEdge, radius: number): Result<IFace>;
+    /** @unit length distance */
     chamfer2d(face: IFace, edge1: IEdge, edge2: IEdge, distance: number): Result<IFace>;
+    /** @unit length radius */
     filletEdge2d(edge1: IEdge, edge2: IEdge, radius: number): Result<IEdge[]>;
+    /** @unit length distance */
     chamferEdge2d(edge1: IEdge, edge2: IEdge, distance: number): Result<IEdge[]>;
     /**
      * Lofts through `sections` in order. A section is a vertex (only as the first or last),
@@ -178,6 +204,10 @@ export interface IShapeFactory {
     removeSubShape(shape: IShape, subShapes: IShape[]): Result<IShape>;
     replaceSubShapes(shape: IShape, oldSubShapes: IShape[], newSubShapes: IShape[]): Result<IShape>;
     curveProjection(curve: IEdge | IWire, targetFace: IFace, vec: XYZ): Result<IShape>;
+    /**
+     * @unit length linearTolerance
+     * @unit none angleTolerance
+     */
     simplifyShape(
         shape: IShape,
         removeEdges: boolean,

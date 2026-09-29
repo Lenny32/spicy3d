@@ -33,10 +33,15 @@ export type ShapeReturnKind =
     | "shape"
     | "shapeWithData";
 
+/** Unit of a numeric param: length = mm, angle = degrees, none = dimensionless. */
+export type ShapeParamUnit = "length" | "angle" | "none";
+
 export interface ShapeCapabilityParam {
     name: string;
     kind: ShapeParamKind;
     enum?: string[];
+    /** Set on every "number" param (the generator enforces it). */
+    unit?: ShapeParamUnit;
     required?: boolean;
 }
 
@@ -129,9 +134,9 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "origin", kind: "xyz" },
             { name: "normal", kind: "xyz" },
             { name: "xDir", kind: "xyz" },
-            { name: "radius", kind: "number" },
-            { name: "pitch", kind: "number" },
-            { name: "angle", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
+            { name: "pitch", kind: "number", unit: "length" },
+            { name: "angle", kind: "number", unit: "angle" },
         ],
     },
     { method: "point", returnKind: "vertex", params: [{ name: "point", kind: "xyz" }] },
@@ -150,7 +155,7 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "normal", kind: "xyz" },
             { name: "center", kind: "xyz" },
             { name: "start", kind: "xyz" },
-            { name: "angle", kind: "number" },
+            { name: "angle", kind: "number", unit: "angle" },
         ],
     },
     {
@@ -159,7 +164,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "normal", kind: "xyz" },
             { name: "center", kind: "xyz" },
-            { name: "radius", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
         ],
     },
     {
@@ -167,8 +172,8 @@ export const shapeCapabilities: ShapeCapability[] = [
         returnKind: "face",
         params: [
             { name: "plane", kind: "plane" },
-            { name: "dx", kind: "number" },
-            { name: "dy", kind: "number" },
+            { name: "dx", kind: "number", unit: "length" },
+            { name: "dy", kind: "number", unit: "length" },
         ],
     },
     { method: "polygon", returnKind: "wire", params: [{ name: "points", kind: "xyzArray" }] },
@@ -177,9 +182,9 @@ export const shapeCapabilities: ShapeCapability[] = [
         returnKind: "solid",
         params: [
             { name: "plane", kind: "plane" },
-            { name: "dx", kind: "number" },
-            { name: "dy", kind: "number" },
-            { name: "dz", kind: "number" },
+            { name: "dx", kind: "number", unit: "length" },
+            { name: "dy", kind: "number", unit: "length" },
+            { name: "dz", kind: "number", unit: "length" },
         ],
     },
     {
@@ -189,8 +194,8 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "normal", kind: "xyz" },
             { name: "center", kind: "xyz" },
             { name: "xvec", kind: "xyz" },
-            { name: "majorRadius", kind: "number" },
-            { name: "minorRadius", kind: "number" },
+            { name: "majorRadius", kind: "number", unit: "length" },
+            { name: "minorRadius", kind: "number", unit: "length" },
         ],
     },
     {
@@ -199,8 +204,8 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "normal", kind: "xyz" },
             { name: "center", kind: "xyz" },
-            { name: "radius", kind: "number" },
-            { name: "dz", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
+            { name: "dz", kind: "number", unit: "length" },
         ],
     },
     {
@@ -209,9 +214,9 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "normal", kind: "xyz" },
             { name: "center", kind: "xyz" },
-            { name: "radius", kind: "number" },
-            { name: "radiusUp", kind: "number" },
-            { name: "dz", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
+            { name: "radiusUp", kind: "number", unit: "length" },
+            { name: "dz", kind: "number", unit: "length" },
         ],
     },
     {
@@ -219,7 +224,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         returnKind: "solid",
         params: [
             { name: "center", kind: "xyz" },
-            { name: "radius", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
         ],
     },
     {
@@ -227,9 +232,9 @@ export const shapeCapabilities: ShapeCapability[] = [
         returnKind: "solid",
         params: [
             { name: "plane", kind: "plane" },
-            { name: "dx", kind: "number" },
-            { name: "dy", kind: "number" },
-            { name: "dz", kind: "number" },
+            { name: "dx", kind: "number", unit: "length" },
+            { name: "dy", kind: "number", unit: "length" },
+            { name: "dz", kind: "number", unit: "length" },
         ],
     },
     { method: "wire", returnKind: "wire", params: [{ name: "edges", kind: "refArray" }] },
@@ -265,7 +270,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "profile", kind: "ref" },
             { name: "axis", kind: "line" },
-            { name: "angle", kind: "number" },
+            { name: "angle", kind: "number", unit: "angle" },
         ],
     },
     {
@@ -300,7 +305,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         returnKind: "shape",
         params: [
             { name: "shape", kind: "ref" },
-            { name: "thickness", kind: "number" },
+            { name: "thickness", kind: "number", unit: "length" },
         ],
     },
     {
@@ -309,7 +314,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "shape", kind: "ref" },
             { name: "openFaces", kind: "refArray" },
-            { name: "thickness", kind: "number" },
+            { name: "thickness", kind: "number", unit: "length" },
             { name: "joinType", kind: "enum", enum: ["arc", "tangent", "intersection"] },
             { name: "mode", kind: "enum", enum: ["skin", "pipe", "rectoVerso"], required: false },
             { name: "intersection", kind: "boolean", required: false },
@@ -321,7 +326,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "shape", kind: "ref" },
             { name: "edges", kind: "numberArray" },
-            { name: "radius", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
         ],
     },
     {
@@ -330,7 +335,7 @@ export const shapeCapabilities: ShapeCapability[] = [
         params: [
             { name: "shape", kind: "ref" },
             { name: "edges", kind: "numberArray" },
-            { name: "distance", kind: "number" },
+            { name: "distance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -340,7 +345,7 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "face", kind: "ref" },
             { name: "edge1", kind: "ref" },
             { name: "edge2", kind: "ref" },
-            { name: "radius", kind: "number" },
+            { name: "radius", kind: "number", unit: "length" },
         ],
     },
     {
@@ -350,7 +355,7 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "face", kind: "ref" },
             { name: "edge1", kind: "ref" },
             { name: "edge2", kind: "ref" },
-            { name: "distance", kind: "number" },
+            { name: "distance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -413,8 +418,8 @@ export const shapeCapabilities: ShapeCapability[] = [
             { name: "removeEdges", kind: "boolean" },
             { name: "removeFaces", kind: "boolean" },
             { name: "keepShapes", kind: "refArray" },
-            { name: "linearTolerance", kind: "number", required: false },
-            { name: "angleTolerance", kind: "number", required: false },
+            { name: "linearTolerance", kind: "number", unit: "length", required: false },
+            { name: "angleTolerance", kind: "number", unit: "none", required: false },
         ],
     },
 ];
@@ -528,7 +533,7 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "shapeRef",
         params: [
             { name: "shapes", kind: "refArray" },
-            { name: "tolerance", kind: "number", required: false },
+            { name: "tolerance", kind: "number", unit: "length", required: false },
         ],
     },
     {
@@ -645,7 +650,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "shapeRef",
-        params: [{ name: "tolerance", kind: "number" }],
+        params: [{ name: "tolerance", kind: "number", unit: "length" }],
     },
     {
         method: "shape.fixSmallFace",
@@ -653,7 +658,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "shapeRef",
-        params: [{ name: "tolerance", kind: "number" }],
+        params: [{ name: "tolerance", kind: "number", unit: "length" }],
     },
     {
         method: "shape.fixSolid",
@@ -661,7 +666,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "shapeRef",
-        params: [{ name: "tolerance", kind: "number" }],
+        params: [{ name: "tolerance", kind: "number", unit: "length" }],
     },
     {
         method: "shape.shellSewing",
@@ -669,7 +674,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "shapeRef",
-        params: [{ name: "tolerance", kind: "number" }],
+        params: [{ name: "tolerance", kind: "number", unit: "length" }],
     },
     {
         method: "shape.setTolerance",
@@ -677,7 +682,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "mutate",
-        params: [{ name: "tolerance", kind: "number" }],
+        params: [{ name: "tolerance", kind: "number", unit: "length" }],
     },
     {
         method: "shape.volume",
@@ -742,7 +747,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "edge",
         family: "shape",
         returnKind: "data",
-        params: [{ name: "parameter", kind: "number" }],
+        params: [{ name: "parameter", kind: "number", unit: "none" }],
     },
     {
         method: "edge.startPoint",
@@ -768,7 +773,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "shape",
         returnKind: "shapeRef",
         params: [
-            { name: "distance", kind: "number" },
+            { name: "distance", kind: "number", unit: "length" },
             { name: "dir", kind: "xyz" },
         ],
     },
@@ -779,8 +784,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "shape",
         returnKind: "shapeRef",
         params: [
-            { name: "start", kind: "number" },
-            { name: "end", kind: "number" },
+            { name: "start", kind: "number", unit: "none" },
+            { name: "end", kind: "number", unit: "none" },
         ],
     },
     {
@@ -828,7 +833,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "shape",
         returnKind: "shapeRef",
         params: [
-            { name: "distance", kind: "number" },
+            { name: "distance", kind: "number", unit: "length" },
             { name: "joinType", kind: "enum", enum: ["arc", "tangent", "intersection"] },
         ],
     },
@@ -840,7 +845,7 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "shapeRef",
         params: [
             { name: "direction", kind: "enum", enum: ["u", "v"] },
-            { name: "parameter", kind: "number" },
+            { name: "parameter", kind: "number", unit: "none" },
         ],
     },
     {
@@ -860,9 +865,9 @@ export const queryCapabilities: QueryCapability[] = [
         params: [
             { name: "point", kind: "xyz" },
             { name: "direction", kind: "xyz" },
-            { name: "minDistance", kind: "number" },
-            { name: "maxDistance", kind: "number" },
-            { name: "tolerance", kind: "number", required: false },
+            { name: "minDistance", kind: "number", unit: "length" },
+            { name: "maxDistance", kind: "number", unit: "length" },
+            { name: "tolerance", kind: "number", unit: "length", required: false },
         ],
     },
     { method: "face.area", name: "area", owner: "face", family: "shape", returnKind: "data", params: [] },
@@ -873,8 +878,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "shape",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -902,7 +907,7 @@ export const queryCapabilities: QueryCapability[] = [
         params: [
             { name: "point", kind: "xyz" },
             { name: "direction", kind: "xyz" },
-            { name: "tolerance", kind: "number", required: false },
+            { name: "tolerance", kind: "number", unit: "length", required: false },
         ],
     },
     {
@@ -922,7 +927,7 @@ export const queryCapabilities: QueryCapability[] = [
         params: [
             { name: "point", kind: "xyz" },
             { name: "containsEdge", kind: "boolean" },
-            { name: "tolerance", kind: "number" },
+            { name: "tolerance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -934,7 +939,7 @@ export const queryCapabilities: QueryCapability[] = [
         params: [
             { name: "point", kind: "xyz" },
             { name: "containsSurface", kind: "boolean" },
-            { name: "tolerance", kind: "number" },
+            { name: "tolerance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -951,7 +956,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "length", kind: "number" }],
+        params: [{ name: "length", kind: "number", unit: "length" }],
     },
     {
         method: "curve.uniformAbscissaByCount",
@@ -959,7 +964,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "curveCount", kind: "number" }],
+        params: [{ name: "curveCount", kind: "number", unit: "none" }],
     },
     {
         method: "curve.length",
@@ -977,7 +982,7 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "data",
         params: [
             { name: "point", kind: "xyz" },
-            { name: "tolerance", kind: "number" },
+            { name: "tolerance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -1010,7 +1015,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "parameter", kind: "number" }],
+        params: [{ name: "parameter", kind: "number", unit: "none" }],
     },
     {
         method: "curve.isCN",
@@ -1018,7 +1023,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "n", kind: "number" }],
+        params: [{ name: "n", kind: "number", unit: "none" }],
     },
     {
         method: "curve.trim",
@@ -1027,8 +1032,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "curveRef",
         params: [
-            { name: "u1", kind: "number" },
-            { name: "u2", kind: "number" },
+            { name: "u1", kind: "number", unit: "none" },
+            { name: "u2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1037,7 +1042,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "u", kind: "number" }],
+        params: [{ name: "u", kind: "number", unit: "none" }],
     },
     {
         method: "curve.d1",
@@ -1045,7 +1050,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "u", kind: "number" }],
+        params: [{ name: "u", kind: "number", unit: "none" }],
     },
     {
         method: "curve.d2",
@@ -1053,7 +1058,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "u", kind: "number" }],
+        params: [{ name: "u", kind: "number", unit: "none" }],
     },
     {
         method: "curve.d3",
@@ -1061,7 +1066,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "curve",
         family: "curve",
         returnKind: "data",
-        params: [{ name: "u", kind: "number" }],
+        params: [{ name: "u", kind: "number", unit: "none" }],
     },
     {
         method: "curve.dn",
@@ -1070,8 +1075,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "n", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "n", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1334,7 +1339,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         runtimeType: "bezierCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bezierCurve.insertPoleAfter",
@@ -1344,9 +1349,9 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bezierCurve",
         params: [
-            { name: "index", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
             { name: "point", kind: "xyz" },
-            { name: "weight", kind: "number", required: false },
+            { name: "weight", kind: "number", unit: "none", required: false },
         ],
     },
     {
@@ -1357,9 +1362,9 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bezierCurve",
         params: [
-            { name: "index", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
             { name: "point", kind: "xyz" },
-            { name: "weight", kind: "number", required: false },
+            { name: "weight", kind: "number", unit: "none", required: false },
         ],
     },
     {
@@ -1369,7 +1374,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "mutate",
         runtimeType: "bezierCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bezierCurve.setPole",
@@ -1379,9 +1384,9 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bezierCurve",
         params: [
-            { name: "index", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
             { name: "point", kind: "xyz" },
-            { name: "weight", kind: "number", required: false },
+            { name: "weight", kind: "number", unit: "none", required: false },
         ],
     },
     {
@@ -1392,8 +1397,8 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bezierCurve",
         params: [
-            { name: "index", kind: "number" },
-            { name: "weight", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
+            { name: "weight", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1412,7 +1417,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         runtimeType: "bezierCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bezierCurve.poles",
@@ -1448,7 +1453,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         runtimeType: "bsplineCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bsplineCurve.setKnot",
@@ -1458,8 +1463,8 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bsplineCurve",
         params: [
-            { name: "index", kind: "number" },
-            { name: "value", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
+            { name: "value", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1478,7 +1483,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         runtimeType: "bsplineCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bsplineCurve.poles",
@@ -1496,7 +1501,7 @@ export const queryCapabilities: QueryCapability[] = [
         family: "curve",
         returnKind: "data",
         runtimeType: "bsplineCurve",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "bsplineCurve.setWeight",
@@ -1506,8 +1511,8 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "bsplineCurve",
         params: [
-            { name: "index", kind: "number" },
-            { name: "value", kind: "number" },
+            { name: "index", kind: "number", unit: "none" },
+            { name: "value", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1527,8 +1532,8 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "mutate",
         runtimeType: "trimmedCurve",
         params: [
-            { name: "u1", kind: "number" },
-            { name: "u2", kind: "number" },
+            { name: "u1", kind: "number", unit: "none" },
+            { name: "u2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1572,7 +1577,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "complexCurve",
         family: "curve",
         returnKind: "curveRef",
-        params: [{ name: "index", kind: "number" }],
+        params: [{ name: "index", kind: "number", unit: "none" }],
     },
     {
         method: "surface.nearestPoint",
@@ -1606,7 +1611,7 @@ export const queryCapabilities: QueryCapability[] = [
         returnKind: "data",
         params: [
             { name: "point", kind: "xyz" },
-            { name: "maxDistance", kind: "number" },
+            { name: "maxDistance", kind: "number", unit: "length" },
         ],
     },
     {
@@ -1623,7 +1628,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "surface",
         family: "surface",
         returnKind: "curveRef",
-        params: [{ name: "u", kind: "number" }],
+        params: [{ name: "u", kind: "number", unit: "none" }],
     },
     {
         method: "surface.vIso",
@@ -1631,7 +1636,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "surface",
         family: "surface",
         returnKind: "curveRef",
-        params: [{ name: "v", kind: "number" }],
+        params: [{ name: "v", kind: "number", unit: "none" }],
     },
     {
         method: "surface.isPlanar",
@@ -1703,7 +1708,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "surface",
         family: "surface",
         returnKind: "data",
-        params: [{ name: "n", kind: "number" }],
+        params: [{ name: "n", kind: "number", unit: "none" }],
     },
     {
         method: "surface.isCNv",
@@ -1711,7 +1716,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "surface",
         family: "surface",
         returnKind: "data",
-        params: [{ name: "n", kind: "number" }],
+        params: [{ name: "n", kind: "number", unit: "none" }],
     },
     {
         method: "surface.d0",
@@ -1720,8 +1725,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1731,8 +1736,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1742,8 +1747,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1753,8 +1758,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1764,10 +1769,10 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
-            { name: "nu", kind: "number" },
-            { name: "nv", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
+            { name: "nu", kind: "number", unit: "none" },
+            { name: "nv", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1777,8 +1782,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "data",
         params: [
-            { name: "u", kind: "number" },
-            { name: "v", kind: "number" },
+            { name: "u", kind: "number", unit: "none" },
+            { name: "v", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1788,10 +1793,10 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "mutate",
         params: [
-            { name: "u1", kind: "number" },
-            { name: "u2", kind: "number" },
-            { name: "v1", kind: "number" },
-            { name: "v2", kind: "number" },
+            { name: "u1", kind: "number", unit: "none" },
+            { name: "u2", kind: "number", unit: "none" },
+            { name: "v1", kind: "number", unit: "none" },
+            { name: "v2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1865,8 +1870,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "mutate",
         params: [
-            { name: "u1", kind: "number" },
-            { name: "u2", kind: "number" },
+            { name: "u1", kind: "number", unit: "none" },
+            { name: "u2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1876,8 +1881,8 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "mutate",
         params: [
-            { name: "v1", kind: "number" },
-            { name: "v2", kind: "number" },
+            { name: "v1", kind: "number", unit: "none" },
+            { name: "v2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1887,10 +1892,10 @@ export const queryCapabilities: QueryCapability[] = [
         family: "surface",
         returnKind: "mutate",
         params: [
-            { name: "u1", kind: "number" },
-            { name: "u2", kind: "number" },
-            { name: "v1", kind: "number" },
-            { name: "v2", kind: "number" },
+            { name: "u1", kind: "number", unit: "none" },
+            { name: "u2", kind: "number", unit: "none" },
+            { name: "v1", kind: "number", unit: "none" },
+            { name: "v2", kind: "number", unit: "none" },
         ],
     },
     {
@@ -1907,7 +1912,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "conicalSurface",
         family: "surface",
         returnKind: "mutate",
-        params: [{ name: "value", kind: "number" }],
+        params: [{ name: "value", kind: "number", unit: "length" }],
     },
     {
         method: "conicalSurface.apex",
@@ -2022,43 +2027,44 @@ export const capabilitiesSource = `Available modeling capabilities (from IShapeF
   shell(faces: refArray) -> shell
   solid(shells: refArray) -> solid
   bezier(points: xyzArray, weights: numberArray?) -> edge
-  helix(origin: xyz, normal: xyz, xDir: xyz, radius: number, pitch: number, angle: number) -> wire
+  helix(origin: xyz, normal: xyz, xDir: xyz, radius: length, pitch: length, angle: angle) -> wire
   point(point: xyz) -> vertex
   line(start: xyz, end: xyz) -> edge
-  arc(normal: xyz, center: xyz, start: xyz, angle: number) -> edge
-  circle(normal: xyz, center: xyz, radius: number) -> edge
-  rect(plane: plane, dx: number, dy: number) -> face
+  arc(normal: xyz, center: xyz, start: xyz, angle: angle) -> edge
+  circle(normal: xyz, center: xyz, radius: length) -> edge
+  rect(plane: plane, dx: length, dy: length) -> face
   polygon(points: xyzArray) -> wire
-  box(plane: plane, dx: number, dy: number, dz: number) -> solid
-  ellipse(normal: xyz, center: xyz, xvec: xyz, majorRadius: number, minorRadius: number) -> edge
-  cylinder(normal: xyz, center: xyz, radius: number, dz: number) -> solid
-  cone(normal: xyz, center: xyz, radius: number, radiusUp: number, dz: number) -> solid
-  sphere(center: xyz, radius: number) -> solid
-  pyramid(plane: plane, dx: number, dy: number, dz: number) -> solid
+  box(plane: plane, dx: length, dy: length, dz: length) -> solid
+  ellipse(normal: xyz, center: xyz, xvec: xyz, majorRadius: length, minorRadius: length) -> edge
+  cylinder(normal: xyz, center: xyz, radius: length, dz: length) -> solid
+  cone(normal: xyz, center: xyz, radius: length, radiusUp: length, dz: length) -> solid
+  sphere(center: xyz, radius: length) -> solid
+  pyramid(plane: plane, dx: length, dy: length, dz: length) -> solid
   wire(edges: refArray) -> wire
   prism(shape: ref, vec: xyz) -> shape
   pushPull(shape: ref, face: ref, vec: xyz) -> shape
   sweep(profile: refArray, path: ref, isRoundCorner: boolean) -> shape
-  revolve(profile: ref, axis: line, angle: number) -> shape
+  revolve(profile: ref, axis: line, angle: angle) -> shape
   booleanCommon(shape1: refArray, shape2: refArray) -> shape
   booleanCut(shape1: refArray, shape2: refArray) -> shape
   booleanFuse(shape1: refArray, shape2: refArray, simplifyShape: boolean) -> shape
   sewing(shapes: refArray) -> shape
   combine(shapes: refArray) -> compound
-  makeThickSolidBySimple(shape: ref, thickness: number) -> shape
-  makeThickSolidByJoin(shape: ref, openFaces: refArray, thickness: number, joinType: arc|tangent|intersection, mode: skin|pipe|rectoVerso?, intersection: boolean?) -> shape
-  fillet(shape: ref, edges: numberArray, radius: number) -> shape
-  chamfer(shape: ref, edges: numberArray, distance: number) -> shape
-  fillet2d(face: ref, edge1: ref, edge2: ref, radius: number) -> face
-  chamfer2d(face: ref, edge1: ref, edge2: ref, distance: number) -> face
+  makeThickSolidBySimple(shape: ref, thickness: length) -> shape
+  makeThickSolidByJoin(shape: ref, openFaces: refArray, thickness: length, joinType: arc|tangent|intersection, mode: skin|pipe|rectoVerso?, intersection: boolean?) -> shape
+  fillet(shape: ref, edges: numberArray, radius: length) -> shape
+  chamfer(shape: ref, edges: numberArray, distance: length) -> shape
+  fillet2d(face: ref, edge1: ref, edge2: ref, radius: length) -> face
+  chamfer2d(face: ref, edge1: ref, edge2: ref, distance: length) -> face
   loft(sections: refArray, isSolid: boolean, isRuled: boolean, continuity: c0|g1|c1|g2|c2|c3|cn) -> shape
   removeFeature(shape: ref, faces: refArray) -> shape
   removeFillet(shape: ref, faces: refArray) -> shapeWithData
   removeSubShape(shape: ref, subShapes: refArray) -> shape
   replaceSubShapes(shape: ref, oldSubShapes: refArray, newSubShapes: refArray) -> shape
   curveProjection(curve: ref, targetFace: ref, vec: xyz) -> shape
-  simplifyShape(shape: ref, removeEdges: boolean, removeFaces: boolean, keepShapes: refArray, linearTolerance: number?, angleTolerance: number?) -> shape
-JSON encoding: XYZ={x,y,z}; Plane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} — an XY-oriented plane through origin when normal is omitted; Line={point:{x,y,z},direction:{x,y,z}} — a point plus a direction, NOT {start,end} ("line(start,end)" above is a creation method that builds an edge; to revolve around an existing edge, query edge.ends and derive point/direction from them); a shape/ref parameter takes an op id from any run_program call on this document or an existing node id; number[] is a plain number array — for fillet/chamfer "edges" it takes edge indices in the order returned by shape.findSubShapes(target, edge), so run that query first and pick indices from the edges' geometry (e.g. via edge.ends); enum params list their allowed values inline (a|b|c). Geometric params (plane/center/normal) may be omitted and default to the origin/Z axis. Params marked with ? are optional and may be omitted; the factory default applies. A method returning "shapeWithData" (removeFillet) creates its node from the result's shape; array extras (newEdges) come back in "results" under "<opId>.<key>" as { count, refs, kind: "shape" } with refs named <opId>#<key>#0..n.
+  simplifyShape(shape: ref, removeEdges: boolean, removeFaces: boolean, keepShapes: refArray, linearTolerance: length?, angleTolerance: number?) -> shape
+JSON encoding: XYZ={x,y,z}; Plane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} — an XY-oriented plane through origin when normal is omitted; Line={point:{x,y,z},direction:{x,y,z}} — a point plus a direction, NOT {start,end} ("line(start,end)" above is a creation method that builds an edge; to revolve around an existing edge, query edge.ends and derive point/direction from them); a shape/ref parameter takes an op id from any run_program call on this document or an existing node id; number[] is a plain number array — for fillet/chamfer "edges" it takes edge indices in the order returned by shape.findSubShapes(target, edge), so run that query first and pick indices from the edges' geometry (e.g. via edge.ends); enum params list their allowed values inline (a|b|c). Geometric params (plane/center/normal) may be omitted and default to the origin/Z axis. Params marked with ? are optional and may be omitted; the factory default applies. Numeric params: "length" = mm, "angle" = degrees, "number" = dimensionless (curve/surface parameter, count, index, weight; simplifyShape's angleTolerance is radians). A method returning "shapeWithData" (removeFillet) creates its node from the result's shape; array extras (newEdges) come back in "results" under "<opId>.<key>" as { count, refs, kind: "shape" } with refs named <opId>#<key>#0..n.
+Expressions: every numeric param (length, angle, number) takes a number OR an expression string over the document variables (document_variables), e.g. "wall_t", "wall_t / 2 + 1", "2 cm" — a length or angle expression must come out as that unit or unitless (a bare number counts as mm / degrees; "draft_angle" as a thickness is an error), a dimensionless param takes the value as is. The expression is evaluated ONCE, when the op runs: run_program builds direct, non-parametric nodes, so changing the variable later does NOT update them — use run_parametric (load_skill parametric-modeling) when the dimension must follow the variable. Each op that used an expression reports the numbers it resolved to in the response's "resolved" under its id (ops[<index>] without one), e.g. resolved.shell = { thickness: 3.75 }.
 Placement: box/rect/pyramid — plane.origin is a CORNER, the shape extends +dx/+dy/+dz from it. cylinder/cone — center is the BASE-FACE center, the shape extends +dz along normal. sphere — center is the true center. To center a box at P use origin = P - (dx/2,dy/2,dz/2); to center a cylinder/cone at P use center = P - normal*(dz/2).
 polygon: pass the corner points in PERIMETER ORDER, at least 3, ALL ON ONE PLANE, and REPEAT THE FIRST POINT as the last point to close the wire explicitly. polygon returns a WIRE, not a face — prism/revolve take it as it is: a CLOSED wire (or a closed edge such as a circle) is closed into a face for you and sweeps a solid, while an UNCLOSED one is swept into an open SHELL, a silent wrong result that breaks downstream booleans and fillets. A self-crossing point order (bowtie) yields a degenerate near-zero-area face, not an error — order points around the perimeter.
 loft: sections are lofted in array order; each may be a wire, an edge, a face (its outer wire), a vertex (first/last only) or a node whose shape is a compound of edges — a sketch node id works directly, its edges are chained into the section wire. OPEN chains are valid (an open skin), but a section whose edges form SEVERAL separate chains is an error: pick one with shape.findSubShapes + wire. For a re-editable loft of CLOSED single-profile sketches, use run_parametric's loft op instead.`;
@@ -2069,6 +2075,7 @@ export const queryApiDoc = `Shape query API (units: mm, angles: degrees — the 
 - Refs persist across run_program calls on the same document and re-resolve against the live shape; a ref whose source node was deleted fails with a clear error — re-run the query that produced it. At most 256 refs are kept per document: in a long session the oldest are evicted and later fail as "Unknown ref".
 - Every query op needs an "id"; its return value comes back in the response "results" under that id. Result encodings: data queries return the plain value; curve/surface-producing queries (edge.curve, face.surface, trimmedCurve.basisCurve, ...) return { ref, kind } where kind is "curve" or "surface" — pass ref as the target of follow-up queries, and only to members matching its kind; single-shape queries (wire.toFace, wire.offset, face.outerWire, edge.trim, ...) return { ref, kind: "shape" } — the ref works both as a query target and as a shape argument in creation ops; list queries (shape.findSubShapes, wire.edgeLoop) return { count, refs, kind: "shape" }; mutation queries (curve.reverse, trimmedCurve.setTrim, ...) return null and modify the target ref's geometry in place — the mutation is remembered and re-applied whenever the ref is re-resolved.
 - Query ops never consume or delete the referenced node, and never create scene nodes — except shape.clone, which adds the copy as a new node (reported in "created") so it is an independent input for later edit ops.
+- Numeric args (length = mm, angle = degrees, number = dimensionless) take a number or an expression string over the document variables, evaluated once when the op runs (see modeling-api, "Expressions").
 - kind encodings: xyz={x,y,z}; plane/refOrPlane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} (XY-oriented through origin when normal is omitted) or, for refOrPlane, a shape ref string; line/refOrLine={point:{x,y,z},direction:{x,y,z}} or a ref string; matrix={array:[16 numbers, column-major]}; shapeType one of solid|shell|face|wire|edge|vertex|compound|compoundSolid (the plural is accepted too, and shape.findSubShapes' subshapeType may be left out — it then means edge); ref/curveRef/surfaceRef take a ref string.
 - Type hierarchy: circle/ellipse/hyperbola/parabola are conic; conic/line/bezierCurve/bsplineCurve/trimmedCurve/offsetCurve are curve — curve.* and conic.* members apply to those targets too. Surfaces likewise: cylindricalSurface/planeSurface/sphericalSurface/... are elementarySurface, and every *Surface is a surface. Use curve.curveType to check what a curve ref actually is.
 - edge.curve ALWAYS yields a trimmedCurve (it carries the edge's parameter range), even for a straight or circular edge.
@@ -2089,7 +2096,7 @@ shape.* (target must be a shape):
   shape.findSubShapes(target, subshapeType: shapeType) -> { count, refs } — also registers sub-shape refs <id>#0..n
   shape.directSubShapes(target) -> { count, refs } — also registers sub-shape refs <id>#0..n
   shape.section(target, shape: refOrPlane) -> shape ref (registered under the op id)
-  shape.split(target, shapes: refArray, tolerance: number?) -> shape ref (registered under the op id)
+  shape.split(target, shapes: refArray, tolerance: length?) -> shape ref (registered under the op id)
   shape.reserve(target) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
   shape.clone(target) -> independent copy as a NEW scene node "<source name>_copy" next to the source (listed in "created"; shape ref registered under the op id and backed by the new node — edit ops on it consume the copy, never the source)
   shape.hlr(target, position: xyz, direction: xyz, xDir: xyz) -> shape ref (registered under the op id)
@@ -2103,11 +2110,11 @@ shape.* (target must be a shape):
   shape.checkShape(target) -> boolean
   shape.checkFaces(target) -> { index: number; isValid: boolean; status: string[]; }[]
   shape.checkSelfIntersection(target) -> Result<boolean, string>
-  shape.fixShape(target, tolerance: number) -> shape ref (registered under the op id)
-  shape.fixSmallFace(target, tolerance: number) -> shape ref (registered under the op id)
-  shape.fixSolid(target, tolerance: number) -> shape ref (registered under the op id)
-  shape.shellSewing(target, tolerance: number) -> shape ref (registered under the op id)
-  shape.setTolerance(target, tolerance: number) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
+  shape.fixShape(target, tolerance: length) -> shape ref (registered under the op id)
+  shape.fixSmallFace(target, tolerance: length) -> shape ref (registered under the op id)
+  shape.fixSolid(target, tolerance: length) -> shape ref (registered under the op id)
+  shape.shellSewing(target, tolerance: length) -> shape ref (registered under the op id)
+  shape.setTolerance(target, tolerance: length) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
   shape.volume(target) -> number
 
 vertex.* (target must be a vertex):
@@ -2124,7 +2131,7 @@ edge.* (target must be an edge):
   edge.startPoint(target) -> XYZ
   edge.endPoint(target) -> XYZ
   edge.ends(target) -> [start: XYZ, end: XYZ]
-  edge.offset(target, distance: number, dir: xyz) -> shape ref (registered under the op id)
+  edge.offset(target, distance: length, dir: xyz) -> shape ref (registered under the op id)
   edge.trim(target, start: number, end: number) -> shape ref (registered under the op id)
   edge.hasContinuity(target, face1: ref, face2: ref) -> boolean
   edge.continuity(target, face1: ref, face2: ref) -> "c0" | "g1" | "c1" | "g2" | "c2" | "c3" | "cn"
@@ -2132,29 +2139,29 @@ edge.* (target must be an edge):
 wire.* (target must be a wire):
   wire.toFace(target) -> shape ref (registered under the op id)
   wire.edgeLoop(target) -> { count, refs } — also registers sub-shape refs <id>#0..n
-  wire.offset(target, distance: number, joinType: arc|tangent|intersection) -> shape ref (registered under the op id)
+  wire.offset(target, distance: length, joinType: arc|tangent|intersection) -> shape ref (registered under the op id)
 
 face.* (target must be a face):
   face.inspectionTrimmedIso(target, direction: u|v, parameter: number) -> shape ref (registered under the op id)
   face.inspectionUVBounds(target) -> Result<{ u1: number; u2: number; v1: number; v2: number; }, string>
-  face.inspectionRayHit(target, point: xyz, direction: xyz, minDistance: number, maxDistance: number, tolerance: number?) -> Result<XYZ | undefined, string>
+  face.inspectionRayHit(target, point: xyz, direction: xyz, minDistance: length, maxDistance: length, tolerance: length?) -> Result<XYZ | undefined, string>
   face.area(target) -> number
   face.normal(target, u: number, v: number) -> [point: XYZ, normal: XYZ]
   face.outerWire(target) -> shape ref (registered under the op id)
   face.surface(target) -> surface ref (registered under the op id)
-  face.intersectLine(target, point: xyz, direction: xyz, tolerance: number?) -> XYZ | undefined
+  face.intersectLine(target, point: xyz, direction: xyz, tolerance: length?) -> XYZ | undefined
   face.segmentsOfEdgeOnFace(target, edge: ref) -> { start: number; end: number; } | undefined
-  face.containsPoint(target, point: xyz, containsEdge: boolean, tolerance: number) -> boolean
+  face.containsPoint(target, point: xyz, containsEdge: boolean, tolerance: length) -> boolean
 
 solid.* (target must be a solid):
-  solid.containsPoint(target, point: xyz, containsSurface: boolean, tolerance: number) -> boolean
+  solid.containsPoint(target, point: xyz, containsSurface: boolean, tolerance: length) -> boolean
 
 curve.* (target must be a curve (or a subtype of it)):
   curve.curveType(target) -> "line" | "circle" | "ellipse" | "hyperbola" | "parabola" | "bezierCurve" | "bsplineCurve" | "offsetCurve" | "otherCurve" | "trimmedCurve"
-  curve.uniformAbscissaByLength(target, length: number) -> XYZ[]
+  curve.uniformAbscissaByLength(target, length: length) -> XYZ[]
   curve.uniformAbscissaByCount(target, curveCount: number) -> XYZ[]
   curve.length(target) -> number
-  curve.parameter(target, point: xyz, tolerance: number) -> number | undefined
+  curve.parameter(target, point: xyz, tolerance: length) -> number | undefined
   curve.firstParameter(target) -> number
   curve.lastParameter(target) -> number
   curve.project(target, point: xyz) -> XYZ[]
@@ -2252,7 +2259,7 @@ surface.* (target must be a surface (or a subtype of it)):
   surface.nearestPoint(target, point: xyz) -> [XYZ, number] | undefined
   surface.project(target, point: xyz) -> XYZ[]
   surface.projectCurve(target, curve: curveRef) -> curve ref (registered under the op id)
-  surface.parameter(target, point: xyz, maxDistance: number) -> { u: number; v: number; } | undefined
+  surface.parameter(target, point: xyz, maxDistance: length) -> { u: number; v: number; } | undefined
   surface.continuity(target) -> "c0" | "g1" | "c1" | "g2" | "c2" | "c3" | "cn"
   surface.uIso(target, u: number) -> curve ref (registered under the op id)
   surface.vIso(target, v: number) -> curve ref (registered under the op id)
@@ -2297,7 +2304,7 @@ rectangularTrimmedSurface.* (target must be a rectangularTrimmedSurface (or a su
 
 conicalSurface.* (target must be a conicalSurface (or a subtype of it)):
   conicalSurface.semiAngle(target) -> number
-  conicalSurface.setRadius(target, value: number) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
+  conicalSurface.setRadius(target, value: length) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
   conicalSurface.apex(target) -> XYZ
   conicalSurface.refRadius(target) -> number
 

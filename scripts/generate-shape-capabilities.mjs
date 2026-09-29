@@ -11,6 +11,14 @@
 // `packages/ai/test/capabilitiesFreshness.test.ts` re-runs this script and fails when the
 // checked-in file is stale, so an edit to core's shape API cannot silently leave the model
 // with an outdated catalog.
+//
+// Units of numeric params: every `number` parameter of a catalogued method must be tagged in
+// the member's JSDoc with `@unit <length|angle|none> <param> [<param> ...]` (several tags per
+// member are fine), e.g. `/** @unit length radius dz @unit angle angle */`. `length` = mm and
+// `angle` = degrees: run_program then accepts an expression string over the document variables
+// for it, unit-checked; `none` (parameters, counts, indexes, tolerances, ratios) accepts a
+// unitless expression. The generator fails on an untagged numeric param or a tag naming an
+// unknown parameter, so the catalog can never carry a number without its unit.
 
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -353,7 +361,29 @@ function collectFactoryCapabilities(program, checker, skipped) {
     return capabilities;
 }
 
+const PARAM_UNITS = new Set(["length", "angle", "none"]);
+
+/** `@unit <kind> <param...>` tags of a member -> Map(param name -> kind). */
+function collectUnitTags(member, context) {
+    const units = new Map();
+    for (const tag of ts.getJSDocTags(member)) {
+        if (tag.tagName.text !== "unit") continue;
+        const [unit, ...names] = (ts.getTextOfJSDocComment(tag.comment) ?? "").trim().split(/\s+/);
+        if (!PARAM_UNITS.has(unit) || names.length === 0) {
+            throw new Error(
+                `${context}: malformed @unit tag, expected "@unit <length|angle|none> <param...>"`,
+            );
+        }
+        for (const name of names) {
+            if (units.has(name)) throw new Error(`${context}: parameter "${name}" has two @unit tags`);
+            units.set(name, unit);
+        }
+    }
+    return units;
+}
+
 function classifyParams(member, sf, checker, context, skipped) {
+    const units = collectUnitTags(member, context);
     const params = [];
     for (const p of member.parameters ?? []) {
         const name = ts.isIdentifier(p.name)
@@ -367,8 +397,20 @@ function classifyParams(member, sf, checker, context, skipped) {
             skipped.push(`${context}(${name}: ${typeStr})`);
             return null;
         }
-        params.push({ name, kind: cls.kind, enum: cls.enum, required: !p.questionToken });
+        const unit = units.get(name);
+        if (cls.kind === "number" && unit === undefined) {
+            throw new Error(
+                `${context}: numeric parameter "${name}" needs a JSDoc "@unit <length|angle|none> ${name}"`,
+            );
+        }
+        if (cls.kind !== "number" && unit !== undefined) {
+            throw new Error(`${context}: @unit names "${name}", which is not a numeric parameter`);
+        }
+        units.delete(name);
+        params.push({ name, kind: cls.kind, enum: cls.enum, unit, required: !p.questionToken });
     }
+    if (units.size)
+        throw new Error(`${context}: @unit names unknown parameter(s) ${[...units.keys()].join(", ")}`);
     return params;
 }
 
@@ -440,15 +482,19 @@ const kindLine = (p) => {
     const base = `{ name: ${JSON.stringify(p.name)}, kind: ${JSON.stringify(p.kind)}`;
     const extra = [];
     if (p.enum) extra.push(`enum: ${JSON.stringify(p.enum)}`);
+    if (p.unit) extra.push(`unit: ${JSON.stringify(p.unit)}`);
     if (!p.required) extra.push("required: false");
     return extra.length ? `${base}, ${extra.join(", ")} }` : `${base} }`;
 };
+
+/** Doc label of a param: numeric params show their unit (length = mm, angle = degrees). */
+const paramKindLabel = (p) => (p.kind === "number" && p.unit !== "none" ? p.unit : p.kind);
 
 const paramList = (params) =>
     params
         .map(
             (p) =>
-                `${p.name}: ${p.kind === "enum" && p.enum ? p.enum.join("|") : p.kind}${p.required ? "" : "?"}`,
+                `${p.name}: ${p.kind === "enum" && p.enum ? p.enum.join("|") : paramKindLabel(p)}${p.required ? "" : "?"}`,
         )
         .join(", ");
 
@@ -555,10 +601,15 @@ export type ShapeParamKind =
 export type ShapeReturnKind =
     | "solid" | "edge" | "wire" | "face" | "compound" | "shell" | "vertex" | "shape" | "shapeWithData";
 
+/** Unit of a numeric param: length = mm, angle = degrees, none = dimensionless. */
+export type ShapeParamUnit = "length" | "angle" | "none";
+
 export interface ShapeCapabilityParam {
     name: string;
     kind: ShapeParamKind;
     enum?: string[];
+    /** Set on every "number" param (the generator enforces it). */
+    unit?: ShapeParamUnit;
     required?: boolean;
 }
 
@@ -602,7 +653,8 @@ ${queryEntries}
 
 export const capabilitiesSource = \`Available modeling capabilities (from IShapeFactory; units: mm, angles: degrees — the exception is simplifyShape's angleTolerance, which OCCT takes in radians):
 ${sourceLines.join("\n")}
-JSON encoding: XYZ={x,y,z}; Plane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} — an XY-oriented plane through origin when normal is omitted; Line={point:{x,y,z},direction:{x,y,z}} — a point plus a direction, NOT {start,end} ("line(start,end)" above is a creation method that builds an edge; to revolve around an existing edge, query edge.ends and derive point/direction from them); a shape/ref parameter takes an op id from any run_program call on this document or an existing node id; number[] is a plain number array — for fillet/chamfer "edges" it takes edge indices in the order returned by shape.findSubShapes(target, edge), so run that query first and pick indices from the edges' geometry (e.g. via edge.ends); enum params list their allowed values inline (a|b|c). Geometric params (plane/center/normal) may be omitted and default to the origin/Z axis. Params marked with ? are optional and may be omitted; the factory default applies. A method returning "shapeWithData" (removeFillet) creates its node from the result's shape; array extras (newEdges) come back in "results" under "<opId>.<key>" as { count, refs, kind: "shape" } with refs named <opId>#<key>#0..n.
+JSON encoding: XYZ={x,y,z}; Plane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} — an XY-oriented plane through origin when normal is omitted; Line={point:{x,y,z},direction:{x,y,z}} — a point plus a direction, NOT {start,end} ("line(start,end)" above is a creation method that builds an edge; to revolve around an existing edge, query edge.ends and derive point/direction from them); a shape/ref parameter takes an op id from any run_program call on this document or an existing node id; number[] is a plain number array — for fillet/chamfer "edges" it takes edge indices in the order returned by shape.findSubShapes(target, edge), so run that query first and pick indices from the edges' geometry (e.g. via edge.ends); enum params list their allowed values inline (a|b|c). Geometric params (plane/center/normal) may be omitted and default to the origin/Z axis. Params marked with ? are optional and may be omitted; the factory default applies. Numeric params: "length" = mm, "angle" = degrees, "number" = dimensionless (curve/surface parameter, count, index, weight; simplifyShape's angleTolerance is radians). A method returning "shapeWithData" (removeFillet) creates its node from the result's shape; array extras (newEdges) come back in "results" under "<opId>.<key>" as { count, refs, kind: "shape" } with refs named <opId>#<key>#0..n.
+Expressions: every numeric param (length, angle, number) takes a number OR an expression string over the document variables (document_variables), e.g. "wall_t", "wall_t / 2 + 1", "2 cm" — a length or angle expression must come out as that unit or unitless (a bare number counts as mm / degrees; "draft_angle" as a thickness is an error), a dimensionless param takes the value as is. The expression is evaluated ONCE, when the op runs: run_program builds direct, non-parametric nodes, so changing the variable later does NOT update them — use run_parametric (load_skill parametric-modeling) when the dimension must follow the variable. Each op that used an expression reports the numbers it resolved to in the response's "resolved" under its id (ops[<index>] without one), e.g. resolved.shell = { thickness: 3.75 }.
 Placement: box/rect/pyramid — plane.origin is a CORNER, the shape extends +dx/+dy/+dz from it. cylinder/cone — center is the BASE-FACE center, the shape extends +dz along normal. sphere — center is the true center. To center a box at P use origin = P - (dx/2,dy/2,dz/2); to center a cylinder/cone at P use center = P - normal*(dz/2).
 polygon: pass the corner points in PERIMETER ORDER, at least 3, ALL ON ONE PLANE, and REPEAT THE FIRST POINT as the last point to close the wire explicitly. polygon returns a WIRE, not a face — prism/revolve take it as it is: a CLOSED wire (or a closed edge such as a circle) is closed into a face for you and sweeps a solid, while an UNCLOSED one is swept into an open SHELL, a silent wrong result that breaks downstream booleans and fillets. A self-crossing point order (bowtie) yields a degenerate near-zero-area face, not an error — order points around the perimeter.
 loft: sections are lofted in array order; each may be a wire, an edge, a face (its outer wire), a vertex (first/last only) or a node whose shape is a compound of edges — a sketch node id works directly, its edges are chained into the section wire. OPEN chains are valid (an open skin), but a section whose edges form SEVERAL separate chains is an error: pick one with shape.findSubShapes + wire. For a re-editable loft of CLOSED single-profile sketches, use run_parametric's loft op instead.\`;
@@ -613,6 +665,7 @@ export const queryApiDoc = \`Shape query API (units: mm, angles: degrees — the
 - Refs persist across run_program calls on the same document and re-resolve against the live shape; a ref whose source node was deleted fails with a clear error — re-run the query that produced it. At most 256 refs are kept per document: in a long session the oldest are evicted and later fail as "Unknown ref".
 - Every query op needs an "id"; its return value comes back in the response "results" under that id. Result encodings: data queries return the plain value; curve/surface-producing queries (edge.curve, face.surface, trimmedCurve.basisCurve, ...) return { ref, kind } where kind is "curve" or "surface" — pass ref as the target of follow-up queries, and only to members matching its kind; single-shape queries (wire.toFace, wire.offset, face.outerWire, edge.trim, ...) return { ref, kind: "shape" } — the ref works both as a query target and as a shape argument in creation ops; list queries (shape.findSubShapes, wire.edgeLoop) return { count, refs, kind: "shape" }; mutation queries (curve.reverse, trimmedCurve.setTrim, ...) return null and modify the target ref's geometry in place — the mutation is remembered and re-applied whenever the ref is re-resolved.
 - Query ops never consume or delete the referenced node, and never create scene nodes — except shape.clone, which adds the copy as a new node (reported in "created") so it is an independent input for later edit ops.
+- Numeric args (length = mm, angle = degrees, number = dimensionless) take a number or an expression string over the document variables, evaluated once when the op runs (see modeling-api, "Expressions").
 - kind encodings: xyz={x,y,z}; plane/refOrPlane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}?} (XY-oriented through origin when normal is omitted) or, for refOrPlane, a shape ref string; line/refOrLine={point:{x,y,z},direction:{x,y,z}} or a ref string; matrix={array:[16 numbers, column-major]}; shapeType one of solid|shell|face|wire|edge|vertex|compound|compoundSolid (the plural is accepted too, and shape.findSubShapes' subshapeType may be left out — it then means edge); ref/curveRef/surfaceRef take a ref string.
 - Type hierarchy: circle/ellipse/hyperbola/parabola are conic; conic/line/bezierCurve/bsplineCurve/trimmedCurve/offsetCurve are curve — curve.* and conic.* members apply to those targets too. Surfaces likewise: cylindricalSurface/planeSurface/sphericalSurface/... are elementarySurface, and every *Surface is a surface. Use curve.curveType to check what a curve ref actually is.
 - edge.curve ALWAYS yields a trimmedCurve (it carries the edge's parameter range), even for a straight or circular edge.

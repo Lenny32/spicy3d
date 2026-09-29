@@ -186,7 +186,8 @@ document_variables first — {"action":"set","variables":[{"name":"width","type"
 — then name them in the ops. A variable may reference only the ones declared ABOVE it. This is
 what makes the model parametric rather than merely feature-based: when the user changes width,
 every feature that names it rebuilds. Reach for a variable when a dimension is one the user is
-likely to come back to, and a plain number when it is incidental.
+likely to come back to, and a plain number when it is incidental. run_program's numeric args accept
+the same expressions, but evaluate them ONCE: its nodes keep the number and do not follow the variable.
 
 Selecting edges for fillet/chamfer: "edgeIndexes" index the body's current edge list (findSubShapes
 order). Get them with a run_program query on the body node first — shape.findSubShapes(target: "b1",

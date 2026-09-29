@@ -1065,16 +1065,18 @@ describe("capabilityEngine", () => {
                 return { nodes };
             }
 
-            test("non-number numeric args reject with the op and param in the message", async () => {
+            test("numeric args that are neither a number nor an expression reject with the op and param in the message", async () => {
                 const box = rs.fn(() => Result.ok({} as IShape));
                 setup({ box });
                 try {
                     const tool = buildCapabilityTools()[0];
                     await expect(
                         tool.handler({
-                            ops: [{ id: "b", method: "box", args: { dx: "10", dy: 20, dz: 5 } }],
+                            ops: [{ id: "b", method: "box", args: { dx: [10], dy: 20, dz: 5 } }],
                         }),
-                    ).rejects.toThrow('op "box" (id "b") failed: dx must be a finite number, got "10"');
+                    ).rejects.toThrow(
+                        'op "box" (id "b") failed: dx must be a number or a length expression, got [10]',
+                    );
                     expect(box.mock.calls.length).toBe(0);
                 } finally {
                     rs.unstubAllGlobals();
