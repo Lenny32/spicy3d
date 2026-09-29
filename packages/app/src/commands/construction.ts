@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    ANGLE_UNITS,
     AsyncController,
     CancelableCommand,
     type ConstructionDefinition,
@@ -20,9 +21,15 @@ import {
     type ICommand,
     type IDocument,
     type INode,
+    LENGTH_UNITS,
+    lengthParameterFromInput,
     MeshDataUtils,
+    type ParameterValue,
     Plane,
     PointStep,
+    parseParameterValue,
+    Result,
+    resolveUnitSpec,
     SelectNodeStep,
     SelectShapeStep,
     type ShapeType,
@@ -53,7 +60,17 @@ function constructionError(error: unknown): string {
 
 type SourceType = "plane" | "axis" | "point" | "edge" | "face" | "vertex" | "path" | "center";
 type Field = { name: string; label: string; type: SourceType; optional?: boolean };
-type NumberField = { name: string; label: string; value: number; optional?: boolean };
+/**
+ * A numeric form field. `unit` marks a length (millimetres) or an angle (degrees) parameter: it takes
+ * a number or an expression of the document's variables, as a feature's depth does.
+ */
+type NumberField = {
+    name: string;
+    label: string;
+    value: number;
+    optional?: boolean;
+    unit?: "length" | "angle";
+};
 type DefinitionKind = ConstructionDefinition["kind"];
 type Tool = {
     kind: DefinitionKind;
@@ -69,7 +86,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "source", label: "Plane", type: "plane" },
             { name: "toPoint", label: "To Object point", type: "point", optional: true },
         ],
-        numbers: [{ name: "distance", label: "Distance (mm)", value: 0 }],
+        numbers: [{ name: "distance", label: "Distance (mm)", value: 0, unit: "length" }],
     },
     midplane: {
         kind: "plane-midplane",
@@ -86,8 +103,8 @@ const TOOLS: Record<string, Tool> = {
             { name: "baseline", label: "Reference plane", type: "plane" },
         ],
         numbers: [
-            { name: "angle", label: "Angle (degrees)", value: 0 },
-            { name: "offset", label: "Normal offset (mm)", value: 0 },
+            { name: "angle", label: "Angle (degrees)", value: 0, unit: "angle" },
+            { name: "offset", label: "Normal offset (mm)", value: 0, unit: "length" },
         ],
     },
     planeThroughTwoEdges: {
@@ -96,7 +113,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "first", label: "First edge", type: "edge" },
             { name: "second", label: "Second edge", type: "edge" },
         ],
-        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0 }],
+        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0, unit: "length" }],
     },
     planeThroughThreePoints: {
         kind: "plane-three-points",
@@ -105,7 +122,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "second", label: "Second point", type: "point" },
             { name: "third", label: "Third point", type: "point" },
         ],
-        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0 }],
+        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0, unit: "length" }],
     },
     planeAlongPath: {
         kind: "plane-along-path",
@@ -114,8 +131,8 @@ const TOOLS: Record<string, Tool> = {
             { name: "toPoint", label: "To Object point", type: "point", optional: true },
         ],
         numbers: [
-            { name: "value", label: "Position", value: 0 },
-            { name: "offset", label: "Normal offset (mm)", value: 0 },
+            { name: "value", label: "Position", value: 0, unit: "length" },
+            { name: "offset", label: "Normal offset (mm)", value: 0, unit: "length" },
             { name: "branch", label: "Path branch", value: 0, optional: true },
         ],
         choices: [
@@ -129,7 +146,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "face", label: "Surface", type: "face" },
             { name: "contact", label: "Contact point", type: "point" },
         ],
-        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0 }],
+        numbers: [{ name: "offset", label: "Normal offset (mm)", value: 0, unit: "length" }],
     },
     perpendicularPlane: {
         kind: "plane-perpendicular",
@@ -138,7 +155,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "contact", label: "Contact point", type: "point" },
             { name: "orientation", label: "Orientation axis", type: "axis" },
         ],
-        numbers: [{ name: "distance", label: "Distance (mm)", value: 0 }],
+        numbers: [{ name: "distance", label: "Distance (mm)", value: 0, unit: "length" }],
     },
     axisThroughCylinder: {
         kind: "axis-analytic",
@@ -201,7 +218,7 @@ const TOOLS: Record<string, Tool> = {
             { name: "toPoint", label: "To Object point", type: "point", optional: true },
         ],
         numbers: [
-            { name: "value", label: "Position", value: 0 },
+            { name: "value", label: "Position", value: 0, unit: "length" },
             { name: "branch", label: "Path branch", value: 0, optional: true },
         ],
         choices: [
@@ -370,6 +387,10 @@ class ConstructionSession {
 
     private renderNumbers() {
         for (const field of this.tool.numbers ?? []) {
+            if (field.unit) {
+                this.renderParameter(field);
+                continue;
+            }
             const row = document.createElement("label");
             row.textContent = tr(field.label);
             row.className = style.field;
@@ -396,6 +417,75 @@ class ConstructionSession {
         }
     }
 
+    /**
+     * A length or angle field: a number or an expression of the document's variables (`sec_x_1 * 2`),
+     * kept as typed — the construction follows the variables — with its evaluated value shown beside
+     * it. Text that does not resolve to the field's unit is reported and not taken.
+     */
+    private renderParameter(field: NumberField) {
+        const row = document.createElement("label");
+        row.textContent = tr(field.label);
+        row.className = style.field;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.inputMode = "decimal";
+        input.dataset["parameter"] = field.name;
+        const evaluated = document.createElement("small");
+        evaluated.dataset["evaluated"] = field.name;
+        const current = this.valueFor(field.name) as ParameterValue | undefined;
+        input.value = String(current ?? (field.optional ? "" : field.value));
+        const show = (value: ParameterValue | undefined) => {
+            const resolved = value === undefined ? undefined : this.resolveParameter(field, value);
+            evaluated.textContent =
+                typeof value === "string" && resolved?.isOk
+                    ? `= ${formatEvaluated(resolved.value)} ${field.unit === "angle" ? "°" : "mm"}`
+                    : "";
+            return resolved;
+        };
+        show(current);
+        input.oninput = () => {
+            if (input.value.trim() === "" && field.optional) {
+                delete this.values[field.name];
+                show(undefined);
+                this.refreshPreview();
+                return;
+            }
+            const value =
+                field.unit === "length"
+                    ? lengthParameterFromInput(input.value, "mm", this.model.variables.evaluate().scope)
+                    : parseParameterValue(input.value);
+            const resolved = show(value);
+            if (!resolved?.isOk) {
+                this.clearPreview();
+                this.status.textContent = I18n.translate(
+                    field.unit === "angle" ? "construction.error.angle{0}" : "construction.error.length{0}",
+                    resolved?.error ?? input.value,
+                );
+                return;
+            }
+            this.values[field.name] = value;
+            this.refreshPreview();
+        };
+        input.onkeydown = (event) => event.stopPropagation();
+        this.controls.push(input);
+        row.append(input, evaluated);
+        this.root.append(row);
+    }
+
+    /** A parameter's value against the document's variables; a path position's ratio must be a number. */
+    private resolveParameter(field: NumberField, value: ParameterValue) {
+        const ratio =
+            field.name === "value" &&
+            (this.values["positionKind"] ??
+                (this.values["position"] as { kind?: string } | undefined)?.kind) === "normalized";
+        if (ratio && typeof value === "string") return Result.err(`"${value}" is not a number`);
+        return resolveUnitSpec(
+            value,
+            this.model.variables.evaluate().scope,
+            field.unit === "angle" ? ANGLE_UNITS : LENGTH_UNITS,
+        );
+    }
+
     private renderChoices() {
         for (const field of this.tool.choices ?? []) {
             const row = document.createElement("label");
@@ -416,7 +506,8 @@ class ConstructionSession {
 
     private valueFor(name: string): unknown {
         if (name === "positionKind") return (this.values["position"] as { kind?: string } | undefined)?.kind;
-        if (name === "value") return (this.values["position"] as { value?: number } | undefined)?.value;
+        if (name === "value")
+            return (this.values["position"] as { value?: ParameterValue } | undefined)?.value;
         if (name === "reversed" || name === "branch")
             return (this.values["path"] as { reversed?: boolean; branch?: number } | undefined)?.[name];
         return this.values[name];
@@ -434,9 +525,11 @@ class ConstructionSession {
             const positionKind = (fields["positionKind"] ??
                 (fields["position"] as { kind?: string } | undefined)?.kind ??
                 "distance") as string;
-            const value = Number(
-                fields["value"] ?? (fields["position"] as { value?: number } | undefined)?.value ?? 0,
-            );
+            const stored = (fields["value"] ??
+                (fields["position"] as { value?: ParameterValue } | undefined)?.value ??
+                0) as ParameterValue;
+            // A distance along the path may be an expression; a normalized ratio is a number.
+            const value = positionKind === "distance" ? stored : Number(stored);
             if (positionKind === "to-point" && !fields["toPoint"]) {
                 this.status.textContent = tr("Select a To Object point.");
                 return undefined;
@@ -615,7 +708,11 @@ class ConstructionSession {
         this.clearPreview();
         const definition = this.definition();
         if (!definition) return;
-        const result = evaluateConstruction(definition, new DocumentConstructionResolver(this.model));
+        const result = evaluateConstruction(
+            definition,
+            new DocumentConstructionResolver(this.model),
+            this.model.variables.evaluate().scope,
+        );
         if (!result.isOk) {
             this.status.textContent = constructionError(result.error);
             return;
@@ -632,7 +729,11 @@ class ConstructionSession {
     private finish(definition?: ConstructionDefinition) {
         if (this.finished) return;
         if (definition) {
-            const result = evaluateConstruction(definition, new DocumentConstructionResolver(this.model));
+            const result = evaluateConstruction(
+                definition,
+                new DocumentConstructionResolver(this.model),
+                this.model.variables.evaluate().scope,
+            );
             if (!result.isOk) {
                 this.status.textContent = constructionError(result.error);
                 return;
@@ -649,6 +750,11 @@ class ConstructionSession {
     cancel() {
         this.finish();
     }
+}
+
+/** An evaluated parameter for the hint beside its field: at most six decimals, no trailing zeros. */
+function formatEvaluated(value: number): string {
+    return String(Math.round(value * 1e6) / 1e6);
 }
 
 function previewGeometry(geometry: ConstructionGeometry) {

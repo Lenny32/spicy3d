@@ -172,11 +172,16 @@ construction axes and fixed axes; point refs accept vertices, snaps, constructio
                         reverseFirst?, reverseSecond? }
   position (along-path kinds): { kind: "distance", value } (mm) | { kind: "normalized", value } (0..1)
                                | { kind: "to-point", point }
+  Lengths (distance, offset, a "distance" position's value) and angles (angle) take a number or an
+  EXPRESSION STRING of document variables, like feature parameters: distance: "sec_x_1" or
+  "sec_x_1 * 2 + 5 mm" — the construction (and every sketch on it) follows when the variable changes.
+  A bad expression fails the op naming the field.
 The construct result reports the resolved geometry (plane origin/normal/xvec, axis origin/direction, point).
 
 Variables. Every feature parameter (extrude depth/startOffset, revolve angle, fillet radius,
-chamfer distance) and every sketch datum takes either a number or an EXPRESSION STRING, so "width * 2"
-follows the document variable width instead of freezing a number into the feature. Create them with
+chamfer distance), every construction length/angle and every sketch datum takes either a number or
+an EXPRESSION STRING, so "width * 2" follows the document variable width instead of freezing a number
+into the feature. Create them with
 document_variables first — {"action":"set","variables":[{"name":"width","type":"length","expression":"40"}]}
 — then name them in the ops. A variable may reference only the ones declared ABOVE it. This is
 what makes the model parametric rather than merely feature-based: when the user changes width,

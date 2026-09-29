@@ -1,8 +1,21 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Plane, Result, ucsLocalToWorld, ucsWorldToLocal, XYZ } from "../src";
-import { evaluateConstruction } from "../src/construction/evaluate";
+import {
+    ANGLE_UNITS,
+    LENGTH_UNITS,
+    Plane,
+    Result,
+    type Scope,
+    ucsLocalToWorld,
+    ucsWorldToLocal,
+    XYZ,
+} from "../src";
+import {
+    constructionHasExpressions,
+    evaluateConstruction,
+    resolveConstructionParameters,
+} from "../src/construction/evaluate";
 import type {
     ConstructionDefinition,
     ConstructionGeometry,
@@ -296,5 +309,135 @@ describe("construction validation", () => {
 
     test("missing resolver sources propagate as errors", () => {
         rejects({ kind: "plane-offset", source: { kind: "datum", nodeId: "deleted" }, distance: 5 });
+    });
+});
+
+describe("construction parameters as expressions", () => {
+    const scope: Scope = new Map([
+        ["sec_x_1", { value: 12, unit: LENGTH_UNITS }],
+        ["tilt", { value: 30, unit: ANGLE_UNITS }],
+    ]);
+
+    function evaluateIn(definition: ConstructionDefinition) {
+        const result = evaluateConstruction(definition, resolver, scope);
+        expect(result.isOk, result.isOk ? undefined : String(result.error)).toBe(true);
+        return result.unchecked()!;
+    }
+
+    test.each<[string, number | string, number]>([
+        ["a number", 7, 7],
+        ["a length variable", "sec_x_1", 12],
+        ["an expression of variables and units", "sec_x_1 * 2 + 1 cm", 34],
+        ["a unitless expression", "3 * 4", 12],
+    ])("an offset plane's distance may be %s", (_name, distance, z) => {
+        const result = evaluateIn({ kind: "plane-offset", source: plane(), distance });
+        expect(result.kind).toBe("plane");
+        if (result.kind !== "plane") throw new Error("Expected plane");
+        expectXYZ(result.plane.origin, xyz(0, 0, z));
+    });
+
+    test("an angle plane takes an angle and an offset expression", () => {
+        const result = evaluateIn({
+            kind: "plane-angle",
+            axis: axis(),
+            baseline: plane(),
+            angle: "tilt",
+            offset: "sec_x_1 / 3",
+        });
+        if (result.kind !== "plane") throw new Error("Expected plane");
+        expect(result.plane.normal.dot(XYZ.unitZ)).toBeCloseTo(Math.cos(Math.PI / 6));
+        expect(result.plane.origin.dot(result.plane.normal)).toBeCloseTo(4);
+    });
+
+    test("a path distance position resolves; a normalized one stays a ratio", () => {
+        const result = evaluateIn({
+            kind: "point-along-path",
+            path: axis(xyz(3, 4, 5), XYZ.unitY),
+            position: { kind: "distance", value: "-sec_x_1" },
+        });
+        if (result.kind !== "point") throw new Error("Expected point");
+        expectXYZ(result.point, xyz(3, -8, 5));
+    });
+
+    test.each<[string, ConstructionDefinition, string]>([
+        [
+            "an unknown variable",
+            { kind: "plane-offset", source: plane(), distance: "sec_x_2" },
+            'Construction distance "sec_x_2" does not evaluate: ',
+        ],
+        [
+            "an angle where a length belongs",
+            { kind: "plane-offset", source: plane(), distance: "tilt" },
+            'Construction distance "tilt" does not evaluate: Dimension mismatch',
+        ],
+        [
+            "a length where an angle belongs",
+            { kind: "plane-angle", axis: axis(), baseline: plane(), angle: "sec_x_1" },
+            'Construction angle "sec_x_1" does not evaluate: Dimension mismatch',
+        ],
+        [
+            "a broken offset",
+            {
+                kind: "plane-three-points",
+                first: point(),
+                second: point(1),
+                third: point(0, 1),
+                offset: "2 *",
+            },
+            'Construction offset "2 *" does not evaluate: ',
+        ],
+        [
+            "a broken path distance",
+            { kind: "point-along-path", path: axis(), position: { kind: "distance", value: "nope" } },
+            'Construction position "nope" does not evaluate: ',
+        ],
+        [
+            "an empty expression",
+            { kind: "plane-offset", source: plane(), distance: " " },
+            "Construction distance must be a number or an expression",
+        ],
+    ])("%s fails naming the field and the expression", (_name, definition, message) => {
+        const result = evaluateConstruction(definition, resolver, scope);
+        expect(result.isOk).toBe(false);
+        expect(String(result.error)).toContain(message);
+        expect(String(result.error)).not.toContain("NaN in XYZ");
+    });
+
+    test("without a scope an expression naming a variable does not evaluate", () => {
+        const result = evaluateConstruction(
+            { kind: "plane-offset", source: plane(), distance: "sec_x_1" },
+            resolver,
+        );
+        expect(String(result.error)).toContain('Construction distance "sec_x_1" does not evaluate');
+    });
+
+    test("a NaN distance is reported as such, not as NaN in XYZ", () => {
+        const result = evaluateConstruction(
+            { kind: "plane-offset", source: plane(), distance: Number.NaN },
+            resolver,
+        );
+        expect(result.error).toBe("Construction distance must be a finite number, got NaN");
+    });
+
+    test("resolving leaves the references and options, and resolves only the parameters", () => {
+        const definition: ConstructionDefinition = {
+            kind: "plane-along-path",
+            path: axis(),
+            position: { kind: "normalized", value: 0.5 },
+            offset: "sec_x_1",
+        };
+        const resolved = resolveConstructionParameters(definition, scope);
+        expect(resolved.value).toEqual({ ...definition, offset: 12 });
+        expect(definition.offset).toBe("sec_x_1");
+    });
+
+    test.each<[ConstructionDefinition, boolean]>([
+        [{ kind: "plane-offset", source: plane(), distance: 5 }, false],
+        [{ kind: "plane-offset", source: plane(), distance: "5 mm" }, true],
+        [{ kind: "plane-angle", axis: axis(), baseline: plane(), angle: 5, offset: "w" }, true],
+        [{ kind: "point-along-path", path: axis(), position: { kind: "distance", value: "w" } }, true],
+        [{ kind: "point-along-path", path: axis(), position: { kind: "normalized", value: 0.5 } }, false],
+    ])("constructionHasExpressions(%j) is %s", (definition, expected) => {
+        expect(constructionHasExpressions(definition)).toBe(expected);
     });
 });

@@ -87,6 +87,8 @@ export const I18N_KEYS = [
     "construction.error.missing",
     "construction.error.ambiguous",
     "construction.error.invalid",
+    "construction.error.length{0}",
+    "construction.error.angle{0}",
     "construction.createSketch",
     "construction.createSketchXY",
     "construction.createSketchYZ",

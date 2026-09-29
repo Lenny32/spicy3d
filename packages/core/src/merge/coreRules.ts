@@ -16,6 +16,7 @@ import {
 const atomic: MergeValueRule = { kind: "atomic" };
 const scalar: MergeValueRule = { kind: "scalar" };
 const nodeRef: MergeValueRule = { kind: "ref", target: "node" };
+const expression: MergeValueRule = { kind: "expression" };
 
 // ------------------------------------------------------------------ The envelope
 
@@ -221,17 +222,35 @@ registerMergeRule("Result", {
 registerMergePayload("construction.definition", {
     rule: {
         // a changed `kind` makes the whole definition one value (the other fields change meaning);
-        // within one kind every field is a ConstructionRef, a number or a small option: one value each
+        // within one kind every field is a ConstructionRef, a length or angle (a number or an
+        // expression, document format 2), or a small option: one value each
         kind: "union",
         tag: "kind",
         variants: {},
-        fallback: { kind: "object", fields: {}, rest: CONSTRUCTION_REF_RULE },
+        fallback: {
+            kind: "object",
+            fields: {
+                distance: expression,
+                offset: expression,
+                angle: expression,
+                // where along the path: a distance (an expression), a normalized ratio or a point —
+                // picked as a whole, one value
+                position: {
+                    kind: "object",
+                    atomic: true,
+                    fields: { value: expression, point: CONSTRUCTION_REF_RULE },
+                },
+            },
+            rest: CONSTRUCTION_REF_RULE,
+        },
     },
     segment: "definition",
     note:
         "`ConstructionNode.definitionJson` (`ConstructionDefinition`). A changed `kind` replaces the whole " +
         "definition (atomic); otherwise field by field, each `ConstructionRef` one value that must resolve " +
-        "(its `nodeId`, tracked `trackedId`/`incidentEdgeIds`), its `featureIndex` a timeline position.",
+        "(its `nodeId`, tracked `trackedId`/`incidentEdgeIds`), its `featureIndex` a timeline position; " +
+        "`distance`/`offset`/`angle` are parameters (a number or an expression whose names must be " +
+        "variables), a path `position` one value.",
 });
 
 registerMergePayload("construction.ref", {

@@ -157,6 +157,8 @@ export default {
         "construction.error.missing": "Construction reference is missing",
         "construction.error.ambiguous": "Construction geometry has multiple solutions",
         "construction.error.invalid": "Construction geometry is invalid",
+        "construction.error.length{0}": "Enter a length or an expression of length variables: {0}",
+        "construction.error.angle{0}": "Enter an angle or an expression of angle variables: {0}",
         "construction.createSketch": "Create sketch on this plane",
         "construction.createSketchXY": "Create sketch on UCS XY",
         "construction.createSketchYZ": "Create sketch on UCS YZ",

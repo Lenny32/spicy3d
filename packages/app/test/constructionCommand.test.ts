@@ -104,7 +104,7 @@ describe("construction command forms", () => {
         const command = new OffsetPlaneCommand();
         const completion = command.execute(app);
         await chooseSource("Plane", "XY");
-        const input = panel().querySelector<HTMLInputElement>("input[type=number]");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
         expect(input).not.toBeNull();
         input!.value = "12";
         input!.dispatchEvent(new Event("input"));
@@ -130,7 +130,7 @@ describe("construction command forms", () => {
         const beforeHistory = doc.history.undoCount();
         const command = new EditConstructionCommand();
         const completion = command.execute(app);
-        const input = panel().querySelector<HTMLInputElement>("input[type=number]");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
         expect(input).not.toBeNull();
         expect(input!.value).toBe("3");
         input!.value = "15";
@@ -148,6 +148,103 @@ describe("construction command forms", () => {
         expect(node.definition).toMatchObject({ distance: 3 });
         doc.history.redo();
         expect(node.definition).toMatchObject({ distance: 15 });
+    });
+
+    test("a distance expression is kept as typed, shows its value and follows the variables", async () => {
+        const { app, doc, display } = setup();
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "12", type: "length" }]);
+        const completion = new OffsetPlaneCommand().execute(app);
+        await chooseSource("Plane", "XY");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
+        expect(input).not.toBeNull();
+        expect(input!.type).toBe("text");
+        input!.value = "sec_x_1 * 2";
+        input!.dispatchEvent(new Event("input"));
+        expect(panel().querySelector("[data-evaluated=distance]")?.textContent).toBe("= 24 mm");
+        const meshes = display.mock.calls.at(-1)![0];
+        expect(meshes[0].position[2]).toBeCloseTo(24);
+        button("Create").click();
+        await completion;
+        const node = doc.modelManager.findNode((n) => n instanceof ConstructionNode) as ConstructionNode;
+        expect(node.definition).toMatchObject({ distance: "sec_x_1 * 2" });
+
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "5", type: "length" }]);
+
+        const geometry = node.geometry.unchecked()!;
+        expect(geometry.kind === "plane" && geometry.plane.origin.z).toBeCloseTo(10);
+    });
+
+    test("a unit typed into a length field is converted to millimetres", async () => {
+        const { app, doc } = setup();
+        const completion = new OffsetPlaneCommand().execute(app);
+        await chooseSource("Plane", "XY");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
+        expect(input).not.toBeNull();
+        input!.value = "2 cm";
+        input!.dispatchEvent(new Event("input"));
+        button("Create").click();
+        await completion;
+        const node = doc.modelManager.findNode((n) => n instanceof ConstructionNode) as ConstructionNode;
+        expect(node.definition).toMatchObject({ distance: 20 });
+    });
+
+    test("an expression that is not a length is reported and not taken", async () => {
+        const { app, doc } = setup();
+        doc.variables.setItems([{ id: "v1", name: "tilt", expression: "30", type: "angle" }]);
+        const completion = new OffsetPlaneCommand().execute(app);
+        await chooseSource("Plane", "XY");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
+        expect(input).not.toBeNull();
+        input!.value = "7";
+        input!.dispatchEvent(new Event("input"));
+        input!.value = "tilt + 1";
+        input!.dispatchEvent(new Event("input"));
+        const status = panel().querySelector("[role=status]")?.textContent ?? "";
+        // The test locale is the identity: the key with its argument filled in.
+        expect(status).toMatch(/^construction\.error\.lengthDimension mismatch/);
+        expect(panel().querySelector("[data-evaluated=distance]")?.textContent).toBe("");
+        button("Create").click();
+        await completion;
+        const node = doc.modelManager.findNode((n) => n instanceof ConstructionNode) as ConstructionNode;
+        expect(node.definition).toMatchObject({ distance: 7 });
+    });
+
+    test("editing shows a stored expression and its value; the angle field takes angle variables", async () => {
+        const { app, doc } = setup();
+        doc.variables.setItems([
+            { id: "v1", name: "sec_x_1", expression: "12", type: "length" },
+            { id: "v2", name: "tilt", expression: "30", type: "angle" },
+        ]);
+        const node = new ConstructionNode({
+            document: doc,
+            definition: {
+                kind: "plane-angle",
+                axis: { kind: "fixed", geometry: { kind: "axis", origin: XYZ.zero, direction: XYZ.unitX } },
+                baseline: { kind: "origin-plane", plane: "XY" },
+                angle: 10,
+                offset: "sec_x_1 / 2",
+            },
+        });
+        doc.modelManager.addNode(node);
+        doc.selection.getSelectedNodes = () => [node];
+        const completion = new EditConstructionCommand().execute(app);
+        const offset = panel().querySelector<HTMLInputElement>("input[data-parameter=offset]");
+        const angle = panel().querySelector<HTMLInputElement>("input[data-parameter=angle]");
+        expect(offset).not.toBeNull();
+        expect(angle).not.toBeNull();
+        expect(offset!.value).toBe("sec_x_1 / 2");
+        expect(panel().querySelector("[data-evaluated=offset]")?.textContent).toBe("= 6 mm");
+        angle!.value = "sec_x_1";
+        angle!.dispatchEvent(new Event("input"));
+        expect(panel().querySelector("[role=status]")?.textContent).toMatch(
+            /^construction\.error\.angleDimension mismatch/,
+        );
+        angle!.value = "tilt * 2";
+        angle!.dispatchEvent(new Event("input"));
+        expect(panel().querySelector("[data-evaluated=angle]")?.textContent).toBe("= 60 °");
+        button("Apply").click();
+        await completion;
+        expect(node.definition).toMatchObject({ angle: "tilt * 2", offset: "sec_x_1 / 2" });
     });
 
     test.each([

@@ -304,7 +304,7 @@ const OPS_SCHEMA = {
         definition: {
             type: "object",
             description:
-                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. load_skill parametric-modeling for each kind\'s fields.',
+                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. Lengths (distance, offset, a distance position\'s value) and angles (angle) take a number or an expression of document variables, e.g. distance: "sec_x_1 * 2". load_skill parametric-modeling for each kind\'s fields.',
         },
         node: {
             type: "string",

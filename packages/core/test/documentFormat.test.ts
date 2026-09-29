@@ -42,7 +42,7 @@ describe("MigrationRegistry.migrate", () => {
     test("a current-format document comes back unchanged, as a copy", () => {
         const data = envelope();
 
-        const result = new MigrationRegistry().migrate(data);
+        const result = new MigrationRegistry(1).migrate(data);
 
         expect(result.isOk).toBe(true);
         expect(result.value).toEqual(data);
@@ -79,7 +79,7 @@ describe("MigrationRegistry.migrate", () => {
     });
 
     test("a module missing from moduleVersions reads as its minimum version", () => {
-        const registry = new MigrationRegistry();
+        const registry = new MigrationRegistry(1);
         registry.registerModule("parametric", 2);
         const migrate = rs.fn((data: Serialized) => data);
         registry.registerMigration("parametric", 1, migrate);
@@ -91,7 +91,7 @@ describe("MigrationRegistry.migrate", () => {
     });
 
     test("versions of modules this build does not know pass through", () => {
-        const result = new MigrationRegistry().migrate(envelope({ moduleVersions: { myPlugin: 7 } }));
+        const result = new MigrationRegistry(1).migrate(envelope({ moduleVersions: { myPlugin: 7 } }));
 
         expect(result.value["moduleVersions"]).toEqual({ myPlugin: 7 });
     });
@@ -261,5 +261,83 @@ describe("document fixture corpus", () => {
         expect(result.isOk).toBe(true);
         expect(result.value["formatVersion"]).toBe(DOCUMENT_FORMAT_VERSION);
         expect(result.value["userData"]).toEqual(fixture.data["userData"]);
+    });
+});
+
+describe("document format 2 (construction expressions)", () => {
+    const fixtures = loadDocumentFixtures();
+    const fixture = (name: string) => {
+        const found = fixtures.find((x) => x.name === name);
+        expect(found).not.toBeUndefined();
+        return found!;
+    };
+    const definitions = (data: Serialized) =>
+        (data["models"] as { nodes: Record<string, any>[] }).nodes
+            .filter((x) => x["__cla$$__"] === "ConstructionNode")
+            .map((x) => JSON.parse(x["definitionJson"]));
+
+    test("is the running version, reached from 1 without a gap", () => {
+        expect(DOCUMENT_FORMAT_VERSION).toBe(2);
+        expect(DocumentMigrations.currentVersion(DOCUMENT_MODULE)).toBe(2);
+        expect(DocumentMigrations.findGaps()).toEqual([]);
+    });
+
+    test.each(
+        fixtures.filter((x) => x.version === 1).map((x) => [x.name, x] as const),
+    )("%s (document 1) migrates with its models and variables untouched", (_name, { data }) => {
+        const original = structuredClone(data);
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["formatVersion"]).toBe(2);
+        expect(migrated.value["models"]).toEqual(original["models"]);
+        expect(migrated.value["variables"]).toEqual(original["variables"]);
+        // Pure: the input is left as it was.
+        expect(data).toEqual(original);
+    });
+
+    test("a document 1 construction keeps its number distance through the migration", () => {
+        const v1 = {
+            ...envelope(),
+            models: {
+                nodes: [
+                    {
+                        __cla$$__: "ConstructionNode",
+                        id: "plane-1",
+                        definitionJson: JSON.stringify({
+                            kind: "plane-offset",
+                            source: { kind: "origin-plane", plane: "YZ" },
+                            distance: 12.5,
+                        }),
+                    },
+                ],
+                components: [],
+                materials: [],
+            },
+        };
+
+        const migrated = migrateDocument(v1);
+
+        expect(migrated.isOk).toBe(true);
+        expect(definitions(migrated.value)).toEqual([
+            { kind: "plane-offset", source: { kind: "origin-plane", plane: "YZ" }, distance: 12.5 },
+        ]);
+    });
+
+    test("a document 2 with expression parameters needs no migration", () => {
+        const { data } = fixture("v2/construction-expressions.json");
+        expect(data["formatVersion"]).toBe(2);
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        expect(definitions(migrated.value).map((x) => [x.kind, x.distance ?? x.angle, x.offset])).toEqual([
+            ["plane-offset", "sec_x_1", undefined],
+            ["plane-offset", "sec_x_1 * 2 + 5 mm", undefined],
+            ["plane-offset", 7.5, undefined],
+            ["plane-angle", "tilt", "sec_x_1 / 4"],
+        ]);
     });
 });
