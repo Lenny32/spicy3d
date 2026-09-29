@@ -2,8 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
-import type { AsyncController, I18nKeys, Locale, ParameterValue } from "@spicy3d/core";
+import type { AsyncController, I18nKeys, INode, INodeList, Locale, ParameterValue } from "@spicy3d/core";
 import {
+    CancelableCommand,
     Combobox,
     CommandStore,
     I18n,
@@ -34,6 +35,12 @@ rs.mock("../src/ribbon/commandContext.module.css", () => ({
     input: "cc-input",
     button: "cc-button",
     materialButton: "cc-material-button",
+    nodeList: "cc-node-list",
+    nodeItem: "cc-node-item",
+    nodeName: "cc-node-name",
+    nodeRemove: "cc-node-remove",
+    nodeAdd: "cc-node-add",
+    active: "cc-active",
 }));
 
 // Mock element helpers
@@ -172,6 +179,70 @@ class MaterialCommand extends Observable {
     }
 }
 
+const NODE_LIST_CMD_KEY = "test.context.nodeList";
+const PICK_CMD_KEY = "test.context.pick";
+
+const namedNode = (name: string) => ({ id: name, name }) as unknown as INode;
+
+/** A command listing nodes in its options tab (an `INodeList` property). */
+class NodeListCommand extends Observable {
+    async execute() {}
+
+    readonly left = namedNode("Left");
+    readonly right = namedNode("Right");
+    readonly removed = rs.fn((_node: INode) => {});
+    readonly toggled = rs.fn(() => {});
+
+    @property("test.bodies" as I18nKeys, { type: "nodeList" })
+    get bodies(): INodeList | undefined {
+        return this.getPrivateValue("bodies", undefined);
+    }
+    set bodies(value: INodeList | undefined) {
+        this.setProperty("bodies", value);
+    }
+
+    list(nodes: INode[], options: { label?: string; fixed?: INode[]; adding?: boolean } = {}): INodeList {
+        return {
+            label: options.label,
+            nodes,
+            fixed: options.fixed,
+            remove: this.removed,
+            add: options.adding === undefined ? undefined : { active: options.adding, toggle: this.toggled },
+        };
+    }
+}
+
+/** A running command whose document's selection is a plain list (for a node pick's control). */
+class PickCommand extends CancelableCommand {
+    selected: INode[] = [];
+    private readonly handlers = new Set<(nodes: INode[]) => void>();
+    readonly deselect = rs.fn((nodes: INode[], _toggle: boolean) => {
+        this.selected = this.selected.filter((x) => !nodes.includes(x));
+        for (const handler of this.handlers) handler(this.selected);
+        return nodes.length;
+    });
+    private readonly selection = {
+        getSelectedNodes: () => this.selected,
+        getSelectedShapes: () => [],
+        getSelectedNodeLength: () => this.selected.length,
+        setSelectedNodes: this.deselect,
+        onNodeChanged: {
+            sub: (handler: (nodes: INode[]) => void) => this.handlers.add(handler),
+            remove: (handler: (nodes: INode[]) => void) => this.handlers.delete(handler),
+        },
+        onShapeChanged: { sub: () => {}, remove: () => {} },
+    };
+
+    override get document() {
+        return { selection: this.selection } as never;
+    }
+
+    protected async executeAsync() {}
+}
+
+const clickWithEvent = (el: Element) =>
+    (el as unknown as { _onclick: (e: unknown) => void })._onclick({ stopPropagation: () => {} });
+
 function findInput(ctx: CommandContext, type: string): HTMLInputElement {
     return mustQuery(ctx, `input[type='${type}']`);
 }
@@ -185,6 +256,8 @@ describe("CommandContext", () => {
         CommandStore.registerCommand(CancelableTestCommand, { key: CANCEL_CMD_KEY, icon: "icon-ctx" });
         CommandStore.registerCommand(MaterialCommand, { key: MATERIAL_CMD_KEY, icon: "icon-ctx" });
         CommandStore.registerCommand(LengthCommand, { key: LENGTH_CMD_KEY, icon: "icon-ctx" });
+        CommandStore.registerCommand(NodeListCommand, { key: NODE_LIST_CMD_KEY, icon: "icon-ctx" });
+        CommandStore.registerCommand(PickCommand, { key: PICK_CMD_KEY, icon: "icon-ctx" });
         // I18n.isI18nKey (used by the combobox editor) reads the en translation table
         I18n.addLanguage({ display: "English", language: "en", translation: {} as Locale["translation"] });
     });
@@ -198,6 +271,8 @@ describe("CommandContext", () => {
         CommandStore.unregisterCommand(CANCEL_CMD_KEY);
         CommandStore.unregisterCommand(MATERIAL_CMD_KEY);
         CommandStore.unregisterCommand(LENGTH_CMD_KEY);
+        CommandStore.unregisterCommand(NODE_LIST_CMD_KEY);
+        CommandStore.unregisterCommand(PICK_CMD_KEY);
         I18n.removeLanguage("en");
     });
 
@@ -428,6 +503,23 @@ describe("CommandContext", () => {
         }
     });
 
+    test("a combobox follows a value the command sets itself (an edit session loading its own)", () => {
+        CommandStore.registerCommand(LiveLabelCommand, { key: LIVE_CMD_KEY, icon: "icon-ctx" });
+        try {
+            const command = new LiveLabelCommand();
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+            const box = mustQuery<HTMLSelectElement>(ctx, "select");
+
+            command.choice = "test.live.other";
+            expect(box.selectedIndex).toBe(1);
+            command.choice = "test.live.auto";
+            expect(box.selectedIndex).toBe(0);
+        } finally {
+            CommandStore.unregisterCommand(LIVE_CMD_KEY);
+        }
+    });
+
     describe("dependent property visibility", () => {
         test("should hide dependent property until dependency matches, then reveal on change", () => {
             const command = new TestCommand();
@@ -500,6 +592,107 @@ describe("CommandContext", () => {
             (buttons[1] as unknown as { _onclick: () => void })._onclick();
             expect(controller.cancel).toHaveBeenCalledTimes(1);
 
+            PubSub.default.pub("clearSelectionControl");
+        });
+    });
+
+    describe("node list property", () => {
+        const names = (root: Element) =>
+            [...root.querySelectorAll(".cc-node-name")].map((x) => x.textContent);
+
+        test("shows one entry per node under its caption; a remove button hands the node back", () => {
+            const command = new NodeListCommand();
+            command.bodies = command.list([command.left, command.right], {
+                label: "Objects to cut: 2 bodies",
+            });
+            const ctx = track(new CommandContext(command));
+
+            const list = mustQuery(ctx, ".cc-node-list");
+            expect(list.previousElementSibling?.textContent).toBe("Objects to cut: 2 bodies");
+            expect(names(ctx)).toEqual(["Left", "Right"]);
+            const removes = ctx.querySelectorAll(".cc-node-remove");
+            expect(removes.length).toBe(2);
+
+            clickWithEvent(removes[1]);
+            expect(command.removed.mock.calls).toEqual([[command.right]]);
+        });
+
+        test("fixed nodes have no remove button; without an add toggle there is no add button", () => {
+            const command = new NodeListCommand();
+            command.bodies = command.list([command.left, command.right], { fixed: [command.left] });
+            const ctx = track(new CommandContext(command));
+
+            const items = ctx.querySelectorAll(".cc-node-item");
+            expect(items.length).toBe(2);
+            expect(items[0].querySelector(".cc-node-remove")).toBeNull();
+            expect(items[1].querySelector(".cc-node-remove")).not.toBeNull();
+            expect(ctx.querySelector(".cc-node-add")).toBeNull();
+        });
+
+        test("the add button toggles, shows when it is on, and the list redraws on a new value", () => {
+            const command = new NodeListCommand();
+            command.bodies = command.list([command.left], { adding: false });
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+
+            const add = mustQuery(ctx, ".cc-node-add");
+            expect(add.classList.contains("cc-active")).toBe(false);
+            clickWithEvent(add);
+            expect(command.toggled).toHaveBeenCalledTimes(1);
+
+            command.bodies = command.list([command.left, command.right], { adding: true });
+            expect(names(ctx)).toEqual(["Left", "Right"]);
+            expect(mustQuery(ctx, ".cc-node-add").classList.contains("cc-active")).toBe(true);
+        });
+
+        test("without a caption the property's display name is shown; no value = an empty list", () => {
+            const command = new NodeListCommand();
+            const ctx = track(new CommandContext(command));
+
+            const list = mustQuery(ctx, ".cc-node-list");
+            expect(list.childElementCount).toBe(0);
+            expect(list.previousElementSibling?.textContent).toBe(I18n.translate("test.bodies" as I18nKeys));
+        });
+    });
+
+    describe("node pick selection control", () => {
+        const show = (options?: { nodes?: boolean }) => {
+            const controller = { success: rs.fn(() => {}), cancel: rs.fn(() => {}) };
+            PubSub.default.pub("showSelectionControl", controller as unknown as AsyncController, options);
+        };
+
+        test("lists the picked nodes; a remove button deselects one", () => {
+            const command = new PickCommand();
+            const left = namedNode("Left");
+            const right = namedNode("Right");
+            command.selected = [left, right];
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+
+            show({ nodes: true });
+
+            const control = mustQuery(ctx, ".cc-selection-control");
+            const listed = () => [...control.querySelectorAll(".cc-node-name")].map((x) => x.textContent);
+            expect(listed()).toEqual(["Left", "Right"]);
+
+            clickWithEvent(control.querySelectorAll(".cc-node-remove")[0]);
+            expect(command.deselect.mock.calls).toEqual([[[left], true]]);
+            expect(listed()).toEqual(["Right"]);
+            // Confirm and cancel stay the only selection buttons.
+            expect(control.querySelectorAll(".cc-selection-button").length).toBe(2);
+
+            PubSub.default.pub("clearSelectionControl");
+        });
+
+        test("a shape pick's control lists nothing", () => {
+            const command = new PickCommand();
+            command.selected = [namedNode("Left")];
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+
+            show();
+
+            expect(mustQuery(ctx, ".cc-selection-control").querySelector(".cc-node-list")).toBeNull();
             PubSub.default.pub("clearSelectionControl");
         });
     });

@@ -12,6 +12,7 @@ import {
     Id,
     type IFace,
     type INode,
+    type INodeList,
     type INodeVisual,
     type IShape,
     type IStep,
@@ -19,6 +20,7 @@ import {
     LENGTH_UNITS,
     Matrix4,
     MultistepCommand,
+    NodeListComparer,
     type ParameterValue,
     Precision,
     type Property,
@@ -70,7 +72,14 @@ import { prioritizeSketchFaces } from "./profileFaceSort";
 import { toolOverlay } from "./toolOverlay";
 
 /** Options every extrude starts afresh with (see `isPropertyCached`). */
-const UNCACHED_PROPERTIES = new Set(["operation", "targetsInfo", "extent", "extentFaceInfo", "extentOffset"]);
+const UNCACHED_PROPERTIES = new Set([
+    "operation",
+    "targetsInfo",
+    "targetList",
+    "extent",
+    "extentFaceInfo",
+    "extentOffset",
+]);
 
 const OPERATION_NEW: I18nKeys = "option.command.operation.new";
 
@@ -322,22 +331,39 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         return this.getPrivateValue("autoOperationLabel", OPERATION_AUTO);
     }
 
-    /**
-     * What the extrude acts on, e.g. "Objects to cut: 2 bodies" — by default every body it
-     * goes into (a join: touches); Ctrl/Cmd+click on a body during the drag adds or removes it.
-     */
-    @property("option.command.targets", {
-        type: "info",
-        dependencies: [{ property: "hasTargets", value: true }],
-    })
+    /** What the extrude acts on, e.g. "Objects to cut: 2 bodies" — the caption of `targetList`. */
     get targetsInfo(): string {
         return this.getPrivateValue("targetsInfo", "");
     }
 
-    /** True while the extrude acts on at least one body (the targets line shows only then). */
+    /** True while the extrude acts on at least one body. */
     get hasTargets(): boolean {
         return this.getPrivateValue("hasTargets", false);
     }
+
+    /**
+     * The bodies the extrude acts on, listed in the options tab — by default every body it goes
+     * into (a join: touches). Each can be removed there; "Add" (or Ctrl/Cmd+click on a body
+     * during the drag, at any time) adds or removes bodies. Listed while the operation combines
+     * with bodies, even once all are removed, so they can be added back.
+     */
+    @property("option.command.targets", {
+        type: "nodeList",
+        dependencies: [{ property: "listsTargets", value: true }],
+    })
+    get targetList(): INodeList | undefined {
+        return this.getPrivateValue("targetList", undefined);
+    }
+
+    /** True while `targetList` is shown. */
+    get listsTargets(): boolean {
+        return this.getPrivateValue("listsTargets", false);
+    }
+
+    /** True while a plain click on a body during the drag adds or removes it (the list's "Add"). */
+    private _addingTargets = false;
+    /** What the last resolution listed, so toggling "Add" can republish it. */
+    private _listed?: { targets: readonly ParametricBodyNode[]; canAdd: boolean };
 
     /** Bodies Ctrl+clicked in beyond the default targets, and default ones Ctrl+clicked out, by id. */
     private readonly _includedTargets = new Set<string>();
@@ -499,6 +525,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             buildPreview: this.buildPreview,
             meshArrow: this.meshArrow,
             toggleTarget: this.toggleTarget,
+            picksTarget: () => this._addingTargets,
             depthLocked: () => this.extent !== EXTENT_DISTANCE,
             extentReady: () => this.extent !== EXTENT_TO_OBJECT || this._extentFace !== undefined,
             picksExtentFace: () => this.extent === EXTENT_TO_OBJECT,
@@ -669,12 +696,47 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         return targets;
     }
 
-    /** Publishes what the extrude acts on to the options tab (see `targetsInfo`). */
-    private showTargets(operation: BooleanOperation | undefined, targets: readonly ParametricBodyNode[]) {
+    /**
+     * Publishes what the extrude acts on to the options tab (see `targetList`): `listed` is the
+     * operation whose bodies are listed (unset: no list), `canAdd` whether bodies can be added.
+     */
+    private showTargets(
+        operation: BooleanOperation | undefined,
+        targets: readonly ParametricBodyNode[],
+        listed?: { canAdd: boolean },
+    ) {
         this._lastTargets = targets;
         const shown = operation !== undefined && targets.length > 0;
         this.setProperty("targetsInfo", shown ? extrudeTargetsInfo(operation, targets.length) : "");
         this.setProperty("hasTargets", shown);
+        this._listed = listed === undefined ? undefined : { targets, canAdd: listed.canAdd };
+        if (listed?.canAdd !== true) this._addingTargets = false;
+        this.publishTargetList();
+    }
+
+    private publishTargetList() {
+        const listed = this._listed;
+        const list: INodeList | undefined =
+            listed === undefined
+                ? undefined
+                : {
+                      label: this.targetsInfo === "" ? undefined : this.targetsInfo,
+                      nodes: listed.targets,
+                      remove: (node) => {
+                          if (this.toggleTarget(node)) this._dragHandler?.refresh();
+                      },
+                      add: listed.canAdd
+                          ? {
+                                active: this._addingTargets,
+                                toggle: () => {
+                                    this._addingTargets = !this._addingTargets;
+                                    this.publishTargetList();
+                                },
+                            }
+                          : undefined,
+                  };
+        this.setProperty("targetList", list, undefined, NodeListComparer);
+        this.setProperty("listsTargets", list !== undefined);
     }
 
     private toolOverlayOf(operation: BooleanOperation, tool: IShape) {
@@ -721,13 +783,14 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         if (primary !== undefined && targets.includes(primary)) {
             targets = [primary, ...targets.filter((x) => x !== primary)];
         }
-        if (pressPull && operation !== "fuse") targets = targets.slice(0, 1);
+        const hostOnly = pressPull && operation !== "fuse";
+        if (hostOnly) targets = targets.slice(0, 1);
         const resolved = targets.length === 0 ? undefined : operation;
         if (auto) {
             const label = targets.length === 0 ? "new" : (autoResolved ?? "new");
             this.setProperty("autoOperationLabel", AUTO_LABELS[label]);
         }
-        this.showTargets(resolved, targets);
+        this.showTargets(resolved, targets, operation === undefined ? undefined : { canAdd: !hostOnly });
         return resolved === undefined ? { targets: [] } : { operation: resolved, targets };
     }
 
