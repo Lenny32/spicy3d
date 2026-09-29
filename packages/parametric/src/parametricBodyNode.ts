@@ -311,6 +311,7 @@ export class ParametricBodyNode
                 reselectable: handler?.reselectable === true,
                 editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
+                dependsOn: handler?.nodeIds(feature, this.document).filter((id) => id !== this.id),
                 parameters: handler?.parameters(feature) ?? [],
             };
         });

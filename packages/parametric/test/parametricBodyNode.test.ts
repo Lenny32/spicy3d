@@ -1189,6 +1189,31 @@ describe("ParametricBodyNode feature references", () => {
         expect(body.featureItems()[1].references).toBeUndefined();
     });
 
+    test("featureItems reports the nodes each feature reads, without the body itself", () => {
+        const tool = bodyWith([extrudeFeature(sketch.id)]);
+        const booleanFeature: BooleanFeatureData = {
+            id: "f3",
+            type: "boolean",
+            operation: "fuse",
+            toolIds: [tool.id],
+        };
+        const pressPull: ExtrudeFeatureData = {
+            id: "f4",
+            type: "extrude",
+            depth: 2,
+            source: { nodeId: "self", profiles: [] },
+        };
+        const body = bodyWith([extrudeFeature(sketch.id), booleanFeature]);
+        const self = new ParametricBodyNode({ document: doc, id: "self", features: [pressPull] });
+        doc.modelManager.addNode(self);
+
+        const items = body.featureItems();
+
+        expect(items[0].dependsOn).toEqual([sketch.id]);
+        expect(items[1].dependsOn).toEqual([tool.id]);
+        expect(self.featureItems()[0].dependsOn).toEqual([]);
+    });
+
     test("should drop a reference that no longer resolves", () => {
         const body = bodyWith([extrudeFeature("missing-sketch")]);
         expect(body.featureItems()[0].references).toBeUndefined();
