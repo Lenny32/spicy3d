@@ -15,6 +15,8 @@ export const errorRecovery: Skill = {
 
 "Missing required parameter "x"" — the op left out a required argument; nothing ran. Add it and re-run that op (the signatures are in the modeling-api skill).
 
+"Kernel crashed (…); reload the page" — the geometry kernel (WASM) died; nothing that builds geometry works again in this tab, and get_document_state shows kernel: "crashed". Do NOT retry or work around it: stop modeling and tell the user to reload the page.
+
 "The radius is too small." — the radius is at or below the kernel's minimum (1e-7 mm), i.e. effectively zero. Pass a positive radius.
 
 "Failed to fillet" / "Failed to chamfer" (or "Fillet Error: …") — the radius/distance is too large for the adjacent faces, or the picked edges are unsuitable. Query edge.length / face.area around the target and lower the value; typical cause is a radius larger than half the shortest adjacent edge.

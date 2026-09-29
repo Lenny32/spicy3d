@@ -9,6 +9,7 @@ import {
     type IShape,
     type IVertex,
     type IWire,
+    KernelState,
     Line,
     Matrix4,
     Plane,
@@ -756,6 +757,13 @@ describe("ShapeFactory — feature operations", () => {
             const result = factory.fillet(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
             expect(result.error).toContain("Fillet Error");
+        });
+
+        test("the module survives that abort: the kernel is not reported crashed", () => {
+            const boxValue = factory.box(plane, 10, 10, 10).value;
+            expect(factory.fillet(boxValue, [999], 5).error).toContain("Aborted(");
+            expect(KernelState.current.status).toBe("ok");
+            expect(factory.fillet(boxValue, [0], 1).isOk).toBe(true);
         });
     });
 

@@ -9,6 +9,7 @@ export const I18N_KEYS = [
     "ai.error.nullRef",
     "ai.error.unknownRef",
     "app.insecureContext",
+    "app.kernelCrashed",
     "arc.angle",
     "arc.start",
     "axis.x",

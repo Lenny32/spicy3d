@@ -38,6 +38,7 @@ import type {
 } from "../lib/spicy-wasm";
 import { OccCurve } from "./curve";
 import { convertFromContinuity, getJoinType, getOffsetMode } from "./helper";
+import { guardKernelResults } from "./kernelGuard";
 import { OccEdge, OccShape } from "./shape";
 
 function ensureOccShape(shapes: IShape | IShape[]): TopoDS_Shape[] {
@@ -167,6 +168,13 @@ function filletResultEdges(edges: TopoDS_Shape[]): OccEdge[] {
 
 export class ShapeFactory implements IShapeFactory {
     readonly kernelName = "opencascade";
+
+    constructor() {
+        // Once the kernel crashed, every call answers `Result.err` with the same message; `edge`
+        // returns a plain edge, so it throws that message instead.
+        // biome-ignore lint/correctness/noConstructorReturn: the guarded facade replaces the instance
+        return guardKernelResults(this, ["edge"]);
+    }
 
     edge(curve: ICurve): IEdge {
         if (!(curve instanceof OccCurve)) {

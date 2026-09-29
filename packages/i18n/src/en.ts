@@ -17,6 +17,7 @@ export default {
             'Unknown ref "{0}". Available refs: {1} — a ref exists only after the op defining it has run; check op order, and do not guess ids from numbering patterns.',
         "app.insecureContext":
             "This page is served over plain HTTP, so the browser disables secure features: accounts and cloud documents, copy to clipboard, saving back to files. Open it over HTTPS (ask your administrator).",
+        "app.kernelCrashed": "The geometry kernel crashed ({0}). Reload the page.",
         "arc.angle": "Angle",
         "arc.start": "Start",
         "axis.x": "X Axis",

@@ -19,6 +19,7 @@ import {
 import type { Tool, ToolCallContext } from "../llm/types";
 import { type AgentCloudInfo, agentCloudLink, onAgentCloudChanged } from "./cloudLink";
 import { getDocument } from "./documentContext";
+import { guardKernelTool } from "./kernelTools";
 import { OPEN_WAIT_MS, OpenConsent } from "./openConsent";
 
 export const OPEN_DOCUMENT_TOOL = "spicy3d_open_document";
@@ -364,7 +365,7 @@ async function save(args: Record<string, unknown>): Promise<string> {
 export function buildCloudTools(options: CloudToolOptions = {}): Tool[] {
     const consent = options.consent ?? PAGE_CONSENT;
     const waitMs = options.waitMs ?? OPEN_WAIT_MS;
-    return [
+    const tools: Tool[] = [
         {
             name: OPEN_DOCUMENT_TOOL,
             description:
@@ -409,4 +410,6 @@ export function buildCloudTools(options: CloudToolOptions = {}): Tool[] {
             handler: (args) => save(args),
         },
     ];
+    // Opening a document rebuilds it: refused once the kernel crashed.
+    return tools.map(guardKernelTool);
 }
