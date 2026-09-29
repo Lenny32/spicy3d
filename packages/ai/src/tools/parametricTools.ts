@@ -186,6 +186,7 @@ const OPS_SCHEMA = {
                 "loft",
                 "fillet",
                 "chamfer",
+                "thicken",
                 "boolean",
                 "editFeature",
                 "features",
@@ -285,6 +286,26 @@ const OPS_SCHEMA = {
         },
         radius: { description: "Fillet radius in mm" },
         distance: { description: "Chamfer distance in mm" },
+        thickness: {
+            description:
+                'Thicken only: signed wall thickness in mm (a number or an expression, e.g. "wall_t"; it re-evaluates when the variable changes). Positive grows along the face normals (outward for a solid), negative inward; never zero.',
+        },
+        joinType: {
+            type: "string",
+            enum: ["arc", "intersection"],
+            description: "Thicken only, solids: how the offset walls meet at edges (default arc = rounded)",
+        },
+        mode: {
+            type: "string",
+            enum: ["skin", "pipe"],
+            description: "Thicken only, solids: offset mode (default skin)",
+        },
+        openFaceIndexes: {
+            type: "array",
+            items: { type: "number" },
+            description:
+                "Thicken only, solids: indexes into the body's current face list (findSubShapes order) of the faces to remove, opening the shell. Omit for a closed hollow solid, and always for an open shell or surface (e.g. an open loft), which becomes a solid.",
+        },
         tools: {
             type: "array",
             items: { type: "string" },
@@ -328,7 +349,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },

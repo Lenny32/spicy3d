@@ -22,6 +22,7 @@ import {
 
 @command({
     key: "modify.shell",
+    helpText: "tooltip.modify.shell",
     icon: "icon-shell",
 })
 export class ShellCommand extends MultistepCommand {

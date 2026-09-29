@@ -12,8 +12,10 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * ignore them and sweep the blind `depth` instead.
  * 4: `loft` features (a loft through sketch profiles) — a build reading only v3 would fail those bodies
  * with "Unknown feature type".
+ * 5: `thicken` features (a shell / thicken of the previous shape) — a build reading only v4 would fail
+ * those bodies with "Unknown feature type".
  */
-export const PARAMETRIC_FORMAT_VERSION = 4;
+export const PARAMETRIC_FORMAT_VERSION = 5;
 /** Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references). */
 export const SKETCH_FORMAT_VERSION = 1;
 
@@ -33,3 +35,6 @@ registerMigration("parametric", 2, (document) => document);
 
 // parametric 3 → 4: the `loft` feature type is new; every v3 feature list is a valid v4 one.
 registerMigration("parametric", 3, (document) => document);
+
+// parametric 4 → 5: the `thicken` feature type is new; every v4 feature list is a valid v5 one.
+registerMigration("parametric", 4, (document) => document);

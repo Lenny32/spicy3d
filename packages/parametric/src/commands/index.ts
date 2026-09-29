@@ -11,4 +11,6 @@ import "./loftEditCommand";
 import "./reselectCommand";
 import "./revolveCommand";
 import "./revolveEditCommand";
+import "./thickenCommand";
+import "./thickenEditCommand";
 import "./variableCommand";

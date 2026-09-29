@@ -1,0 +1,134 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 5,
+        "sketch": 1
+    },
+    "id": "fixture-parametric5-thicken",
+    "name": "Fixture parametric v5: a box shelled open at its top and an open loft thickened into a wall, both driven by a variable",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[-10,-10,10,-10]},{\"id\":2,\"type\":\"line\",\"params\":[10,-10,10,10]},{\"id\":3,\"type\":\"line\",\"params\":[10,10,-10,10]},{\"id\":4,\"type\":\"line\",\"params\":[-10,10,-10,-10]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-base",
+                "name": "body.sketch1",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 20,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"circle\",\"params\":[0,0,6]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-top",
+                "name": "body.sketch2",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-box\",\"type\":\"extrude\",\"sketchId\":\"sketch-base\",\"depth\":10},{\"id\":\"feature-shell\",\"type\":\"thicken\",\"thickness\":\"-wall_t\",\"openFaces\":[{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":10,\"z\":10},\"end\":{\"x\":-10,\"y\":10,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":-10,\"y\":10,\"z\":10},\"end\":{\"x\":-10,\"y\":-10,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":-10,\"y\":-10,\"z\":10},\"end\":{\"x\":10,\"y\":-10,\"z\":10}},{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":-10,\"z\":10},\"end\":{\"x\":10,\"y\":10,\"z\":10}}],\"splitPiece\":false,\"id\":\"sketch:sketch-base:e1.2.3.4:top\",\"normal\":{\"x\":0,\"y\":0,\"z\":1},\"center\":{\"x\":0,\"y\":0,\"z\":10},\"area\":399.99999999999994}],\"joinType\":\"intersection\"}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-shell",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-skin\",\"type\":\"loft\",\"sections\":[{\"sketchId\":\"sketch-base\"},{\"sketchId\":\"sketch-top\"}],\"solid\":false},{\"id\":\"feature-wall\",\"type\":\"thicken\",\"thickness\":\"wall_t\"}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-wall",
+                "name": "body.parametricBody2",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "var-wall",
+            "name": "wall_t",
+            "expression": "1.5 mm",
+            "type": "length",
+            "description": "wall thickness"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

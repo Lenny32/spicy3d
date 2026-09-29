@@ -106,6 +106,7 @@ export default {
         "command.feature.extrudeTarget": "Extrude from another body",
         "command.feature.revolve": "Revolve",
         "command.feature.loft": "Loft",
+        "command.feature.thicken": "Thicken",
         "command.feature.fillet": "Fillet",
         "command.feature.chamfer": "Chamfer",
         "command.feature.fuse": "Fuse",
@@ -116,6 +117,7 @@ export default {
         "command.feature.editExtrude": "Edit Extrude",
         "command.feature.editRevolve": "Edit Revolve",
         "command.feature.editLoft": "Edit Loft",
+        "command.feature.editThicken": "Edit Thicken",
         "command.feature.editFillet": "Edit Fillet",
         "command.feature.editChamfer": "Edit Chamfer",
         "command.create.folder": "Folder",
@@ -262,7 +264,7 @@ export default {
         "command.create.section": "Section",
         "command.create.sphere": "Sphere",
         "command.create.sweep": "Sweep",
-        "command.create.thickSolid": "Thicken",
+        "command.create.thickSolid": "Thicken (Direct)",
         "command.dimension.angle": "Angle",
         "command.dimension.distance": "Distance",
         "command.dimension.horizontalDistance": "Horizontal Distance",
@@ -388,7 +390,7 @@ export default {
         "command.modify.removeShapes": "Remove Shapes",
         "command.modify.rotate": "Rotate",
         "command.modify.sew": "Stitch",
-        "command.modify.shell": "Shell",
+        "command.modify.shell": "Shell (Direct)",
         "command.modify.repairShape": "Repair Shape",
         "command.modify.simplifyShape": "Simplify",
         "command.modify.checkShape": "Check Shape",
@@ -952,6 +954,8 @@ export default {
         "prompt.select.section": "Please select section",
         "prompt.select.loftSection":
             "Select the section profiles in loft order, one per sketch; Confirm when done",
+        "prompt.select.thickenOpenFaces":
+            "Select the faces to open, none for a closed hollow or a thickened surface; Confirm when done",
         "prompt.select.shape": "Please select shape",
         "prompt.select.sketch": "Please select a sketch",
         "prompt.select.solids": "Please select solids",
@@ -1028,6 +1032,10 @@ export default {
         "tooltip.create.revol": "Revolves the picked shapes into a fixed shape that does not update.",
         "tooltip.feature.loft":
             "Lofts a solid or surface through one sketch profile per section, in order. Stays linked: editing a sketch re-lofts the body.",
+        "tooltip.feature.thicken":
+            "Shells a solid (open faces optional) or thickens a surface into a solid. Stays linked: the wall follows the thickness and every change upstream.",
+        "tooltip.create.thickSolid": "Thickens the picked faces into a fixed solid that does not update.",
+        "tooltip.modify.shell": "Shells the picked solid into a fixed shape that does not update.",
         "toast.converter.error": "Converter error",
         "toast.converter.invalidColor": "The color is invalid",
         "toast.consumedTool.forbidden":

@@ -174,6 +174,17 @@ registerMergePayload("parametric.features", {
                         continuity: scalar,
                     },
                 },
+                // a thicken (parametric 5): the thickness is a parameter; the open faces are one pick
+                thicken: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        thickness: expression,
+                        joinType: scalar,
+                        mode: scalar,
+                        openFaces: profiles,
+                    },
+                },
                 // an extrude hosted in another body, applied here (parametric 2): the host and the
                 // extrude in it name one thing together — one value
                 extrudeTarget: {

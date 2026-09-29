@@ -36,6 +36,7 @@ describe("parametricTools", () => {
             "loft",
             "fillet",
             "chamfer",
+            "thicken",
             "boolean",
             "editFeature",
             "features",

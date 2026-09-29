@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 4 (loft)", () => {
+describe("parametric format 5 (thicken)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(4);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(4);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(5);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(5);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -22,6 +22,8 @@ describe("parametric format 4 (loft)", () => {
         ["v1/rich.json", 1],
         ["v1/parametric2-extrude-targets.json", 2],
         ["v1/parametric3-extrude-extents.json", 3],
+        ["v1/parametric4-loft.json", 4],
+        ["v2/construction-expressions.json", 4],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -30,7 +32,7 @@ describe("parametric format 4 (loft)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 4 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 5 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
@@ -62,7 +64,7 @@ describe("parametric format 4 (loft)", () => {
         expect(extents.sort()).toEqual(["throughAll", "toObject"]);
     });
 
-    test("a parametric 4 document with lofts needs no migration", () => {
+    test("a parametric 4 document keeps its lofts through the migration", () => {
         const { data } = fixture("v1/parametric4-loft.json");
         expect(data["moduleVersions"]).toMatchObject({ parametric: 4 });
 
@@ -77,6 +79,25 @@ describe("parametric format 4 (loft)", () => {
         expect(lofts).toEqual([
             ["loft", 3],
             ["loft", 2],
+        ]);
+    });
+
+    test("a parametric 5 document with thickens needs no migration", () => {
+        const { data } = fixture("v2/parametric5-thicken.json");
+        expect(data["moduleVersions"]).toMatchObject({ parametric: 5 });
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const thickens = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "ParametricBodyNode")
+            .flatMap((x: any) => JSON.parse(x.featuresJson))
+            .filter((x: any) => x.type === "thicken")
+            .map((x: any) => [x.thickness, x.openFaces?.length ?? 0]);
+        expect(thickens).toEqual([
+            ["-wall_t", 1],
+            ["wall_t", 0],
         ]);
     });
 });
