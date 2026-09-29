@@ -182,29 +182,64 @@ function nearEndpoint(edgePoints: [XYZ, XYZ], point: XYZ): boolean {
 }
 
 export function groupConnected(edges: IEdge[]): IEdge[][] {
-    const remaining = [...edges];
+    const neighbours = edgeNeighbours(edges);
+    const grouped = new Array<boolean>(edges.length).fill(false);
     const groups: IEdge[][] = [];
-    while (remaining.length > 0) {
+    for (let seed = 0; seed < edges.length; seed++) {
+        if (grouped[seed]) continue;
         // Seed each group from the first remaining edge — the lowest entity — so groups
         // come out in entity order. That order is stable under append: a newly added
         // entity carries a higher id and lands in a group after the existing ones, so
         // existing profiles keep their positional index — the fallback seed when
         // entity ids are unavailable, and the occurrence order behind the `~n`
         // suffix telling apart profiles bounded by the same entity set.
-        const group = [remaining.shift()!];
-        let grew = true;
-        while (grew) {
-            grew = false;
-            for (let i = remaining.length - 1; i >= 0; i--) {
-                if (touches(group, remaining[i])) {
-                    group.push(remaining.splice(i, 1)[0]);
-                    grew = true;
-                }
-            }
+        grouped[seed] = true;
+        const group = [seed];
+        // Edge order inside a group is kept as the historical scan produced it: passes
+        // over the remaining edges from the highest index down, each taking every edge
+        // touching the group so far. The next edge that scan takes is the highest
+        // touching edge below the scan position, or — once none is left below it — the
+        // highest one overall, starting the next pass.
+        const frontier = new Set<number>();
+        const reach = (edge: number) => {
+            for (const next of neighbours[edge]) if (!grouped[next]) frontier.add(next);
+        };
+        reach(seed);
+        let cursor = Number.POSITIVE_INFINITY;
+        while (frontier.size > 0) {
+            let next = highestBelow(frontier, cursor);
+            if (next < 0) next = highestBelow(frontier, Number.POSITIVE_INFINITY);
+            frontier.delete(next);
+            grouped[next] = true;
+            group.push(next);
+            reach(next);
+            cursor = next;
         }
-        groups.push(group);
+        groups.push(group.map((index) => edges[index]));
     }
     return groups;
+}
+
+function highestBelow(indexes: Set<number>, limit: number): number {
+    let best = -1;
+    for (const index of indexes) if (index < limit && index > best) best = index;
+    return best;
+}
+
+/** For each edge, the other edges sharing a coinciding endpoint with it, found through a grid index. */
+function edgeNeighbours(edges: IEdge[]): number[][] {
+    const points = edges.flatMap((edge) => endpoints(edge));
+    const index = new PointGrid(points);
+    return edges.map((_, edge) => {
+        const found = new Set<number>();
+        for (const point of [points[2 * edge], points[2 * edge + 1]]) {
+            index.forEachCoinciding(point, (other) => {
+                const otherEdge = other >> 1;
+                if (otherEdge !== edge) found.add(otherEdge);
+            });
+        }
+        return [...found];
+    });
 }
 
 /**
@@ -214,19 +249,56 @@ export function groupConnected(edges: IEdge[]): IEdge[][] {
  * be chained into one wire, so `sketchProfiles` routes it through the kernel.
  */
 export function hasBranchVertex(group: IEdge[]): boolean {
-    const endpoints = group.flatMap((edge) => [edge.startPoint(), edge.endPoint()]);
-    for (let i = 0; i < endpoints.length; i++) {
+    const points = group.flatMap((edge) => endpoints(edge));
+    const index = new PointGrid(points);
+    return points.some((point) => {
         let count = 0;
-        for (let j = 0; j < endpoints.length; j++) {
-            if (coincides(endpoints[i], endpoints[j])) count++;
-        }
-        if (count > 2) return true;
-    }
-    return false;
+        index.forEachCoinciding(point, () => count++);
+        return count > 2;
+    });
 }
 
-function touches(group: IEdge[], edge: IEdge): boolean {
-    return group.some((x) => endpoints(x).some((a) => endpoints(edge).some((b) => coincides(a, b))));
+/**
+ * Points bucketed on a grid of `Precision.Distance` cells. Two points that `coincide`
+ * differ by less than one cell on every axis, so the coinciding points of a query all
+ * sit in the 27 cells around it — endpoint matching stays near-linear instead of
+ * comparing every pair.
+ */
+class PointGrid {
+    private readonly cells = new Map<string, number[]>();
+
+    constructor(private readonly points: XYZ[]) {
+        points.forEach((point, index) => {
+            const key = cellKey(cell(point.x), cell(point.y), cell(point.z));
+            const bucket = this.cells.get(key);
+            if (bucket) bucket.push(index);
+            else this.cells.set(key, [index]);
+        });
+    }
+
+    /** Calls `visit` with the index of every point coinciding with `point` (itself included when indexed). */
+    forEachCoinciding(point: XYZ, visit: (index: number) => void): void {
+        const [cx, cy, cz] = [cell(point.x), cell(point.y), cell(point.z)];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const bucket = this.cells.get(cellKey(cx + dx, cy + dy, cz + dz));
+                    if (!bucket) continue;
+                    for (const index of bucket) {
+                        if (coincides(point, this.points[index])) visit(index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+function cell(value: number): number {
+    return Math.floor(value / Precision.Distance);
+}
+
+function cellKey(x: number, y: number, z: number): string {
+    return `${x},${y},${z}`;
 }
 
 function endpoints(edge: IEdge): [XYZ, XYZ] {

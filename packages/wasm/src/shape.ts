@@ -516,6 +516,7 @@ export class OccEdge extends OccShape implements IEdge {
         }
         this._shape = wasm.Edge.fromCurve(curve.curve);
         this._mesh = undefined;
+        this._ends = undefined;
     }
 
     intersect(other: IEdge | Line): { parameter: number; point: XYZ }[] {
@@ -554,17 +555,25 @@ export class OccEdge extends OccShape implements IEdge {
         return toXYZ(wasm.Edge.pointAt(this.edge, parameter));
     }
 
+    // Endpoints are kernel queries hit in O(n²) loops (sketch profile grouping), so both
+    // are fetched in one call and kept until the geometry or placement changes.
+    private _ends: [start: XYZ, end: XYZ] | undefined;
+
     startPoint(): XYZ {
-        return toXYZ(wasm.Edge.startPoint(this.edge));
+        return this.ends()[0];
     }
 
     endPoint(): XYZ {
-        return toXYZ(wasm.Edge.endPoint(this.edge));
+        return this.ends()[1];
     }
 
     ends(): [start: XYZ, end: XYZ] {
-        const points = wasm.Edge.ends(this.edge);
-        return [toXYZ(points[0]), toXYZ(points[1])];
+        if (!this._ends) {
+            const points = wasm.Edge.ends(this.edge);
+            this._ends = [toXYZ(points[0]), toXYZ(points[1])];
+        }
+        // A fresh tuple so callers cannot swap the cached entries.
+        return [this._ends[0], this._ends[1]];
     }
 
     private _curve: ITrimmedCurve | undefined;
@@ -578,6 +587,7 @@ export class OccEdge extends OccShape implements IEdge {
 
     protected override onTransformChanged(): void {
         super.onTransformChanged();
+        this._ends = undefined;
         if (this._curve) {
             this._curve.dispose();
             this._curve = undefined;
