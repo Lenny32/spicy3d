@@ -49,7 +49,7 @@ docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web
 docker compose pull && docker compose up    # compose.yml: the published image, same options
 ```
 
-The GitHub workflow **Deploy** (push to `develop`, or manual with an optional version) picks the
+The GitHub workflow **Deploy** (manual runs only, never on push; optional version) picks the
 version from the repository's release tags `X.Y.Z`, not from `package.json`: empty = the highest one
 with its patch number bumped (`0.0.1` → `0.0.2`, `0.1.0` → `0.1.1`; `0.0.1` when there is none,
 pre-release tags ignored), an explicit version must be semver and not a tag yet. It builds and tests

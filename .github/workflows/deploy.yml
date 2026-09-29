@@ -3,9 +3,8 @@ name: Deploy
 # Continuous delivery: builds the web application, deploys it to GitHub Pages and publishes it as a
 # Docker image.
 #
-# - Push to develop or manual run (Actions > Deploy > Run workflow): tests, builds and deploys the
-#   site. A manual run asks for the version; empty (and every push) = the last release tag with its
-#   patch number bumped (0.0.1 -> 0.0.2, 0.1.0 -> 0.1.1; 0.0.1 when there is none). An explicit
+# - Manual run only (Actions > Deploy > Run workflow), never on push: tests, builds and deploys the
+#   site. The run asks for the version; empty = the last release tag with its patch number bumped (0.0.1 -> 0.0.2, 0.1.0 -> 0.1.1; 0.0.1 when there is none). An explicit
 #   version that is already a tag fails the run.
 # - Versions: the release tags `X.Y.Z` in this repository, nothing in package.json. Job `docker`
 #   creates the tag on the built commit before pushing the image; the app shows the version
@@ -22,8 +21,6 @@ name: Deploy
 # One-time setup: Settings > Pages > Source = "GitHub Actions".
 
 on:
-    push:
-        branches: ["develop"]
     workflow_dispatch:
         inputs:
             version:
