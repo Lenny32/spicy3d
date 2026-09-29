@@ -668,6 +668,31 @@ describe("OccEdge", () => {
         expect(start.x).toBeCloseTo(0);
         expect(end.x).toBeCloseTo(10);
     });
+
+    test("endpoints are read from the kernel once until the edge moves", () => {
+        const edge = unwrapOk(factory.line(XYZ.zero, new XYZ({ x: 10, y: 0, z: 0 }))) as OccEdge;
+        const spy = rs.spyOn(wasm.Edge, "ends");
+        try {
+            edge.startPoint();
+            edge.endPoint();
+            edge.ends();
+            expect(spy).toHaveBeenCalledTimes(1);
+
+            edge.matrix = Matrix4.fromTranslation(0, 5, 0);
+            expect(edge.startPoint().y).toBeCloseTo(5);
+            expect(edge.endPoint().y).toBeCloseTo(5);
+            expect(spy).toHaveBeenCalledTimes(2);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    test("ends hands out a fresh tuple each call", () => {
+        const edge = unwrapOk(factory.line(XYZ.zero, new XYZ({ x: 10, y: 0, z: 0 }))) as OccEdge;
+        const ends = edge.ends();
+        ends[0] = ends[1];
+        expect(edge.startPoint().x).toBeCloseTo(0);
+    });
 });
 
 // ============================================================================
