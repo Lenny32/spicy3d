@@ -68,7 +68,8 @@ export class RevolveEditCommand extends CancelableCommand {
         const feature = body.features[index];
         if (feature?.type !== "revolve") return;
 
-        this.setPrivateValue("angle", feature.angle);
+        // Published: the options tab is already open (`beforeExecute`) and must show it.
+        this.setProperty("angle", feature.angle);
         const preview = new FeatureChainPreview(body, index);
         const data = this.angleData(body, feature, index, preview);
         if (data === undefined) {

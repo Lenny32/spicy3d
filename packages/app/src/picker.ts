@@ -58,7 +58,7 @@ export class Picker implements IPicker {
     ): Promise<VisualNode[]> {
         const multi = options?.multi ?? false;
         const handler = new NodeSelectionHandler(this.document, multi, controller, options?.nodeFilter);
-        await this.pickAsync(handler, prompt, controller, multi);
+        await this.pickAsync(handler, prompt, controller, multi, "select.default", { nodes: true });
         return this.document.selection.getSelectedNodes() as VisualNode[];
     }
 
@@ -68,12 +68,13 @@ export class Picker implements IPicker {
         controller: AsyncController,
         showControl: boolean,
         cursor: CursorType = "select.default",
+        control?: { nodes?: boolean },
     ): Promise<void> {
         const oldHandler = this.document.visual.eventHandler;
         this.document.visual.eventHandler = handler;
         PubSub.default.pub("viewCursor", cursor);
         PubSub.default.pub("statusBarTip", prompt);
-        if (showControl) PubSub.default.pub("showSelectionControl", controller);
+        if (showControl) PubSub.default.pub("showSelectionControl", controller, control);
 
         try {
             await new Promise<void>((resolve, reject) => {

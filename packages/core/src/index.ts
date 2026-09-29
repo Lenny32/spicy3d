@@ -30,6 +30,7 @@ export * from "./merge";
 export * from "./model";
 export * from "./modelManager";
 export * from "./navigation";
+export * from "./nodeList";
 export * from "./parameters";
 export * from "./plugin";
 export * from "./property";

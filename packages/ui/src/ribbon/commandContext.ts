@@ -16,6 +16,8 @@ import {
     type ICommand,
     type IDisposable,
     type IDocument,
+    type INode,
+    type INodeList,
     isCancelableCommand,
     isLengthProperty,
     LengthConverter,
@@ -50,6 +52,8 @@ import style from "./commandContext.module.css";
 
 export class CommandContext extends HTMLElement implements IDisposable {
     private readonly propMap: Map<string | number | symbol, [Property, HTMLElement][]> = new Map();
+    /** Controls that redraw themselves when their property changes (node lists). */
+    private readonly redraws: Map<string | number | symbol, () => void> = new Map();
     private readonly container = div({ className: style.container });
     private selectionControlContainer?: HTMLDivElement;
     private closeIcon?: HTMLElement;
@@ -89,7 +93,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
         }
     }
 
-    private readonly showSelectionControl = (controller: AsyncController) => {
+    private readonly showSelectionControl = (controller: AsyncController, options?: { nodes?: boolean }) => {
         if (this.selectionControlContainer) return;
         if (this.closeIcon) this.closeIcon.style.display = "none";
 
@@ -103,6 +107,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
                     textContent: new Localize("prompt.selectedCount"),
                 }),
             ),
+            ...(options?.nodes ? [this.selectedNodesDom()] : []),
             div(
                 { className: style.selectionButton, onclick: () => controller.success() },
                 svg({ icon: "icon-confirm" }),
@@ -134,6 +139,26 @@ export class CommandContext extends HTMLElement implements IDisposable {
         return countSpan;
     }
 
+    /**
+     * A node pick's selection as a list: each node with a remove button that deselects it
+     * (clicking it in the viewport or the tree adds it, as always).
+     */
+    private selectedNodesDom() {
+        const list = div({ className: style.nodeList });
+        if (!(this.command instanceof CancelableCommand)) return list;
+        const sel = this.command.document.selection;
+        const render = () => {
+            const nodes = sel.getSelectedNodes();
+            list.replaceChildren(
+                ...this.nodeItems({ nodes, remove: (node) => sel.setSelectedNodes([node], true) }),
+            );
+        };
+        render();
+        sel.onNodeChanged.sub(render);
+        this.selectionCountCleanups.push(() => sel.onNodeChanged.remove(render));
+        return list;
+    }
+
     private readonly clearSelectionControl = () => {
         this.selectionControlContainer?.remove();
         this.selectionControlContainer = undefined;
@@ -161,10 +186,12 @@ export class CommandContext extends HTMLElement implements IDisposable {
 
     dispose() {
         this.propMap.clear();
+        this.redraws.clear();
         this.disconnectedCallback();
     }
 
     private readonly onPropertyChanged = (property: string | number | symbol) => {
+        this.redraws.get(property)?.();
         if (this.propMap.has(property)) {
             const items = this.propMap.get(property)!;
             for (const [prop, control] of items) {
@@ -229,6 +256,8 @@ export class CommandContext extends HTMLElement implements IDisposable {
             return this.materialEditor(g, noType);
         } else if (g.type === "info") {
             return this.newInfo(g, noType);
+        } else if (g.type === "nodeList") {
+            return this.newNodeList(g, noType);
         } else if (g.combobox) {
             return this.newCombobox(g, g.combobox);
         }
@@ -273,19 +302,22 @@ export class CommandContext extends HTMLElement implements IDisposable {
             });
         });
 
-        return div(
-            label({ textContent: new Localize(g.display) }),
-            select(
-                {
-                    className: style.select,
-                    onchange: (e) => {
-                        combobox.selectedIndex = (e.target as HTMLSelectElement).selectedIndex;
-                        (this.command as any)[g.name] = combobox.selectedItem;
-                    },
+        const box = select(
+            {
+                className: style.select,
+                onchange: (e) => {
+                    combobox.selectedIndex = (e.target as HTMLSelectElement).selectedIndex;
+                    (this.command as any)[g.name] = combobox.selectedItem;
                 },
-                ...options,
-            ),
+            },
+            ...options,
         );
+        // The command can change the value itself (an edit session loading the stored one).
+        this.redraws.set(g.name, () => {
+            const index = combobox.items.indexOf((this.command as any)[g.name]);
+            if (index >= 0) box.selectedIndex = index;
+        });
+        return div(label({ textContent: new Localize(g.display) }), box);
     }
 
     /**
@@ -383,6 +415,60 @@ export class CommandContext extends HTMLElement implements IDisposable {
     /** A read-only line of text the command computes (e.g. what unit an export writes). */
     private newInfo(g: Property, noType: any) {
         return div(span({ className: style.info, textContent: new Binding(noType, g.name) }));
+    }
+
+    /** An `INodeList` property: its nodes and add toggle, redrawn whenever the command publishes a new list. */
+    private newNodeList(g: Property, noType: any) {
+        const caption = label();
+        const list = div({ className: style.nodeList });
+        const render = () => {
+            const value = noType[g.name] as INodeList | undefined;
+            caption.textContent = value?.label ?? I18n.translate(g.display);
+            list.replaceChildren(...(value === undefined ? [] : this.nodeItems(value)));
+        };
+        render();
+        this.redraws.set(g.name, render);
+        return div(caption, list);
+    }
+
+    /** One entry per node (its name, and a remove button unless it is fixed), then the add toggle. */
+    private nodeItems(list: INodeList): HTMLElement[] {
+        const fixed = new Set<INode>(list.fixed ?? []);
+        const items: HTMLElement[] = list.nodes.map((node) =>
+            div(
+                { className: style.nodeItem, title: node.name },
+                span({ className: style.nodeName, textContent: node.name }),
+                ...(fixed.has(node)
+                    ? []
+                    : [
+                          div(
+                              {
+                                  className: style.nodeRemove,
+                                  title: I18n.translate("option.command.nodeList.remove"),
+                                  onclick: (e: MouseEvent) => {
+                                      e.stopPropagation();
+                                      list.remove(node);
+                                  },
+                              },
+                              svg({ icon: "icon-cancel" }),
+                          ),
+                      ]),
+            ),
+        );
+        const add = list.add;
+        if (add !== undefined) {
+            items.push(
+                button({
+                    className: add.active ? `${style.nodeAdd} ${style.active}` : style.nodeAdd,
+                    title: I18n.translate("option.command.nodeList.add.tip"),
+                    textContent: new Localize(
+                        add.active ? "option.command.nodeList.adding" : "option.command.nodeList.add",
+                    ),
+                    onclick: () => add.toggle(),
+                }),
+            );
+        }
+        return items;
     }
 
     /** The unit lengths are typed in: the command's document's, millimetres without one. */

@@ -13,6 +13,7 @@ import {
     Ray,
     type ShapeMeshData,
     ShapeTypes,
+    type VisualShapeData,
     VisualStates,
     XY,
     XYZ,
@@ -569,6 +570,63 @@ describe("ExtrudeDragHandler", () => {
 
             expect(toggleTarget).not.toHaveBeenCalled();
             expect(handler.state.faces).toEqual([faceA, faceB]);
+        });
+
+        test("while Add is on, a plain click on a body toggles it instead of switching profiles", () => {
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const handler = new ExtrudeDragHandler(doc, controller, {
+                ...dragData([faceData(sketch)]),
+                depth: 5,
+                toggleTarget,
+                picksTarget: () => true,
+            });
+            const view = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [faceData(sketch), bodyFace(body)] as any,
+            });
+
+            handler.pointerDown(view, createPointerEvent());
+            handler.pointerUp(view, createPointerEvent());
+
+            // The sketch face is on top: a body is only what it lies on, so nothing is toggled…
+            expect(toggleTarget).not.toHaveBeenCalled();
+            // …and the click does not switch the profiles either.
+            expect(handler.state.node).toBe(sketch);
+            expect(handler.state.dist).toBe(5);
+
+            const bodyView = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [bodyFace(body)] as any,
+            });
+            handler.pointerDown(bodyView, createPointerEvent());
+            handler.pointerUp(bodyView, createPointerEvent());
+
+            expect(toggleTarget.mock.calls).toEqual([[body]]);
+            expect(handler.state.dist).toBe(5);
+        });
+
+        test("while Add is on, a click never picks the to-object face", () => {
+            const body = new ParametricBodyNode({ document: doc, features: [] });
+            const toggleTarget = rs.fn((_node: INode) => true);
+            const pickExtentFace = rs.fn((_face: VisualShapeData) => true);
+            const handler = new ExtrudeDragHandler(doc, controller, {
+                ...dragData([faceData(sketch)]),
+                toggleTarget,
+                picksTarget: () => true,
+                picksExtentFace: () => true,
+                pickExtentFace,
+            });
+            const view = createHandlerMockView({
+                document: doc,
+                detectShapes: () => [bodyFace(body)] as any,
+            });
+
+            handler.pointerDown(view, createPointerEvent());
+            handler.pointerUp(view, createPointerEvent());
+
+            expect(pickExtentFace).not.toHaveBeenCalled();
+            expect(toggleTarget.mock.calls).toEqual([[body]]);
         });
     });
 

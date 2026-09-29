@@ -13,12 +13,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     type AsyncController,
+    type ICommand,
     type IEventHandler,
     type IFace,
     type IPicker,
     Matrix4,
     migrateDocument,
+    type Observable,
     Plane,
+    PubSub,
     ShapeTypes,
     Transaction,
     XYZ,
@@ -242,6 +245,75 @@ describe("an extrude through two bodies", () => {
         expect(s.left.features).toHaveLength(1);
         expect(s.right.features).toHaveLength(1);
         expect(s.doc.modelManager.findNodes((n) => n instanceof ParametricBodyNode)).toHaveLength(3);
+    });
+
+    test("the options tab lists both bodies; removing one there leaves it out", () => {
+        const s = scene();
+        const { cmd, preview, commit } = slotCommand(s, slotSketch(s), -5);
+        preview();
+
+        expect(cmd.listsTargets).toBe(true);
+        const list = cmd.targetList!;
+        expect(list.label).toBe(extrudeTargetsInfo("cut", 2));
+        expect(list.nodes).toEqual([s.left, s.right]);
+        expect(list.fixed).toBeUndefined();
+        expect(list.add?.active).toBe(false);
+
+        list.remove(s.right);
+        preview();
+        expect(cmd.targetList!.nodes).toEqual([s.left]);
+        commit();
+
+        expect(s.right.features).toHaveLength(1);
+        expect(volume(s.right)).toBeCloseTo(BLOCK, 3);
+        expect(volume(s.left)).toBeCloseTo(BLOCK - SLOT_SHARE, 3);
+    });
+
+    test("with every body removed the list stays, empty, so one can be added back", () => {
+        const s = scene();
+        const { cmd, preview } = slotCommand(s, slotSketch(s), -5);
+        preview();
+        cmd.targetList!.remove(s.left);
+        preview();
+        cmd.targetList!.remove(s.right);
+        preview();
+
+        expect(cmd.hasTargets).toBe(false);
+        expect(cmd.listsTargets).toBe(true);
+        expect(cmd.targetList!.nodes).toEqual([]);
+        expect(cmd.targetList!.label).toBeUndefined();
+
+        (cmd as any).toggleTarget(s.right);
+        preview();
+        expect(cmd.targetList!.nodes).toEqual([s.right]);
+    });
+
+    test("Add turns plain clicks on bodies into target toggles until it is turned off", () => {
+        const s = scene();
+        const { cmd, preview } = slotCommand(s, slotSketch(s), -5);
+        preview();
+        const picksTarget = (cmd as any).getDragData().picksTarget as () => boolean;
+        expect(picksTarget()).toBe(false);
+
+        cmd.targetList!.add!.toggle();
+        expect(picksTarget()).toBe(true);
+        expect(cmd.targetList!.add!.active).toBe(true);
+        // A rebuild keeps it on.
+        preview();
+        expect(cmd.targetList!.add!.active).toBe(true);
+
+        cmd.targetList!.add!.toggle();
+        expect(picksTarget()).toBe(false);
+        expect(cmd.targetList!.add!.active).toBe(false);
+    });
+
+    test("a new-body extrude lists no bodies", () => {
+        const s = scene();
+        const { cmd, preview } = slotCommand(s, slotSketch(s), -5, "option.command.operation.new");
+        preview();
+
+        expect(cmd.listsTargets).toBe(false);
+        expect(cmd.targetList).toBeUndefined();
     });
 
     test("a Ctrl+clicked body the tool does not reach is added (a cut there changes nothing)", () => {
@@ -491,6 +563,60 @@ describe("the edit session's target list", () => {
 
         expect((s.left.features[1] as ExtrudeFeatureData).depth).toBe(-8);
         expect(volume(s.right)).toBeCloseTo(BLOCK - 800, 3);
+    });
+
+    test("lists the host (fixed) and the other target; removing it there takes its entry off", async () => {
+        const s = scene();
+        slotCommand(s, slotSketch(s), -5).commit();
+        const slot = s.left.features[1] as ExtrudeFeatureData;
+        let nodes: readonly unknown[] = [];
+        let fixed: readonly unknown[] | undefined;
+        let label: string | undefined;
+        let after: readonly unknown[] = [];
+        let adding: boolean | undefined;
+        s.drive((handler) => {
+            const command = s.app.executingCommand as ExtrudeEditCommand;
+            const list = command.targetList!;
+            nodes = list.nodes;
+            fixed = list.fixed;
+            label = list.label;
+            list.remove(s.right);
+            after = command.targetList!.nodes;
+            command.targetList!.add!.toggle();
+            adding = (handler as any).data.picksTarget();
+            confirm(s, handler);
+        });
+
+        await s.left.editFeature(slot.id);
+
+        expect(nodes).toEqual([s.left, s.right]);
+        expect(fixed).toEqual([s.left]);
+        expect(label).toBe(extrudeTargetsInfo("cut", 2));
+        expect(after).toEqual([s.left]);
+        expect(adding).toBe(true);
+        expect(s.right.features).toHaveLength(1);
+        expect(volume(s.right)).toBeCloseTo(BLOCK, 3);
+    });
+
+    test("the stored values reach the options tab, which is open before the session loads them", async () => {
+        const s = scene();
+        slotCommand(s, slotSketch(s), -5).commit();
+        const slot = s.left.features[1] as ExtrudeFeatureData;
+        const changed: (string | number | symbol)[] = [];
+        const watch = (command: ICommand) => {
+            (command as unknown as Observable).onPropertyChanged((property) => changed.push(property));
+        };
+        PubSub.default.sub("openCommandContext", watch);
+        try {
+            s.drive((handler) => confirm(s, handler));
+            await s.left.editFeature(slot.id);
+        } finally {
+            PubSub.default.remove("openCommandContext", watch);
+        }
+
+        for (const property of ["combines", "targetList"]) {
+            expect(changed).toContain(property);
+        }
     });
 
     test("the host cannot be Ctrl+clicked out: the extrude lives in its list", async () => {

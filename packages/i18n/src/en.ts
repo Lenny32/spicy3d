@@ -882,6 +882,11 @@ export default {
         "option.command.targets.intersect{0}": "Objects to intersect: {0}",
         "option.command.targets.one": "1 body",
         "option.command.targets.many{0}": "{0} bodies",
+        "option.command.nodeList.add": "+ Add",
+        "option.command.nodeList.adding": "Done adding",
+        "option.command.nodeList.add.tip":
+            "Click bodies in the view to add or remove them (Ctrl+click works at any time)",
+        "option.command.nodeList.remove": "Remove",
         "option.command.patternType": "Pattern Type",
         "option.command.patternType.circular": "Circular",
         "option.command.patternType.curve": "Along Curve",

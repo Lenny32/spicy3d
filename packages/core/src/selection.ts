@@ -59,11 +59,13 @@ export interface IPicker {
 
     pickNode(prompt: I18nKeys, controller: AsyncController, options?: PickNodeOptions): Promise<VisualNode[]>;
 
+    /** `control.nodes`: the selection control lists the picked nodes (see `showSelectionControl`). */
     pickAsync(
         handler: IEventHandler,
         prompt: I18nKeys,
         controller: AsyncController,
         showControl: boolean,
         cursor: CursorType,
+        control?: { nodes?: boolean },
     ): Promise<void>;
 }
