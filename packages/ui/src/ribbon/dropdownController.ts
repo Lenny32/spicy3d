@@ -26,7 +26,7 @@ export function getItemData(item: PushButton | CommandKeys): DropdownItemData {
         const data = CommandStore.getComandData(item);
         return {
             command: item,
-            icon: data?.icon ?? ("icon-command" as CommandIcon),
+            icon: data?.icon ?? ("icon-box" as CommandIcon),
             display: (data ? `command.${data.key}` : item) as I18nKeys,
             onClick: () => PubSub.default.pub("executeCommand", item),
         };
