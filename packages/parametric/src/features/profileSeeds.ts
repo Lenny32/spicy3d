@@ -4,6 +4,7 @@
 import type { IEdge, IFace, XYZLike } from "@spicy3d/core";
 import { profileEdgeEntityIds, profileEntityIds } from "./profileEntities";
 import { captureRegionFingerprint } from "./profileRef";
+import { MATCH_TOLERANCE } from "./refGeometry";
 
 /**
  * Content-derived seed keys for profile regions and their boundary edges.
@@ -52,12 +53,26 @@ export function profileSeeds(all: IFace[]): string[] {
     return seeds;
 }
 
-/** Region-fingerprint order (bbox center, then area) — the tiebreak recipe of `matchProfileIndexes`. */
+/**
+ * Region-fingerprint order (bbox center, then area) — the tiebreak recipe of `matchProfileIndexes`.
+ * Coordinates within `MATCH_TOLERANCE` count as equal, so regions aligned on an axis (two
+ * crossing circles stacked vertically share their center x) are ordered by the next
+ * coordinate, not by floating-point noise of the box computation.
+ */
 function compareRegionFingerprints(
     a: { center: XYZLike; area: number },
     b: { center: XYZLike; area: number },
 ): number {
-    return a.center.x - b.center.x || a.center.y - b.center.y || a.center.z - b.center.z || a.area - b.area;
+    return (
+        compareCoordinate(a.center.x, b.center.x) ||
+        compareCoordinate(a.center.y, b.center.y) ||
+        compareCoordinate(a.center.z, b.center.z) ||
+        a.area - b.area
+    );
+}
+
+function compareCoordinate(a: number, b: number): number {
+    return Math.abs(a - b) <= MATCH_TOLERANCE ? 0 : a - b;
 }
 
 /**
