@@ -523,5 +523,111 @@ describe("TimelineBar", () => {
 
             expect(highlighter.removeCalls).toEqual([faceHighlight(visual, ShapeTypes.face, [2])]);
         });
+
+        test("hovering a step highlights what it made until the pointer leaves", () => {
+            const { document, bar, highlighter, visualOf } = setup();
+            const body = bodyNode("Body 1", [extrude("f1"), extrude("f2")], { f1: [0], f2: [1] });
+            const visual = visualOf(body);
+            document.modelManager.rootNode.add(body);
+            show(document);
+
+            entries(bar)[1].dispatchEvent(new MouseEvent("mouseenter"));
+            expect(highlighter.addCalls).toEqual([faceHighlight(visual, ShapeTypes.face, [1])]);
+
+            entries(bar)[1].dispatchEvent(new MouseEvent("mouseleave"));
+            expect(highlighter.removeCalls).toEqual([faceHighlight(visual, ShapeTypes.face, [1])]);
+        });
+
+        test("hovering another step stands in for the clicked one's highlight, which comes back", () => {
+            const { document, bar, highlighter, visualOf } = setup();
+            const body = bodyNode("Body 1", [extrude("f1"), extrude("f2")], { f1: [0], f2: [1] });
+            const visual = visualOf(body);
+            document.modelManager.rootNode.add(body);
+            show(document);
+            entries(bar)[0].click();
+
+            entries(bar)[1].dispatchEvent(new MouseEvent("mouseenter"));
+            expect(highlighter.removeCalls).toEqual([faceHighlight(visual, ShapeTypes.face, [0])]);
+            entries(bar)[1].dispatchEvent(new MouseEvent("mouseleave"));
+
+            expect(highlighter.addCalls).toEqual([
+                faceHighlight(visual, ShapeTypes.face, [0]),
+                faceHighlight(visual, ShapeTypes.face, [1]),
+                faceHighlight(visual, ShapeTypes.face, [0]),
+            ]);
+            expect(highlighter.removeCalls).toEqual([
+                faceHighlight(visual, ShapeTypes.face, [0]),
+                faceHighlight(visual, ShapeTypes.face, [1]),
+            ]);
+        });
+
+        test("a change to the document takes the hover highlight off", async () => {
+            const { document, bar, highlighter, visualOf } = setup();
+            const body = bodyNode("Body 1", [extrude("f1")], { f1: [2] });
+            const visual = visualOf(body);
+            document.modelManager.rootNode.add(body);
+            show(document);
+            entries(bar)[0].dispatchEvent(new MouseEvent("mouseenter"));
+
+            await commit(document);
+
+            expect(highlighter.removeCalls).toEqual([faceHighlight(visual, ShapeTypes.face, [2])]);
+        });
+    });
+
+    describe("mark", () => {
+        const marked = (bar: TimelineBar) =>
+            entries(bar).map((x) => x.classList.contains(style.selected) && x.getAttribute("aria-current"));
+
+        test("a click marks the step's icon, the next click moves it, the selection takes it off", () => {
+            const { document, bar } = setup();
+            document.modelManager.rootNode.add(bodyNode("Body 1", [extrude("f1"), extrude("f2")]));
+            show(document);
+            expect(marked(bar)).toEqual([false, false]);
+
+            entries(bar)[0].click();
+            expect(marked(bar)).toEqual(["true", false]);
+            entries(bar)[1].click();
+            expect(marked(bar)).toEqual([false, "true"]);
+
+            document.selection.setSelectedNodes([], false);
+            expect(marked(bar)).toEqual([false, false]);
+        });
+
+        test("an edited step stays marked through its session and across rebuilds", async () => {
+            const { document, bar } = setup();
+            const body = bodyNode("Body 1", [extrude("f1", { editable: true }), extrude("f2")]);
+            const other = iconNode("Box 1", "icon-box");
+            document.modelManager.rootNode.add(body, other);
+            show(document);
+
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            // The edit session empties the selection, and gives the body back when it ends.
+            document.selection.setSelectedNodes([], false);
+            expect(marked(bar)).toEqual(["true", false, false]);
+            await commit(document);
+            expect(marked(bar)).toEqual(["true", false, false]);
+            document.selection.setSelectedNodes([body], false);
+            expect(marked(bar)).toEqual(["true", false, false]);
+
+            // Past the session, the mark goes with the selection again.
+            document.selection.setSelectedNodes([], false);
+            expect(marked(bar)).toEqual([false, false, false]);
+        });
+
+        test("selecting another node takes an edited step's mark off", () => {
+            const { document, bar } = setup();
+            const other = iconNode("Box 1", "icon-box");
+            document.modelManager.rootNode.add(
+                bodyNode("Body 1", [extrude("f1", { editable: true })]),
+                other,
+            );
+            show(document);
+
+            entries(bar)[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+            document.selection.setSelectedNodes([other], false);
+
+            expect(marked(bar)).toEqual([false, false]);
+        });
     });
 });

@@ -28,19 +28,30 @@ const translate = (key: I18nKeys) => I18n.translate(key) ?? key;
 
 /**
  * The design history of the active document along the bottom of the viewport, Fusion-timeline
- * style: one icon per step (`documentTimeline`), its name on hover. The strip scrolls sideways
- * (the mouse wheel too) and follows new steps as they appear. Click selects the step's node (a
- * feature also opens in the body's feature list) and highlights what the step made in the
- * viewport; double-click edits it; right-click offers edit (the step, and the nodes a feature
- * holds, e.g. an extrude's sketch), suppress, rename and delete, each change one undo step.
+ * style: one icon per step (`documentTimeline`), its name on hover and what it made highlighted
+ * in the viewport. The strip scrolls sideways (the mouse wheel too) and follows new steps as they
+ * appear. Click selects the step's node (a feature also opens in the body's feature list), marks
+ * its icon and highlights what the step made; double-click edits it, the icon staying marked
+ * through the edit session; right-click offers edit (the step, and the nodes a feature holds,
+ * e.g. an extrude's sketch), suppress, rename and delete, each change one undo step.
  */
 export class TimelineBar extends HTMLElement {
     private readonly track = div({ className: style.track });
     private document?: IDocument;
     private keys = new Set<string>();
     private closeMenu: (() => void) | undefined;
-    /** Takes the clicked step's viewport highlight off again. */
-    private clearHighlight: (() => void) | undefined;
+    /**
+     * The clicked step's viewport highlight; `clear` takes it off, and is unset while a hovered
+     * step's highlight shows instead (both use the same highlight state, which does not stack).
+     */
+    private highlight: { entry: TimelineEntry; clear: (() => void) | undefined } | undefined;
+    /** Takes the hovered step's viewport highlight off again. */
+    private clearHover: (() => void) | undefined;
+    /**
+     * The clicked or edited step, whose icon is marked. `editing` keeps it through an edit
+     * session, which empties the selection, until its node is selected again.
+     */
+    private marked: { key: string; node: INode; editing: boolean } | undefined;
     private renderQueued = false;
 
     constructor(readonly app: IApplication) {
@@ -78,10 +89,11 @@ export class TimelineBar extends HTMLElement {
         if (document === this.document) return;
         this.unhighlight();
         this.document?.history.onChanged.remove(this.scheduleRender);
-        this.document?.selection.onNodeChanged.remove(this.unhighlight);
+        this.document?.selection.onNodeChanged.remove(this.handleSelectionChanged);
+        this.marked = undefined;
         this.document = document;
         this.document?.history.onChanged.sub(this.scheduleRender);
-        this.document?.selection.onNodeChanged.sub(this.unhighlight);
+        this.document?.selection.onNodeChanged.sub(this.handleSelectionChanged);
         // A document switch is not "new steps": the strip opens on the latest ones.
         this.keys = new Set();
         this.render();
@@ -110,6 +122,8 @@ export class TimelineBar extends HTMLElement {
         const items = entries.map((entry) => this.entryItem(entry));
         this.track.replaceChildren(...items);
         this.keys = new Set(entries.map((x) => x.key));
+        if (this.marked !== undefined && !this.keys.has(this.marked.key)) this.marked = undefined;
+        this.showMark();
         if (previous.size === 0) return;
         const added = items.findLast((_item, i) => !previous.has(entries[i].key));
         added?.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -129,6 +143,8 @@ export class TimelineBar extends HTMLElement {
                 title: this.tooltip(entry),
                 onclick: () => this.select(entry),
                 ondblclick: () => this.edit(entry),
+                onmouseenter: () => this.hover(entry),
+                onmouseleave: () => this.unhover(),
                 oncontextmenu: (e: MouseEvent) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -157,24 +173,79 @@ export class TimelineBar extends HTMLElement {
         this.track.scrollLeft += e.deltaY;
     };
 
-    /** Selects the step's node and highlights what the step made, until the selection changes. */
+    /**
+     * Selects the step's node, marks its icon and highlights what the step made, until the
+     * selection changes.
+     */
     private select(entry: TimelineEntry) {
         const document = this.document;
         if (document === undefined) return;
         revealTimelineEntry(document, entry);
         // After the selection, whose change takes the previous highlight off.
         this.unhighlight();
-        this.clearHighlight = highlightTimelineEntry(document, entry);
+        this.highlight = { entry, clear: highlightTimelineEntry(document, entry) };
+        this.mark(entry, false);
         document.visual.update();
     }
 
+    private readonly handleSelectionChanged = (nodes: INode[]) => {
+        this.unhighlight();
+        const marked = this.marked;
+        if (marked === undefined) return;
+        if (nodes.includes(marked.node)) marked.editing = false;
+        else if (nodes.length > 0 || !marked.editing) this.mark(undefined);
+    };
+
+    private mark(entry: TimelineEntry | undefined, editing = false) {
+        this.marked = entry === undefined ? undefined : { key: entry.key, node: entry.node, editing };
+        this.showMark();
+    }
+
+    private showMark() {
+        for (const item of this.track.children) {
+            const marked = (item as HTMLElement).dataset["key"] === this.marked?.key;
+            item.classList.toggle(style.selected, marked);
+            if (marked) item.setAttribute("aria-current", "true");
+            else item.removeAttribute("aria-current");
+        }
+    }
+
     private readonly unhighlight = () => {
-        const clear = this.clearHighlight;
-        if (clear === undefined) return;
-        this.clearHighlight = undefined;
-        clear();
+        this.endHover();
+        const highlight = this.highlight;
+        if (highlight === undefined) return;
+        this.highlight = undefined;
+        highlight.clear?.();
         this.document?.visual.update();
     };
+
+    /** Highlights what the hovered step made, in place of the clicked step's highlight. */
+    private hover(entry: TimelineEntry) {
+        const document = this.document;
+        if (document === undefined) return;
+        this.endHover();
+        const highlight = this.highlight;
+        highlight?.clear?.();
+        if (highlight !== undefined) highlight.clear = undefined;
+        this.clearHover = highlightTimelineEntry(document, entry);
+        document.visual.update();
+    }
+
+    /** Takes the hovered step's highlight off and puts the clicked step's back. */
+    private unhover() {
+        const document = this.document;
+        if (document === undefined || this.clearHover === undefined) return;
+        this.endHover();
+        const highlight = this.highlight;
+        if (highlight !== undefined) highlight.clear = highlightTimelineEntry(document, highlight.entry);
+        document.visual.update();
+    }
+
+    private endHover() {
+        const clear = this.clearHover;
+        this.clearHover = undefined;
+        clear?.();
+    }
 
     /**
      * Opens the step for editing: a feature that can be, in the interactive session it was
@@ -184,6 +255,7 @@ export class TimelineBar extends HTMLElement {
      */
     private edit(entry: TimelineEntry) {
         this.select(entry);
+        this.mark(entry, true);
         if (entry.kind === "node") this.open(entry.node);
         else if (entry.feature.editable) entry.node.editFeature?.(entry.feature.id);
     }
