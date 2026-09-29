@@ -120,6 +120,11 @@ export interface IFace extends IShape {
         tolerance?: number,
     ): Result<XYZ | undefined>;
     area(): number;
+    /**
+     * Point and outward unit normal at surface parameters (u, v), following the face orientation.
+     * The normal is the zero vector for a surface-less face or where the surface derivatives degenerate
+     * (|dS/du x dS/dv| <= 1e-12, e.g. at a sphere pole).
+     */
     normal(u: number, v: number): [point: XYZ, normal: XYZ];
     outerWire(): IWire;
     surface(): ISurface;

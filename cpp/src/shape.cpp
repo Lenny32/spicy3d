@@ -842,6 +842,14 @@ public:
         }
         BRepGProp_Face gpProp(face);
         gpProp.Normal(u, v, point, normal);
+        // BRepGProp_Face reports D1U ^ D1V; return a unit vector, or zeros where it degenerates.
+        // Same cutoff as MIN_NORMAL_LENGTH (1e-12 on the length) in packages/wasm/src/shape.ts.
+        constexpr double minNormalLength = 1e-12;
+        if (normal.SquareMagnitude() > minNormalLength * minNormalLength) {
+            normal.Normalize();
+        } else {
+            normal = gp_Vec(0, 0, 0);
+        }
     }
 
     static WireArray wires(const TopoDS_Face& face)

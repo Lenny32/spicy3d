@@ -44,7 +44,7 @@ import {
     serializable,
     type VertexMeshData,
     VisualConfig,
-    type XYZ,
+    XYZ,
     type XYZLike,
 } from "@spicy3d/core";
 import type {
@@ -686,6 +686,18 @@ export interface OccFaceOptions {
     id?: string;
 }
 
+// The kernel reports D1U ^ D1V, whose length depends on the surface parametrization.
+// Below this length the direction is numerically meaningless (e.g. a sphere pole).
+// Same cutoff as `minNormalLength` in Face::normal (cpp/src/shape.cpp); keep both in sync.
+export const MIN_NORMAL_LENGTH = 1e-12;
+
+export function unitOrZero(vector: XYZ): XYZ {
+    const length = vector.length();
+    return Number.isFinite(length) && length > MIN_NORMAL_LENGTH
+        ? new XYZ({ x: vector.x / length, y: vector.y / length, z: vector.z / length })
+        : new XYZ({ x: 0, y: 0, z: 0 });
+}
+
 @serializable({
     deserialize: occShapeDeserialize,
     serialize: occShapeSerialize,
@@ -738,7 +750,7 @@ export class OccFace extends OccShape implements IFace {
             const pnt = c(new wasm.gp_Pnt(0, 0, 0));
             const normal = c(new wasm.gp_Vec(0, 0, 0));
             wasm.Face.normal(this.shape, u, v, pnt, normal);
-            return [toXYZ(pnt), toXYZ(normal)];
+            return [toXYZ(pnt), unitOrZero(toXYZ(normal))];
         });
     }
 
