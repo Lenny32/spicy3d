@@ -57,6 +57,8 @@ export interface FeatureItem {
     readonly editable?: boolean;
     /** Nodes this feature holds (e.g. its sketch), shown as link rows above the parameters. */
     readonly references?: readonly FeatureReference[];
+    /** Ids of the nodes this feature reads (sketch, tools, other bodies); orders the timeline. */
+    readonly dependsOn?: readonly string[];
     readonly parameters: readonly FeatureParameter[];
 }
 
