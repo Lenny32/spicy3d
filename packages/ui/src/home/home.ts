@@ -12,6 +12,7 @@ import {
     type ExistingDocumentChoice,
     encodeDocumentFile,
     formatDateTime,
+    HomeBar,
     I18n,
     type I18nKeys,
     type IApplication,
@@ -263,6 +264,11 @@ export class Home extends HTMLElement {
     private rightSection() {
         return div(
             { className: style.right },
+            collection({
+                className: style.homeBarItems,
+                sources: HomeBar.items,
+                template: (item: HTMLElement) => item,
+            }),
             div(
                 { className: style.page },
                 div(

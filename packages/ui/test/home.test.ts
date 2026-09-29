@@ -10,6 +10,7 @@ import {
     type DocumentRepositoryError,
     formatDateTime,
     formatRelative,
+    HomeBar,
     type IApplication,
     PubSub,
     Result,
@@ -135,6 +136,22 @@ describe("home without the cloud", () => {
         expect(texts).not.toContain("home.import.button");
         expect(texts).not.toContain("cloud.document.saveToCloud");
         expect(texts).toContain("cloud.document.download");
+    });
+
+    test("shows the home bar items, live", async () => {
+        const early = document.createElement("span");
+        const late = document.createElement("span");
+        HomeBar.items.push(early);
+        try {
+            await render();
+            expect(home.contains(early)).toBe(true);
+            HomeBar.items.push(late);
+            expect(home.contains(late)).toBe(true);
+            HomeBar.items.remove(early);
+            expect(home.contains(early)).toBe(false);
+        } finally {
+            HomeBar.items.remove(early, late);
+        }
     });
 });
 
