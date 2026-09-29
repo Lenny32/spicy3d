@@ -75,6 +75,22 @@ import {
 } from "./helper";
 import { OccSurface } from "./surface";
 
+/** Answer of `checkSelfIntersection` when the loaded module has no such binding. */
+export const SELF_INTERSECTION_UNAVAILABLE = "Self-intersection check is not available in this kernel build";
+
+type SelfIntersectionCheck = (shape: TopoDS_Shape) => boolean;
+
+/**
+ * `Shape.checkSelfIntersection` of the loaded module, or undefined when the module predates it
+ * (a build older than the binding, as the committed binary is): feature-detected on each call.
+ */
+function selfIntersectionBinding(): SelfIntersectionCheck | undefined {
+    const shapeClass = wasm.Shape as unknown as { checkSelfIntersection?: unknown };
+    const check = shapeClass.checkSelfIntersection;
+    if (typeof check !== "function") return undefined;
+    return (shape) => Boolean(check.call(shapeClass, shape));
+}
+
 export interface OccShapeOptions {
     shape: TopoDS_Shape;
     id?: string;
@@ -265,6 +281,13 @@ export class OccShape implements IShape {
         if (!(other instanceof OccShape) || this.isNull() || other.isNull()) {
             return Result.err("Intersection requires two non-null OCCT shapes");
         }
+        // The kernel's boolean may raise on an invalid solid; do not call into it with one.
+        if (!this.checkShape()) {
+            return Result.err("Intersection volume: the target shape is invalid (checkShape is false)");
+        }
+        if (!other.checkShape()) {
+            return Result.err("Intersection volume: the other shape is invalid (checkShape is false)");
+        }
         const value = wasm.Shape.inspectionCommonVolume(this.shape, other.shape);
         return value == null || !Number.isFinite(value) || value < 0
             ? Result.err("Intersection volume is unavailable")
@@ -279,6 +302,9 @@ export class OccShape implements IShape {
                 this.shapeType !== ShapeTypes.compoundSolid)
         ) {
             return Result.err("Volume center requires a non-null solid or solid compound");
+        }
+        if (!this.checkShape()) {
+            return Result.err("Volume center: the shape is invalid (checkShape is false)");
         }
         const value = wasm.Shape.inspectionMass(this.shape);
         return value &&
@@ -431,6 +457,19 @@ export class OccShape implements IShape {
 
     checkShape(): boolean {
         return wasm.Shape.check(this.shape);
+    }
+
+    checkSelfIntersection(): Result<boolean> {
+        const check = selfIntersectionBinding();
+        if (!check) return Result.err(SELF_INTERSECTION_UNAVAILABLE);
+        if (this.isNull()) return Result.err("Self-intersection check requires a non-null shape");
+        try {
+            return Result.ok(check(this.shape));
+        } catch (err) {
+            return Result.err(
+                `CheckSelfIntersection failed: ${err instanceof Error ? err.message || err.name : String(err)}`,
+            );
+        }
     }
 
     checkFaces(): { index: number; isValid: boolean; status: string[] }[] {

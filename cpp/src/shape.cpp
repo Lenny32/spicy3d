@@ -4,6 +4,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include <BOPAlgo_ArgumentAnalyzer.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -106,6 +107,45 @@ class Shape {
                 return false;
         }
         return hasChild;
+    }
+
+    // BOPAlgo_ArgumentAnalyzer's self-interference test intersects faces pairwise, so the
+    // inspections run it on their inputs only below this many faces per shape; larger inputs
+    // skip it (BRepCheck_Analyzer still runs) and the caller can opt in with
+    // checkSelfIntersection.
+    static constexpr size_t SELF_INTERSECTION_FACE_LIMIT = 200;
+
+    // True when `shape` passes the self-interference test. Each solid is tested on its own,
+    // so solids of one compound that touch or overlap each other are not reported; a shape
+    // without solids is tested as a whole. A test that cannot complete (BOPAlgo_CheckUnknown)
+    // counts as a failure.
+    static bool selfIntersectionFree(const TopoDS_Shape& shape)
+    {
+        if (shape.IsNull())
+            return false;
+        auto testOne = [](const TopoDS_Shape& part) {
+            BOPAlgo_ArgumentAnalyzer analyzer;
+            analyzer.SetShape1(part);
+            analyzer.SelfInterMode() = Standard_True;
+            analyzer.StopOnFirstFaulty() = Standard_True;
+            analyzer.Perform();
+            return !analyzer.HasFaulty();
+        };
+        bool hasSolid = false;
+        for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) {
+            hasSolid = true;
+            if (!testOne(it.Current()))
+                return false;
+        }
+        return hasSolid || testOne(shape);
+    }
+
+    // The self-interference test of an inspection input: skipped (true) above the face limit.
+    static bool boundedSelfIntersectionFree(const TopoDS_Shape& shape)
+    {
+        if (countShape(shape, TopAbs_FACE) >= SELF_INTERSECTION_FACE_LIMIT)
+            return true;
+        return selfIntersectionFree(shape);
     }
 
 public:
@@ -253,9 +293,13 @@ public:
             || !BRepCheck_Analyzer(first).IsValid()
             || !BRepCheck_Analyzer(second).IsValid())
             return std::nullopt;
+        // BRepCheck_Analyzer does not test self-intersection, and the boolean may raise on a
+        // self-intersecting solid (an offset whose faces cross). Bounded, see the face limit.
+        if (!boundedSelfIntersectionFree(first) || !boundedSelfIntersectionFree(second))
+            return std::nullopt;
         BRepAlgoAPI_Common common(first, second);
         common.Build();
-        if (!common.IsDone() || common.Shape().IsNull())
+        if (!common.IsDone() || common.HasErrors() || common.Shape().IsNull())
             return std::nullopt;
         GProp_GProps props;
         BRepGProp::VolumeProperties(common.Shape(), props);
@@ -312,9 +356,12 @@ public:
             Vector3::toPnt(o).Translated(gp_Vec(normal).Multiplied(radius)));
         if (!halfSpace.IsDone() || halfSpace.Solid().IsNull())
             return TopoDS_Shape();
+        // As in inspectionCommonVolume: a self-intersecting solid may make the boolean raise.
+        if (!boundedSelfIntersectionFree(shape))
+            return TopoDS_Shape();
         BRepAlgoAPI_Common common(shape, halfSpace.Solid());
         common.Build();
-        if (!common.IsDone() || common.Shape().IsNull())
+        if (!common.IsDone() || common.HasErrors() || common.Shape().IsNull())
             return TopoDS_Shape();
         BRep_Builder builder;
         TopoDS_Compound caps;
@@ -352,6 +399,13 @@ public:
     {
         BRepCheck_Analyzer analyzer(shape);
         return analyzer.IsValid();
+    }
+
+    // True when `shape` has no self-intersection (see selfIntersectionFree). Not bounded:
+    // pairwise face intersection, expensive on shapes with many faces.
+    static bool checkSelfIntersection(const TopoDS_Shape& shape)
+    {
+        return selfIntersectionFree(shape);
     }
 
     static const char* checkStatusName(BRepCheck_Status status)
@@ -935,6 +989,7 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("splitShapes", guardedEntry<&Shape::splitShapes>("Shape.splitShapes"))
         .class_function("check", guardedEntry<&Shape::check>("Shape.check"))
         .class_function("checkFaces", guardedEntry<&Shape::checkFaces>("Shape.checkFaces"))
+        .class_function("checkSelfIntersection", guardedEntry<&Shape::checkSelfIntersection>("Shape.checkSelfIntersection"))
         .class_function("hlr", guardedEntry<&Shape::hlr>("Shape.hlr"))
         .class_function("shellSewing", guardedEntry<&Shape::shellSewing>("Shape.shellSewing"))
         .class_function("setTolerance", guardedEntry<&Shape::setTolerance>("Shape.setTolerance"))

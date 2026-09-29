@@ -57,8 +57,19 @@ export interface IShape extends IDisposable {
     inspectionMass?(): Result<{ volume: number; center: XYZ }>;
     /** Exact planar cap faces of the positive-side cut; empty compound if no cut. */
     inspectionSectionCaps?(plane: Plane): Result<IShape>;
+    /**
+     * Topology validity (BRepCheck_Analyzer). It does not test self-intersection. Run it on
+     * offset / thickened results before booleans or inspections.
+     */
     checkShape(): boolean;
     checkFaces(): { index: number; isValid: boolean; status: string[] }[];
+    /**
+     * true when the shape has no self-intersection (each solid tested on its own; a shape
+     * without solids as a whole), false when faces cross or the test could not complete. It
+     * intersects faces pairwise: expensive on shapes with many faces. An error when the kernel
+     * build has no such check.
+     */
+    checkSelfIntersection?(): Result<boolean>;
     fixShape(tolerance: number): IShape;
     fixSmallFace(tolerance: number): IShape;
     fixSolid(tolerance: number): IShape;

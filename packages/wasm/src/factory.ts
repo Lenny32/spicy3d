@@ -98,6 +98,18 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
     return res;
 }
 
+/**
+ * A thick solid the kernel answered is checked with `checkShape()` before it is handed out: an
+ * offset of steep, narrow faces can come back invalid, and a later boolean or inspection on it
+ * may raise inside the kernel. Newer kernel builds check it in C++ too; this covers older ones.
+ */
+function validThickSolid(result: Result<IShape, string>, op: string): Result<IShape, string> {
+    if (!result.isOk) return result;
+    if (result.value.checkShape()) return result;
+    result.value.dispose();
+    return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+}
+
 function convertShapesResult<P extends unknown[] = unknown[]>(
     factory: (...params: P) => ShapesResult,
     params: P,
@@ -753,9 +765,12 @@ export class ShapeFactory implements IShapeFactory {
         ) as Result<ICompound>;
     }
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape> {
-        return convertShapeResult(
-            wasm.ShapeFactory.makeThickSolidBySimple,
-            [ensureOccShape(shape)[0], thickness],
+        return validThickSolid(
+            convertShapeResult(
+                wasm.ShapeFactory.makeThickSolidBySimple,
+                [ensureOccShape(shape)[0], thickness],
+                "MakeThickSolidBySimple",
+            ),
             "MakeThickSolidBySimple",
         );
     }
@@ -767,16 +782,19 @@ export class ShapeFactory implements IShapeFactory {
         mode: OffsetMode = "skin",
         intersection: boolean = false,
     ): Result<IShape> {
-        return convertShapeResult(
-            wasm.ShapeFactory.makeThickSolidByJoin,
-            [
-                ensureOccShape(shape)[0],
-                ensureOccShape(closingFaces),
-                thickness,
-                getJoinType(joinType),
-                getOffsetMode(mode),
-                intersection,
-            ],
+        return validThickSolid(
+            convertShapeResult(
+                wasm.ShapeFactory.makeThickSolidByJoin,
+                [
+                    ensureOccShape(shape)[0],
+                    ensureOccShape(closingFaces),
+                    thickness,
+                    getJoinType(joinType),
+                    getOffsetMode(mode),
+                    intersection,
+                ],
+                "MakeThickSolidByJoin",
+            ),
             "MakeThickSolidByJoin",
         );
     }

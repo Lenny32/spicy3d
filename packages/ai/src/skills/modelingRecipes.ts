@@ -21,6 +21,11 @@ Fillet / chamfer workflow:
 - Identify the edges you want by geometry: query edge.ends (or edge.length, edge.curve) on candidates like e#0, e#1 — e.g. vertical edges have equal x/y at both ends; top edges have max z.
 - { method: "fillet", id: "f1", args: { shape: "body", edges: [<indices>], radius: 2 } } — the number in an edge ref e#3 IS the index for "edges". fillet consumes "body"; the result is the new node f1. Too-large radius fails — keep radius below half the smallest adjacent face dimension.
 
+Validity checks (offset / thickened results):
+- Run shape.checkShape on offset/thickened results (makeThickSolid*, offsets of lofted or swept skins) before booleans or inspections; the kernel cannot recover from a failed boolean on a self-intersecting solid. shape.checkFaces names the faulty faces.
+- checkShape does not test self-intersection (offset faces crossing at steep, narrow ends). shape.checkSelfIntersection does (true = none found); it is expensive on shapes with many faces, and older kernel builds answer an error "not available in this kernel build".
+- makeThickSolid* already fail with "Thick solid is invalid" when the result does not pass checkShape; shape.inspectionCommonVolume / shape.inspectionMass refuse an input that does not pass it.
+
 Flange (base plate + boss + bolt circle):
 1. base: box(plane at corner, dx, dy, dz) id "base".
 2. boss: cylinder(normal +Z, center at plate center on top face, radius r, dz h) id "boss".

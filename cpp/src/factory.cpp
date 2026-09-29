@@ -1627,6 +1627,21 @@ public:
         return "";
     }
 
+    // Empty text = the thick solid is valid. BRepOffset may answer IsDone() with a result whose
+    // offset faces cross (steep, narrow faces of an open shell); a later boolean or inspection
+    // on it may raise, so the cheap topology check runs here. Self-intersection is not tested
+    // (expensive): callers opt in with Shape.checkSelfIntersection.
+    static std::string thickSolidResultError(const TopoDS_Shape& result)
+    {
+        if (result.IsNull()) {
+            return "Failed to create thick solid: empty result";
+        }
+        if (!BRepCheck_Analyzer(result).IsValid()) {
+            return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
+        }
+        return "";
+    }
+
     static const char* offsetErrorName(BRepOffset_Error error)
     {
         switch (error) {
@@ -1668,6 +1683,10 @@ public:
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
+        std::string resultError = thickSolidResultError(makeThickSolid.Shape());
+        if (!resultError.empty()) {
+            return ShapeResult { TopoDS_Shape(), false, resultError };
+        }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }
 
@@ -1690,8 +1709,9 @@ public:
             return ShapeResult { TopoDS_Shape(), false,
                 std::string("Failed to create thick solid: ") + offsetErrorName(makeThickSolid.MakeOffset().Error()) };
         }
-        if (makeThickSolid.Shape().IsNull()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: empty result" };
+        std::string resultError = thickSolidResultError(makeThickSolid.Shape());
+        if (!resultError.empty()) {
+            return ShapeResult { TopoDS_Shape(), false, resultError };
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }
