@@ -3,6 +3,7 @@
 
 import {
     type ConstructionRef,
+    type Continuity,
     type FeatureParameter,
     type I18nKeys,
     type IDocument,
@@ -37,7 +38,8 @@ export type FeatureData =
     | FilletFeatureData
     | ChamferFeatureData
     | BooleanFeatureData
-    | ExtrudeTargetFeatureData;
+    | ExtrudeTargetFeatureData
+    | LoftFeatureData;
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";
@@ -128,6 +130,30 @@ export interface RevolveFeatureData extends FeatureBase {
      * empty revolves every closed profile of the sketch.
      */
     readonly profiles?: ProfileRef[];
+}
+
+/** One cross-section of a loft: a closed profile of a sketch. */
+export interface LoftSection {
+    readonly sketchId: string;
+    /** Fingerprint of the picked profile (`profileRef.ts`); absent = the sketch's only outer profile. */
+    readonly profile?: ProfileRef;
+}
+
+/**
+ * A loft through sketch profiles, one per section, in `sections` order (parametric format 4).
+ * Always starts a new body, like a revolve. Every section is a live reference: editing a
+ * section's sketch re-lofts.
+ */
+export interface LoftFeatureData extends FeatureBase {
+    readonly type: "loft";
+    /** At least two, each on its own plane. */
+    readonly sections: LoftSection[];
+    /** Capped ends (a solid) unless false (an open surface). */
+    readonly solid?: boolean;
+    /** Straight (ruled) faces between consecutive sections; absent = smooth. */
+    readonly ruled?: boolean;
+    /** Continuity of a smooth loft's surfaces; absent = C2. Ignored when `ruled`. */
+    readonly continuity?: Continuity;
 }
 
 export interface FilletFeatureData extends FeatureBase {

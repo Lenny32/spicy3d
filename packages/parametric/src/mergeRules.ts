@@ -157,6 +157,23 @@ registerMergePayload("parametric.features", {
                         consumeTools: scalar,
                     },
                 },
+                // a loft (parametric 4): the sections are one pick, in loft order — one value
+                loft: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        sections: {
+                            kind: "atomic",
+                            of: {
+                                kind: "object",
+                                fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
+                            },
+                        },
+                        solid: scalar,
+                        ruled: scalar,
+                        continuity: scalar,
+                    },
+                },
                 // an extrude hosted in another body, applied here (parametric 2): the host and the
                 // extrude in it name one thing together — one value
                 extrudeTarget: {

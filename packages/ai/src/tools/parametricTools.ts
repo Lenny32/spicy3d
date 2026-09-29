@@ -183,6 +183,7 @@ const OPS_SCHEMA = {
                 "sketch",
                 "extrude",
                 "revolve",
+                "loft",
                 "fillet",
                 "chamfer",
                 "boolean",
@@ -199,7 +200,7 @@ const OPS_SCHEMA = {
         id: {
             type: "string",
             description:
-                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/construct.",
+                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/construct.",
         },
         name: { type: "string", description: "Optional display name for the resulting node" },
         plane: {
@@ -250,12 +251,31 @@ const OPS_SCHEMA = {
             },
         },
         angle: { description: "Revolve angle in degrees (default 360)" },
+        sections: {
+            type: "array",
+            items: { type: "string" },
+            description:
+                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
+        },
+        solid: {
+            type: "boolean",
+            description: "Loft only: capped ends (default true); false = an open surface",
+        },
+        ruled: {
+            type: "boolean",
+            description: "Loft only: straight faces between sections (default smooth)",
+        },
+        continuity: {
+            type: "string",
+            enum: ["c0", "g1", "c1", "g2", "c2", "c3", "cn"],
+            description: "Loft only, not ruled: surface continuity (default c2)",
+        },
         body: { type: "string", description: "The body op id (or an existing body's node id)" },
         operation: {
             type: "string",
             enum: ["fuse", "cut", "common"],
             description:
-                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve has no join/cut form.)",
+                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve and loft have no join/cut form.)",
         },
         edgeIndexes: {
             type: "array",
@@ -308,7 +328,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, fillet, chamfer, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },

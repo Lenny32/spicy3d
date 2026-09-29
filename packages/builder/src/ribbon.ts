@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { RibbonTabKeys, RibbonTabProfile } from "@spicy3d/core";
+import type { CommandKeys, RibbonTabKeys, RibbonTabProfile } from "@spicy3d/core";
 
 /**
  * Fusion 360-style layout: workflow tabs, task-named groups. Only direct-modeling commands live
@@ -182,7 +182,14 @@ export const DefaultRibbon: RibbonTabProfile[] = [
 ];
 
 /** Extras may request insertion before an existing tab instead of appending. */
-export type RibbonProfileExtra = RibbonTabProfile & { before?: RibbonTabKeys };
+export type RibbonProfileExtra = RibbonTabProfile & {
+    before?: RibbonTabKeys;
+    /**
+     * Direct commands this tab's features stand in for (e.g. the direct loft beside the parametric
+     * one): moved from their group's items to its collapsed items, still reachable, never twice on show.
+     */
+    supersedes?: CommandKeys[];
+};
 
 /**
  * Ribbon contributions of the parametric module, applied by `AppBuilder.useParametric`.
@@ -194,7 +201,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
         groups: [
             {
                 groupName: "ribbon.group.create",
-                items: ["feature.extrude", "feature.revolve"],
+                items: ["feature.extrude", "feature.revolve", "feature.loft"],
             },
             {
                 groupName: "ribbon.group.modify",
@@ -206,6 +213,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                 collapsedItems: ["feature.variable"],
             },
         ],
+        supersedes: ["create.loft"],
     },
 ];
 
@@ -245,6 +253,15 @@ function mergeTab(result: RibbonTabProfile[], extra: RibbonProfileExtra): void {
         return;
     }
     tab.contextual = tab.contextual || extra.contextual;
+    for (const key of extra.supersedes ?? []) {
+        for (const group of tab.groups) {
+            const index = group.items.indexOf(key);
+            if (index < 0) continue;
+            group.items.splice(index, 1);
+            if (!group.collapsedItems?.includes(key))
+                group.collapsedItems = [...(group.collapsedItems ?? []), key];
+        }
+    }
     for (const group of extra.groups) {
         const existing = tab.groups.find((g) => g.groupName === group.groupName);
         if (existing === undefined) {

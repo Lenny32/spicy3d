@@ -33,6 +33,7 @@ describe("parametricTools", () => {
             "sketch",
             "extrude",
             "revolve",
+            "loft",
             "fillet",
             "chamfer",
             "boolean",

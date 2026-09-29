@@ -375,7 +375,7 @@ Every reference in the merged document must resolve:
 | material (`materialId`), component (`componentId`) | the id exists in `models.materials` / `models.components` |
 | sketch entity (`constraints[].refs[].entityId`) | an entity or external of the same merged sketch, or a datum id (−1, −2, −3) |
 | sketch constraint (`anchors[].id`) | a constraint of the same sketch (else dropped, above) |
-| tracked sub-shape id (`EdgeRef.edgeId`, `ProfileRef.id`, `PlaneFaceRef.faceId`, `ConstructionRef.trackedId`/`incidentEdgeIds`) | every `\|`-component names an existing source: `<featureId>:…` a feature of that body *before* the referring feature in the merged timeline (or any feature of it, for a reference from outside the body); `sketch:<sketchId>:…` (sweep seeds of an extrude / revolve) such a feature that swept that sketch; `tool:<nodeId>:…` an existing node |
+| tracked sub-shape id (`EdgeRef.edgeId`, `ProfileRef.id`, `PlaneFaceRef.faceId`, `ConstructionRef.trackedId`/`incidentEdgeIds`) | every `\|`-component names an existing source: `<featureId>:…` a feature of that body *before* the referring feature in the merged timeline (or any feature of it, for a reference from outside the body); `sketch:<sketchId>:…` (sweep seeds of an extrude / revolve / loft) such a feature that swept that sketch (a loft sweeps each of its sections' sketches); `tool:<nodeId>:…` an existing node |
 | sketch entity of a profile (`ProfileRef.entities`) | an entity of the feature's sketch |
 | variable name | unique in the merged table (below) |
 | variable (names in an expression: feature parameters, constraint `datum`/`datums`, variable expressions) | a variable of that name exists — for a variable's own expression, *above* it |
@@ -383,7 +383,7 @@ Every reference in the merged document must resolve:
 
 Tracked ids are derived from feature ids and kernel history (`trackedId.ts`, `operationIds.ts`:
 `<featureId>:<n>`, compounds `a|b`, `tool:<nodeId>:<n>`, sweep seeds `sketch:<sketchId>:<seed>…` from
-the swept sketch's entities, `extrude.ts` / `revolve.ts`), so their source is readable without the
+the swept sketch's entities, `extrude.ts` / `revolve.ts` / `loft.ts`), so their source is readable without the
 kernel. Whether a surviving source still produces *that* edge is the
 validation pass's question.
 
@@ -681,7 +681,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, extrudeTarget, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, extrudeTarget, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -756,6 +756,15 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `operation`: scalar
       - `toolIds`: atomic of ref → node
       - `consumeTools`: scalar
+    - `type: "loft"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `sections`: atomic of { sketchId: ref → node; profile: ref → profile }
+      - `solid`: scalar
+      - `ruled`: scalar
+      - `continuity`: scalar
     - `type: "extrudeTarget"`
       - `id`: scalar
       - `type`: scalar

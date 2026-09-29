@@ -6,6 +6,8 @@ import "./edgeCornerCommand";
 import "./edgeCornerEditCommand";
 import "./extrudeCommand";
 import "./extrudeEditCommand";
+import "./loftCommand";
+import "./loftEditCommand";
 import "./reselectCommand";
 import "./revolveCommand";
 import "./revolveEditCommand";

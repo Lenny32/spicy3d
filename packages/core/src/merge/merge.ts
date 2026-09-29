@@ -7,7 +7,7 @@ import { Result } from "../foundation/result";
 import type { Serialized } from "../serialize";
 import { diffViews } from "./diff";
 import { DocumentView, payloadProperties, type SideName, timelineProperty } from "./documentView";
-import { collectReferences, type ReferenceRecord, type TargetNames } from "./integrity";
+import { collectReferences, featureSketchIds, type ReferenceRecord, type TargetNames } from "./integrity";
 import { isRecord, type Json, type JsonEquality, PositionMarker } from "./json";
 import { itemLabel, joinPath, nodeLabel } from "./paths";
 import { type MergeRuleRegistry, MergeRules } from "./rules";
@@ -191,7 +191,7 @@ function targetNames(views: MergeViews, rules: MergeRuleRegistry): TargetNames {
         },
         sketchFeature: (body, sketchId) => {
             for (const view of order) {
-                const feature = view.features(body)?.find((f) => f["sketchId"] === sketchId);
+                const feature = view.features(body)?.find((f) => featureSketchIds(f).includes(sketchId));
                 if (feature !== undefined) return String(feature["id"]);
             }
             return undefined;

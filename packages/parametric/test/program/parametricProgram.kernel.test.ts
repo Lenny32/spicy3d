@@ -293,6 +293,65 @@ describe("extrude extents", () => {
     });
 });
 
+describe("loft", () => {
+    const sections: ParametricOp[] = [
+        { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 30 } },
+        { op: "sketch", id: "s1", plane: "XY", entities: rect(-10, -10, 10, 10) },
+        {
+            op: "sketch",
+            id: "s2",
+            plane: { construction: "p1" },
+            entities: [{ type: "circle", params: [0, 0, 6] }],
+        },
+    ];
+
+    test("lofts its sections into a clean body that follows a section edit", () => {
+        const doc = newDoc();
+        const result = run(doc, [...sections, { op: "loft", id: "b1", sections: ["s1", "s2"] }]);
+        const body = createdBody(doc, result, "b1");
+        expectClean(body);
+        expect(body.features[0]).toMatchObject({ type: "loft" });
+        expect(body.shape.unchecked()!.shapeType).toBe(ShapeTypes.solid);
+        expect(extent(body)).toEqual([-10, -10, 0, 10, 10, 30]);
+        const s1 = result.created.find((created) => created.id === "s1")!.nodeId;
+        expect((doc.modelManager.findNodes((n) => n.id === s1)[0] as SketchNode).visible).toBe(false);
+
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: s1,
+                actions: [{ action: "move", entities: [1, 2, 3, 4], delta: [5, 0] }],
+            } as ParametricOp,
+        ]);
+
+        expectClean(body);
+        expect(extent(body)[3]).toBeCloseTo(15, 3);
+    });
+
+    test("stores the options it was given", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            ...sections,
+            { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false, ruled: true },
+        ]);
+        const body = createdBody(doc, result, "b1");
+        expectClean(body);
+        expect(body.features[0]).toMatchObject({ solid: false, ruled: true });
+        expect(body.shape.unchecked()!.shapeType).not.toBe(ShapeTypes.solid);
+    });
+
+    test.each([
+        [[{ op: "loft", id: "b1", sections: ["s1"] }], "at least two sketches"],
+        [[{ op: "loft", id: "b1", sections: ["s1", "s2"], continuity: "c9" }], "continuity"],
+        [[{ op: "loft", id: "b1", sections: ["s1", "s1"] }], "same plane"],
+    ])("refuses %j and leaves nothing behind", (loft, message) => {
+        const doc = newDoc();
+        const before = nodeIds(doc);
+        expect(runExpectingFailure(doc, [...sections, ...(loft as ParametricOp[])])).toContain(message);
+        expect(nodeIds(doc)).toEqual(before);
+    });
+});
+
 describe("feature list editing", () => {
     test("a depth edit carries the geometry and editing back restores it exactly", () => {
         const doc = newDoc();
