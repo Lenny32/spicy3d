@@ -45,12 +45,12 @@ interface ApplicationCommand {
 const applicationCommands = new ObservableCollection<ApplicationCommand>(
     {
         display: "command.doc.new",
-        icon: "icon-plus",
+        icon: "icon-file-plus",
         onclick: () => PubSub.default.pub("executeCommand", "doc.new"),
     },
     {
         display: "command.doc.open",
-        icon: "icon-folder",
+        icon: "icon-folder-open",
         onclick: () => PubSub.default.pub("executeCommand", "doc.open"),
     },
 );

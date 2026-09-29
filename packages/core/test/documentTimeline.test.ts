@@ -59,7 +59,7 @@ describe("documentTimeline", () => {
         expect(entries.map((x) => [x.kind, x.key, x.icon])).toEqual([
             ["node", "sketch", "icon-sketch"],
             ["node", "box", "icon-box"],
-            ["node", "plain", "icon-box"],
+            ["node", "plain", "icon-shape"],
         ]);
     });
 

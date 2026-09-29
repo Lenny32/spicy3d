@@ -5,7 +5,7 @@ import { command } from "@spicy3d/core";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { SketchConstraintCommand } from "./sketchConstraints";
 
-@command({ key: "sketch.autoConstrain", icon: "icon-cEqual" })
+@command({ key: "sketch.autoConstrain", icon: "icon-autoDimension" })
 export class SketchAutoConstrainCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         editor.showDimensionReview();

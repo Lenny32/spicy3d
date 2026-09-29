@@ -148,7 +148,7 @@ export class RibbonUI extends HTMLElement {
             }),
             svg({
                 className: style.new,
-                icon: "icon-plus",
+                icon: "icon-file-plus",
                 title: I18n.translate("command.doc.new"),
                 onclick: () => PubSub.default.pub("executeCommand", "doc.new"),
             }),

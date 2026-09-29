@@ -724,88 +724,88 @@ abstract class CreateConstruction extends CancelableCommand {
     }
 }
 
-@command({ key: "construct.offsetPlane", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.offsetPlane", icon: "icon-offsetPlane" })
 export class OffsetPlaneCommand extends CreateConstruction {
     protected readonly toolName = "offsetPlane";
 }
-@command({ key: "construct.midplane", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.midplane", icon: "icon-midplane" })
 export class MidplaneCommand extends CreateConstruction {
     protected readonly toolName = "midplane";
 }
-@command({ key: "construct.planeAtAngle", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.planeAtAngle", icon: "icon-planeAtAngle" })
 export class PlaneAtAngleCommand extends CreateConstruction {
     protected readonly toolName = "planeAtAngle";
 }
-@command({ key: "construct.planeThroughTwoEdges", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.planeThroughTwoEdges", icon: "icon-planeThroughTwoEdges" })
 export class PlaneThroughTwoEdgesCommand extends CreateConstruction {
     protected readonly toolName = "planeThroughTwoEdges";
 }
-@command({ key: "construct.planeThroughThreePoints", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.planeThroughThreePoints", icon: "icon-planeThroughThreePoints" })
 export class PlaneThroughThreePointsCommand extends CreateConstruction {
     protected readonly toolName = "planeThroughThreePoints";
 }
-@command({ key: "construct.planeAlongPath", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.planeAlongPath", icon: "icon-planeAlongPath" })
 export class PlaneAlongPathCommand extends CreateConstruction {
     protected readonly toolName = "planeAlongPath";
 }
-@command({ key: "construct.tangentPlane", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.tangentPlane", icon: "icon-tangentPlane" })
 export class TangentPlaneCommand extends CreateConstruction {
     protected readonly toolName = "tangentPlane";
 }
-@command({ key: "construct.perpendicularPlane", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.perpendicularPlane", icon: "icon-perpendicularPlane" })
 export class PerpendicularPlaneCommand extends CreateConstruction {
     protected readonly toolName = "perpendicularPlane";
 }
-@command({ key: "construct.axisThroughCylinder", icon: "icon-line" })
+@command({ key: "construct.axisThroughCylinder", icon: "icon-axisThroughCylinder" })
 export class AxisThroughCylinderCommand extends CreateConstruction {
     protected readonly toolName = "axisThroughCylinder";
 }
-@command({ key: "construct.axisPerpendicularToFace", icon: "icon-line" })
+@command({ key: "construct.axisPerpendicularToFace", icon: "icon-axisPerpendicularToFace" })
 export class AxisPerpendicularToFaceCommand extends CreateConstruction {
     protected readonly toolName = "axisPerpendicularToFace";
 }
-@command({ key: "construct.axisThroughTwoPlanes", icon: "icon-line" })
+@command({ key: "construct.axisThroughTwoPlanes", icon: "icon-axisThroughTwoPlanes" })
 export class AxisThroughTwoPlanesCommand extends CreateConstruction {
     protected readonly toolName = "axisThroughTwoPlanes";
 }
-@command({ key: "construct.axisThroughTwoPoints", icon: "icon-line" })
+@command({ key: "construct.axisThroughTwoPoints", icon: "icon-axisThroughTwoPoints" })
 export class AxisThroughTwoPointsCommand extends CreateConstruction {
     protected readonly toolName = "axisThroughTwoPoints";
 }
-@command({ key: "construct.axisThroughEdge", icon: "icon-line" })
+@command({ key: "construct.axisThroughEdge", icon: "icon-axisThroughEdge" })
 export class AxisThroughEdgeCommand extends CreateConstruction {
     protected readonly toolName = "axisThroughEdge";
 }
-@command({ key: "construct.pointAtVertex", icon: "icon-point" })
+@command({ key: "construct.pointAtVertex", icon: "icon-pointAtVertex" })
 export class PointAtVertexCommand extends CreateConstruction {
     protected readonly toolName = "pointAtVertex";
 }
-@command({ key: "construct.pointThroughTwoEdges", icon: "icon-point" })
+@command({ key: "construct.pointThroughTwoEdges", icon: "icon-pointThroughTwoEdges" })
 export class PointThroughTwoEdgesCommand extends CreateConstruction {
     protected readonly toolName = "pointThroughTwoEdges";
 }
-@command({ key: "construct.pointThroughThreePlanes", icon: "icon-point" })
+@command({ key: "construct.pointThroughThreePlanes", icon: "icon-pointThroughThreePlanes" })
 export class PointThroughThreePlanesCommand extends CreateConstruction {
     protected readonly toolName = "pointThroughThreePlanes";
 }
-@command({ key: "construct.pointAtCenter", icon: "icon-point" })
+@command({ key: "construct.pointAtCenter", icon: "icon-pointAtCenter" })
 export class PointAtCenterCommand extends CreateConstruction {
     protected readonly toolName = "pointAtCenter";
 }
-@command({ key: "construct.pointAtEdgeAndPlane", icon: "icon-point" })
+@command({ key: "construct.pointAtEdgeAndPlane", icon: "icon-pointAtEdgeAndPlane" })
 export class PointAtEdgeAndPlaneCommand extends CreateConstruction {
     protected readonly toolName = "pointAtEdgeAndPlane";
 }
-@command({ key: "construct.pointAlongPath", icon: "icon-point" })
+@command({ key: "construct.pointAlongPath", icon: "icon-pointAlongPath" })
 export class PointAlongPathCommand extends CreateConstruction {
     protected readonly toolName = "pointAlongPath";
 }
-@command({ key: "construct.ucs", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.ucs", icon: "icon-ucs" })
 export class UcsCommand extends CreateConstruction {
     protected readonly toolName = "ucs";
 }
 
-@command({ key: "construct.edit", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.edit", icon: "icon-editConstruction" })
 export class EditConstructionCommand extends CancelableCommand {
     private session?: ConstructionSession;
     protected override async executeAsync(): Promise<void> {
@@ -856,19 +856,19 @@ abstract class ActivateConstructionPlane implements ICommand {
     }
 }
 
-@command({ key: "construct.activatePlane", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.activatePlane", icon: "icon-useAsWorkingPlane" })
 export class ActivateConstructionPlaneCommand extends ActivateConstructionPlane {
     protected readonly member = undefined;
 }
-@command({ key: "construct.activateXY", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.activateXY", icon: "icon-useUcsXY" })
 export class ActivateConstructionXYCommand extends ActivateConstructionPlane {
     protected readonly member = "XY";
 }
-@command({ key: "construct.activateYZ", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.activateYZ", icon: "icon-useUcsYZ" })
 export class ActivateConstructionYZCommand extends ActivateConstructionPlane {
     protected readonly member = "YZ";
 }
-@command({ key: "construct.activateZX", icon: "icon-setWorkingPlane" })
+@command({ key: "construct.activateZX", icon: "icon-useUcsZX" })
 export class ActivateConstructionZXCommand extends ActivateConstructionPlane {
     protected readonly member = "ZX";
 }

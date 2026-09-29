@@ -291,7 +291,7 @@ export class FixConstraintCommand extends SketchConstraintCommand {
 }
 
 /** Selected lines/points share a baseline; with no selection, pick two lines. */
-@command({ key: "constraint.collinear", icon: "icon-cParallel" })
+@command({ key: "constraint.collinear", icon: "icon-cCollinear" })
 export class CollinearConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -325,7 +325,7 @@ export class CollinearConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.block", icon: "icon-cFix" })
+@command({ key: "constraint.block", icon: "icon-cBlock" })
 export class BlockConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -349,7 +349,7 @@ export class BlockConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.construction", icon: "icon-cPointOn" })
+@command({ key: "constraint.construction", icon: "icon-cConstruction" })
 export class ConstructionConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -373,7 +373,7 @@ export class ConstructionConstraintCommand extends SketchConstraintCommand {
 }
 
 /** Four lines in order define two directed angles, with no driving angle datum required. */
-@command({ key: "constraint.equalAngle", icon: "icon-cEqual" })
+@command({ key: "constraint.equalAngle", icon: "icon-cEqualAngle" })
 export class EqualAngleConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const refs: SketchPointRef[] = [];
@@ -401,7 +401,7 @@ export class EqualAngleConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.scale", icon: "icon-cEqual" })
+@command({ key: "constraint.scale", icon: "icon-cLengthRatio" })
 export class ScaleConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const ids: number[] = [];
