@@ -1336,6 +1336,13 @@ export const I18N_KEYS = [
     "file.stl.customTessellation",
     "file.stl.linearTolerance",
     "file.stl.angularTolerance",
+    "fillet.variableRadius",
+    "fillet.editRadiusLaw",
+    "fillet.radiusLaw",
+    "fillet.lawPosition",
+    "fillet.lawRadius",
+    "fillet.addSample",
+    "fillet.lawHelp",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

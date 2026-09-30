@@ -27,12 +27,14 @@ import { matchEdgeIndexes } from "../features/edgeMatcher";
 import { captureEdgeRef, type EdgeRef } from "../features/edgeRef";
 import type { ChamferFeatureData, FilletFeatureData } from "../features/feature";
 import { reportSilentIdLoss } from "../features/idDiagnostics";
+import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import {
     type EdgeCornerArrowData,
     type EdgeCornerPickHandler,
     EdgeCornerSelectStep,
 } from "./edgeCornerPickStep";
+import { showRadiusLawEditor } from "./radiusLawEditor";
 
 /** Shared flow for fillet/chamfer: pick edges of a parametric body, enter the value. */
 abstract class EdgeCornerFeatureCommand extends MultistepCommand {
@@ -41,6 +43,9 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
     /** The fillet radius / chamfer distance, entered in the command's floating options tab. */
     protected abstract get value(): ParameterValue;
     protected abstract set value(value: ParameterValue);
+    protected get radiusLaw(): FilletRadiusPoint[] | undefined {
+        return undefined;
+    }
 
     /**
      * The value as the preview, the arrow and the kernel need it. Undefined when the
@@ -82,7 +87,7 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         this.removePreview();
         this.activeHandler?.refreshArrow();
         const value = this.valueNumber;
-        if (value === undefined || value <= 0) return;
+        if (this.radiusLaw === undefined && (value === undefined || value <= 0)) return;
 
         const picked = this.pickedEdgesOnBody();
         if (picked === undefined) return;
@@ -117,7 +122,7 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         edges: VisualShapeData[],
     ): ShapeMeshData[] | undefined {
         const value = this.valueNumber;
-        if (value === undefined) return undefined;
+        if (this.radiusLaw === undefined && value === undefined) return undefined;
         const shape = node.shape.value;
         const indexes = matchEdgeIndexes(
             shape,
@@ -125,7 +130,16 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         );
         if (!indexes.isOk) return undefined;
 
-        const result = shapeFactory[this.featureType](shape, indexes.value, value);
+        const law =
+            this.radiusLaw === undefined
+                ? undefined
+                : resolveFilletRadiusLaw(this.radiusLaw, this.document.variables.evaluate().scope);
+        if (law !== undefined && !law.isOk) return undefined;
+        const result =
+            law !== undefined
+                ? shapeFactory.filletVariableRadius?.(shape, indexes.value, law.value)
+                : shapeFactory[this.featureType](shape, indexes.value, value!);
+        if (result === undefined) return undefined;
         if (!result.isOk) return undefined;
         const world = result.value.transformedMul(edges[0].transform);
         result.value.dispose();
@@ -151,7 +165,9 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
     }
 
     private readonly arrowData = (): EdgeCornerArrowData | undefined =>
-        edgeCornerArrowData(this.document.selection.getSelectedShapes().at(0), this.valueNumber);
+        this.radiusLaw === undefined
+            ? edgeCornerArrowData(this.document.selection.getSelectedShapes().at(0), this.valueNumber)
+            : undefined;
 
     private readonly setValueFromArrow = (value: number) => {
         this.value = value;
@@ -179,7 +195,10 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
         // typed, and an expression that no longer resolves — the variable was deleted between
         // typing and confirming, and the parameters panel is not modal — fails the next rebuild
         // and takes every feature after it down the chain with it.
-        const resolved = this.resolveParameter(this.value, LENGTH_UNITS);
+        const resolved =
+            this.radiusLaw === undefined
+                ? this.resolveParameter(this.value, LENGTH_UNITS)
+                : resolveFilletRadiusLaw(this.radiusLaw, this.document.variables.evaluate().scope);
         if (!resolved.isOk) {
             PubSub.default.pub("showToast", "error.default:{0}", resolved.error);
             return;
@@ -200,7 +219,13 @@ abstract class EdgeCornerFeatureCommand extends MultistepCommand {
 
     private feature(value: ParameterValue, edges: EdgeRef[]): FilletFeatureData | ChamferFeatureData {
         if (this.featureType === "fillet") {
-            return { id: Id.generate(), type: "fillet", radius: value, edges };
+            return {
+                id: Id.generate(),
+                type: "fillet",
+                radius: value,
+                edges,
+                ...(this.radiusLaw === undefined ? {} : { radiusLaw: this.radiusLaw }),
+            };
         }
         return { id: Id.generate(), type: "chamfer", distance: value, edges };
     }
@@ -254,12 +279,40 @@ function arrowDirection(edge: IEdge, midParam: number, data: VisualShapeData): X
 export class FilletFeatureCommand extends EdgeCornerFeatureCommand {
     protected readonly featureType = "fillet" as const;
 
-    @property("circle.radius", { unit: LENGTH_UNITS })
+    @property("circle.radius", {
+        unit: LENGTH_UNITS,
+        dependencies: [{ property: "variableRadius", value: false }],
+    })
     get value(): ParameterValue {
         return this.getPrivateValue("value", 2);
     }
     set value(value: ParameterValue) {
         this.setProperty("value", value, () => this.updatePreview());
+    }
+
+    @property("fillet.variableRadius")
+    get variableRadius(): boolean {
+        return this.getPrivateValue("variableRadius", false);
+    }
+    set variableRadius(value: boolean) {
+        this.setProperty("variableRadius", value, () => this.updatePreview());
+    }
+    private lawDraft: FilletRadiusPoint[] | undefined;
+    protected override get radiusLaw(): FilletRadiusPoint[] | undefined {
+        return this.variableRadius
+            ? (this.lawDraft ?? [
+                  { position: 0, radius: this.value },
+                  { position: 1, radius: this.value },
+              ])
+            : undefined;
+    }
+    @property("fillet.editRadiusLaw", { dependencies: [{ property: "variableRadius", value: true }] })
+    editRadiusLaw(): void {
+        showRadiusLawEditor(this.document, this.radiusLaw ?? [], (law) => {
+            if (this.checkCanceled()) return;
+            this.lawDraft = law;
+            this.updatePreview();
+        });
     }
 }
 

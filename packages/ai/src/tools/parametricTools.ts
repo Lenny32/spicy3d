@@ -454,6 +454,21 @@ const OPS_SCHEMA = {
                 "fillet/chamfer: indexes into the current body edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
         },
         radius: { description: "Fillet radius in mm" },
+        radiusLaw: {
+            type: "array",
+            minItems: 2,
+            maxItems: 64,
+            items: {
+                type: "object",
+                properties: {
+                    position: { type: "number", minimum: 0, maximum: 1 },
+                    radius: { description: "Positive radius in millimetres, or a length expression" },
+                },
+                required: ["position", "radius"],
+            },
+            description:
+                "Fillet only: smooth law along each selected edge's normalized arc length in natural curve direction. Strictly increasing positions, endpoints 0/1. One edge per tangent contour; closed contours need equal resolved endpoint radii. editFeature action setRadiusLaw replaces the law; omit it to restore constant radius.",
+        },
         distance: { description: "Chamfer distance in mm" },
         thickness: {
             description:
@@ -484,7 +499,7 @@ const OPS_SCHEMA = {
         consumeTools: { type: "boolean", description: "Defaults to true" },
         action: {
             type: "string",
-            enum: ["setParameter", "rename", "suppress", "moveTo", "remove"],
+            enum: ["setParameter", "setRadiusLaw", "rename", "suppress", "moveTo", "remove"],
             description: "editFeature: what to do with the feature",
         },
         featureId: { type: "string", description: "The feature's id, as reported by the `features` op" },

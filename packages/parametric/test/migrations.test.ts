@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 6 (associative starting faces)", () => {
+describe("parametric format 7 (variable fillet radius laws)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(6);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(6);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(7);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(7);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -25,6 +25,7 @@ describe("parametric format 6 (associative starting faces)", () => {
         ["v1/parametric4-loft.json", 4],
         ["v2/construction-expressions.json", 4],
         ["v2/parametric5-thicken.json", 5],
+        ["v2/parametric6-from-face.json", 6],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -33,7 +34,7 @@ describe("parametric format 6 (associative starting faces)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 6 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 7 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
