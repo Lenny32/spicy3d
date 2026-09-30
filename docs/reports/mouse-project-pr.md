@@ -21,6 +21,8 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #87 | Stable edge selectors by topology, feature origin and analytic geometry | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 |
 | #104 | Optional bounded base64 export bytes with filename/MIME metadata | 93c7fc625535192ee3d4f9b2a5cb15113e4258d2 |
 | #81 | Reject invalid tracked/untracked native fillet/chamfer results | 0b8655a0701c86211723a4fe4dc1980f4ea95922 |
+| #105 | One ZIP with separate model files and per-output errors | 82189d89ae8f62f39c2bdf06a6055c47cb3ff8d4 |
+| #102 | Sampled model-to-reference mesh deviation in UI and MCP | 9305b007de052d3463c44993185c44dfaceffb0a |
 
 Validation: 9,181 passing tests across 542 files, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
@@ -38,9 +40,11 @@ The production app and all three plugins also build after #86/#101.
 Additional #104 validation: 34 worker/integrated tests, isolated/root TypeScript and scoped check pass.
 Additional #81 validation: rebuilt Emscripten 5.0.7 / OCCT V8_0_1 artifacts, 182 worker/integrated kernel
 tests, TypeScript and required check pass.
+Additional #105 validation: 43 worker/integrated tests, isolated/root TypeScript and required check.
+Additional #102 validation: 170 worker tests, 49 integrated tests, TypeScript and required check.
 
-Remaining project work: #82–#85, #88–#90, #92–#98, #102/#103/#105 (17 tickets). Next correctness work is #82;
+Remaining project work: #82–#85, #88–#90, #92–#98, #103 (15 tickets). Next correctness work is #82;
 C++ changes require setting up/rebuilding WASM because no local emsdk/OCCT build tree is present.
 Worker work follows KERNEL-01, with one shared cancellation/recovery protocol before splitting it.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81. Keep issues open and never merge this PR automatically.
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102. Keep issues open and never merge this PR automatically.
