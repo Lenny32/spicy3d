@@ -137,6 +137,22 @@ describe("ordered whole-edge path references (real kernel)", () => {
         result.value.dispose();
     });
 
+    test("a logical span retains every source ancestor rather than only its first piece", () => {
+        const { source, context } = fixture(
+            shapeFactory.combine([line(XYZ.zero, point(0, 0, 5)), line(point(0, 0, 5), point(0, 0, 10))])
+                .value,
+        );
+        tracking(source, ["ancestor-a", "ancestor-b"]);
+        const ref = captureEdgeRef(line(XYZ.zero, point(0, 0, 10)), "ancestor-a|ancestor-b");
+        const result = resolvePathReferences({ nodeId: source.id, edges: [ref] }, context);
+        expect(result.isOk).toBe(true);
+        expect(result.value.references[0].seed).toBe("ancestor-a|ancestor-b");
+        expect(result.value.references[0].edges).toHaveLength(2);
+        expect(result.value.edgeSeeds.sort()).toEqual(["ancestor-a", "ancestor-b"]);
+        expect(result.value.references[0].provenance).toBe("source");
+        result.value.dispose();
+    });
+
     test.each([
         "repeat",
         "disconnected",

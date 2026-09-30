@@ -19,6 +19,7 @@ import { captureEdgeRef, type EdgeRef } from "./edgeRef";
 import type { FeatureContext } from "./feature";
 import { collectEdges } from "./profileGeometry";
 import { MATCH_TOLERANCE } from "./refGeometry";
+import { combineIds } from "./trackedId";
 
 /** Whole source-local edges, authored in traversal order. Shared by sweep and projection. */
 export interface PathReference {
@@ -247,7 +248,7 @@ export function resolvePathReferences(
             references: anchors.map((anchor, index) => ({
                 anchor,
                 edges: pieces.filter((piece) => piece.reference === index).map((piece) => piece.edge),
-                seed: groups[index][0].seed,
+                seed: combineIds(groups[index].map((piece) => piece.seed)),
                 stable: pieces.filter((piece) => piece.reference === index).every((piece) => piece.stable),
                 provenance: pieces.filter((piece) => piece.reference === index).every((piece) => piece.stable)
                     ? "source"
