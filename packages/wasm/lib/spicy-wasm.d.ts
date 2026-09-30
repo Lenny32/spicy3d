@@ -691,6 +691,7 @@ interface EmbindModule {
   TrackedShapeResult: {};
   ShapeFactory: {
     makeThickSolidBySimple(_0: TopoDS_Shape, _1: number): ShapeResult;
+    copyTracked(_0: TopoDS_Shape): TrackedShapeResult;
     fixShape(_0: TopoDS_Shape, _1: number): ShapeResult;
     fixSmallFace(_0: TopoDS_Shape, _1: number): ShapeResult;
     fixSolid(_0: TopoDS_Shape, _1: number): ShapeResult;

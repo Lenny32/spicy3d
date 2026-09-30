@@ -22,6 +22,22 @@ function inputs() {
     return { factory, cylinder, support, path, section };
 }
 describe("support-normal face sweep (real native kernel)", () => {
+    test("deep-copy face and edge maps name every original through native history", () => {
+        const { factory, cylinder } = inputs();
+        const converter = new OccShapeConverter();
+        const before = converter.convertToBrep(cylinder).value;
+        const copied = unwrapOk(factory.copyTracked(cylinder));
+        expect(copied.shape.isSame(cylinder)).toBe(false);
+        expect(copied.shape.volume()).toBeCloseTo(cylinder.volume(), 5);
+        const faces = cylinder.findSubShapes(ShapeTypes.face);
+        const edges = cylinder.findSubShapes(ShapeTypes.edge);
+        expect([...copied.faceMap].sort()).toEqual(faces.map((_, index) => index));
+        expect([...copied.edgeMap].sort()).toEqual(edges.map((_, index) => index));
+        expect(copied.faceAncestors).toHaveLength(2 * faces.length);
+        expect(copied.edgeAncestors).toHaveLength(2 * edges.length);
+        expect(converter.convertToBrep(cylinder).value).toBe(before);
+        copied.shape.dispose();
+    });
     test.each([
         "join",
         "cut",

@@ -173,6 +173,8 @@ export interface IShapeFactory {
     booleanFuse(shape1: IShape[], shape2: IShape[], simplifyShape: boolean): Result<IShape>;
     sewing(shapes: IShape[]): Result<IShape>;
     combine(shapes: IShape[]): Result<ICompound>;
+    /** Deep copy with explicit native ModifiedShape face/edge ancestry. */
+    copyTracked?(shape: IShape): Result<TrackedShape>;
     /** @unit length thickness */
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape>;
     /**
