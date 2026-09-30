@@ -922,6 +922,8 @@ export default {
         "option.command.patternType.rectangular": "Rectangular",
         "option.command.pitch": "Pitch",
         "option.command.repeat": "Repeat",
+        "option.command.fromFace": "Start from face",
+        "option.command.pickStartFace": "Choose starting face",
         "option.command.startOffset": "Start Offset",
         "option.command.symmetric": "Symmetric",
         "option.command.thickness": "Thickness",
@@ -1427,5 +1429,13 @@ export default {
         "file.stl.customTessellation": "Custom STL tessellation",
         "file.stl.linearTolerance": "Linear deflection",
         "file.stl.angularTolerance": "Angular deflection (degrees)",
+        "fillet.variableRadius": "Variable radius",
+        "fillet.editRadiusLaw": "Edit radius law…",
+        "fillet.radiusLaw": "Fillet radius law",
+        "fillet.lawPosition": "Position (%)",
+        "fillet.lawRadius": "Law radius",
+        "fillet.addSample": "Add sample",
+        "fillet.lawHelp":
+            "Positions follow arc length along each selected edge in its natural curve direction. OCCT interpolates smoothly between samples and propagates onto tangent edges. Select one edge per tangent contour; closed contours require equal endpoint radii.",
     },
 } satisfies Locale;

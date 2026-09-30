@@ -132,6 +132,9 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
                     ? { ...next, profiles: resolvedProfiles }
                     : { ...next, source: { ...next.source, profiles: resolvedProfiles } };
         }
+        const startingFace = resolvedFaces?.["startFace"];
+        if (startingFace && next.startFace)
+            next = { ...next, startFace: { ...next.startFace, face: startingFace } };
         for (const key of ["extent", "secondExtent"] as const) {
             const face = resolvedFaces?.[key];
             const extent = next[key];
@@ -151,6 +154,7 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
             !tracking ||
             !feature.operation ||
             !shapeFactory.prismTracked ||
+            feature.startFace !== undefined ||
             // Through-all / to-object extents depend on the operation (flush) and the chain
             // state (re-anchored target faces): they stay on the synchronous path.
             [feature.extent, feature.secondExtent].some((x) => x !== undefined && x.type !== "distance")
@@ -439,7 +443,7 @@ function extrudeFromSketch(
     if (!resolved.isOk) return Result.err(resolved.error);
     const { sketch, profiles } = resolved.value;
     const sides = extents.sidesAlong(sketch.plane.normal);
-    const offsetVec = sketch.plane.normal.multiply(startOffset);
+    const offsetVec = sketch.plane.normal.multiply(feature.startFace ? 0 : startOffset);
 
     // An operation with unavailable tracking falls back to the plain path — downstream
     // edge fingerprints then re-match geometrically after a rebuild.
@@ -624,7 +628,7 @@ function extrudeOperationTracked(
 
     const sides = extents.sidesAlong(resolved.value.sketch.plane.normal);
     if (!canSweepTracked(sides)) return undefined;
-    const offsetVec = resolved.value.sketch.plane.normal.multiply(startOffset);
+    const offsetVec = resolved.value.sketch.plane.normal.multiply(feature.startFace ? 0 : startOffset);
     const tool = sweepProfiles(feature, resolved.value.sketch, sides, resolved.value.profiles, offsetVec);
     if (!tool.isOk) return Result.err(tool.error);
     try {

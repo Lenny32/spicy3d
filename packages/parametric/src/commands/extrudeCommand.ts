@@ -78,6 +78,7 @@ const UNCACHED_PROPERTIES = new Set([
     "targetsInfo",
     "targetList",
     "extent",
+    "fromFace",
     "extentFaceInfo",
     "extentOffset",
 ]);
@@ -444,6 +445,23 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         this._dragHandler?.refresh();
     }
 
+    private _startFace: VisualShapeData | undefined;
+    private _pickingStartFace = false;
+    @property("option.command.fromFace")
+    get fromFace(): boolean {
+        return this.getPrivateValue("fromFace", false);
+    }
+    set fromFace(value: boolean) {
+        this.setProperty("fromFace", value);
+        this._pickingStartFace = value;
+        this._dragHandler?.refresh();
+    }
+    @property("option.command.pickStartFace", { dependencies: [{ property: "fromFace", value: true }] })
+    pickStartingFace(): void {
+        this._pickingStartFace = true;
+        this._dragHandler?.refresh();
+    }
+
     @property("option.command.startOffset", { unit: LENGTH_UNITS })
     get startOffset(): ParameterValue {
         return this.getPrivateValue("startOffset", 0);
@@ -528,9 +546,17 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             toggleTarget: this.toggleTarget,
             picksTarget: () => this._addingTargets,
             depthLocked: () => this.extent !== EXTENT_DISTANCE,
-            extentReady: () => this.extent !== EXTENT_TO_OBJECT || this._extentFace !== undefined,
-            picksExtentFace: () => this.extent === EXTENT_TO_OBJECT,
+            extentReady: () =>
+                (!this.fromFace || this._startFace !== undefined) &&
+                (this.extent !== EXTENT_TO_OBJECT || this._extentFace !== undefined),
+            picksExtentFace: () =>
+                (this.fromFace && this._pickingStartFace) || this.extent === EXTENT_TO_OBJECT,
             pickExtentFace: (face: VisualShapeData) => {
+                if (this.fromFace && this._pickingStartFace) {
+                    this._startFace = face;
+                    this._pickingStartFace = false;
+                    return true;
+                }
                 this._extentFace = face;
                 this.showExtentFace();
                 return true;
@@ -561,6 +587,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
     private readonly buildPreview = (state: ExtrudeDragState): ExtrudePreview => {
         const locked = this.extent !== EXTENT_DISTANCE;
         if (!locked && Math.abs(state.dist) < Precision.Float) return { meshes: [] };
+        if (this.fromFace && this._startFace === undefined) return { meshes: [] };
         if (this.extent === EXTENT_TO_OBJECT && this._extentFace === undefined) return { meshes: [] };
         const owned: IFace[] = [];
         const node = state.node as SketchNode | ParametricBodyNode;
@@ -595,15 +622,19 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
 
     /** `preview` with the picked to-object face highlighted over it. */
     private withExtentFace(preview: ExtrudePreview): ExtrudePreview {
-        if (this.extent !== EXTENT_TO_OBJECT || this._extentFace === undefined) return preview;
+        const selected = [
+            ...(this.fromFace && this._startFace !== undefined ? [this._startFace] : []),
+            ...(this.extent === EXTENT_TO_OBJECT && this._extentFace !== undefined ? [this._extentFace] : []),
+        ];
+        if (selected.length === 0) return preview;
         const owned: IFace[] = [];
         try {
-            const overlay = extentFaceOverlay(worldFaceOf(this._extentFace, owned));
-            return overlay === undefined
-                ? preview
-                : { ...preview, overlays: [...(preview.overlays ?? []), overlay] };
+            const overlays = selected
+                .map((face) => extentFaceOverlay(worldFaceOf(face, owned)))
+                .filter((overlay): overlay is NonNullable<typeof overlay> => overlay !== undefined);
+            return { ...preview, overlays: [...(preview.overlays ?? []), ...overlays] };
         } finally {
-            owned.forEach((x) => x.dispose());
+            owned.forEach((face) => face.dispose());
         }
     }
 
@@ -836,10 +867,30 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         try {
             const end = this.extentEnd(node.document, owned, fuseHost);
             if (!end.isOk) return Result.err(end.error);
+            const sides = this.sweepSidesOf(node, normal, dist, end.value);
+            if (!this.fromFace)
+                return ExtrudeFeatureCommand.buildPrisms(faces, sides, this.offsetVectorOf(node, normal));
+            if (!this._startFace) return Result.err("Select the extrusion starting face");
+            const copies: IFace[] = [];
+            const start = worldFaceOf(this._startFace, copies);
+            owned.push(...copies);
             return ExtrudeFeatureCommand.buildPrisms(
                 faces,
-                this.sweepSidesOf(node, normal, dist, end.value),
-                this.offsetVectorOf(node, normal),
+                (face) => {
+                    const n = node instanceof SketchNode ? normal : face.normal(0, 0)[1];
+                    return sides(face).map((side) => {
+                        const direction =
+                            side.kind === "distance" ? (side.vec.normalize() ?? n) : side.direction;
+                        return {
+                            kind: "fromFace" as const,
+                            direction,
+                            face: start,
+                            offset: this.startOffsetValue * (direction.dot(n) < 0 ? -1 : 1),
+                            end: side,
+                        };
+                    });
+                },
+                () => normal.multiply(0),
             );
         } finally {
             owned.forEach((x) => x.dispose());
@@ -1021,6 +1072,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
 
     /** Why the extent cannot be committed as it stands; undefined when it can. */
     private extentRefusal(): string | undefined {
+        if (this.fromFace && this._startFace === undefined) return "Select the extrusion starting face";
         if (this.extent === EXTENT_TO_OBJECT) {
             if (this._extentFace === undefined) return I18n.translate("option.command.extentFace.none");
             const offset = this.resolveParameter(this.extentOffset, LENGTH_UNITS);
@@ -1036,6 +1088,12 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
         return { extent: toObjectExtentOf(this._extentFace, this.extentOffset) };
     }
 
+    private startFaceData(): NonNullable<ExtrudeFeatureData["startFace"]> {
+        const picked = toObjectExtentOf(this._startFace!, 0);
+        if (picked.type !== "toObject") throw new Error("The starting object is not a face");
+        return { nodeId: picked.nodeId, face: picked.face };
+    }
+
     /** The feature payload of the committed drag. */
     private buildFeature(
         node: SketchNode | ParametricBodyNode,
@@ -1049,6 +1107,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             ...(this.symmetric && this.extent !== EXTENT_TO_OBJECT ? { symmetric: true } : {}),
             ...(this.startOffset !== 0 ? { startOffset: this.startOffset } : {}),
             ...this.extentData(),
+            ...(this.fromFace && this._startFace ? { startFace: this.startFaceData() } : {}),
             ...(node instanceof SketchNode
                 ? {
                       sketchId: node.id,

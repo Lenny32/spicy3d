@@ -30,6 +30,7 @@ import {
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
+import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
     type EdgesReport,
@@ -731,6 +732,98 @@ describe("feature list editing", () => {
 });
 
 describe("fillet and boolean", () => {
+    test("variable radius laws create persistent picks, survive an upstream edit, and undo as one change", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        const originalEdges = body.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        const index = originalEdges.findIndex(
+            (edge) => Math.abs(edge.endPoint().z - edge.startPoint().z) > 39,
+        );
+        expect(index).toBeGreaterThanOrEqual(0);
+        for (const edge of originalEdges) edge.dispose();
+        const law = [
+            { position: 0, radius: "1 mm" },
+            { position: 0.5, radius: "2 mm" },
+            { position: 1, radius: "3 mm" },
+        ];
+        run(doc, [{ op: "fillet", id: "variable", body: body.id, edgeIndexes: [index], radiusLaw: law }]);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        const feature = body.features[1] as FilletFeatureData;
+        expect(feature.radiusLaw).toEqual(law);
+        expect(feature.edges[0].edgeId).not.toBeUndefined();
+        const selectedId = feature.edges[0].edgeId;
+        const volume = body.shape.value.volume();
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: body.features[0].id,
+                action: "setParameter",
+                key: "depth",
+                value: 50,
+            },
+        ]);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect(body.shape.value.volume()).toBeGreaterThan(volume);
+        expect((body.features[1] as FilletFeatureData).edges[0].edgeId).toBe(selectedId);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual(law);
+        doc.history.undo();
+        expectClean(body);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.undo();
+        expect(body.features).toHaveLength(1);
+        expect(body.shape.value.volume()).toBeCloseTo(48000, 5);
+        doc.history.redo();
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual(law);
+    });
+
+    test("a whole-law edit can be cleared and invalid replacement rolls back", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        run(doc, [{ op: "fillet", id: "constant", body: body.id, edgeIndexes: [0], radius: 1 }]);
+        const id = body.features[1].id;
+        const constantVolume = body.shape.value.volume();
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: id,
+                action: "setRadiusLaw",
+                radiusLaw: [
+                    { position: 0, radius: 1 },
+                    { position: 1, radius: 2 },
+                ],
+            },
+        ]);
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toHaveLength(2);
+        expect(body.shape.value.volume()).toBeLessThan(constantVolume);
+        const before = body.features;
+        expect(
+            runExpectingFailure(doc, [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: id,
+                    action: "setRadiusLaw",
+                    radiusLaw: [
+                        { position: 0, radius: -1 },
+                        { position: 1, radius: 2 },
+                    ],
+                },
+            ]),
+        ).toContain("positive finite");
+        expect(body.features).toEqual(before);
+        expectClean(body);
+        run(doc, [{ op: "editFeature", body: body.id, featureId: id, action: "setRadiusLaw" }]);
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toBeUndefined();
+        expect(body.shape.value.volume()).toBeCloseTo(constantVolume, 5);
+    });
+
     test("a fillet takes edge indexes and reports an out-of-range index", () => {
         const doc = newDoc();
         const result = run(doc, plate(20));
@@ -1076,6 +1169,43 @@ describe("compact parametric responses", () => {
             doc.close();
         }
     });
+});
+
+test("the MCP handler accepts variable radius laws and retains only approved sample fields", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    (app as any).activeView = { document: doc };
+    doc.selection = createMockSelection();
+    rs.stubGlobal("app", app);
+    try {
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        const tool = buildParametricTools()[0];
+        const response = await tool.handler({
+            responseMode: "compact",
+            ops: [
+                {
+                    op: "fillet",
+                    id: "law",
+                    body: body.id,
+                    edgeIndexes: [0],
+                    radiusLaw: [
+                        { position: 0, radius: "1 mm", extra: "ignored" },
+                        { position: 1, radius: "2 mm", extra: "ignored" },
+                    ],
+                },
+            ],
+        });
+        const result = JSON.parse(response as string);
+        expect(result.bodies[0].status).toBe("ok");
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual([
+            { position: 0, radius: "1 mm" },
+            { position: 1, radius: "2 mm" },
+        ]);
+    } finally {
+        rs.unstubAllGlobals();
+        doc.close();
+    }
 });
 
 test("the MCP compact handler returns only the edited feature from a large body", async () => {
@@ -1518,4 +1648,43 @@ describe("rule-based edge queries (real kernel)", () => {
         ).toThrow(/curve selection is missing or ambiguous/);
         expect(body.featuresJson).toBe(before);
     });
+});
+
+test("run_parametric captures a JSON starting-face pick and rebuilds it after an upstream edit", () => {
+    const doc = newDoc();
+    const body = createdBody(doc, run(doc, plate(20)), "b1");
+    const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const top = faces.findIndex((face) => face.surface().isPlanar() && face.normal(0, 0)[1].z > 0.99);
+    expect(top).toBeGreaterThanOrEqual(0);
+    const result = run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "boss-sketch", plane: "XY", entities: rect(5, 5, 10, 10) },
+                {
+                    op: "extrude",
+                    id: "boss",
+                    sketch: "boss-sketch",
+                    depth: 5,
+                    startFace: { nodeId: body.id, faceIndex: top },
+                },
+            ]),
+        ),
+    );
+    const boss = createdBody(doc, result, "boss");
+    expectClean(boss);
+    expect(boss.features[0]).toMatchObject({ startFace: { nodeId: body.id } });
+    expect(extent(boss)).toEqual([5, 5, 20, 10, 10, 25]);
+    run(doc, [
+        {
+            op: "editFeature",
+            body: body.id,
+            featureId: body.features[0].id,
+            action: "setParameter",
+            key: "depth",
+            value: 30,
+        },
+    ]);
+    expectClean(boss);
+    expect(extent(boss)).toEqual([5, 5, 30, 10, 10, 35]);
 });

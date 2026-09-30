@@ -37,6 +37,7 @@ import type {
     RevolveFeatureData,
     ThickenFeatureData,
 } from "../features/feature";
+import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
 import { captureFaceRef, type PlaneFaceRef, sketchPlaneOfFace } from "../sketch/planeRef";
@@ -165,6 +166,7 @@ export interface ExtrudeOp {
     depth: ParameterValue;
     symmetric?: boolean;
     startOffset?: ParameterValue;
+    startFace?: { nodeId: string; faceIndex: number };
     /** Omit to create a new body; otherwise the body to append the feature to. */
     body?: string;
     operation?: BooleanOperation;
@@ -227,6 +229,8 @@ export interface FilletChamferOp {
     /** Body-scoped persistent refs returned by the edges op; alternative to indexes. */
     edgeRefs?: PersistentEdgeReference[];
     radius?: ParameterValue;
+    /** Fillet only: smooth radius law per edge, normalized arc length in natural curve direction. */
+    radiusLaw?: FilletRadiusPoint[];
     distance?: ParameterValue;
 }
 
@@ -286,7 +290,9 @@ export interface EditFeatureOp {
     op: "editFeature";
     body: string;
     featureId: string;
-    action: "setParameter" | "rename" | "suppress" | "moveTo" | "remove";
+    action: "setParameter" | "setRadiusLaw" | "rename" | "suppress" | "moveTo" | "remove";
+    /** setRadiusLaw only; omitted clears the law and restores the stored constant radius. */
+    radiusLaw?: FilletRadiusPoint[];
     key?: string;
     value?: ParameterValue | boolean;
     index?: number;
@@ -712,6 +718,10 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         );
     }
     const extent = op.extent === undefined ? undefined : resolveExtent(state, op.extent, "extent", scope);
+    const from =
+        op.startFace === undefined
+            ? undefined
+            : resolveExtent(state, { type: "toObject", face: op.startFace }, "startFace", scope);
     const secondExtent =
         op.secondExtent === undefined
             ? undefined
@@ -723,6 +733,7 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         depth: op.depth,
         ...(op.symmetric === true ? { symmetric: true } : {}),
         ...(op.startOffset !== undefined ? { startOffset: op.startOffset } : {}),
+        ...(from?.type === "toObject" ? { startFace: { nodeId: from.nodeId, face: from.face } } : {}),
         ...(extent === undefined || extent.type === "distance" ? {} : { extent }),
         ...(secondExtent === undefined ? {} : { secondExtent }),
     };
@@ -834,7 +845,13 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     const shape = body.shape;
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
     const scope = state.document.variables.evaluate().scope;
-    const value = op.op === "fillet" ? op.radius : op.distance;
+    if (op.op === "chamfer" && op.radiusLaw !== undefined)
+        throw new Error("Radius laws apply only to fillets");
+    if (op.radiusLaw !== undefined) {
+        const resolved = resolveFilletRadiusLaw(op.radiusLaw, scope);
+        if (!resolved.isOk) throw new Error(resolved.error);
+    }
+    const value = op.op === "fillet" ? (op.radius ?? op.radiusLaw?.[0]?.radius) : op.distance;
     if (value === undefined)
         throw new Error(`"${op.op}" requires "${op.op === "fillet" ? "radius" : "distance"}"`);
     ensureUnit(value, scope, LENGTH_UNITS, op.op === "fillet" ? "radius" : "distance");
@@ -861,7 +878,15 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
 
     const feature: FeatureData =
         op.op === "fillet"
-            ? { id: Id.generate(), type: "fillet", radius: value, edges: refs }
+            ? {
+                  id: Id.generate(),
+                  type: "fillet",
+                  radius: value,
+                  edges: refs,
+                  ...(op.radiusLaw === undefined
+                      ? {}
+                      : { radiusLaw: op.radiusLaw.map(({ position, radius }) => ({ position, radius })) }),
+              }
             : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
     appendFeature(state, body, feature);
     state.refs.set(op.id, body.id);
@@ -1055,6 +1080,25 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
     const body = resolveBody(state, op.body);
     const before = erroredFeatureIds(body);
     switch (op.action) {
+        case "setRadiusLaw": {
+            const feature = body.features.find((item) => item.id === op.featureId);
+            if (feature?.type !== "fillet") throw new Error("Radius laws apply only to fillet features");
+            if (op.radiusLaw !== undefined) {
+                const law = resolveFilletRadiusLaw(op.radiusLaw, state.document.variables.evaluate().scope);
+                if (!law.isOk) throw new Error(law.error);
+            }
+            const { radiusLaw: _oldLaw, ...constant } = feature;
+            const edited = {
+                ...constant,
+                ...(op.radiusLaw === undefined
+                    ? {}
+                    : { radiusLaw: op.radiusLaw.map(({ position, radius }) => ({ position, radius })) }),
+            };
+            body.setFeaturesEmitShapeChanged(
+                body.features.map((item) => (item.id === feature.id ? edited : item)),
+            );
+            break;
+        }
         case "setParameter":
             if (op.key === undefined) throw new Error('"setParameter" requires "key"');
             if (op.value === undefined) throw new Error('"setParameter" requires "value"');

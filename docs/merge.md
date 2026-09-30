@@ -700,6 +700,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `depth`: expression
       - `symmetric`: scalar
       - `startOffset`: expression
+      - `startFace`: atomic { nodeId: ref → node; face: atomic }
       - `operation`: scalar
       - `profiles`: atomic of ref → profile
       - `extent`: union on `type` (distance, toObject, throughAll, any other)
@@ -748,6 +749,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `radius`: expression
+      - `radiusLaw`: atomic
       - `edges`: atomic of ref → edge
     - `type: "chamfer"`
       - `id`: scalar

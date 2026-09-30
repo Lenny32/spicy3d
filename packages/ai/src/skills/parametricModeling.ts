@@ -67,7 +67,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   their datums (display units), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
   a sketch you did not build in this call.
-- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, body?, operation?, extent?, secondExtent? }
+- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, startFace?, body?, operation?, extent?, secondExtent? }
   Without "body" it starts a new body. With "body" + "operation" (fuse/cut/common) the new prism
   combines with that body's shape. All closed profiles of the sketch are extruded.
   extent: "distance" (default, by depth) | "throughAll" (through the whole body; direction = sign of
@@ -76,6 +76,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   it follows the face on rebuild — a hole cut to a block's bottom face stays through when the block
   grows). With symmetric, extent applies to both sides; secondExtent gives the second side its own
   (a to-object extent cannot be mirrored).
+  startFace: {nodeId, faceIndex} selects an associative starting surface, including curved walls.
+  startOffset moves that surface along the sketch normal; expressions are supported. With distance,
+  depth separates the surface and its exact translated end cap. Upstream edits rebuild both caps.
+  The profile must project completely onto the selected surface; incomplete or ambiguous boundaries
+  fail explicitly. Omit startFace to retain the sketch-plane start.
 - { op: "revolve", id, sketch, axis, angle? }
   axis: { point: {x,y,z}, direction: {x,y,z} } (world) | { construction, member? } (a construction axis;
   for a UCS member "X"/"Y"/"Z", default Z) | { nodeId, edgeIndex } (a linear edge of a node, e.g. a
@@ -89,6 +94,14 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
 - { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
 - { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
+  Fillets also accept radiusLaw: [{position:0,radius:"noseRadius"}, {position:1,radius:"tailRadius"}].
+  Use 2–64 increasing samples with endpoints 0 and 1; radii are positive lengths/expressions.
+  Positions are normalized selected-edge arc length in its natural curve direction, not world-space
+  anchors: upstream parameterization reversal can exchange the physical ends. OCCT interpolates
+  smoothly and propagates along tangent contours; select one edge per contour, and use equal law
+  endpoint radii on a closed contour. BREP validation can reject a law that cannot fit the shape.
+  editFeature action "setRadiusLaw" replaces the whole law; omit radiusLaw to restore the saved
+  constant radius. setParameter keys radiusLaw.0, radiusLaw.1, ... edit individual radius expressions.
 - { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
@@ -102,7 +115,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.
 - { op: "editFeature", body, featureId, action, ... }
-  action: "setParameter" (key, value) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
+  action: "setParameter" (key, value) | "setRadiusLaw" (radiusLaw?, fillet only) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
 - { op: "features", body }   // reads the feature list: ids, names, parameters, errors
 - { op: "construct", id, definition, name?, displaySize? }   // construction plane / axis / point / UCS
 - { op: "editConstruction", node, definition?, name?, displaySize? }

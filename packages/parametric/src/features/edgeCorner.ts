@@ -21,6 +21,7 @@ import {
     type ShapeTracking,
     trackedIds,
 } from "./feature";
+import { resolveFilletRadiusLaw } from "./radiusLaw";
 
 interface EdgeCornerOptions<F extends FilletFeatureData | ChamferFeatureData> {
     readonly display: I18nKeys;
@@ -46,16 +47,41 @@ function edgeCornerHandler<F extends FilletFeatureData | ChamferFeatureData>(
 
         nodeIds: () => [],
 
-        parameters: (feature) => [
-            {
-                key: options.parameterKey,
-                display: options.parameterDisplay,
-                value: feature[options.parameterKey] as number | string,
-                unit: LENGTH_UNITS,
-            },
-        ],
+        parameters: (feature) =>
+            feature.type === "fillet" && feature.radiusLaw !== undefined
+                ? feature.radiusLaw.map((point, index) => ({
+                      key: `radiusLaw.${index}`,
+                      display: "fillet.lawRadius" as const,
+                      value: point.radius,
+                      unit: LENGTH_UNITS,
+                  }))
+                : [
+                      {
+                          key: options.parameterKey,
+                          display: options.parameterDisplay,
+                          value: feature[options.parameterKey] as number | string,
+                          unit: LENGTH_UNITS,
+                      },
+                  ],
 
-        setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+        setParameter: (feature, key, value) => {
+            if (
+                feature.type === "fillet" &&
+                feature.radiusLaw !== undefined &&
+                key.startsWith("radiusLaw.")
+            ) {
+                const index = Number(key.slice("radiusLaw.".length));
+                if (!Number.isInteger(index) || index < 0 || index >= feature.radiusLaw.length)
+                    return feature;
+                return {
+                    ...feature,
+                    radiusLaw: feature.radiusLaw.map((point, i) =>
+                        i === index ? { ...point, radius: value } : point,
+                    ),
+                };
+            }
+            return { ...feature, [key]: value };
+        },
 
         applyResolvedRefs: (feature, { resolvedEdges }) =>
             resolvedEdges === undefined ? feature : { ...feature, edges: resolvedEdges },
@@ -65,9 +91,25 @@ function edgeCornerHandler<F extends FilletFeatureData | ChamferFeatureData>(
             if (input === undefined) {
                 return Result.err(`${feature.type} requires a preceding feature`);
             }
+            const tracking = context.tracking;
+            if (feature.type === "fillet" && feature.radiusLaw !== undefined) {
+                const law = resolveFilletRadiusLaw(feature.radiusLaw, context.scope);
+                if (!law.isOk) return Result.err(law.error);
+                const indexes = matchCornerEdges(input, feature, tracking);
+                if (!indexes.isOk) return Result.err(indexes.error);
+                if (tracking !== undefined && shapeFactory.filletVariableRadiusTracked !== undefined) {
+                    const result = shapeFactory.filletVariableRadiusTracked(input, indexes.value, law.value);
+                    return result.isOk
+                        ? trackEdgeCorner(feature.id, tracking, input, result.value)
+                        : Result.err(result.error);
+                }
+                return (
+                    shapeFactory.filletVariableRadius?.(input, indexes.value, law.value) ??
+                    Result.err("Variable-radius fillets are not available in this kernel build")
+                );
+            }
             const parameter = resolveCornerParameter(feature, context.scope, options);
             if (!parameter.isOk) return Result.err(parameter.error);
-            const tracking = context.tracking;
             const indexes = matchCornerEdges(input, feature, tracking);
             if (!indexes.isOk) return Result.err(indexes.error);
             return applyEdgeCorner(feature, options, input, indexes.value, parameter.value, tracking);

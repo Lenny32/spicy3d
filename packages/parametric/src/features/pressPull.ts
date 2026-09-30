@@ -54,7 +54,7 @@ export function extrudeFromSourceFaces(
         return sweepFaces(
             matched.value.indexes.map((index) => worldFaces[index]),
             (face) => extents.sidesAlong(face.normal(0, 0)[1]),
-            (face) => face.normal(0, 0)[1].multiply(startOffset),
+            (face) => face.normal(0, 0)[1].multiply(feature.startFace ? 0 : startOffset),
         );
     } finally {
         owned.forEach((x) => x.dispose());

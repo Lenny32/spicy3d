@@ -1,10 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { mergeDocuments, migrateDocument, type Serialized } from "@spicy3d/core";
+import {
+    assembleManifest,
+    mergeDocuments,
+    migrateDocument,
+    type Serialized,
+    splitManifest,
+} from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
 import "@spicy3d/parametric";
+import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric/src/migrations";
 import "@spicy3d/wasm";
 
 // The merge rule of an extrude's extents (parametric format 3, docs/merge.md "Features"). Base: the
@@ -148,5 +155,56 @@ describe("merging extrude extents", () => {
         const dangling = result.conflicts.filter((x) => x.kind === "dangling-ref");
         expect(dangling).toHaveLength(1);
         expect(dangling[0].path).toContain("feature-hole");
+    });
+});
+
+describe("merging associative extrusion starts", () => {
+    const withStart = () =>
+        editFeature(base(), "feature-hole", (x) => ({
+            ...x,
+            startFace: { nodeId: "body-block", face: x.extent.face },
+        }));
+    test("the body and face are one atomic pick", () => {
+        const b = withStart();
+        const ours = editFeature(b, "feature-hole", (x) => ({
+            ...x,
+            startFace: { ...x.startFace, nodeId: "sketch-hole" },
+        }));
+        const theirs = editFeature(b, "feature-hole", (x) => ({
+            ...x,
+            startFace: { ...x.startFace, face: { ...x.startFace.face, id: "different" } },
+        }));
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts.map((conflict) => conflict.kind)).toEqual(["property"]);
+        expect(feature(result.merged, "feature-hole").startFace).toEqual(
+            feature(ours, "feature-hole").startFace,
+        );
+    });
+    test("a start offset edit and a depth edit merge independently", () => {
+        const b = withStart();
+        const ours = editFeature(b, "feature-hole", (x) => ({ ...x, startOffset: "gap" }));
+        const theirs = editFeature(b, "feature-hole", (x) => ({ ...x, depth: 4 }));
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts).toEqual([]);
+        expect(feature(result.merged, "feature-hole")).toMatchObject({ startOffset: "gap", depth: 4 });
+    });
+});
+
+test("the parametric-6 starting-face fixture survives cloud manifest/blob assembly", async () => {
+    const fixture = loadDocumentFixtures().find(
+        (fixture) => fixture.name === "v2/parametric6-from-face.json",
+    );
+    expect(fixture).not.toBeUndefined();
+    if (fixture === undefined) throw new Error("Missing approved format fixture");
+    const { manifest, blobs } = await splitManifest(fixture.data, { minStringLength: 1 });
+    expect(blobs.size).toBeGreaterThan(0);
+    const assembled = assembleManifest(JSON.parse(JSON.stringify(manifest)), (sha) => blobs.get(sha));
+    expect(assembled.isOk).toBe(true);
+    expect(assembled.value).toEqual(fixture.data);
+    const merged = merge(fixture.data, assembled.value, fixture.data);
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.merged["moduleVersions"]).toMatchObject({
+        parametric: PARAMETRIC_FORMAT_VERSION,
+        sketch: 3,
     });
 });

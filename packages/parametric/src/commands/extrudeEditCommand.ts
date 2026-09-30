@@ -26,7 +26,7 @@ import {
     type XYZ,
 } from "@spicy3d/core";
 import { findSketch } from "../features/extrude";
-import { locateExtentFace } from "../features/extrudeExtent";
+import { locateExtentFace, locateStartFace } from "../features/extrudeExtent";
 import { linkedExtrude, withLinkedExtrudeOverride } from "../features/extrudeTarget";
 import type {
     BooleanOperation,
@@ -136,9 +136,14 @@ export class ExtrudeEditCommand extends CancelableCommand {
 
     /** The session's values are the feature's: none is carried over from another run. */
     protected override isPropertyCached(property: Property): boolean {
-        return !["targetsInfo", "targetList", "extent", "extentFaceInfo", "extentOffset"].includes(
-            property.name,
-        );
+        return ![
+            "targetsInfo",
+            "targetList",
+            "fromFace",
+            "extent",
+            "extentFaceInfo",
+            "extentOffset",
+        ].includes(property.name);
     }
 
     /** Distance (dragged), up to a face ("To object", click another face to change it) or through all. */
@@ -221,6 +226,34 @@ export class ExtrudeEditCommand extends CancelableCommand {
     set symmetric(value: boolean) {
         this.setProperty("symmetric", value);
         this._dragHandler?.refresh();
+    }
+
+    private _storedStartFace: ExtrudeFeatureData["startFace"];
+    private _pickedStartFace: VisualShapeData | undefined;
+    private _pickingStartFace = false;
+    @property("option.command.fromFace")
+    get fromFace(): boolean {
+        return this.getPrivateValue("fromFace", false);
+    }
+    set fromFace(value: boolean) {
+        this.setProperty("fromFace", value);
+        this._pickingStartFace = value;
+        this._dragHandler?.refresh();
+    }
+    @property("option.command.pickStartFace", { dependencies: [{ property: "fromFace", value: true }] })
+    pickStartingFace(): void {
+        this._pickingStartFace = true;
+        this._dragHandler?.refresh();
+    }
+    private get hasStartFace(): boolean {
+        return this._pickedStartFace !== undefined || this._storedStartFace !== undefined;
+    }
+    private editedStartFace(): ExtrudeFeatureData["startFace"] {
+        if (!this.fromFace) return undefined;
+        if (!this._pickedStartFace) return this._storedStartFace;
+        const picked = toObjectExtentOf(this._pickedStartFace, 0);
+        if (picked.type !== "toObject") throw new Error("The starting object is not a face");
+        return { nodeId: picked.nodeId, face: picked.face };
     }
 
     @property("option.command.startOffset", { unit: LENGTH_UNITS })
@@ -370,6 +403,10 @@ export class ExtrudeEditCommand extends CancelableCommand {
         if (operation !== undefined) this.setProperty("operation", operation[0] as I18nKeys);
         this.setProperty("symmetric", feature.symmetric === true);
         this.setProperty("startOffset", feature.startOffset ?? 0);
+        this.setProperty("fromFace", feature.startFace !== undefined);
+        this._storedStartFace = feature.startFace;
+        this._pickedStartFace = undefined;
+        this._pickingStartFace = false;
         this.setProperty("depth", feature.depth);
         this.setProperty("extent", extentKeyOf(feature.extent));
         this._storedToObject = feature.extent?.type === "toObject" ? feature.extent : undefined;
@@ -395,9 +432,17 @@ export class ExtrudeEditCommand extends CancelableCommand {
             toggleTarget: (node) => this.toggleTarget(node, body),
             picksTarget: () => this._addingTargets,
             depthLocked: () => this.extent !== EXTENT_DISTANCE,
-            extentReady: () => this.extent !== EXTENT_TO_OBJECT || this.hasExtentFace,
-            picksExtentFace: () => this.extent === EXTENT_TO_OBJECT,
+            extentReady: () =>
+                (!this.fromFace || this.hasStartFace) &&
+                (this.extent !== EXTENT_TO_OBJECT || this.hasExtentFace),
+            picksExtentFace: () =>
+                (this.fromFace && this._pickingStartFace) || this.extent === EXTENT_TO_OBJECT,
             pickExtentFace: (face) => {
+                if (this.fromFace && this._pickingStartFace) {
+                    this._pickedStartFace = face;
+                    this._pickingStartFace = false;
+                    return true;
+                }
                 this._pickedExtentFace = face;
                 this.syncExtentFlags();
                 return true;
@@ -427,6 +472,10 @@ export class ExtrudeEditCommand extends CancelableCommand {
         dragging: boolean,
     ): ExtrudePreview {
         const edited = this.editedFeature(feature);
+        if (this.fromFace && !this.hasStartFace) {
+            showPreviewProblem("Select the extrusion starting face");
+            return { meshes: [] };
+        }
         if (this.extent === EXTENT_TO_OBJECT && !this.hasExtentFace) {
             showPreviewProblem(I18n.translate("option.command.extentFace.none"));
             return { meshes: [] };
@@ -439,6 +488,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
         const overlays = [
             this.toolOverlayOf(body, edited, preview),
             this.extentFaceOverlayOf(edited, preview),
+            this.startFaceOverlayOf(edited, preview),
         ].filter((x): x is PreviewOverlay => x !== undefined);
         const others = this.targetsPreview(body, edited, preview, dragging);
         return {
@@ -467,6 +517,26 @@ export class ExtrudeEditCommand extends CancelableCommand {
             return extentFaceOverlay(located.value);
         } finally {
             owned.forEach((x) => x.dispose());
+        }
+    }
+
+    private startFaceOverlayOf(
+        edited: ExtrudeFeatureData,
+        preview: FeatureChainPreview,
+    ): PreviewOverlay | undefined {
+        if (edited.startFace === undefined) return undefined;
+        const owned: IFace[] = [];
+        try {
+            if (this._pickedStartFace !== undefined)
+                return extentFaceOverlay(worldFaceOf(this._pickedStartFace, owned));
+            const context = preview.enteringContext();
+            if (context === undefined) return undefined;
+            const face = locateStartFace(edited, context);
+            if (!face.isOk) return undefined;
+            owned.push(face.value);
+            return extentFaceOverlay(face.value);
+        } finally {
+            owned.forEach((face) => face.dispose());
         }
     }
 
@@ -571,6 +641,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
         const {
             symmetric: _symmetric,
             startOffset: _startOffset,
+            startFace: _startFace,
             operation,
             extent: _extent,
             secondExtent,
@@ -584,6 +655,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
             depth: this.depth,
             ...(symmetric ? { symmetric: true } : {}),
             ...(this.startOffset !== 0 ? { startOffset: this.startOffset } : {}),
+            ...(this.editedStartFace() ? { startFace: this.editedStartFace() } : {}),
             ...(extent === undefined ? {} : { extent }),
             ...(symmetric && secondExtent !== undefined ? { secondExtent } : {}),
             ...(operation === undefined
@@ -611,6 +683,10 @@ export class ExtrudeEditCommand extends CancelableCommand {
     }
 
     private commit(body: ParametricBodyNode, feature: ExtrudeFeatureData) {
+        if (this.fromFace && !this.hasStartFace) {
+            PubSub.default.pub("showToast", "error.default:{0}", "Select the extrusion starting face");
+            return;
+        }
         if (this.extent === EXTENT_TO_OBJECT && !this.hasExtentFace) {
             PubSub.default.pub(
                 "showToast",

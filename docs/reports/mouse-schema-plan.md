@@ -98,3 +98,34 @@ The pure parametric 6→7 migration is identity. Treat radiusLaw as one atomic m
 NEW fixture. Worker may implement native/runtime/feature/UI/MCP code now, but must wait for #94's
 committed version-6 registration before editing version/migration/rule/fixture sections.
 Serialize native artifact builds after #94 and retain all earlier committed C++ sources.
+
+## #95: automatic next-face extrusion extent
+
+Reserved owning module version: **parametric 8**, following #83's parametric 7. Worker: `mouse_86`.
+Add an extent/secondExtent union variant `{ type: "next"; nodeIds: string[]; offset?: ParameterValue }`.
+Capture eligible existing candidate body IDs automatically at authoring time, with host input
+implicit. Freeze that candidate universe to prevent future downstream bodies introducing cycles;
+editing may explicitly refresh candidates. Resolve each referenced body's appropriate timeline
+state and recompute the nearest valid face on every rebuild. Missing candidates fail explicitly.
+
+Choose the uniformly nearest complete trimmed surface by exact tool containment, not a center
+sample or face index. Crossing or tied minima and incomplete coverage report useful ambiguity.
+Initial scope requires one full-coverage face per profile; piecewise caps are unsupported explicitly.
+Choose the unoffset target first, then apply the axial offset and rebuild. Do not reverse a
+one-sided search automatically; depth sign chooses direction and symmetric sides search separately.
+Enforce bounded candidate/face/tool inspection with clear limit errors and geometric pruning.
+
+The pure parametric 7→8 migration is identity; the next variant is atomic with node references and
+its offset expression declared. Add a NEW immutable fixture. Migration/rule/version edits wait
+for #83's committed version-7 step. Native builds follow #83 and preserve all earlier sources.
+Required proof covers moving/curved candidates, full and partial coverage, thin curved walls,
+ties/crossing order, offsets, both signs/symmetric, #94 starts, transformed/linked timelines,
+UI/MCP edits/undo, old fixtures, atomic merge and cloud payload round trips.
+
+## #98 runtime recovery boundary
+
+The user directly approved "Allow undo/redo reset during recovery" in response to the explicit
+question about preserving committed edits, document IDs and feature references while clearing
+native-bearing undo records. This permits an undo reset only after successful reconstruction.
+Failed preparation must retain the original live state. Runtime generation/checkpoint/recovery
+infrastructure must not change any saved payload, envelope or module version.
