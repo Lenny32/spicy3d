@@ -57,6 +57,13 @@ import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher"
 
 /** One side of an extrude, ready for the kernel. */
 export type SweepSide =
+    | {
+          readonly kind: "fromFace";
+          readonly direction: XYZ;
+          readonly face: IFace;
+          readonly offset: number;
+          readonly end: SweepSide;
+      }
     | { readonly kind: "distance"; readonly vec: XYZ }
     | {
           readonly kind: "toObject";
@@ -99,11 +106,12 @@ export interface ResolvedExtents {
 }
 
 type ToObjectExtent = Extract<ExtrudeExtent, { type: "toObject" }>;
-type ExtentKey = "extent" | "secondExtent";
+type ExtentKey = "extent" | "secondExtent" | "startFace";
 
 /** The to-object extents of `feature`, by field. */
 export function toObjectExtents(feature: ExtrudeFeatureData): [ExtentKey, ToObjectExtent][] {
     const result: [ExtentKey, ToObjectExtent][] = [];
+    if (feature.startFace) result.push(["startFace", { type: "toObject", ...feature.startFace }]);
     if (feature.extent?.type === "toObject") result.push(["extent", feature.extent]);
     if (feature.symmetric === true && feature.secondExtent?.type === "toObject") {
         result.push(["secondExtent", feature.secondExtent]);
@@ -137,6 +145,15 @@ export function resolveExtents(
     }
     const owned: IFace[] = [];
     const dispose = () => owned.forEach((x) => x.dispose());
+    let start: { face: IFace; offset: number } | undefined;
+    if (feature.startFace) {
+        const offset = resolveUnitSpec(feature.startOffset ?? 0, env.scope, LENGTH_UNITS);
+        if (!offset.isOk) return Result.err(offset.error);
+        const face = resolveExtentFace("startFace", { type: "toObject", ...feature.startFace }, feature, env);
+        if (!face.isOk) return Result.err(`Starting face: ${face.error}`);
+        owned.push(face.value);
+        start = { face: face.value, offset: offset.value };
+    }
     const firstEnd = resolveEnd("extent", first, feature, env, owned);
     if (!firstEnd.isOk) {
         dispose();
@@ -153,7 +170,19 @@ export function resolveExtents(
         secondEnd = resolved.value;
     }
     return Result.ok({
-        sidesAlong: (normal) => extentSides(firstEnd.value, secondEnd, normal, depth),
+        sidesAlong: (normal) =>
+            extentSides(firstEnd.value, secondEnd, normal, depth).map((side) => {
+                if (!start) return side;
+                const direction =
+                    side.kind === "distance" ? (side.vec.normalize() ?? normal) : side.direction;
+                return {
+                    kind: "fromFace" as const,
+                    direction,
+                    face: start.face,
+                    offset: start.offset * (direction.dot(normal) < 0 ? -1 : 1),
+                    end: side,
+                };
+            }),
         dispose,
     });
 }
@@ -287,6 +316,12 @@ export function locateExtentFace(
     const world = local.value.transformedMul(context.host.worldTransform()) as IFace;
     local.value.dispose();
     return Result.ok(world);
+}
+
+/** The associative starting face, in world coordinates; the caller disposes it. */
+export function locateStartFace(feature: ExtrudeFeatureData, context: FeatureContext): Result<IFace> {
+    if (feature.startFace === undefined) return Result.err("The extrusion has no starting face");
+    return locateExtentFace(feature, { type: "toObject", ...feature.startFace }, context);
 }
 
 /** Face-resolution errors, worded for an extent's face rather than a press-pull source. */
@@ -423,6 +458,23 @@ export function extentNodeIds(feature: ExtrudeFeatureData): string[] {
 /** One side's tool with kernel history (channels relative to the profile, see `prismTracked`). */
 export function sweepSideTracked(face: IFace, side: SweepSide): Result<TrackedShape> {
     switch (side.kind) {
+        case "fromFace": {
+            const from = shapeFactory.prismFromTracked?.bind(shapeFactory);
+            if (!from) return Result.err("This kernel cannot start an extrusion from a face");
+            const end = side.end;
+            if (end.kind === "fromFace") return Result.err("Nested starting faces are invalid");
+            return from(
+                face,
+                side.direction,
+                side.face,
+                side.offset,
+                end.kind === "distance"
+                    ? { kind: "distance", depth: end.vec.length() }
+                    : end.kind === "toObject"
+                      ? { kind: "toObject", face: end.face, offset: end.offset }
+                      : { kind: "throughAll", bounds: [...end.bounds], flush: end.flush },
+            );
+        }
         case "distance":
             return shapeFactory.prismTracked === undefined
                 ? Result.err("This kernel cannot extrude with history")
@@ -456,10 +508,12 @@ export function sweepSide(face: IFace, side: SweepSide): Result<IShape> {
 /** True when every side of `sides` is a distance with a usable kernel for the tracked path. */
 export function canSweepTracked(sides: readonly SweepSide[]): boolean {
     return sides.every((side) =>
-        side.kind === "distance"
-            ? shapeFactory.prismTracked !== undefined
-            : side.kind === "toObject"
-              ? shapeFactory.prismUntilTracked !== undefined
-              : shapeFactory.prismThruAllTracked !== undefined,
+        side.kind === "fromFace"
+            ? shapeFactory.prismFromTracked !== undefined
+            : side.kind === "distance"
+              ? shapeFactory.prismTracked !== undefined
+              : side.kind === "toObject"
+                ? shapeFactory.prismUntilTracked !== undefined
+                : shapeFactory.prismThruAllTracked !== undefined,
     );
 }

@@ -1519,3 +1519,42 @@ describe("rule-based edge queries (real kernel)", () => {
         expect(body.featuresJson).toBe(before);
     });
 });
+
+test("run_parametric captures a JSON starting-face pick and rebuilds it after an upstream edit", () => {
+    const doc = newDoc();
+    const body = createdBody(doc, run(doc, plate(20)), "b1");
+    const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const top = faces.findIndex((face) => face.surface().isPlanar() && face.normal(0, 0)[1].z > 0.99);
+    expect(top).toBeGreaterThanOrEqual(0);
+    const result = run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "boss-sketch", plane: "XY", entities: rect(5, 5, 10, 10) },
+                {
+                    op: "extrude",
+                    id: "boss",
+                    sketch: "boss-sketch",
+                    depth: 5,
+                    startFace: { nodeId: body.id, faceIndex: top },
+                },
+            ]),
+        ),
+    );
+    const boss = createdBody(doc, result, "boss");
+    expectClean(boss);
+    expect(boss.features[0]).toMatchObject({ startFace: { nodeId: body.id } });
+    expect(extent(boss)).toEqual([5, 5, 20, 10, 10, 25]);
+    run(doc, [
+        {
+            op: "editFeature",
+            body: body.id,
+            featureId: body.features[0].id,
+            action: "setParameter",
+            key: "depth",
+            value: 30,
+        },
+    ]);
+    expectClean(boss);
+    expect(extent(boss)).toEqual([5, 5, 30, 10, 10, 35]);
+});

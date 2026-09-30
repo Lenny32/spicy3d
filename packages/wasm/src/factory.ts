@@ -22,6 +22,7 @@ import {
     PerformanceTrace,
     type Plane,
     Precision,
+    type PrismFromEnd,
     Result,
     ShapeTypes,
     ShapeTypeUtils,
@@ -760,6 +761,34 @@ export class ShapeFactory implements IShapeFactory {
         return convertTrackedShapeResult(
             wasm.ShapeFactory.prismTracked,
             [ensureOccShape(shape)[0], vec],
+            "Prism",
+        );
+    }
+
+    prismFromTracked(
+        profile: IShape,
+        direction: XYZ,
+        fromFace: IFace,
+        offset: number,
+        end: PrismFromEnd,
+    ): Result<TrackedShape> {
+        const binding = wasm.ShapeFactory.prismFromTracked;
+        if (typeof binding !== "function")
+            return Result.err("This kernel cannot start an extrusion from a face");
+        return convertTrackedShapeResult(
+            binding,
+            [
+                ensureOccShape(profile)[0],
+                direction,
+                ensureOccShape(fromFace)[0],
+                offset,
+                end.kind === "distance" ? 0 : end.kind === "toObject" ? 1 : 2,
+                end.kind === "distance" ? end.depth : 0,
+                ensureOccShape(end.kind === "toObject" ? end.face : fromFace)[0],
+                end.kind === "toObject" ? (end.offset ?? 0) : 0,
+                ensureOccShape(end.kind === "throughAll" ? end.bounds : []),
+                end.kind === "throughAll" && end.flush === true,
+            ],
             "Prism",
         );
     }

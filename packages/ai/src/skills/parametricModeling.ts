@@ -67,7 +67,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   their datums (display units), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
   a sketch you did not build in this call.
-- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, body?, operation?, extent?, secondExtent? }
+- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, startFace?, body?, operation?, extent?, secondExtent? }
   Without "body" it starts a new body. With "body" + "operation" (fuse/cut/common) the new prism
   combines with that body's shape. All closed profiles of the sketch are extruded.
   extent: "distance" (default, by depth) | "throughAll" (through the whole body; direction = sign of
@@ -76,6 +76,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   it follows the face on rebuild — a hole cut to a block's bottom face stays through when the block
   grows). With symmetric, extent applies to both sides; secondExtent gives the second side its own
   (a to-object extent cannot be mirrored).
+  startFace: {nodeId, faceIndex} selects an associative starting surface, including curved walls.
+  startOffset moves that surface along the sketch normal; expressions are supported. With distance,
+  depth separates the surface and its exact translated end cap. Upstream edits rebuild both caps.
+  The profile must project completely onto the selected surface; incomplete or ambiguous boundaries
+  fail explicitly. Omit startFace to retain the sketch-plane start.
 - { op: "revolve", id, sketch, axis, angle? }
   axis: { point: {x,y,z}, direction: {x,y,z} } (world) | { construction, member? } (a construction axis;
   for a UCS member "X"/"Y"/"Z", default Z) | { nodeId, edgeIndex } (a linear edge of a node, e.g. a
