@@ -922,6 +922,8 @@ export default {
         "option.command.patternType.rectangular": "Rectangular",
         "option.command.pitch": "Pitch",
         "option.command.repeat": "Repeat",
+        "option.command.fromFace": "Start from face",
+        "option.command.pickStartFace": "Choose starting face",
         "option.command.startOffset": "Start Offset",
         "option.command.symmetric": "Symmetric",
         "option.command.thickness": "Thickness",

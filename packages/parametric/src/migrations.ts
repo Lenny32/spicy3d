@@ -14,8 +14,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * with "Unknown feature type".
  * 5: `thicken` features (a shell / thicken of the previous shape) — a build reading only v4 would fail
  * those bodies with "Unknown feature type".
+ * 6: associative extrusion starting faces; older builds would ignore the selected surface.
  */
-export const PARAMETRIC_FORMAT_VERSION = 5;
+export const PARAMETRIC_FORMAT_VERSION = 6;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -51,3 +52,6 @@ registerMigration("sketch", 1, (document) => document);
 
 // sketch 2 → 3: absent control metadata retains fit-point semantics verbatim.
 registerMigration("sketch", 2, (document) => document);
+
+// parametric 5 → 6: optional associative starting faces; absent preserves old extrusions.
+registerMigration("parametric", 5, (document) => document);

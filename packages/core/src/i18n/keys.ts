@@ -873,6 +873,8 @@ export const I18N_KEYS = [
     "option.command.patternType.linear",
     "option.command.patternType.rectangular",
     "option.command.repeat",
+    "option.command.fromFace",
+    "option.command.pickStartFace",
     "option.command.startOffset",
     "option.command.symmetric",
     "option.command.thickness",
