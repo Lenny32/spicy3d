@@ -26,6 +26,7 @@ export * from "./externalContent";
 export * from "./foundation";
 export * from "./guide";
 export * from "./i18n";
+export * from "./kernelRecovery";
 export * from "./material";
 export * from "./math";
 export * from "./merge";

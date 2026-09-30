@@ -1,8 +1,14 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import type { IKernelRecoveryContext } from "@spicy3d/core";
 import MainModuleFactory, { type MainModule } from "../lib/spicy-wasm";
-import { guardKernelModule, onKernelAbort } from "./kernelGuard";
+import {
+    guardKernelModule,
+    onKernelModuleAbort,
+    retireKernelModule,
+    runKernelPreparation,
+} from "./kernelGuard";
 
 declare global {
     var wasm: MainModule;
@@ -22,12 +28,46 @@ export interface InitWasmOptions {
  * does not survive marks core's `KernelState` crashed, and no call re-enters it afterwards.
  */
 export async function initWasm(options?: InitWasmOptions) {
+    const module = await createWasmModule(options);
+    global.wasm = module;
+    return module;
+}
+
+/** Creates an independent instance without installing it as the page's public kernel. */
+export async function createWasmModule(options?: InitWasmOptions): Promise<MainModule> {
+    let instance: MainModule | undefined;
     const module = await MainModuleFactory({
-        onAbort: onKernelAbort,
+        onAbort: (what: unknown) => {
+            if (instance) onKernelModuleAbort(instance, what);
+        },
         ...(options?.wasmBinary && { wasmBinary: options.wasmBinary }),
     });
-    global.wasm = guardKernelModule(module, { probe: () => probeKernel(module) });
-    return global.wasm;
+    probeKernel(module);
+    instance = guardKernelModule(module, { probe: () => probeKernel(module) });
+    return instance;
+}
+
+/** Private synchronous module selection for candidate graphs. Disposal permanently retires it. */
+export async function createWasmRecoveryContext(options?: InitWasmOptions): Promise<IKernelRecoveryContext> {
+    const module = await createWasmModule(options);
+    let disposed = false;
+    return {
+        run<T>(action: () => T): T {
+            if (disposed) throw new Error("Recovery context has been disposed");
+            const previous = global.wasm;
+            try {
+                global.wasm = module;
+                return runKernelPreparation(module, action);
+            } finally {
+                global.wasm = previous;
+            }
+        },
+        dispose() {
+            if (disposed) return;
+            disposed = true;
+            retireKernelModule(module);
+        },
+    };
 }
 
 /** A unit box, built and freed: throws when the module no longer works after an abort. */

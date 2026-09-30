@@ -41,7 +41,69 @@ function materialIdsOf(materialId: string | string[] | undefined): readonly stri
     return Array.isArray(materialId) ? materialId : [materialId];
 }
 
+export interface PreparedModelGraph {
+    readonly root: INodeLinkedList;
+    /** Re-enters candidate lookup without publishing a node or touching the live tree. */
+    run<T>(action: () => T): T;
+    dispose(): void;
+}
+
 export class ModelManager extends Observable {
+    private preparingRecovery = false;
+    get isPreparingRecovery(): boolean {
+        return this.preparingRecovery;
+    }
+
+    /** Candidate nodes are bound to this document; validation temporarily sees their own graph. */
+    prepareRecoveryNodes(nodes: Serialized[], validate: () => void): PreparedModelGraph {
+        let root: INodeLinkedList | undefined;
+        let disposed = false;
+        const constructed: INode[] = [];
+        const run = <T>(action: () => T): T => {
+            if (disposed) throw new Error("Recovery candidate has been disposed");
+            const previousRoot = this._rootNode;
+            const previousPreparing = this.preparingRecovery;
+            const previousDeserializing = this._deserializing;
+            const previousDisabled = this.document.history.disabled;
+            try {
+                this.preparingRecovery = true;
+                this._deserializing = true;
+                this.document.history.disabled = true;
+                if (root) this._rootNode = root;
+                return action();
+            } finally {
+                this._rootNode = previousRoot;
+                this.preparingRecovery = previousPreparing;
+                this._deserializing = previousDeserializing;
+                this.document.history.disabled = previousDisabled;
+            }
+        };
+        const dispose = () => {
+            if (disposed) return;
+            run(() => {
+                for (const node of constructed) node.dispose();
+            });
+            disposed = true;
+        };
+        try {
+            run(() => {
+                root = NodeUtils.deserializeNodeSync(
+                    this.document,
+                    structuredClone(nodes),
+                    (doc, data) => new UnknownNode(doc, data),
+                    (node) => constructed.push(node),
+                );
+                if (!root) throw new Error("Recovery checkpoint has no root node");
+                this._rootNode = root;
+                validate();
+            });
+        } catch (error) {
+            dispose();
+            throw error;
+        }
+        return { root: root!, run, dispose };
+    }
+
     private readonly _nodeChangedObservers = new Set<OnNodeChanged>();
     private _deserializing = false;
     /** Records collected while {@link applyContent} runs, dispatched once when it is done. */

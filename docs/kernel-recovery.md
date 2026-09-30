@@ -1,0 +1,9 @@
+# Main-kernel recovery (#98)
+
+Recovery recreates the main WASM instance and reconstructs every open document from its last healthy committed runtime checkpoint. Checkpoints reuse the existing saved envelope unchanged, including cached BREP values for stored shapes; they are not repository saves. Capture refuses open transactions and pending derived work. Missing checkpoints for the current committed undo position cause an explicit failure.
+
+Every native instance owns its receivers and native arguments. Retirement is permanent, independent of public crash-state reset. A private synchronous preparation context selects only the new instance, leaving the public crash state and module unchanged on exit. Candidate nodes bind to their original document and temporarily resolve against their candidate tree; they do not publish tree notifications or undo records. All documents must reconstruct and validate before publication. A failure discards candidates and retains every live document and checkpoint.
+
+The user explicitly approved clearing undo/redo during successful recovery on 2026-09-30. Publication may therefore establish a new runtime undo boundary after all candidates succeed. Current committed unsaved edits, document IDs, feature IDs and stable topology references must survive. Interrupted uncommitted transactions are excluded. Failed preparations must preserve the previous history stacks. No saved field, version, migration, cloud payload, or native binding is changed.
+
+The currently implemented infrastructure provides permanent generation guards, healthy checkpoint capture/observation, independent WASM creation, and candidate preparation/disposal. Publication, startup wiring, quiescence, runtime undo reset, recovery UI and normal-FIFO MCP recovery are the following implementation stage. #97 worker cancellation and #92 asynchronous program jobs remain separate features. Original historical scan failure has not been reproduced.
