@@ -37,16 +37,22 @@ export class KernelWorkerClient {
         return this.native.size;
     }
     private closed = false;
+    private initialized = false;
     private readonly onMessage: EventListener = (event) => {
         const message: unknown = (event as MessageEvent).data;
         if (!isKernelResponse(message)) {
             this.close({ code: "kernel", message: "Invalid geometry worker response" });
             return;
         }
+        if (message.type === "initialized") {
+            this.initialized = true;
+            return;
+        }
         if (message.type === "fatal") {
             this.close({ code: message.code ?? "kernel", message: message.message });
             return;
         }
+        this.initialized = true;
         if (!this.native.delete(message.id)) {
             this.close({ code: "kernel", message: "Unexpected geometry worker response id" });
             return;
@@ -66,10 +72,17 @@ export class KernelWorkerClient {
             pending?.complete(message.result);
             if (!message.result.ok) this.reportNativeFailure(message.result.error);
         } catch {
-            this.onError(new Event("error"));
+            this.onConnectionError();
         }
     };
     private readonly onError: EventListener = () =>
+        this.close({
+            code: this.initialized ? "kernel" : "unavailable",
+            message: this.initialized
+                ? "Geometry worker connection failed"
+                : "Geometry worker initialization failed",
+        });
+    private readonly onConnectionError = () =>
         this.close({
             code: "kernel",
             message: "Geometry worker connection failed",
@@ -79,7 +92,7 @@ export class KernelWorkerClient {
         workerProfile.add(this);
         worker.addEventListener("message", this.onMessage);
         worker.addEventListener("error", this.onError);
-        worker.addEventListener("messageerror", this.onError);
+        worker.addEventListener("messageerror", this.onConnectionError);
     }
 
     /** Includes failed late replies whose caller already cancelled; registration replays the latch. */
@@ -119,7 +132,7 @@ export class KernelWorkerClient {
                 try {
                     this.worker.postMessage({ type: "cancel", id });
                 } catch {
-                    this.onError(new Event("error"));
+                    this.onConnectionError();
                 }
             };
             this.pending.set(id, { complete });
@@ -132,7 +145,7 @@ export class KernelWorkerClient {
             try {
                 this.worker.postMessage({ type: "request", id, operation, args, trace } as KernelRequest);
             } catch {
-                this.onError(new Event("error"));
+                this.onConnectionError();
             }
         });
     }
@@ -149,7 +162,7 @@ export class KernelWorkerClient {
         this.native.clear();
         this.worker.removeEventListener("message", this.onMessage);
         this.worker.removeEventListener("error", this.onError);
-        this.worker.removeEventListener("messageerror", this.onError);
+        this.worker.removeEventListener("messageerror", this.onConnectionError);
         this.worker.terminate();
         for (const pending of this.pending.values()) pending.complete({ ok: false, error });
         this.reportNativeFailure(error);
@@ -169,6 +182,7 @@ export class KernelWorkerClient {
 
 function isKernelResponse(value: unknown): value is KernelResponse {
     if (!value || typeof value !== "object" || !("type" in value)) return false;
+    if (value.type === "initialized") return true;
     if (value.type === "fatal")
         return (
             "message" in value &&

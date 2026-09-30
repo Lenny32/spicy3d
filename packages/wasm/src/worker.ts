@@ -37,6 +37,8 @@ MainModuleFactory({ onAbort: fatal })
         host = new KernelWorkerHost(new WorkerKernel(module), (response, transfers) =>
             scope.postMessage(response, transfers),
         );
+        // Announce initialization before any queued request can enter the native kernel.
+        scope.postMessage({ type: "initialized" }, []);
         for (const message of pending) host.receive(message);
         pending.length = 0;
     })

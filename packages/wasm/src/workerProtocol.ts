@@ -82,6 +82,7 @@ export type KernelRequest = {
 }[KernelOperation];
 export type KernelMessage = KernelRequest | { type: "cancel"; id: number } | { type: "accept"; id: number };
 export type KernelResponse =
+    | { type: "initialized" }
     | { type: "result"; id: number; result: KernelResult<unknown>; events?: WorkerNativeEvent[] }
     | { type: "fatal"; message: string; code?: "kernel" | "unavailable" };
 

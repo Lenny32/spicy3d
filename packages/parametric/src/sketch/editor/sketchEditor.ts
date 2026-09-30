@@ -237,9 +237,7 @@ export class SketchEditor implements IDisposable {
                 }
             }
             rollback.clear();
-            if (document.modelManager.findNode((candidate) => candidate === node)) {
-                node.setEditingSession(false);
-            }
+            node.setEditingSession(false);
         };
         SketchEditor.cancelPrepared = cancelPrepared;
         let entered = false;
@@ -296,9 +294,8 @@ export class SketchEditor implements IDisposable {
             document.history.onBeforeReplay.remove(cancel);
             releaseSession();
             if (!entered && !cleanedSynchronously) {
-                if (document.modelManager.findNode((candidate) => candidate === node)) {
-                    node.setEditingSession(false);
-                }
+                // Undo detaches nodes without disposing them; redo must not restore session ownership.
+                node.setEditingSession(false);
                 for (const body of rollbackRestoreOrder(rollback)) {
                     if (document.modelManager.findNode((candidate) => candidate === body) === undefined)
                         continue;

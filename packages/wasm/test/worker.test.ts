@@ -27,7 +27,12 @@ class Transport extends EventTarget implements IKernelWorkerTransport {
         this.detached.push(...transfer);
     });
     terminated = false;
+    private initialized = false;
     postMessage(message: KernelMessage): void {
+        if (!this.initialized) {
+            this.initialized = true;
+            this.dispatchEvent(new MessageEvent("message", { data: { type: "initialized" } }));
+        }
         this.host.receive(structuredClone(message));
     }
     terminate(): void {

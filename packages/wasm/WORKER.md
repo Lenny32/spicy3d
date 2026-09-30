@@ -70,6 +70,8 @@ residency, queued/late cancellation, source disposal and provider disposal of un
 The approved **hybrid replicas** path is integrated into the real application. `OccShapeProvider`
 (already installed by `AppBuilder.useWasmOcc()`) supplies the optional core `IAsyncShapeFactory`
 capability when explicitly enabled and browser `Worker` exists. The worker starts lazily on the first eligible operation.
+It announces initialization before processing queued native requests. Browser loading errors before that
+announcement allow synchronous fallback; transport failures after initialization retain native quarantine.
 Parametric imports only core capability interfaces; it does not import WASM.
 
 | Path | Execution |

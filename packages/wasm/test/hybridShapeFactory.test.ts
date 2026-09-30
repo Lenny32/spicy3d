@@ -223,6 +223,77 @@ test("cancelled completed snapshots never create local imports", async () => {
     }
 });
 
+test("worker loading errors allow synchronous fallback without quarantining the provider", async () => {
+    const transport = new NativeWorkerTransport();
+    // A module loading error happens before the worker can receive queued requests.
+    const post = rs.spyOn(transport, "postMessage").mockImplementation((_message) => {});
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const factory = new ShapeFactory(hybrid);
+    const a = createBox(factory);
+    const b = createBox(factory);
+    try {
+        const task = hybrid.booleanTracked("fuse", [a], [b]);
+        expect(task).not.toBeUndefined();
+        if (!task) throw new Error("Missing worker operation");
+        transport.dispatchEvent(new Event("error"));
+        await task.ready;
+        expect(task.take().isOk).toBe(false);
+        expect(task.canFallback).toBe(true);
+        expect(hybrid.failure).toBeUndefined();
+        expect(hybrid.available).toBe(false);
+        expect(hybrid.booleanTracked("fuse", [a], [b])).toBeUndefined();
+        const fallback = unwrapOk(factory.booleanFuseTracked([a], [b]));
+        try {
+            expect(fallback.shape.geometryBoundingBox().max.x).toBeCloseTo(10, 6);
+            expect(fallback.shape.volume()).toBeCloseTo(6000, 6);
+        } finally {
+            fallback.shape.dispose();
+        }
+    } finally {
+        post.mockRestore();
+        hybrid.dispose();
+        a.dispose();
+        b.dispose();
+    }
+});
+
+test.each([
+    "error",
+    "messageerror",
+])("worker %s after initialization keeps native quarantine", async (type) => {
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const factory = new ShapeFactory(hybrid);
+    const a = createBox(factory);
+    const b = createBox(factory);
+    try {
+        // The transport announces initialization before processing the first native request.
+        const task = hybrid.booleanTracked("fuse", [a], [b]);
+        expect(task).not.toBeUndefined();
+        if (!task) throw new Error("Missing worker operation");
+        transport.dispatchEvent(new Event(type));
+        await task.ready;
+        expect(task.take().isOk).toBe(false);
+        expect(task.canFallback).toBe(false);
+        expect(hybrid.failure).toBe("Geometry worker connection failed");
+        const synchronous = factory.booleanFuseTracked([a], [b]);
+        expect(synchronous.isOk).toBe(false);
+        expect(synchronous.error).toBe(hybrid.failure);
+        const requests = transport.requests.length;
+        const next = hybrid.booleanTracked("fuse", [a], [b]);
+        expect(next).not.toBeUndefined();
+        if (!next) throw new Error("Missing quarantined operation");
+        await next.ready;
+        expect(next.take().error).toBe(hybrid.failure);
+        expect(next.canFallback).toBe(false);
+        expect(transport.requests).toHaveLength(requests);
+    } finally {
+        hybrid.dispose();
+        a.dispose();
+        b.dispose();
+    }
+});
+
 test("rollback replica meshing retains render buffers and local picking but releases native tessellation", async () => {
     const transport = new NativeWorkerTransport();
     const hybrid = new HybridShapeFactory(() => transport.client);

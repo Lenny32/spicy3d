@@ -18,7 +18,12 @@ export class NativeWorkerTransport extends EventTarget implements IKernelWorkerT
     hold = false;
     readonly held: KernelResponse[] = [];
     readonly client = new KernelWorkerClient(this);
+    private initialized = false;
     postMessage(message: KernelMessage): void {
+        if (!this.initialized) {
+            this.initialized = true;
+            this.dispatchEvent(new MessageEvent("message", { data: { type: "initialized" } }));
+        }
         this.requests.push(message);
         this.host.receive(structuredClone(message));
     }

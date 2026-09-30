@@ -12,9 +12,11 @@ import {
     type IEventHandler,
     type IFace,
     Matrix4,
+    NodeLinkedListHistoryRecord,
     Plane,
     Result,
     ShapeTypes,
+    Transaction,
     type VisualShapeData,
     XYZ,
 } from "@spicy3d/core";
@@ -143,6 +145,32 @@ test("cancelling entry during a yield restores every body without activating a s
     expect(body.rollbackIndex).toBeUndefined();
     expect(body.isRebuilding).toBe(false);
     expect(body.shape.isOk).toBe(true);
+    expect(AutosaveHolds.isHeld).toBe(false);
+});
+
+test("undoing sketch creation during preparation releases ownership before redo", async () => {
+    // Replay the same add record as sketch creation, without warming the rollback cache.
+    const parent = sketch.parent;
+    expect(parent).not.toBeUndefined();
+    if (!parent) throw new Error("Sketch is detached before preparation");
+    Transaction.add(
+        doc,
+        new NodeLinkedListHistoryRecord([{ action: "add", node: sketch, newParent: parent }]),
+    );
+    const entering = SketchEditor.enterAsync(sketch);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(body.isRebuilding).toBe(true);
+    expect(sketch.editingSession).toBe(true);
+    doc.history.undo();
+    expect(doc.modelManager.findNode((node) => node === sketch)).toBeUndefined();
+    expect(await entering).toBeUndefined();
+    doc.history.redo();
+    expect(doc.modelManager.findNode((node) => node === sketch)).toBe(sketch);
+    expect(SketchEditor.getActive()).toBeUndefined();
+    expect(sketch.editingSession).toBe(false);
+    await DocumentRebuilds.settled(doc);
+    expect(body.rollbackIndex).toBeUndefined();
+    expect(EditSessions.isActive(doc)).toBe(false);
     expect(AutosaveHolds.isHeld).toBe(false);
 });
 
