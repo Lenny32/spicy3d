@@ -236,3 +236,38 @@ and cloud roundtrip/merge tests, independent-distance geometry and actual histor
 scalar/expression UI/MCP editing, rollback, cancel and one-step undo. Version/migration/rule/fixture
 registration waits for #90's committed version-11 step. Runtime/native implementation may proceed
 under the serialized native build slot. #85's owning version remains unassigned.
+
+## #85: associative guided loft with a controlling boundary
+
+Reserved owning module version: **parametric 13**, following #84's parametric 12. Worker: `mouse_86`.
+Add optional atomic `LoftFeatureData.guided` containing
+`{ spine: { nodeId: string; edges: EdgeRef[] }; boundary: { nodeId: string; edges: EdgeRef[] } }`.
+The explicitly referenced main spine and one genuinely frame-driving boundary reuse the ordered
+path resolver. Absent guided inputs preserve every existing loft option and default. Initial guided
+scope is 2–16 single hole-free planar sections, two open connected paths with 1–128 native edge
+pieces each and at most 512 generated side faces. Additional passive constraints are not advertised
+as additional shape-driving boundaries.
+
+The accepted native construction retains every section, uses the auxiliary guide trihedron in
+public OCCT NoContact mode and disables forced C1 approximation. It requests longitudinal C2
+surface construction, preserving polygonal section corners. Guided mode supports default/explicit
+C2; guided C0, C1 and ruled requests fail explicitly. Unguided C0/C1/C2, ruled and solid behavior
+remains unchanged. Require an unambiguous monotonic spine intersection with each section plane,
+the proper endpoint span and boundary-section stations, native validity/self-interference checks,
+and complete section and boundary-curve coverage on the generated SIDE faces. A residual curve
+length above 0.00001 mm fails; containment inside a solid and finite point sampling are insufficient.
+No requested section may be discarded, translated or scaled to force compatibility.
+
+Resolve all inputs in host coordinates, with timeline/pre-consumption cache dependencies and
+reanchoring. Native tracking reports actual section/spine derivations; boundary associations need
+actual history or exact whole-curve overlap. New guided outputs without proven ancestry must not
+receive reusable enumeration-index identities; use honest untracked/ephemeral identity or a proven
+semantic role. Require tracked upstream guide edits and compatible downstream references tested.
+Creation/editing supports referenced spine/boundary picks, repicking, preview, clear option errors,
+cancel and one-step undo; MCP captures validated indexes or persistent references before mutation.
+
+The pure parametric 12→13 migration is identity. Guided spine/boundary choices form one atomic
+group with declared node dependencies. Add a NEW immutable fixture, old-document rebuilds,
+reference deletion/conflicts, `.spicy` and cloud manifest/blob roundtrips. Version/migration/rule/
+fixture registration waits for #84's committed version-12 step. Native/runtime/UI/MCP work may
+proceed earlier, with serialized builds from all accepted native sources and all three artifacts.
