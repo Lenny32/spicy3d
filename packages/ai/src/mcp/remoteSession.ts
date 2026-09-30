@@ -5,6 +5,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Logger } from "@spicy3d/core";
 import { forgetCloudCaller } from "../tools/cloudTools";
 import { imageBudgetFor } from "../tools/imageEncoding";
+import { forgetProgramJobs } from "../tools/programJobs";
 import {
     CLOSE_POLICY_VIOLATION,
     PageSocketTransport,
@@ -108,6 +109,7 @@ export class RemoteMcpSession {
     disconnectAgent(agentId: string): void {
         this.gate.forget(agentId);
         forgetCloudCaller(agentId);
+        forgetProgramJobs(agentId);
         const agents = this.options.state.current.agents.filter((a) => a.id !== agentId);
         this.options.state.update({ agents });
         void this.relay
@@ -133,7 +135,10 @@ export class RemoteMcpSession {
                 this.gate.forget(previous.id);
             }
             // An ended session's open-document question has nobody left to answer to.
-            if (!ids.has(previous.id)) forgetCloudCaller(previous.id);
+            if (!ids.has(previous.id)) {
+                forgetCloudCaller(previous.id);
+                forgetProgramJobs(previous.id);
+            }
         }
         this.options.state.update({
             agents: agents.map((agent) => {
