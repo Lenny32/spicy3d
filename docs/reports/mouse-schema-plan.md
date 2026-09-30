@@ -6,8 +6,8 @@ After the approval reviewer rejected file-based authorization, the user directly
 "Approve the plan’s backward-compatible format changes" in response to the explicit approval
 question covering #81–106 and the sketch-3 proposal below. No further approval is needed within
 that scope; unrelated format redesign remains outside the authorization.
-The document envelope stays at version 2. Parametric remains version 5 until a separate feature
-payload design is approved and assigned here.
+Final implemented versions are document **2**, parametric **13**, and sketch **3**. The owning
+module migrations below preserve prior payloads; existing compatibility fixtures remain unchanged.
 
 ## #93: control-point and weighted sketch B-splines
 
@@ -228,14 +228,16 @@ Use a dedicated tracked worker operation for expensive live solves, retaining th
 **90-second** deadline, generation termination for cancel/timeout and no main-thread fallback.
 Handle synchronous shape reads and configuration flushes explicitly so they cannot invoke the
 expensive solver on the live main thread. Preview uses explicit recompute/confirm/cancel rather
-than continuous dragging. Explicit synchronous native proof/headless evaluation remains possible.
+than continuous dragging. Explicit synchronous native geometry proof remains available; saved and
+headless feature replay uses the asynchronous worker.
 
 The pure parametric 11→12 migration is identity. Setback picks and distances form one atomic
 coherent payload, with declared expression dependencies. Add a NEW immutable fixture, old-document
 and cloud roundtrip/merge tests, independent-distance geometry and actual history proofs,
 scalar/expression UI/MCP editing, rollback, cancel and one-step undo. Version/migration/rule/fixture
-registration waits for #90's committed version-11 step. Runtime/native implementation may proceed
-under the serialized native build slot. #85's owning version is reserved as parametric 13.
+registration followed #90's committed version-11 step and is now implemented with the new fixture.
+The live and headless feature replay requires the asynchronous worker; current synchronous crash
+recovery refuses setback documents atomically, preserving committed state. #85 owns parametric 13.
 
 ## #85: associative guided loft with a controlling boundary
 
@@ -269,5 +271,6 @@ cancel and one-step undo; MCP captures validated indexes or persistent reference
 The pure parametric 12→13 migration is identity. Guided spine/boundary choices form one atomic
 group with declared node dependencies. Add a NEW immutable fixture, old-document rebuilds,
 reference deletion/conflicts, `.spicy` and cloud manifest/blob roundtrips. Version/migration/rule/
-fixture registration waits for #84's committed version-12 step. Native/runtime/UI/MCP work may
-proceed earlier, with serialized builds from all accepted native sources and all three artifacts.
+fixture registration followed #84's committed version-12 step and is now implemented. The committed
+combined native build includes all accepted corner, guided-loft and face-sweep sources and all three
+matching artifacts.

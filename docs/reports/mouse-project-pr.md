@@ -1,22 +1,21 @@
-Mouse modeling project: parametric geometry, kernel recovery and MCP workflows
+Mouse modeling project: guided geometry, corner controls and reliable MCP workflows
 
-This integration adds associative 3D path sweeps and directional surface projection, with editable
-profiles, paths and targets. A support-normal groove/rib joins or cuts a profile along a referenced
-curve on a curved wall, with editable picks and options. It also adds weighted sketch NURBS,
-variable-radius fillets, exact curved-face
-extrusion starts and automatic next-face extents. Corner operations reject invalid geometry with
-actionable diagnostics. Persistent edge references and selectors survive compatible upstream edits;
-feature caches track actual variable dependencies, and appended extrusions retain caller names.
+The mouse modeling workflow now has associative 3D path sweeps, directional surface projection,
+support-normal grooves/ribs, guided lofts and independently editable fillet corner setbacks. UI and
+MCP workflows retain referenced inputs across compatible upstream edits, validate geometry before
+committing, and support cancellation and undo. Weighted sketch NURBS, variable fillets, curved-face
+extrusion starts and next-face extents extend the modeling tools.
 
-Expensive program operations run in bounded cancellable workers with transactional rollback and
-live background status. A fresh main kernel can reconstruct open documents without reloading,
-preserving committed edits and identities. Reference STL meshes bypass CAD conversion and support
-sampled deviation measurement. Exports offer tessellation controls, bounded bytes and separate files
-in one archive; compact MCP responses reduce repeated feature-list output.
+Persistent edge references/selectors, dependency-aware caches and compact MCP responses improve
+repeatable agent modeling. Expensive worker operations have bounded execution, cancellation,
+transactional rollback and committed metadata reads. Reference STL meshes support sampled
+deviation measurements; exports support tessellation controls, bounded bytes and separate files
+in one archive. Main-kernel recovery preserves committed state for supported synchronous replays.
 
-This is the single draft integration PR for the 26-ticket mouse project. Keep it draft while the
-remaining work is queued. Follow [the durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
-for dependencies, ticket status, full integration SHAs and validation.
+All 26 issues #81–#106 are implemented, reviewed, tested and pushed on this branch. This is the
+single integration PR; it is ready for the boss's review and must remain unmerged. Issues retain
+their open state and original labels. The [durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
+records dependencies, full integration SHAs and validation.
 
 | Ticket | Behavior | Integration commit |
 | --- | --- | --- |
@@ -44,82 +43,32 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #88 | Associative path sweep with real section/path history and editable UI/MCP | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 |
 | #89 | Associative directional projection with complete trimmed-face coverage | 279b538db3f00c5b26b55ce37f45c791b3afb54b |
 | #90 | Support-normal groove/rib with tracked join/cut and editable UI/MCP | 76245a90b2935df7ea0d207a82ebbcb67e585103 |
+| #85 | Associative spine/boundary guided loft with editable UI/MCP and proven references | b3237da250b0477afd0ab25cf561dac3801beba7 |
+| #84 | Independent corner setbacks with worker preview, atomic edits and background MCP jobs | c6b23b528404c1a303fbcff8630f5fe82db64592 |
 
-Validation: the 23-ticket full baseline passed 9,650 tests across 583 files, one skip; production build, TypeScript and required
-repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. All 24 listed integrations are validated
-and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain
-unconfirmed without original data.
+Validation: **9,836 passing tests across 605 files, one skip, no failures**. TypeScript and Biome
+checks across all changed source files pass. The production app and all three plugins build.
+Actual Chromium 153/Firefox 155 worker and recovery checks pass; the built app's offline kernel,
+local save/open, deployment banners and external-URL checks pass. Recovery tests inject a fatal
+generation; the original scan-specific failure is not claimed as reproduced. Existing lint,
+bundle-size and Windows libuv worker-exit diagnostics remain; the test process exits successfully.
 
-Control-pole NURBS adds the directly approved optional sketch control layout at sketch version 3,
-with a pure identity migration, atomic merge rule and new fixture. Existing documents remain
-readable. The document envelope stays at version 2. Further payload changes follow the shared
-schema plan and the user-approved backward-compatibility requirements.
+Approved backward-compatible migrations end at document **2**, parametric **13**, sketch **3**.
+Existing compatibility fixtures remain untouched; new immutable fixtures, atomic payload rules,
+device/cloud round-trips and merge validation cover the additions. Unknown payloads and userData
+remain preserved. Older releases need not open newly saved files.
 
-Additional #86 validation: 127 worker tests, 57 integrated tests, TypeScript and required check pass.
-Additional #101 validation: 109 worker and integrated tests, TypeScript and required check pass.
-Additional #87 validation: 138 worker tests, 65 integrated tests, TypeScript and required check pass.
-The production app and all three plugins also build after #86/#101.
-Additional #104 validation: 34 worker/integrated tests, isolated/root TypeScript and scoped check pass.
-Additional #81 validation: rebuilt Emscripten 5.0.7 / OCCT V8_0_1 artifacts, 182 worker/integrated kernel
-tests, TypeScript and required check pass.
-Additional #105 validation: 43 worker/integrated tests, isolated/root TypeScript and required check.
-Additional #102 validation: 170 worker tests, 49 integrated tests, TypeScript and required check.
+Initial corner scope is one eligible three-edge junction with a constant radius and three separate
+distance expressions. Accepted fits take about 60–64 seconds and use a strict 90-second worker
+deadline; unsupported or over-budget fits fail explicitly. **Current synchronous kernel recovery
+refuses corner-setback documents atomically**, preserving committed payload, IDs and history;
+these documents require reopening saved content in a fresh page. Loading and headless merge
+validation rebuild corners asynchronously. See [corner implementation](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-84-implementation.md).
 
-Additional #93 validation: 1,186 worker tests and 182 focused integration tests, including old fits,
-weighted native parity, UI undo, migrations, merge and cloud history/document paths.
-Additional #96 validation: actual Chromium/Firefox workers, exact program rollback and committed
-metadata reads; combined full suite, TypeScript, lint and production app/plugins pass.
-Additional #82 validation: pinned native rebuild, 163 worker and 183 integrated native/worker tests.
+Initial guided mode supports C2, 2–16 planar hole-free sections, one open spine and controlling
+boundary, at most 128 pieces per path and 512 side faces. All unguided continuity/ruled/solid options
+remain unchanged. Ambiguous topology is explicitly untracked; incompatible full-curve coverage
+fails rather than moving or dropping sections. See [guided loft implementation](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-85-runtime-implementation.md).
 
-Additional #97 validation: 1159 worker tests, 37 integrated checks, TypeScript and required lint;
-actual native-entry cancellation in Chromium/Firefox, old-handle rejection and fresh geometry.
-
-Additional #103 validation: 247 worker and 111 integration tests, rebuilt native artifacts,
-TypeScript and required lint. Actual curved fidelity/coarsening, physical units and CAD/cache
-immutability checks pass. Custom tessellation remains synchronous and is approximation control.
-
-Additional #92 validation: 462 worker regressions and the full9423-test suite pass (one skip),
-TypeScript, required lint and production app/plugins. Existing parametric background rebuild
-status is observable; run_parametric remains synchronous. Runtime job state is bounded and
-caller/document-scoped, with queue ordering and rollback unchanged.
-
-Additional #94 validation: 490 worker tests, 128+41 focused integration tests, exact curved caps,
-timeline/reference continuity and native oblique-profile coverage. Approved parametric6 migration,
-merge rules and cloud fixture roundtrip pass.
-Additional #83 validation: 230 worker tests, native radius/direction/periodic/tangent-contour proof,
-editable UI undo, expressions, migrations and cloud merge/roundtrip. Approved parametric7 migration
-and atomic radius law; natural parameter direction may change after upstream reparameterization.
-
-Additional #95 validation: 234 worker tests; exact curved/thin-wall caps, timeline retargeting,
-UI/MCP editing, native budgets, atomic merge and all historical fixtures. Approved parametric8
-migration and new fixture. Initial scope requires one uniformly nearest full face per profile.
-Additional #98 validation: 212 recovery and 150 existing modeling regressions, plus actual app
-startup/UI recovery in Chromium153 and Firefox155. Committed edits, stable IDs, references and
-dirty/view/camera state survive. User explicitly approved clearing undo/redo after successful
-reconstruction. Failed preparation is atomic; old native handles never revive. Browser tests
-inject a fatal-generation state rather than claiming a reproduced scan-specific crash.
-
-Additional #88 validation: 293 worker tests, 144 focused integration tests and 314 native/fixture
-checks, pinned native rebuild, TypeScript and required lint. Actual upstream edits, tracked
-cap/seam identity, UI undo and distinct MCP JSON-reference calls pass.
-Additional #89 validation: 171 worker tests and 103 combined sweep/projection integration tests;
-TypeScript, required lint, exact curved coverage, ancestry, UI undo and MCP reference roundtrips.
-Approved parametric versions 9 and 10 add pure migrations, atomic merge rules and immutable
-fixtures. Existing fixtures remain unchanged; document envelope 2 and sketch 3 remain.
-
-Additional #90 validation: 247 affected tests across 18 files pass on the integration branch,
-including native Darboux framing, deep-copy/boolean ancestry, projected-source and variable edits,
-UI creation/edit/repick/cancel/undo, actual MCP JSON-reference calls and exact rollback. Approved
-parametric 11 migration, atomic picks and the new immutable fixture pass historical native rebuilds
-and cloud/device roundtrips. TypeScript and scoped checks pass.
-
-Remaining project work: #84 and #85 (2 tickets). Two implementation agents are continuing
-concurrently, with the completed face-sweep agent reviewing the setback job workflow. Strict
-asymmetric setback geometry, actual Chromium/Firefox cancellation, and two/three-section guided
-loft proofs pass; product integration and compatibility work continues. 24 tickets are delivered.
-Keep this PR draft until all 26
-are complete and reviewed.
-
-Refs #90, #88, #89, #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
+Refs #81, #82, #83, #84, #85, #86, #87, #88, #89, #90, #91, #92, #93, #94, #95, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #106.
 Keep issues open and never merge this PR automatically.

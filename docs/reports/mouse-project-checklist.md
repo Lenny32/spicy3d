@@ -54,8 +54,8 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #81 Reject invalid fillet and chamfer results | — | Done (pushed) | mouse_81 | mouse/81-valid-corners | Pinned native rebuild; 182 worker/integrated tests; tsc/check | 0b8655a0701c86211723a4fe4dc1980f4ea95922 | — |
 | #82 Report actionable fillet and chamfer failure diagnostics | #81 | Done (pushed) | root | mouse/82-corner-diagnostics | Pinned native rebuild; 163 worker/183 integrated tests; tsc/check | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 | — |
 | #83 Support variable-radius fillets | #81, #82; parametric 7 | Done (pushed) | mouse_101 | mouse/83-variable-fillet | 230 worker tests; full9495pass1skip; tsc/check/build/native rebuild | 948b0d5a85576d788e16f6115085817da2c544af | — |
-| #84 Support fillet corner setbacks | #81, #82; reserved parametric 12 | Implementation | mouse_101 | mouse/84-corner-setback | Valid unequal native setbacks; tracked cancellable worker; tsc | — | Final UI/MCP, compatibility and integration |
-| #85 Support guide and boundary curves in parametric lofts | Reserved parametric 13 after #84 | Implementation | mouse_86 | mouse/85-guide-loft | Five accepted native guide/section proofs; approved payload | — | Tracked product API, UI/MCP and compatibility |
+| #84 Support fillet corner setbacks | #81, #82; parametric 12 | Done (pushed) | mouse_101 + mouse_81 | mouse/84-corner-setback + mouse/84-corner-jobs | Real native/browser/UI/MCP/merge proofs; full suite: 9,836 pass, 1 skip; tsc/check/build/smoke | c6b23b528404c1a303fbcff8630f5fe82db64592 | — |
+| #85 Support guide and boundary curves in parametric lofts | Parametric 13 after #84 format 12 | Done (pushed) | mouse_86 | mouse/85-guide-loft | 149 worker cases; 91 runtime + 56 compatibility + 2 real fixture checks; tsc/check | b3237da250b0477afd0ab25cf561dac3801beba7 | — |
 | #86 Expose persistent edge references through MCP | #100 | Done (pushed) | mouse_86 | mouse/86-persistent-edges | 127 worker tests; 57 integrated tests; tsc/check | 91f48b5e47ac39c510a31a0dd0546874f226b224 | — |
 | #87 Add rule-based edge selection through MCP | #86 | Done (pushed) | mouse_86 | mouse/87-edge-selectors | 138 worker tests; 65 integrated tests; tsc/check | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 | — |
 | #88 Add a parametric sweep along a 3D path | Parametric 9 | Done (pushed) | mouse_81 | mouse/88-associative-path-sweep | 293 worker tests; 144 focused and 314 native/fixture checks; tsc/check | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 | — |
@@ -286,3 +286,34 @@ document **2**, parametric **11**, sketch **3**.
 product/compatibility integrations continue in parallel. The completed #90 agent now reviews the
 setback background-job workflow. The final all-three native build has linked successfully and
 is being validated before integration. PR #107 remains draft until all 26 and final checks pass.
+
+## Final delivery: all 26 tickets
+
+All issues **#81–#106** are reviewed, implemented, integrated, validated and pushed. #85's complete
+integration is b3237da250b0477afd0ab25cf561dac3801beba7; #84's complete integration is c6b23b528404c1a303fbcff8630f5fe82db64592.
+The native/API foundations are f2fd0008db18aec8acb252934ec26966f3ab2286 and
+a4a0872ba1fe3b05e4d8fcafba9b258586d2f028. Earlier progress sections above are historical snapshots.
+
+The complete branch passes **9,836 tests across 605 files, one skip and zero failures**, TypeScript,
+Biome checks across all changed source files, the production app and all three plugins, actual
+Chromium 153/Firefox 155 recovery checks, and the built app's offline kernel/save-open/banner smoke.
+URL policy passes across 937 source/build files. The accepted combined native artifact also passes
+75 native/worker/history/fixture cases and actual Chromium/Firefox corner cancellation proofs;
+its C++ sources, headers and all three artifacts still match the reviewed build exactly.
+
+Versions are document **2**, parametric **13**, sketch **3**. Every earlier compatibility fixture
+remains unchanged. New immutable fixtures, pure migrations, atomic references/expressions, device
+and cloud round-trips, and genuine headless merge validation pass. The user approved clearing
+undo/redo only after successful main-kernel recovery; failed preparation preserves history.
+
+Corner scope is one eligible three-edge junction with a constant radius and three independently
+editable distance expressions. Live preview/confirm and dedicated background tools use a strict
+90-second worker without synchronous fallback. Current synchronous crash recovery refuses these
+documents atomically, preserving committed state; saved loading and headless merge use async
+workers. Guided loft supports C2 with one spine/controlling boundary and 2–16 sections; unguided
+options remain unchanged. Unsupported geometry/coverage or ambiguous ancestry fail explicitly.
+The original scan-specific failures remain unconfirmed without their original inputs.
+
+All 26 issues receive [done] titles and full-SHA/commit-link evidence while remaining OPEN with
+labels unchanged. The same PR #107 is made ready for review after these checks; it remains unmerged.
+Only enhancement-mouse-project was pushed; develop and main were never pushed or merged.
