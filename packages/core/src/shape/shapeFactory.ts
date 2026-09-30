@@ -299,5 +299,5 @@ export type BoundedShapeRequest =
       };
 
 export interface IBoundedShapeFactory {
-    shapeOperation(request: BoundedShapeRequest): IAsyncShapeOperation<IShape>;
+    shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape>;
 }

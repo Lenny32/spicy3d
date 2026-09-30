@@ -37,6 +37,9 @@ export class KernelWorkerClient {
     get pendingNative(): number {
         return this.native.size;
     }
+    get isClosed(): boolean {
+        return this.closed;
+    }
     private closed = false;
     private initialized = false;
     private readonly onMessage: EventListener = (event) => {
@@ -126,6 +129,7 @@ export class KernelWorkerClient {
         operation: K,
         args: KernelOperations[K]["args"],
         signal?: AbortSignal,
+        options?: { terminateOnAbort?: boolean },
     ): Promise<KernelResult<KernelOperations[K]["result"]>> {
         if (this.closed)
             return Promise.resolve({ ok: false, error: { code: "closed", message: "Worker closed" } });
@@ -147,6 +151,10 @@ export class KernelWorkerClient {
                 resolve(result as KernelResult<KernelOperations[K]["result"]>);
             };
             const cancel = () => {
+                if (options?.terminateOnAbort) {
+                    this.close({ code: "cancelled", message: "Geometry worker operation cancelled" });
+                    return;
+                }
                 complete(this.cancelled());
                 try {
                     this.worker.postMessage({ type: "cancel", id });

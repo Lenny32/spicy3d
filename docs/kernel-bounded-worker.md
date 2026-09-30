@@ -22,7 +22,8 @@ A deadline terminates the entire worker generation, settles its outstanding requ
 listeners/timers, and invalidates resident leases. A following operation lazily creates a fresh
 worker. A timeout/unavailable worker is an operation error, never a synchronous retry of the
 expensive geometry on the main thread. Timeout does not mark the main kernel crashed. Main-kernel
-recovery (#98), user-triggered in-flight cancellation (#97), and live progress (#92) remain separate.
+recovery (#98) and live progress (#92) remain separate. Strict in-flight abort terminates its
+worker generation as described in [cancellation](kernel-cancellation.md).
 
 ## Program consistency and responsive reads
 
