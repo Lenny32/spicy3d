@@ -98,6 +98,11 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     const formatError = validateFormat(app, format);
     if (formatError) return JSON.stringify({ error: formatError });
 
+    const mode = args["mode"] === undefined ? "merged" : args["mode"];
+    if (mode !== "merged" && mode !== "separate")
+        return JSON.stringify({ error: 'mode must be "merged" or "separate"' });
+    if (mode === "separate") return handleSeparateExport(app, doc, args, format, delivery, maxBytes);
+
     const nodes = resolveNodes(doc, args["ids"]);
     if (typeof nodes === "string") return JSON.stringify({ error: nodes });
     const visuals = nodes.filter((n): n is VisualNode => n instanceof VisualNode);
@@ -109,13 +114,44 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     }
 
     const filename = resolveFilename(visuals, format, args["filename"]);
+    return deliverExport(
+        data,
+        {
+            filename,
+            mimeType: exportMimeType(format),
+            nodes: visuals.map((node) => node.id),
+        },
+        delivery,
+        maxBytes,
+    );
+}
+
+interface ExportMetadata {
+    filename: string;
+    mimeType: string;
+    nodes: string[];
+    outputs?: BatchExportOutput[];
+}
+
+interface BatchExportOutput {
+    id: string;
+    filename?: string;
+    mimeType: string;
+    bytes?: number;
+    error?: string;
+}
+
+async function deliverExport(
+    data: BlobPart[],
+    details: ExportMetadata,
+    delivery: "download" | "base64",
+    maxBytes: number,
+): Promise<string> {
     const blob = new Blob(data);
     const metadata = {
         ok: true,
-        filename,
-        mimeType: exportMimeType(format),
+        ...details,
         bytes: blob.size,
-        nodes: visuals.map((n) => n.id),
     };
     if (delivery === "base64") {
         if (blob.size > maxBytes) {
@@ -123,8 +159,9 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
                 error: "Export exceeds maxBytes; increase the limit or use browser download",
                 bytes: blob.size,
                 maxBytes,
-                filename,
+                filename: details.filename,
                 mimeType: metadata.mimeType,
+                outputs: details.outputs,
             });
         }
         const result = JSON.stringify({
@@ -140,16 +177,91 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
         if (budget !== undefined && responseBytes > budget) {
             return JSON.stringify({
                 error: "Export exceeds the relay response limit; use browser download or export less geometry",
-                filename,
+                filename: details.filename,
                 bytes: blob.size,
                 responseBytes,
                 responseByteLimit: budget,
+                outputs: details.outputs,
             });
         }
         return result;
     }
-    download(data, filename);
+    download(data, details.filename);
     return JSON.stringify(metadata);
+}
+
+async function handleSeparateExport(
+    app: IApplication,
+    document: IDocument,
+    args: Record<string, unknown>,
+    format: string,
+    delivery: "download" | "base64",
+    maxBytes: number,
+): Promise<string> {
+    const ids = args["ids"];
+    if (ids !== undefined && (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")))
+        return JSON.stringify({ error: "ids must be an array of node ids" });
+    const requested =
+        ids === undefined
+            ? document.modelManager
+                  .findNodes((node) => node.parent === document.modelManager.rootNode)
+                  .map((node) => node.id)
+            : (ids as string[]);
+    if (requested.length === 0) return JSON.stringify({ error: "no exportable nodes" });
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const outputs: BatchExportOutput[] = [];
+    const names = new Set<string>();
+    const exported: string[] = [];
+    for (const id of requested) {
+        const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
+        const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
+        outputs.push(output);
+        if (!node || !(node instanceof VisualNode)) {
+            output.error = node ? "Node has no exportable visual geometry" : "Node not found";
+            continue;
+        }
+        const safeName =
+            Array.from(node.name)
+                .map((character) =>
+                    character === "/" || character === "\\" || character.charCodeAt(0) < 32 ? "_" : character,
+                )
+                .join("") || "model";
+        const suffix = format.replace(" binary", "");
+        const base = safeName.toLowerCase().endsWith(suffix) ? safeName.slice(0, -suffix.length) : safeName;
+        let filename = `${base}${suffix}`;
+        let counter = 2;
+        while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
+        output.filename = filename;
+        try {
+            const data = await app.dataExchange.export(format, [node]);
+            if (!data) {
+                output.error = "Export failed: no exportable geometry for this format";
+                continue;
+            }
+            const blob = new Blob(data);
+            zip.file(filename, await blob.arrayBuffer());
+            names.add(filename.toLowerCase());
+            output.bytes = blob.size;
+            exported.push(id);
+        } catch {
+            output.error = "Export failed";
+        }
+    }
+    if (exported.length === 0) return JSON.stringify({ error: "No batch outputs exported", outputs });
+    let filename = (args["filename"] as string | undefined)?.trim() || "models.zip";
+    if (!filename.toLowerCase().endsWith(".zip")) filename += ".zip";
+    return deliverExport(
+        [await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })],
+        {
+            filename,
+            mimeType: "application/zip",
+            nodes: exported,
+            outputs,
+        },
+        delivery,
+        maxBytes,
+    );
 }
 
 export function buildReferenceMeshImportTool(): Tool {
@@ -203,6 +315,12 @@ export function buildFileTools(): Tool[] {
                         type: "string",
                         enum: ["download", "base64"],
                         description: "Browser download (default) or returned base64 bytes",
+                    },
+                    mode: {
+                        type: "string",
+                        enum: ["merged", "separate"],
+                        description:
+                            "Merge nodes into one model (default) or export one file per node in one ZIP archive; reports each output/error",
                     },
                     maxBytes: {
                         type: "integer",

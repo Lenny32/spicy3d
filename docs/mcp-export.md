@@ -13,3 +13,13 @@ file, export fewer nodes or use browser download. No persistent resource or serv
 `filename` is a basename, with the format extension appended when missing. Directory separators
 and control characters are rejected. This browser tool cannot write to the caller's computer;
 an agent receiving base64 may save those decoded bytes using its own filesystem capabilities.
+
+Use `mode: "separate"` to export each requested node as its own file in one ZIP archive. The default
+mode, `merged`, still exports one combined model. Archive delivery can be `download` (one browser
+download) or `base64` with the same payload limits. `filename` names the archive, default `models.zip`.
+
+Each archive file uses the model's name plus the selected format extension. Path separators and
+control characters in model names become underscores; duplicate names, ignoring case, gain a
+deterministic numeric suffix. The `outputs` array lists the node id, resulting filename, MIME type,
+decoded file size or an individual error. Successful files remain available when another requested
+node is missing or cannot export. If every output fails, the tool returns errors without an archive.
