@@ -54,6 +54,7 @@ import type { ProfileRef } from "./features/profileRef";
 import { syncNodeWatches } from "./nodeWatch";
 import { RebuildJob, type RebuildSteps } from "./rebuildJob";
 import { danglingProfileRefs, SketchNode } from "./sketch/sketchNode";
+import { trackVariableScope } from "./variableScope";
 import { ensureVariableSync } from "./variableSync";
 
 /**
@@ -72,7 +73,7 @@ import { ensureVariableSync } from "./variableSync";
  *    matched; `refreshAnchoredRefs` writes those back into the feature JSON, so the next edit
  *    measures drift from the latest match rather than from the original pick.
  * 3. Per-feature results are cached (`BodyTimeline`) keyed on the feature JSON, the variable
- *    scope, and the identity of the input and referenced shapes — so editing one feature only
+ *    variable dependencies, and the identity of the input and referenced shapes — so editing one feature only
  *    re-evaluates from that feature on.
  *
  * Where to look:
@@ -853,7 +854,7 @@ export class ParametricBodyNode
 
     /**
      * Replays the feature list, reusing cached per-feature results while the feature
-     * data, the document's variable scope, its input shape, and its referenced node
+     * data, the variables it reads, its input shape, and its referenced node
      * shapes are all unchanged — so editing one feature only re-evaluates from that
      * feature on.
      * A session rollback (`_rollbackIndex`) stops the replay early; the truncation
@@ -871,9 +872,8 @@ export class ParametricBodyNode
         let input: IShape | undefined;
         let faceIds: string[] | undefined;
         let edgeIds: string[] | undefined;
-        // The document's parameter table, not a per-body one: every body in the
-        // document resolves the same names, and a variable edit invalidates every
-        // body's cache through `cacheKey` below.
+        // Resolved values carry transitive expression changes. Each feature records
+        // which names it reads, so unrelated table edits keep its geometry cached.
         const scope = this.document.variables.evaluate().scope;
         const nextCache: FeatureCacheEntry[] = [];
         const resolvedProfiles = new Map<string, ProfileRef[]>();
@@ -902,7 +902,11 @@ export class ParametricBodyNode
                     this.followReferencedSketches(feature, followedSketches);
                     this.refreshConsumedTools(feature);
                 });
-                const key = this.cacheKey(feature, scope);
+                const key = this.cacheKey(
+                    feature,
+                    scope,
+                    this._timeline.entryAt(nextCache.length)?.variableDependencies,
+                );
                 const cached = invalidSuffix ? undefined : this.validCacheEntry(key, input, nextCache.length);
                 let step: Result<FeatureStepOutput>;
                 if (cached) {
@@ -936,14 +940,13 @@ export class ParametricBodyNode
                             index,
                             () => {
                                 // The cache probe preceded a yield. Refresh dependencies and capture
-                                // the evaluation key again inside this batch's in-flight timeline.
+                                // variable reads inside this batch's in-flight timeline.
                                 if (asynchronous) {
                                     this.followReferencedSketches(feature, followedSketches);
                                     this.refreshConsumedTools(feature);
                                 }
                                 return this.prepareEvaluation(
                                     feature,
-                                    this.cacheKey(feature, scope),
                                     scope,
                                     input,
                                     faceIds,
@@ -1011,7 +1014,10 @@ export class ParametricBodyNode
             for (const feature of this.features.slice(0, stop)) {
                 if (feature.suppressed) continue;
                 const entry = nextCache[cacheIndex];
-                nextCache[cacheIndex++] = { ...entry, json: this.cacheKey(feature, scope) };
+                nextCache[cacheIndex++] = {
+                    ...entry,
+                    json: this.cacheKey(feature, scope, entry.variableDependencies),
+                };
             }
             this.markUnresolvedExternalRefs(features);
             run.outcome = "success";
@@ -1236,7 +1242,6 @@ export class ParametricBodyNode
     /** Cache-miss path of `evaluateFeatureStep`: evaluates the feature and stores the result. */
     private prepareEvaluation(
         feature: FeatureData,
-        key: string,
         scope: Scope,
         input: IShape | undefined,
         faceIds: string[] | undefined,
@@ -1251,11 +1256,12 @@ export class ParametricBodyNode
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
+        const variables = trackVariableScope(scope);
         const context = {
             document: this.document,
             host: this,
             input,
-            scope,
+            scope: variables.scope,
             tracking,
             meshResult,
         };
@@ -1285,8 +1291,10 @@ export class ParametricBodyNode
                     resolvedEdges: tracking.resolvedEdges,
                     resolvedFaces: tracking.resolvedFaces,
                 };
+                const variableDependencies = variables.dependencies();
                 nextCache.push({
-                    json: key,
+                    json: this.cacheKey(feature, scope, variableDependencies),
+                    variableDependencies,
                     input,
                     refs: parked ? refs : this.snapshotNodeRefs(feature),
                     shape: output.shape,
@@ -1299,11 +1307,13 @@ export class ParametricBodyNode
         };
     }
 
-    /** Cache keys include the scope snapshot so a variable change invalidates dependents. */
-    private cacheKey(feature: FeatureData, scope: Scope): string {
+    /** Cache only names read by evaluation; missing names and their units are significant too. */
+    private cacheKey(feature: FeatureData, scope: Scope, dependencies?: readonly string[]): string {
         const extra = featureHandler(feature.type)?.cacheKey?.(feature, this.document);
         const own = extra === undefined ? feature : [feature, extra];
-        return scope.size === 0 ? JSON.stringify(own) : JSON.stringify([own, [...scope]]);
+        const variables =
+            dependencies === undefined ? [...scope] : dependencies.map((name) => [name, scope.get(name)]);
+        return JSON.stringify([own, variables]);
     }
 
     /** The cached entry for `index`, when the feature data, the input and the refs all still match. */
