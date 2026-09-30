@@ -72,11 +72,30 @@ export function buildProjectionResult(
         const outputs = joined.value.findSubShapes(ShapeTypes.edge) as IEdge[];
         // MakeWire copies inputs to protect their vertices. Transfer existing ancestry
         // only through unchanged geometry with a unique match.
+        const candidateBounds = projectedEdges.map((edge) => edge.geometryBoundingBox());
+        const candidateLengths = projectedEdges.map((edge) => edge.length());
+        let comparisons = 0;
         const edgeIds: string[] = [];
         for (const edge of outputs) {
+            const bounds = edge.geometryBoundingBox();
+            const edgeLength = edge.length();
             const matches: number[] = [];
             for (const [index, candidate] of projectedEdges.entries()) {
-                if (Math.abs(edge.length() - candidate.length()) > 1e-6) continue;
+                if (Math.abs(edgeLength - candidateLengths[index]) > 1e-6) continue;
+                const other = candidateBounds[index];
+                if (
+                    ["x", "y", "z"].some((axis) => {
+                        const key = axis as "x" | "y" | "z";
+                        return (
+                            bounds.max[key] < other.min[key] - 1e-6 || other.max[key] < bounds.min[key] - 1e-6
+                        );
+                    })
+                )
+                    continue;
+                if (++comparisons > 8192)
+                    return Result.err(
+                        "Projection ancestry proof exceeds the 8192-comparison limit; select fewer source edges",
+                    );
                 const overlap = shapeFactory.booleanCommon([edge], [candidate]);
                 if (!overlap.isOk) {
                     if (overlap.error === "Boolean produced an empty shape") continue;
@@ -86,7 +105,7 @@ export function buildProjectionResult(
                     const length = overlap.value
                         .findSubShapes(ShapeTypes.edge)
                         .reduce((sum, piece) => sum + (piece as IEdge).length(), 0);
-                    if (Math.abs(length - edge.length()) <= 1e-6) matches.push(index);
+                    if (Math.abs(length - edgeLength) <= 1e-6) matches.push(index);
                 } finally {
                     overlap.value.dispose();
                 }

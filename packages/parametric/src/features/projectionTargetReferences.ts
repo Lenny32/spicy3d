@@ -86,7 +86,7 @@ let nextToken = 1;
 
 /** Avoid cache loops when a target later consumes this curve host; compare its entering state. */
 export function projectionTargetDependencies(
-    reference: ProjectionTargetReference,
+    reference: Pick<ProjectionTargetReference, "nodeId">,
     document: IDocument,
     hostId: string,
 ): { refIds: string[]; key: string | undefined } {

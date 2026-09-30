@@ -42,7 +42,16 @@ export type FeatureData =
     | BooleanFeatureData
     | ExtrudeTargetFeatureData
     | LoftFeatureData
+    | ProjectionFeatureData
     | ThickenFeatureData;
+
+/** Associative whole-curve projection along positive rays of a fixed world-space vector. */
+export interface ProjectionFeatureData extends FeatureBase {
+    readonly type: "projection";
+    readonly source: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    readonly target: { readonly nodeId: string; readonly face: ProfileRef };
+    readonly direction: XYZLike;
+}
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";

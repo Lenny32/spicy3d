@@ -35,9 +35,12 @@ import type {
     ExtrudeFeatureData,
     FeatureData,
     LoftFeatureData,
+    ProjectionFeatureData,
     RevolveFeatureData,
     ThickenFeatureData,
 } from "../features/feature";
+import { capturePathReference } from "../features/pathReferences";
+import { captureProjectionTarget } from "../features/projectionTargetReferences";
 import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
@@ -92,6 +95,7 @@ export type ParametricOp =
     | ExtrudeOp
     | RevolveOp
     | LoftOp
+    | ProjectionOp
     | FilletChamferOp
     | ThickenOp
     | BooleanOp
@@ -208,6 +212,18 @@ export interface RevolveOp {
 }
 
 /** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
+export interface ProjectionOp {
+    op: "projection";
+    id: string;
+    name?: string;
+    source: string;
+    edgeIndexes?: number[];
+    edgeRefs?: PersistentEdgeReference[];
+    target: string;
+    faceIndex: number;
+    direction: XYZLike;
+}
+
 export interface LoftOp {
     op: "loft";
     id: string;
@@ -468,6 +484,9 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "loft":
             runLoftOp(state, op);
+            break;
+        case "projection":
+            runProjectionOp(state, op);
             break;
         case "fillet":
         case "chamfer":
@@ -855,6 +874,48 @@ function runRevolveOp(state: State, op: RevolveOp): void {
     });
 }
 
+function runProjectionOp(state: State, op: ProjectionOp): void {
+    const source = resolveNode(state, op.source, "projection source");
+    if (!(source instanceof ShapeNode) || !source.shape.isOk)
+        throw new Error("Projection source geometry is unavailable");
+    if (
+        !op.direction ||
+        ![op.direction.x, op.direction.y, op.direction.z].every(Number.isFinite) ||
+        Math.hypot(op.direction.x, op.direction.y, op.direction.z) === 0
+    )
+        throw new Error("Projection direction must be finite and nonzero in world coordinates");
+    if ((op.edgeIndexes !== undefined) === (op.edgeRefs !== undefined))
+        throw new Error('Projection requires exactly one of "edgeIndexes" or "edgeRefs"');
+    let edges: EdgeRef[];
+    if (op.edgeRefs !== undefined) {
+        if (!(source instanceof ParametricBodyNode))
+            throw new Error("Persistent edge references require a parametric source body");
+        edges = persistentEdges(op.edgeRefs, source);
+    } else {
+        if (!Array.isArray(op.edgeIndexes) || op.edgeIndexes.length === 0 || op.edgeIndexes.length > 256)
+            throw new Error("Projection requires 1 to 256 source edge indexes");
+        const count = source.shape.value.findSubShapes(ShapeTypes.edge).length;
+        if (op.edgeIndexes.some((index) => !Number.isInteger(index) || index < 0 || index >= count))
+            throw new Error("Projection edge index is out of bounds or not a nonnegative integer");
+        edges = op.edgeIndexes.map((index) => {
+            const ref = capturePathReference(source, index);
+            if (!ref.isOk) throw new Error(ref.error);
+            return ref.value;
+        });
+    }
+    const target = resolveBody(state, op.target);
+    const captured = captureProjectionTarget(target, op.faceIndex);
+    if (!captured.isOk) throw new Error(captured.error);
+    const feature: ProjectionFeatureData = {
+        id: Id.generate(),
+        type: "projection",
+        source: { nodeId: source.id, edges },
+        target: captured.value,
+        direction: { x: op.direction.x, y: op.direction.y, z: op.direction.z },
+    };
+    createBody(state, op.id, op.name, [feature], () => {});
+}
+
 function runLoftOp(state: State, op: LoftOp): void {
     if (!Array.isArray(op.sections) || op.sections.length < 2) {
         throw new Error('"sections" must list at least two sketches, in loft order');
@@ -1140,6 +1201,13 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
         case "setParameter":
             if (op.key === undefined) throw new Error('"setParameter" requires "key"');
             if (op.value === undefined) throw new Error('"setParameter" requires "value"');
+            if (
+                body.features.find((feature) => feature.id === op.featureId)?.type === "projection" &&
+                (!["directionX", "directionY", "directionZ"].includes(op.key) ||
+                    typeof op.value !== "number" ||
+                    !Number.isFinite(op.value))
+            )
+                throw new Error("Projection direction parameters require finite numeric components");
             body.setFeatureParameter(op.featureId, op.key, op.value);
             break;
         case "rename":

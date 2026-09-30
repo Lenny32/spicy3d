@@ -19,6 +19,8 @@ export * from "./profileGeometry";
 export * from "./profileMatcher";
 export * from "./profileRef";
 export * from "./profileSeeds";
+export * from "./projection";
+export * from "./projectionTargetReferences";
 export * from "./radiusLaw";
 export * from "./refGeometry";
 export * from "./revolve";
