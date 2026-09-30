@@ -83,6 +83,111 @@ function run(
     return result!;
 }
 
+describe("sweep program operations", () => {
+    test("the published MCP tool accepts plain JSON sweep creation and editing", async () => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        rs.stubGlobal("app", app);
+        try {
+            const tool = buildParametricTools()[0];
+            const response = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [
+                        { op: "sketch", id: "section", entities: rect(-1, -1, 1, 1) },
+                        {
+                            op: "sketch",
+                            id: "path",
+                            plane: "ZX",
+                            entities: [{ type: "line", params: [0, 0, 10, 0] }],
+                        },
+                        {
+                            op: "sweep",
+                            id: "sweep",
+                            section: { sketchId: "section" },
+                            path: { nodeId: "path", edgeIndexes: [0] },
+                        },
+                    ],
+                })) as string,
+            );
+            const bodyId = response.created.find((entry: { id: string }) => entry.id === "sweep").nodeId;
+            const body = doc.modelManager.findNode((node) => node.id === bodyId) as ParametricBodyNode;
+            expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+            const edited = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [{ op: "editSweep", body: body.id, featureId: body.features[0].id, solid: false }],
+                })) as string,
+            );
+            expect(edited.bodies[0].status).toBe("ok");
+            expect(body.features[0]).toMatchObject({ solid: false });
+            doc.history.undo();
+            expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+    function sweepProgram(doc: TestDocument) {
+        const result = run(doc, [
+            { op: "sketch", id: "section", entities: rect(-1, -1, 1, 1) },
+            { op: "sketch", id: "path", plane: "ZX", entities: [{ type: "line", params: [0, 0, 10, 0] }] },
+            {
+                op: "sweep",
+                id: "sweep",
+                section: { sketchId: "section", profileIndex: 0 },
+                path: { nodeId: "path", edgeIndexes: [0] },
+            },
+        ]);
+        const bodyId = result.created.find((entry) => entry.id === "sweep")?.nodeId;
+        const body = doc.modelManager.findNode((node) => node.id === bodyId) as ParametricBodyNode;
+        expect(body).toBeInstanceOf(ParametricBodyNode);
+        expect(body.shape.isOk).toBe(true);
+        return { result, body };
+    }
+
+    test("JSON creation captures source ancestry and edits options in one undo step", () => {
+        const doc = newDoc();
+        const { body } = sweepProgram(doc);
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+        const feature = body.features[0];
+        expect(feature).toMatchObject({
+            type: "sweep",
+            path: { edges: [{ edgeId: expect.stringMatching(/^sketch:.*:path:ent/) }] },
+        });
+        const result = run(doc, [{ op: "editSweep", body: body.id, featureId: feature.id, solid: false }]);
+        expect(result.bodies[0].features.map((item) => item.error)).toEqual([undefined]);
+        expect(body.features[0]).toMatchObject({ solid: false });
+        expect(body.shape.value.findSubShapes(ShapeTypes.face)).toHaveLength(4);
+        doc.history.undo();
+        expect(body.features[0]).not.toHaveProperty("solid");
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+    });
+
+    test("a failed path repick rolls back the program and keeps its previous undo position", () => {
+        const doc = newDoc();
+        const { result, body } = sweepProgram(doc);
+        const pathId = result.created.find((entry) => entry.id === "path")?.nodeId;
+        expect(pathId).not.toBeUndefined();
+        const before = JSON.stringify(body.features);
+        const position = doc.history.position();
+        expect(() =>
+            run(doc, [
+                {
+                    op: "editSweep",
+                    body: body.id,
+                    featureId: body.features[0].id,
+                    path: { nodeId: pathId as string, edgeIndexes: [0, 0] },
+                },
+            ]),
+        ).toThrow(/repeated/);
+        expect(JSON.stringify(body.features)).toBe(before);
+        expect(doc.history.position()).toBe(position);
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+    });
+});
+
 /** Runs a program expected to fail; returns the thrown message after the rollback. */
 function runExpectingFailure(doc: TestDocument, ops: ParametricOp[]): string {
     let message = "";

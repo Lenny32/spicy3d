@@ -61,6 +61,15 @@ export interface TrackedShape {
     capFaces?: number[];
     /** Runtime-only automatic next-face selection, relative to the supplied candidate shapes. */
     nextTarget?: { candidateIndex: number; faceIndex: number };
+    /** Runtime pipe-shell history. Inputs enumerate section then path, separately by topology type. */
+    pipeHistory?: {
+        faceEdges: number[];
+        faceVertices: number[];
+        edgeVertices: number[];
+        startEdges: number[];
+        endEdges: number[];
+        startFaces: number[];
+    };
 }
 
 export interface IShapeFactory {
@@ -148,6 +157,8 @@ export interface IShapeFactory {
     pushPull(shape: IShape, face: IShape, vec: XYZ): Result<IShape>;
     fuse(bottom: IShape, top: IShape): Result<IShape>;
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
+    /** A single section swept along a path, retaining both profile and path ancestry. */
+    sweepTracked?(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape>;
     /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;

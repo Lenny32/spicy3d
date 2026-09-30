@@ -8,6 +8,8 @@ import "./extrudeCommand";
 import "./extrudeEditCommand";
 import "./loftCommand";
 import "./loftEditCommand";
+import "./sweepCommand";
+import "./sweepEditCommand";
 import "./reselectCommand";
 import "./revolveCommand";
 import "./revolveEditCommand";

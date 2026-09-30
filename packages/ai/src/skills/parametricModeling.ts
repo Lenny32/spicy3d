@@ -295,6 +295,18 @@ Example — a 40x30 plate, 20 tall, then round one top edge R3:
 Then run a run_program query on "b1" to find which edge index is the top front edge, and:
  [ { op: "fillet", id: "f1", body: "b1", edgeIndexes: [<that index>], radius: 3 } ]
 
+Sweep along a connected 3D path:
+- { op: "sweep", id, section: { sketchId, profileIndex? },
+    path: { nodeId, edgeIndexes: [ ...ordered whole-edge topology indexes ] }, solid?, roundCorner? }
+  creates a new body from one hole-free sketch profile. Omit profileIndex only for a sole profile.
+  Keep the authored profile at the path start, perpendicular to its initial tangent. solid defaults
+  true; roundCorner defaults false. Connected lines and curves, including closed paths, are supported.
+  Stable sketch/entity or tracked-body ancestry follows upstream edits. Untracked source picks use
+  authored logical tokens with geometric matching; missing, ambiguous or incompatible edits fail.
+- { op: "editSweep", body, featureId, section?, path?, solid?, roundCorner? } replaces these inputs
+  atomically and rolls back on an invalid rebuild. The interactive feature editor previews and re-picks
+  the same inputs; Cancel leaves the feature untouched, and Confirm produces one undo step.
+
 Example — a fully dimensioned slot plate driven by a variable:
  [ { op: "sketch", id: "s1", actions: [
        { action: "rectangle", corners: [[0, 0], [60, 40]], name: "r" },

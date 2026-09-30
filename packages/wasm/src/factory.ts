@@ -291,6 +291,7 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
             faceAncestors: toIntArray(result.faceAncestors),
             edgeAncestors: toIntArray(result.edgeAncestors),
             capFaces: toIntArray(result.capFaces),
+            ...convertPipeHistory(result),
             ...(((result as unknown as { nextTargetIndex?: number }).nextTargetIndex ?? -1) < 0
                 ? {}
                 : {
@@ -314,6 +315,39 @@ function toIntArray(vector: IntVector): number[] {
     }
     vector.delete();
     return array;
+}
+
+function convertPipeHistory(result: TrackedShapeResult): Pick<TrackedShape, "pipeHistory"> {
+    const pipe = result as unknown as Partial<
+        Record<
+            | "pipeFaceEdges"
+            | "pipeFaceVertices"
+            | "pipeEdgeVertices"
+            | "pipeStartEdges"
+            | "pipeEndEdges"
+            | "pipeStartFaces",
+            IntVector
+        >
+    >;
+    const faceEdges = pipe.pipeFaceEdges;
+    if (!faceEdges) return {};
+    const faceVertices = pipe.pipeFaceVertices;
+    const edgeVertices = pipe.pipeEdgeVertices;
+    const startEdges = pipe.pipeStartEdges;
+    const endEdges = pipe.pipeEndEdges;
+    const startFaces = pipe.pipeStartFaces;
+    const pipeHistory = {
+        faceEdges: toIntArray(faceEdges),
+        faceVertices: faceVertices ? toIntArray(faceVertices) : [],
+        edgeVertices: edgeVertices ? toIntArray(edgeVertices) : [],
+        startEdges: startEdges ? toIntArray(startEdges) : [],
+        endEdges: endEdges ? toIntArray(endEdges) : [],
+        startFaces: startFaces ? toIntArray(startFaces) : [],
+    };
+    if (Object.values(pipeHistory).every((values) => values.length === 0)) return {};
+    return {
+        pipeHistory,
+    };
 }
 
 /** The edges a fillet removal produced, skipping nulls, non-edges and already-seen handles. */
@@ -905,6 +939,17 @@ export class ShapeFactory implements IShapeFactory {
         return convertShapeResult(
             wasm.ShapeFactory.sweep,
             [ensureOccShape(profile), ensureOccShape(path)[0], true, isRound],
+            "Sweep",
+        );
+    }
+    sweepTracked(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { sweepTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).sweepTracked;
+        if (!binding) return Result.err("Tracked path sweep requires a newer geometry kernel");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(section)[0], ensureOccShape(path)[0], solid, roundCorner],
             "Sweep",
         );
     }
