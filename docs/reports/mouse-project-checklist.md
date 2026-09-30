@@ -17,7 +17,13 @@ Root reviews and integrates each ticket with a separate merge commit, then tests
 Only pushed and validated tickets receive an issue title prefix and a full-SHA evidence comment;
 issues remain open. Exactly one draft PR will be opened after the first meaningful integration.
 
-Initial validation: targeted suites pass (170 tests across 7 files, including #106 regressions); production build passes with existing bundle-size warnings. Non-mutating Biome baseline reports widespread CRLF formatting differences; ticket-level npm run check passes after normalization. Record pre-existing failures
+Opening integration validation: **9,181 tests pass across 542 files; one skipped**. Production build,
+repository lint/check and TypeScript checking pass. Existing bundle-size/lint warnings remain.
+The initial targeted baseline had 170 tests across 7 files, including #106 regressions.
+Windows validation uses Git's POSIX shell on PATH and four Rstest workers. The initial full run
+found shell/line-ending problems and transient cloud failures; the corrected final full run passes.
+Occasional Windows libuv worker-exit assertions are printed even on successful exit.
+Record pre-existing failures
 separately. Full-suite checks and compatibility fixtures are required before final delivery.
 
 ## Shared schema/version coordination
@@ -55,7 +61,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
-| #91 Invalidate feature caches only for dependent variables | — | Implementing | mouse_91 | mouse/91-dependent-cache | Pending | — | — |
+| #91 Invalidate feature caches only for dependent variables | — | Integrated; awaiting push | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | Publishing approval pending (auto-review) |
 | #92 Expose asynchronous rebuild progress through MCP | #96; worker architecture | Queued | — | — | Pending | — | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Shared sketch schema | Queued | — | — | Pending | — | — |
 | #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
@@ -63,11 +69,40 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Queued | — | — | Pending | — | — |
 | #97 Cancel an in-flight kernel operation | #96 | Queued | — | — | Pending | — | — |
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
-| #99 Add compact run_parametric responses | #106 (shared program file) | Implementing | mouse_99 | mouse/99-compact-responses | Pending | — | — |
-| #100 Do not return subshape references already evicted from the ref store | — | Implementing | mouse_100 | mouse/100-subshape-refs | Pending | — | — |
+| #99 Add compact run_parametric responses | #106 (shared program file) | Integrated; awaiting push | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | Publishing approval pending (auto-review) |
+| #100 Do not return subshape references already evicted from the ref store | — | Integrated; awaiting push | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | Publishing approval pending (auto-review) |
 | #101 Import scan files as lightweight reference MeshNodes | — | Queued | — | — | Pending | — | — |
 | #102 Measure CAD-to-reference-mesh deviation | #101 | Queued | — | — | Pending | — | — |
 | #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
 | #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
 | #105 Batch-export separate model files without repeated downloads | #104 | Queued | — | — | Pending | — | — |
 | #106 Honor extrude names when appending to an existing body | — | Integrated; awaiting push | mouse_106 | mouse/106-extrude-names | 38 real-kernel program tests; npm run check | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 | Publishing approval pending (auto-review) |
+
+## Opening delivery status
+
+Four tickets are reviewed, locally integrated and validated. The other 22 remain queued; this is
+an opening implementation, not completion of the project. Saved document version 2, parametric
+version 5 and sketch version 2 are unchanged; no migrations or merge rules needed changes.
+
+Publishing was rejected by automatic approval review because it did not consider the request to
+start the plan explicit enough to publish the plan/audit to GitHub. A focused approval request is
+pending. No push, PR creation or issue status/comment updates have been performed. The reviewable
+[local draft PR description](mouse-project-pr.md) contains all four integration SHAs.
+
+Next correctness work: #81 then #82. Windows lacks CMake on PATH and no local emsdk/OCCT build tree
+was found; WSL Ubuntu has CMake/Ninja, but the WASM prerequisites must be set up before C++ changes
+can be considered validated. Do not integrate source-only kernel changes with stale binaries.
+
+Final checks performed on the root integration checkout:
+
+- `npx rstest --pool.maxWorkers 4` with `C:/Program Files/Git/usr/bin` prepended to PATH:
+  9,181 passed, 1 skipped, 542 files, exit 0.
+- `npm run build`: app and all three plugins build, exit 0; existing size warnings.
+- `npx tsc --noEmit`: exit 0.
+- `npm run check`: whole repository, exit 0; existing warnings and CRLF normalization only.
+  After the final two merges, `npm run check -- <11 changed paths>` also passed.
+- #106: all program kernel tests; #100: all four capability/skill suites; #99: MCP handler and
+  program kernel suites; #91: tracked-scope/body/scheduling/rollback/multi-body/hybrid kernel suites.
+
+Worktrees live under `.claude/worktrees/` and are excluded by the existing repository config.
+All merges use separate ticket commits. The integration branch never writes to develop or main.

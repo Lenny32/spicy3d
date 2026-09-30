@@ -1,7 +1,7 @@
 Mouse modeling project: correctness fixes and MCP efficiency
 
 Appended join/cut extrusion operations now retain the caller's feature name, and large subshape
-queries keep every returned reference usable. The next integrated changes add compact parametric
+queries keep every returned reference usable. The integration also adds compact parametric
 responses and reuse feature geometry when unrelated document variables change.
 
 This is the single draft integration PR for the 26-ticket mouse project. Keep it draft while the
@@ -12,13 +12,12 @@ for dependencies, ticket status, full integration SHAs and validation.
 | --- | --- | --- |
 | #106 | Preserve appended feature names and existing body names | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 |
 | #100 | Bound reference descriptors and retain entire list-query families | 2df0ca446ccaae926f630881ef2c2a3373324ab8 |
-| #99 | Explicit compact response mode; default full response remains | Pending review/integration |
-| #91 | Cache keys depend on actual variable reads, including transitive values | Pending review/integration |
+| #99 | Explicit compact response mode; default full response remains | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 |
+| #91 | Cache keys depend on actual variable reads, including transitive values | 9c18b315741371a09d9b5a0d5679a056b2bced57 |
 
-Validation so far: 9,154 passing tests across 541 files, one skip; production build and required
+Validation: 9,181 passing tests across 542 files, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. Final integrated counts follow once
-#99 and #91 are merged. Scan-specific historical failures remain unconfirmed without original data.
+concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are locally validated. Scan-specific historical failures remain unconfirmed without original data.
 
 No save payloads, schema versions, migrations or merge rules change in this opening implementation.
 The shared schema plan reserves root ownership of versions/migrations before overlapping modeling
