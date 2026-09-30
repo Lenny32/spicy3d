@@ -59,7 +59,7 @@ describe("documentTimeline", () => {
         expect(entries.map((x) => [x.kind, x.key, x.icon])).toEqual([
             ["node", "sketch", "icon-sketch"],
             ["node", "box", "icon-box"],
-            ["node", "plain", "icon-box"],
+            ["node", "plain", "icon-shape"],
         ]);
     });
 
@@ -81,6 +81,78 @@ describe("documentTimeline", () => {
             ["feature", "body/f2", "icon-body"],
         ]);
         expect(entries[2]).toMatchObject({ node: body, feature: { id: "f2", suppressed: true } });
+    });
+
+    const keys = (document: TestDocument) => documentTimeline(document).map((x) => x.key);
+
+    test("a sketch added after its body comes right before the feature reading it", () => {
+        const document = new TestDocument();
+        const sketch1 = iconNode("sketch1");
+        const sketch2 = iconNode("sketch2");
+        const body = bodyNode("body", [
+            feature("f1", { dependsOn: ["sketch1"] }),
+            feature("f2", { dependsOn: ["sketch2"] }),
+        ]);
+        document.modelManager.rootNode.add(sketch1, body, sketch2);
+
+        expect(keys(document)).toEqual(["sketch1", "body/f1", "sketch2", "body/f2"]);
+    });
+
+    test("a consumed tool read by a feature comes right before it, an unread child first", () => {
+        const document = new TestDocument();
+        const unread = iconNode("unread");
+        const tool = iconNode("tool");
+        const body = bodyNode(
+            "body",
+            [feature("f1"), feature("f2", { dependsOn: ["tool"] })],
+            [tool, unread],
+        );
+        document.modelManager.rootNode.add(body);
+
+        expect(keys(document)).toEqual(["unread", "body/f1", "tool", "body/f2"]);
+    });
+
+    test("a consumed tool body still comes before the features, not pulled", () => {
+        const document = new TestDocument();
+        const toolBody = bodyNode("toolBody", [feature("t1")]);
+        const body = bodyNode(
+            "body",
+            [feature("f1"), feature("f2", { dependsOn: ["toolBody"] })],
+            [toolBody],
+        );
+        document.modelManager.rootNode.add(body);
+
+        expect(keys(document)).toEqual(["toolBody/t1", "body/f1", "body/f2"]);
+    });
+
+    test.each([
+        ["a sketch before the body stays in place", ["sketch", "body", "other"], ["sketch"]],
+        ["another body is not pulled forward", ["body", "other", "sketch"], ["other"]],
+        ["an unknown id is ignored", ["sketch", "body", "other"], ["deleted"]],
+    ])("%s", (_case, order, dependsOn) => {
+        const keyOf: Record<string, string> = { sketch: "sketch", body: "body/f1", other: "other/o1" };
+        const document = new TestDocument();
+        const nodes: Record<string, INode> = {
+            sketch: iconNode("sketch"),
+            body: bodyNode("body", [feature("f1", { dependsOn })]),
+            other: bodyNode("other", [feature("o1")]),
+        };
+        document.modelManager.rootNode.add(...order.map((name) => nodes[name]));
+
+        expect(keys(document)).toEqual(order.map((name) => keyOf[name]));
+    });
+
+    test("lists every node exactly once when several features read the same sketch", () => {
+        const document = new TestDocument();
+        const body = bodyNode("body", [
+            feature("f1", { dependsOn: ["sketch"] }),
+            feature("f2", { dependsOn: ["sketch", "tool"] }),
+        ]);
+        const sketch = iconNode("sketch");
+        const tool = iconNode("tool");
+        document.modelManager.rootNode.add(body, tool, sketch);
+
+        expect(keys(document)).toEqual(["sketch", "body/f1", "tool", "body/f2"]);
     });
 
     test("a feature-list node with no features is listed as itself", () => {

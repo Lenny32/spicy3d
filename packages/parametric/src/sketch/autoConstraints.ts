@@ -51,8 +51,11 @@ export interface AutoConstraintOptions {
  * line endpoints, circle center, arc center/start/end. The centers snap like any
  * other point, so a circle drawn onto a center is concentric by constraint.
  */
-function snappablePointIndices(type: SketchEntityType): number[] {
-    return Array.from({ length: entityPointCount(type) }, (_, pointIndex) => pointIndex);
+function snappablePointIndices(entity: Pick<SketchEntityData, "type" | "params">): number[] {
+    return Array.from(
+        { length: entityPointCount(entity.type, entity.params) },
+        (_, pointIndex) => pointIndex,
+    );
 }
 
 /**
@@ -84,7 +87,7 @@ export function applyAutoConstraints(
     const entity = solver.entities().find((x) => x.id === entityId);
     if (entity === undefined) return added;
 
-    const refs: SketchPointRef[] = snappablePointIndices(entity.type).map((pointIndex) => ({
+    const refs: SketchPointRef[] = snappablePointIndices(entity).map((pointIndex) => ({
         entityId,
         pointIndex,
     }));
@@ -474,7 +477,7 @@ function snapCandidates(
     const candidates: SnapCandidate[] = entities
         .filter((e) => excludeEntityId === undefined || e.id !== excludeEntityId)
         .flatMap((e) =>
-            snappablePointIndices(e.type).map((pointIndex) => {
+            snappablePointIndices(e).map((pointIndex) => {
                 const ref = { entityId: e.id, pointIndex };
                 return { ref, position: solver.pointOf(ref) };
             }),
@@ -501,7 +504,7 @@ function nearestPointSnap(
     const candidates: SnapCandidate[] = [];
     for (const entity of entities) {
         if (excludeEntityIds?.has(entity.id)) continue;
-        for (const pointIndex of snappablePointIndices(entity.type)) {
+        for (const pointIndex of snappablePointIndices(entity)) {
             const candidateRef = { entityId: entity.id, pointIndex };
             if (excluded.has(pointRefKey(candidateRef))) continue;
             candidates.push({ ref: candidateRef, position: solver.pointOf(candidateRef) });

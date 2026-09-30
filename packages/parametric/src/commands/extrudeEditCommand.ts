@@ -11,9 +11,11 @@ import {
     type I18nKeys,
     type IFace,
     type INode,
+    type INodeList,
     type IShape,
     LENGTH_UNITS,
     Matrix4,
+    NodeListComparer,
     type ParameterValue,
     type Property,
     PubSub,
@@ -81,8 +83,9 @@ interface ExtrudeAxis {
  * "Reselect").
  *
  * A sketch extrude that cuts or intersects also lists the other bodies it acts on (its
- * `extrudeTarget` entries, see `extrudeTarget.ts`): Ctrl/Cmd+click on a body adds or removes
- * it, previewed live, and confirming adds or removes the entries in the same undo step. The
+ * `extrudeTarget` entries, see `extrudeTarget.ts`) in the options tab: each can be removed there,
+ * and "Add" or Ctrl/Cmd+click on a body adds or removes one, previewed live; confirming adds or
+ * removes the entries in the same undo step. The
  * host body always stays a target — the extrude lives in its feature list. A join acts on the
  * host alone here (the create command merges several bodies with a separate boolean).
  */
@@ -117,18 +120,25 @@ export class ExtrudeEditCommand extends CancelableCommand {
         return this.getPrivateValue("combines", false);
     }
 
-    /** What the extrude acts on, e.g. "Objects to cut: 2 bodies" (see the class comment). */
-    @property("option.command.targets", {
-        type: "info",
-        dependencies: [{ property: "combines", value: true }],
-    })
+    /** What the extrude acts on, e.g. "Objects to cut: 2 bodies" — the caption of `targetList`. */
     get targetsInfo(): string {
         return this.getPrivateValue("targetsInfo", "");
     }
 
+    /** The bodies the extrude acts on (see the class comment): the host first, never removable. */
+    @property("option.command.targets", {
+        type: "nodeList",
+        dependencies: [{ property: "combines", value: true }],
+    })
+    get targetList(): INodeList | undefined {
+        return this.getPrivateValue("targetList", undefined);
+    }
+
     /** The session's values are the feature's: none is carried over from another run. */
     protected override isPropertyCached(property: Property): boolean {
-        return !["targetsInfo", "extent", "extentFaceInfo", "extentOffset"].includes(property.name);
+        return !["targetsInfo", "targetList", "extent", "extentFaceInfo", "extentOffset"].includes(
+            property.name,
+        );
     }
 
     /** Distance (dragged), up to a face ("To object", click another face to change it) or through all. */
@@ -199,6 +209,10 @@ export class ExtrudeEditCommand extends CancelableCommand {
     private readonly _targetPreviews = new Map<ParametricBodyNode, FeatureChainPreview>();
     /** False for a press-pull or a new-body extrude: those act on their host only. */
     private _multiTarget = false;
+    /** The body holding the extrude, set when the session opens. */
+    private _host?: ParametricBodyNode;
+    /** True while a plain click on a body during the drag adds or removes it (the list's "Add"). */
+    private _addingTargets = false;
 
     @property("option.command.symmetric", { dependencies: [{ property: "isToObject", value: false }] })
     get symmetric() {
@@ -286,6 +300,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
         }
         this._targets = [...this._storedTargets.keys()];
         this._multiTarget = feature.source === undefined && feature.operation !== undefined;
+        this._host = body;
         this.showTargets();
     }
 
@@ -308,6 +323,30 @@ export class ExtrudeEditCommand extends CancelableCommand {
                 ? extrudeTargetsInfo(operation, 1 + this.effectiveTargets.length)
                 : "";
         this.setProperty("targetsInfo", info);
+        const host = this._host;
+        const canAdd = this.targetOperation !== undefined;
+        if (!canAdd) this._addingTargets = false;
+        const list: INodeList | undefined =
+            host === undefined || info === ""
+                ? undefined
+                : {
+                      label: info,
+                      nodes: [host, ...this.effectiveTargets],
+                      fixed: [host],
+                      remove: (node) => {
+                          if (this.toggleTarget(node, host)) this._dragHandler?.refresh();
+                      },
+                      add: canAdd
+                          ? {
+                                active: this._addingTargets,
+                                toggle: () => {
+                                    this._addingTargets = !this._addingTargets;
+                                    this.showTargets();
+                                },
+                            }
+                          : undefined,
+                  };
+        this.setProperty("targetList", list, undefined, NodeListComparer);
     }
 
     /** Ctrl/Cmd+click on a body: adds or removes it as a target; the host always stays. */
@@ -321,17 +360,21 @@ export class ExtrudeEditCommand extends CancelableCommand {
         return true;
     }
 
+    /**
+     * The stored values, published as changes: the options tab is already open (`beforeExecute`
+     * opens it), so a silent write would leave it showing the defaults.
+     */
     private loadFeature(feature: ExtrudeFeatureData) {
-        this.setPrivateValue("combines", feature.operation !== undefined);
+        this.setProperty("combines", feature.operation !== undefined);
         const operation = Object.entries(EXTRUDE_OPERATIONS).find(([, op]) => op === feature.operation);
-        if (operation !== undefined) this.setPrivateValue("operation", operation[0] as I18nKeys);
-        this.setPrivateValue("symmetric", feature.symmetric === true);
-        this.setPrivateValue("startOffset", feature.startOffset ?? 0);
-        this.setPrivateValue("depth", feature.depth);
-        this.setPrivateValue("extent", extentKeyOf(feature.extent));
+        if (operation !== undefined) this.setProperty("operation", operation[0] as I18nKeys);
+        this.setProperty("symmetric", feature.symmetric === true);
+        this.setProperty("startOffset", feature.startOffset ?? 0);
+        this.setProperty("depth", feature.depth);
+        this.setProperty("extent", extentKeyOf(feature.extent));
         this._storedToObject = feature.extent?.type === "toObject" ? feature.extent : undefined;
         this._pickedExtentFace = undefined;
-        this.setPrivateValue("extentOffset", this._storedToObject?.offset ?? 0);
+        this.setProperty("extentOffset", this._storedToObject?.offset ?? 0);
         this.syncExtentFlags();
     }
 
@@ -350,6 +393,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
             meshArrow: createExtrudeArrowMesher(),
             buildPreview: (state) => this.buildPreview(body, feature, preview, state.dragging === true),
             toggleTarget: (node) => this.toggleTarget(node, body),
+            picksTarget: () => this._addingTargets,
             depthLocked: () => this.extent !== EXTENT_DISTANCE,
             extentReady: () => this.extent !== EXTENT_TO_OBJECT || this.hasExtentFace,
             picksExtentFace: () => this.extent === EXTENT_TO_OBJECT,

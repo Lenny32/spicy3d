@@ -57,7 +57,7 @@ Design Advice uses the plastic-part workflow described in [Autodesk's Design Adv
 - Persistent analyses retain source references and editable settings, support save/load and undo/redo, and invalidate correctly after geometry or transform changes. Transient measurement inspectors and display toggles use the relevant subset of the lifecycle.
 - Inspection must not silently modify source geometry or materials. Any optional modeling action is separate and undoable.
 - Respect nested transforms, trimmed geometry, and stable parametric sub-shape identity; report lost or ambiguous references instead of guessing.
-- Guard null/degenerate kernel inputs before native queries. Release WASM disables C++ exception catching; try/catch is not a substitute for preventive validation. Expected failures use Result errors at the application boundary.
+- Guard null/degenerate kernel inputs before native queries. Release WASM catches OCCT raises (`-fwasm-exceptions`, `cpp/src/guard.hpp`), but the committed binary may predate that rebuild and a caught raise gives a vaguer message; try/catch is not a substitute for preventive validation. Expected failures use Result errors at the application boundary.
 - Dispose temporary kernel shapes, shaders, textures, clipping state, event subscriptions, and overlays. Expensive evaluation supports cancellation and rejects stale results.
 - Integrate commands into Inspect with localized labels, accessible controls, unit-aware values, and clear legends. Preserve Check Shape and existing measurement shortcuts.
 - Treat local curvature, draft, and directional access as distinct checks. None alone proves manufacturability or collision-free tool motion.

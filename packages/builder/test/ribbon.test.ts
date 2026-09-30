@@ -92,7 +92,10 @@ describe("SketchRibbonProfiles", () => {
         const finish = sketchTab.groups.at(-1)!;
         expect(finish.primary).toBe(true);
         expect(finish.items).toEqual(["sketch.exit", "sketch.autoConstrain"]);
-        expect(flattenItems(sketchTab.groups[0].items)).toContain("sketch.spline");
+        const create = flattenItems(sketchTab.groups[0].items);
+        expect(create).toContain("sketch.spline");
+        // the B-spline tool sits right after the spline tool
+        expect(create.indexOf("sketch.bspline")).toBe(create.indexOf("sketch.spline") + 1);
     });
 
     test("constraint group should be icon-only and hold all 18 constraint tools", () => {
@@ -119,10 +122,20 @@ describe("mergeRibbonProfiles", () => {
             "sketch.create",
             "feature.extrude",
             "feature.revolve",
+            "feature.loft",
             "create.sweep",
-            "create.loft",
         ]);
         expect(create.collapsedItems?.[0]).toBe("sketch.enter");
+    });
+
+    test("with parametric, the direct loft moves to the collapsed items behind the parametric one", () => {
+        const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
+        const create = findGroup(merged, "ribbon.tab.solid", "ribbon.group.create");
+        expect(flattenItems(create.items)).not.toContain("create.loft");
+        expect(create.collapsedItems).toContain("create.loft");
+        // The base profile is left as it was.
+        const base = findGroup(DefaultRibbon, "ribbon.tab.solid", "ribbon.group.create");
+        expect(flattenItems(base.items)).toContain("create.loft");
     });
 
     test("with parametric, SOLID/MODIFY should lead with the feature commands", () => {
@@ -131,13 +144,22 @@ describe("mergeRibbonProfiles", () => {
         expect(flattenItems(modify.items)).toEqual([
             "feature.fillet",
             "feature.chamfer",
+            "feature.thicken",
             "feature.fuse",
             "feature.cut",
             "feature.common",
-            "modify.shell",
             "modify.move",
         ]);
         expect(modify.collapsedItems?.[0]).toBe("feature.variable");
+    });
+
+    test("with parametric, the direct shell moves to the collapsed items behind the thicken feature", () => {
+        const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
+        const modify = findGroup(merged, "ribbon.tab.solid", "ribbon.group.modify");
+        expect(flattenItems(modify.items)).not.toContain("modify.shell");
+        expect(modify.collapsedItems).toContain("modify.shell");
+        const base = findGroup(DefaultRibbon, "ribbon.tab.solid", "ribbon.group.modify");
+        expect(flattenItems(base.items)).toContain("modify.shell");
     });
 
     test("should append the contextual sketch tab after the base tabs", () => {

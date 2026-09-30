@@ -10,3 +10,12 @@ import { ObservableCollection } from "../foundation/collection";
 export class TitleBar {
     static readonly items = new ObservableCollection<HTMLElement>();
 }
+
+/**
+ * Elements modules add to the top-right corner of the home page, where the title bar's items sit
+ * in a document (the home page covers the title bar). An element lives in one place only, so a
+ * module pushes its own instance here, e.g. a second account button.
+ */
+export class HomeBar {
+    static readonly items = new ObservableCollection<HTMLElement>();
+}

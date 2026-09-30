@@ -202,18 +202,25 @@ describe("ShellCommand", () => {
             }
         });
 
-        test("should not modify the document when the shell operation fails", () => {
+        test("should not modify the document and toast the kernel's error when the shell fails", () => {
+            const pubSpy = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
             const { cmd, parent, doc } = buildShellCommand();
 
-            const restoreFactory = stubShapeFactory(() => Result.err("shell failed"));
+            const restoreFactory = stubShapeFactory(() => Result.err("intersection join refused: 61 faces"));
 
             try {
                 (cmd as any).executeMainTask();
                 expect(parent.added).toHaveLength(0);
                 expect(parent.removed).toHaveLength(0);
                 expect(doc.visual.update).not.toHaveBeenCalled();
+                expect(pubSpy).toHaveBeenCalledWith(
+                    "showToast",
+                    "error.default:{0}",
+                    "intersection join refused: 61 faces",
+                );
             } finally {
                 restoreFactory();
+                pubSpy.mockRestore();
             }
         });
     });
@@ -282,12 +289,12 @@ describe("ShellCommand", () => {
             }
         });
 
-        test("should publish a toast and restore visibility when the preview fails", () => {
+        test("should publish the kernel's error and restore visibility when the preview fails", () => {
             rs.useFakeTimers();
             const pubSpy = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
             const { cmd, faces, doc } = buildShellCommand(1);
 
-            const restoreFactory = stubShapeFactory(() => Result.err("shell failed"));
+            const restoreFactory = stubShapeFactory(() => Result.err("thick solid refused"));
 
             try {
                 const step0Owner = (cmd as any).stepDatas[0].shapes[0].owner;
@@ -296,7 +303,7 @@ describe("ShellCommand", () => {
                 rs.advanceTimersByTime(25);
 
                 expect(step0Owner.visible).toBe(true);
-                expect(pubSpy).toHaveBeenCalledWith("showToast", "error.default:{0}", "shell failed");
+                expect(pubSpy).toHaveBeenCalledWith("showToast", "error.default:{0}", "thick solid refused");
             } finally {
                 restoreFactory();
                 pubSpy.mockRestore();

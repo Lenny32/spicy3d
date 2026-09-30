@@ -53,7 +53,8 @@ export interface PubSubEventMap {
     showProperties(document: IDocument, nodes: INode[]): void;
     /** The Items tree's Project Properties row was chosen: show the document's settings. */
     showProjectProperties(document: IDocument): void;
-    showSelectionControl: (controller: AsyncController) => void;
+    /** `options.nodes`: the pick gathers nodes — the control lists them, each with a remove button. */
+    showSelectionControl: (controller: AsyncController, options?: { nodes?: boolean }) => void;
     showToast: (message: I18nKeys, ...args: any[]) => void;
     /**
      * A toast with action buttons (e.g. "Undo"; several: "View changes" / "Undo merge"), shown a

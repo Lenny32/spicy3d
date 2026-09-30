@@ -6,12 +6,14 @@ import { MockShape } from "@spicy3d/core/test-utils";
 import { OccTrimmedCurve } from "../src/curve";
 import type { ShapeFactory } from "../src/factory";
 import {
+    MIN_NORMAL_LENGTH,
     type OccEdge,
     type OccFace,
     OccShape,
     type OccSolid,
     type OccVertex,
     type OccWire,
+    unitOrZero,
 } from "../src/shape";
 import { createBox, createSphere, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
@@ -668,6 +670,31 @@ describe("OccEdge", () => {
         expect(start.x).toBeCloseTo(0);
         expect(end.x).toBeCloseTo(10);
     });
+
+    test("endpoints are read from the kernel once until the edge moves", () => {
+        const edge = unwrapOk(factory.line(XYZ.zero, new XYZ({ x: 10, y: 0, z: 0 }))) as OccEdge;
+        const spy = rs.spyOn(wasm.Edge, "ends");
+        try {
+            edge.startPoint();
+            edge.endPoint();
+            edge.ends();
+            expect(spy).toHaveBeenCalledTimes(1);
+
+            edge.matrix = Matrix4.fromTranslation(0, 5, 0);
+            expect(edge.startPoint().y).toBeCloseTo(5);
+            expect(edge.endPoint().y).toBeCloseTo(5);
+            expect(spy).toHaveBeenCalledTimes(2);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    test("ends hands out a fresh tuple each call", () => {
+        const edge = unwrapOk(factory.line(XYZ.zero, new XYZ({ x: 10, y: 0, z: 0 }))) as OccEdge;
+        const ends = edge.ends();
+        ends[0] = ends[1];
+        expect(edge.startPoint().x).toBeCloseTo(0);
+    });
 });
 
 // ============================================================================
@@ -765,6 +792,90 @@ describe("OccFace", () => {
     test("normal returns a unit axis-aligned normal for a box face", () => {
         const [, normal] = boxFaces[0].normal(0.5, 0.5);
         expect(Math.abs(normal.x) + Math.abs(normal.y) + Math.abs(normal.z)).toBeCloseTo(1, 9);
+    });
+
+    test.each([
+        [0.5, 0.5],
+        [3, 17],
+    ])("normal is unit length on a planar face at (%s, %s)", (u, v) => {
+        for (const face of boxFaces) {
+            expect(face.normal(u, v)[1].length()).toBeCloseTo(1, 9);
+        }
+    });
+
+    test.each([
+        [0.3, 0.2],
+        [2.5, -1.1],
+    ])("normal is the outward unit radial vector on a sphere at (%s, %s)", (u, v) => {
+        const face = createSphere(factory, XYZ.zero, 25).findSubShapes(ShapeTypes.face)[0] as IFace;
+        const [point, normal] = face.normal(u, v);
+        expect(normal.length()).toBeCloseTo(1, 9);
+        const radial = point.divided(25) as XYZ;
+        expect(normal.isEqualTo(radial, 1e-9)).toBe(true);
+    });
+
+    test.each([
+        [0.5, 0.5],
+        [4, 30.5],
+    ])("normal is the outward unit radial vector on a cylinder at (%s, %s)", (u, v) => {
+        const cylinder = unwrapOk(factory.cylinder(XYZ.unitZ, XYZ.zero, 40, 60));
+        const lateral = cylinder
+            .findSubShapes(ShapeTypes.face)
+            .map((f) => f as IFace)
+            .find((f) => {
+                const surface = f.surface();
+                try {
+                    return !surface.isPlanar();
+                } finally {
+                    surface.dispose();
+                }
+            });
+        if (!lateral) throw new Error("cylinder has no lateral face");
+        const [point, normal] = lateral.normal(u, v);
+        expect(normal.length()).toBeCloseTo(1, 9);
+        const radial = new XYZ({ x: point.x / 40, y: point.y / 40, z: 0 });
+        expect(normal.isEqualTo(radial, 1e-9)).toBe(true);
+    });
+
+    test("normal is the zero vector at a sphere pole", () => {
+        const radius = 25;
+        const v = Math.PI / 2;
+        // |D1U ^ D1V| = R^2 cos(v) on a sphere: below the cutoff here by construction.
+        expect(radius * radius * Math.abs(Math.cos(v))).toBeLessThan(MIN_NORMAL_LENGTH);
+        const face = createSphere(factory, XYZ.zero, radius).findSubShapes(ShapeTypes.face)[0] as IFace;
+        const [point, normal] = face.normal(0, v);
+        expect(point.z).toBeCloseTo(radius, 9);
+        expect(normal.x).toBe(0);
+        expect(normal.y).toBe(0);
+        expect(normal.z).toBe(0);
+    });
+
+    test.each([
+        [
+            { x: 3, y: 0, z: 4 },
+            { x: 0.6, y: 0, z: 0.8 },
+        ],
+        [
+            { x: 0, y: -2e-12, z: 0 },
+            { x: 0, y: -1, z: 0 },
+        ],
+        [
+            { x: 0, y: 0, z: 1e-12 },
+            { x: 0, y: 0, z: 0 },
+        ],
+        [
+            { x: 0, y: 0, z: 0 },
+            { x: 0, y: 0, z: 0 },
+        ],
+        [
+            { x: Number.POSITIVE_INFINITY, y: 0, z: 0 },
+            { x: 0, y: 0, z: 0 },
+        ],
+    ])("unitOrZero(%j) is %j", (input, expected) => {
+        const result = unitOrZero(new XYZ(input));
+        expect(result.x).toBeCloseTo(expected.x, 12);
+        expect(result.y).toBeCloseTo(expected.y, 12);
+        expect(result.z).toBeCloseTo(expected.z, 12);
     });
 
     test("intersectLine returns intersection point", () => {

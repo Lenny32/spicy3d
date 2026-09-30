@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { BoundingBox, Matrix4, XYZ } from "@spicy3d/core";
+import { Matrix4, XYZ } from "@spicy3d/core";
 import { type OccEdge, OccShape, type OccSolid, OccSubFaceShape } from "../src/shape";
 import { createBox, createSphere, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
@@ -30,15 +30,16 @@ test("geometry bounds use the existing non-triangulated kernel path once, withou
     }
 });
 
-test("geometry and rendering bounds have independent caches", () => {
+test("geometry and ordinary shape bounds cache exact geometry without meshing", () => {
     const sphere = createSphere(createTestFactory(), XYZ.zero, 10) as OccSolid;
     try {
         const geometry = sphere.geometryBoundingBox();
-        const render = sphere.boundingBox();
-        expect(render).toEqual(BoundingBox.fromNumbers(sphere.mesh.faces!.position));
-        expect(render).not.toBe(geometry);
-        expect(sphere.boundingBox()).toBe(render);
+        const bounds = sphere.boundingBox();
+        expect(bounds).toEqual(geometry);
+        expect(bounds).not.toBe(geometry);
+        expect(sphere.boundingBox()).toBe(bounds);
         expect(sphere.geometryBoundingBox()).toBe(geometry);
+        expect(Reflect.get(sphere, "_mesh")).toBeUndefined();
         expect(geometry.min.x).toBeCloseTo(-10, 6);
         expect(geometry.max.x).toBeCloseTo(10, 6);
     } finally {
@@ -88,15 +89,17 @@ test("replacing the location invalidates geometry bounds instead of compounding 
     }
 });
 
-test("changing shape tolerance invalidates the geometry bounds' tolerance padding", () => {
+test("changing shape tolerance invalidates cached bounds without padding exact geometry", () => {
     const box = createBox(createTestFactory()) as OccSolid;
+    const query = rs.spyOn(wasm.Shape, "boundingBox");
     try {
         const original = box.geometryBoundingBox();
         box.setTolerance(0.1);
         const bounds = box.geometryBoundingBox();
         expect(bounds).not.toBe(original);
-        expect(bounds.min.x).toBeLessThan(original.min.x - 0.09);
-        expect(bounds.max.x).toBeGreaterThan(original.max.x + 0.09);
+        expect(bounds.min.x).toBeCloseTo(0, 6);
+        expect(bounds.max.x).toBeCloseTo(10, 6);
+        expect(query).toHaveBeenCalledTimes(2);
         expect(Reflect.get(box, "_mesh")).toBeUndefined();
     } finally {
         box.dispose();

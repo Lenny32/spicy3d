@@ -8,7 +8,7 @@ import { BoundingBox, Matrix4, XYZ } from "../math";
 import { GeometryNode, type INode, type INodeReferences } from "../model";
 import { serializable, serialize } from "../serialize";
 import { type ICurve, type IFace, type IShapeMeshData, MeshDataUtils } from "../shape";
-import { evaluateConstruction } from "./evaluate";
+import { constructionHasExpressions, evaluateConstruction } from "./evaluate";
 import { DocumentConstructionResolver, validateConstructionDefinition } from "./resolver";
 import { isConstructionFeatureActive } from "./timelineContext";
 import type {
@@ -33,6 +33,8 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
     private _evaluating = false;
     private _notifying = false;
     private _cached?: Result<ConstructionGeometry>;
+    /** The variable table `_cached` was resolved against, when the definition has expressions. */
+    private _cachedVariables?: string;
     private readonly _watched = new Map<string, INode>();
     private _error?: string;
 
@@ -45,6 +47,7 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
         this.setPrivateValue("definitionJson", options.definitionJson ?? JSON.stringify(options.definition));
         this.setPrivateValue("displaySize", options.displaySize ?? 50);
         options.document.modelManager.addNodeObserver(this.handleTreeChanged);
+        options.document.variables.onPropertyChanged(this.handleVariablesChanged);
         this.onPropertyChanged(this.handleOwnTransform);
     }
 
@@ -92,7 +95,8 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
     get geometry(): Result<ConstructionGeometry> {
         if (this._evaluating) return Result.err("Cyclic construction reference");
         const inFeature = isConstructionFeatureActive(this.document);
-        if (this._cached && !inFeature) return this._cached;
+        if (this._cached && !inFeature && this._cachedVariables === this.expressionVariables())
+            return this._cached;
         this.syncWatches();
         this._evaluating = true;
         try {
@@ -112,11 +116,15 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
                     documentResolver.dispose();
                 },
             };
-            const local = evaluateConstruction(this.definition, resolver);
+            const scope = this.document.variables.evaluate().scope;
+            const local = evaluateConstruction(this.definition, resolver, scope);
             const result = local.isOk
                 ? Result.ok(transformGeometry(local.value, this.completeTransform()))
                 : local;
-            if (!inFeature) this._cached = result;
+            if (!inFeature) {
+                this._cached = result;
+                this._cachedVariables = this.expressionVariables();
+            }
             const error = result.isOk ? undefined : result.error;
             if (error !== this._error) {
                 const oldCount = this.warningCount;
@@ -136,13 +144,13 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
     get icon(): string {
         switch (this.definition.kind) {
             case "ucs":
-                return "icon-coordinate";
+                return "icon-ucs";
             default:
                 return this.definition.kind.startsWith("plane")
-                    ? "icon-plane"
+                    ? "icon-constructionPlane"
                     : this.definition.kind.startsWith("axis")
-                      ? "icon-line"
-                      : "icon-point";
+                      ? "icon-constructionAxis"
+                      : "icon-constructionPoint";
         }
     }
 
@@ -216,6 +224,23 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
             this.notifyGeometryChanged();
     };
 
+    /**
+     * The variable table, for a definition with expressions: a cache resolved against another table
+     * is stale even when this node's own notification has not arrived yet (a sketch or body
+     * re-deriving from the new table may read this geometry first). The table's text rather than its
+     * `revision`, which is bumped only after the change notification has run.
+     */
+    private expressionVariables(): string | undefined {
+        return constructionHasExpressions(this.definition)
+            ? this.document.variables.variablesJson
+            : undefined;
+    }
+
+    private readonly handleVariablesChanged = (property: string) => {
+        if (property === "variablesJson" && constructionHasExpressions(this.definition))
+            this.notifyGeometryChanged();
+    };
+
     private readonly handleTreeChanged = () => {
         this.syncWatches();
         this.notifyGeometryChanged();
@@ -275,6 +300,7 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
     override disposeInternal(): void {
         this.removePropertyChanged(this.handleOwnTransform);
         this.document.modelManager.removeNodeObserver(this.handleTreeChanged);
+        this.document.variables.removePropertyChanged(this.handleVariablesChanged);
         for (const node of this._watched.values()) node.removePropertyChanged(this.handleSourceChanged);
         this._watched.clear();
         super.disposeInternal();

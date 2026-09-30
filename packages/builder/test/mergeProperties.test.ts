@@ -3,6 +3,7 @@
 
 import {
     assembleManifest,
+    DOCUMENT_FORMAT_VERSION,
     DocumentMigrations,
     deepFreeze,
     type MergeResult,
@@ -98,7 +99,7 @@ function baseDocument(seed: number): Serialized {
     const r = random(seed);
     const doc: Json = {
         __cla$$__: "Document",
-        formatVersion: 1,
+        formatVersion: DOCUMENT_FORMAT_VERSION,
         moduleVersions: DocumentMigrations.moduleVersions(),
         id: "prop-doc",
         name: "Generated",
@@ -414,7 +415,7 @@ function treeDoc(parents: Map<string, string>, names: Map<string, string>): Seri
     walk(ROOT);
     return {
         __cla$$__: "Document",
-        formatVersion: 1,
+        formatVersion: DOCUMENT_FORMAT_VERSION,
         moduleVersions: {},
         id: "tree",
         name: "T",

@@ -15,7 +15,7 @@ class TestCommand implements ICommand {
 @command({
     key: "test.toggleCommand" as any,
     icon: "toggle-icon",
-    helpText: "Test help text",
+    helpText: "tooltip.feature.loft",
     helpUrl: "https://test.com/help",
 })
 class TestToggleCommand implements ICommand {
@@ -39,7 +39,7 @@ describe("command decorator", () => {
 
         test("should handle optional metadata", () => {
             const data = CommandStore.getComandData(TestToggleCommand);
-            expect(data?.helpText).toBe("Test help text");
+            expect(data?.helpText).toBe("tooltip.feature.loft");
             expect(data?.helpUrl).toBe("https://test.com/help");
         });
     });

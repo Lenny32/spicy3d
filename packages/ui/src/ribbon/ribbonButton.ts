@@ -19,8 +19,20 @@ import {
 import { createIcon, label } from "@spicy3d/element";
 import style from "./ribbonButton.module.css";
 
+/**
+ * A command's ribbon tooltip: its name, its shortcut in parentheses, and on the next line the
+ * command's `helpText` (what it does) when it has one.
+ */
+export function commandTooltip(display: I18nKeys, command: CommandKeys): string {
+    const shortcut = getShortcutText(command);
+    const name = shortcut ? `${I18n.translate(display)} (${shortcut})` : I18n.translate(display);
+    const help = CommandStore.getComandData(command)?.helpText;
+    return help === undefined ? name : `${name}\n${I18n.translate(help)}`;
+}
+
 export class RibbonPushButton extends HTMLElement {
     #shortcut?: string;
+    #display?: I18nKeys;
     get shortcut() {
         return this.#shortcut;
     }
@@ -70,6 +82,7 @@ export class RibbonPushButton extends HTMLElement {
         this.className = size === "large" ? style.normal : style.small;
         image.classList.add(size === "large" ? style.icon : style.smallIcon);
 
+        this.#display = display;
         I18n.set(this, "title", display);
         this.updateShortcut();
 
@@ -82,19 +95,8 @@ export class RibbonPushButton extends HTMLElement {
     }
 
     updateShortcut() {
-        const shortcut = getShortcutText(this.commandName) || undefined;
-
-        if (shortcut) {
-            if (this.#shortcut) {
-                this.title = this.title.replace(this.#shortcut, shortcut);
-            } else {
-                this.title += ` (${shortcut})`;
-            }
-            this.#shortcut = shortcut;
-        } else if (this.#shortcut) {
-            this.title = this.title.replace(this.#shortcut, "");
-            this.#shortcut = undefined;
-        }
+        this.#shortcut = getShortcutText(this.commandName) || undefined;
+        if (this.#display !== undefined) this.title = commandTooltip(this.#display, this.commandName);
     }
 }
 

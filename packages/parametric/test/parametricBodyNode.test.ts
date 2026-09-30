@@ -371,13 +371,13 @@ describe("ParametricBodyNode", () => {
     test("unknown feature types fail with a clear error", () => {
         const body = new ParametricBodyNode({
             document: doc,
-            featuresJson: JSON.stringify([{ id: "f9", type: "loft" }]),
+            featuresJson: JSON.stringify([{ id: "f9", type: "notAFeature" }]),
         });
         doc.modelManager.addNode(body);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Unknown feature type: loft");
-        expect(body.featureItems()[0].error).toBe("Unknown feature type: loft");
+        expect(body.shape.error).toBe("Unknown feature type: notAFeature");
+        expect(body.featureItems()[0].error).toBe("Unknown feature type: notAFeature");
     });
 
     test("featureItems exposes localized display and parameters", () => {
@@ -1187,6 +1187,31 @@ describe("ParametricBodyNode feature references", () => {
         };
         const body = bodyWith([extrudeFeature(sketch.id), booleanFeature]);
         expect(body.featureItems()[1].references).toBeUndefined();
+    });
+
+    test("featureItems reports the nodes each feature reads, without the body itself", () => {
+        const tool = bodyWith([extrudeFeature(sketch.id)]);
+        const booleanFeature: BooleanFeatureData = {
+            id: "f3",
+            type: "boolean",
+            operation: "fuse",
+            toolIds: [tool.id],
+        };
+        const pressPull: ExtrudeFeatureData = {
+            id: "f4",
+            type: "extrude",
+            depth: 2,
+            source: { nodeId: "self", profiles: [] },
+        };
+        const body = bodyWith([extrudeFeature(sketch.id), booleanFeature]);
+        const self = new ParametricBodyNode({ document: doc, id: "self", features: [pressPull] });
+        doc.modelManager.addNode(self);
+
+        const items = body.featureItems();
+
+        expect(items[0].dependsOn).toEqual([sketch.id]);
+        expect(items[1].dependsOn).toEqual([tool.id]);
+        expect(self.featureItems()[0].dependsOn).toEqual([]);
     });
 
     test("should drop a reference that no longer resolves", () => {

@@ -94,15 +94,12 @@ test.each([
     const answer = unwrapOk(next.take());
     shapes.push(answer.result.shape);
     try {
-        const expectedMin =
-            mutation === "location"
-                ? 100
-                : mutation === "tolerance"
-                  ? -0.01
-                  : mutation === "native alias"
-                    ? -0.02
-                    : 0;
+        const expectedMin = mutation === "location" ? 100 : 0;
         expect(answer.inputs[0].geometryBoundingBox().min.x).toBeCloseTo(expectedMin, 6);
+        // The tolerant kernel path still exposes the native tolerance captured by the snapshot.
+        const padding = mutation === "tolerance" ? 0.01 : mutation === "native alias" ? 0.02 : 0;
+        const tolerant = wasm.Shape.boundingBox((answer.inputs[0] as OccShape).shape, true);
+        expect(tolerant.min.x).toBeCloseTo(expectedMin - padding, 6);
     } finally {
         for (const input of answer.inputs) input.dispose();
     }

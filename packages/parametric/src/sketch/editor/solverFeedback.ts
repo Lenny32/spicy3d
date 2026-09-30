@@ -209,6 +209,8 @@ function constraintLabel(kind: ConstraintKind): string {
         [ConstraintKind.Block]: "Block",
         [ConstraintKind.EqualAngle]: "Equal angles",
         [ConstraintKind.Scale]: "Length ratio",
+        [ConstraintKind.PointOnBSpline]: "Point on B-spline",
+        [ConstraintKind.TangentLineBSpline]: "Tangent",
     };
     return labels[kind];
 }

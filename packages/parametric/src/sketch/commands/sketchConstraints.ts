@@ -8,6 +8,7 @@ import type { SketchSolver } from "../solver";
 import {
     allowsConstraintOnEntity,
     arcStartRef,
+    bsplineTangentConstraintFor,
     centerRef,
     lineRefs,
     tangentConstraintFor,
@@ -209,7 +210,8 @@ export class TangentConstraintCommand extends SketchConstraintCommand {
         }
         const t1 = editor.solver.entity(e1)?.type;
         const t2 = editor.solver.entity(e2)?.type;
-        const tangent = tangentConstraintFor(t1, e1, t2, e2);
+        const tangent =
+            tangentConstraintFor(t1, e1, t2, e2) ?? bsplineTangentConstraintFor(editor.solver, e1, e2);
         if (tangent === undefined) {
             PubSub.default.pub("displayError", "Tangent does not apply to this pair of entities");
             return;
@@ -240,6 +242,9 @@ export class PointOnConstraintCommand extends SketchConstraintCommand {
             addAndCommit(editor, ConstraintKind.PointOnCircle, [p, centerRef(entityId)]);
         } else if (type === "arc") {
             addAndCommit(editor, ConstraintKind.PointOnArc, [p, centerRef(entityId), arcStartRef(entityId)]);
+        } else if (type === "bspline" && p.entityId !== entityId) {
+            // any point ref names the curve; its own fit points lie on it by construction
+            addAndCommit(editor, ConstraintKind.PointOnBSpline, [p, { entityId, pointIndex: 0 }]);
         }
     }
 }
@@ -291,7 +296,7 @@ export class FixConstraintCommand extends SketchConstraintCommand {
 }
 
 /** Selected lines/points share a baseline; with no selection, pick two lines. */
-@command({ key: "constraint.collinear", icon: "icon-cParallel" })
+@command({ key: "constraint.collinear", icon: "icon-cCollinear" })
 export class CollinearConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -325,7 +330,7 @@ export class CollinearConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.block", icon: "icon-cFix" })
+@command({ key: "constraint.block", icon: "icon-cBlock" })
 export class BlockConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -349,7 +354,7 @@ export class BlockConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.construction", icon: "icon-cPointOn" })
+@command({ key: "constraint.construction", icon: "icon-cConstruction" })
 export class ConstructionConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         let ids = editor.selectedEntityIds;
@@ -373,7 +378,7 @@ export class ConstructionConstraintCommand extends SketchConstraintCommand {
 }
 
 /** Four lines in order define two directed angles, with no driving angle datum required. */
-@command({ key: "constraint.equalAngle", icon: "icon-cEqual" })
+@command({ key: "constraint.equalAngle", icon: "icon-cEqualAngle" })
 export class EqualAngleConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const refs: SketchPointRef[] = [];
@@ -401,7 +406,7 @@ export class EqualAngleConstraintCommand extends SketchConstraintCommand {
     }
 }
 
-@command({ key: "constraint.scale", icon: "icon-cEqual" })
+@command({ key: "constraint.scale", icon: "icon-cLengthRatio" })
 export class ScaleConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const ids: number[] = [];

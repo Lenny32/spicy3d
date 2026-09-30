@@ -37,8 +37,14 @@ export interface IShape extends IDisposable {
     findSubShapes(subshapeType: ShapeType): IShape[];
     directSubShapes(): IShape[];
     section(shape: IShape | Plane): IShape;
+    /** @unit length tolerance */
     split(shapes: IShape[], tolerance?: number): IShape;
     reserve(): void;
+    /**
+     * An independent copy of this shape. Through run_program (`shape.clone`) the copy becomes
+     * its own scene node next to the source, so edit ops on the clone consume the copy, never
+     * the source.
+     */
     clone(): IShape;
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape;
     boundingBox(): BoundingBox;
@@ -54,12 +60,28 @@ export interface IShape extends IDisposable {
     inspectionMass?(): Result<{ volume: number; center: XYZ }>;
     /** Exact planar cap faces of the positive-side cut; empty compound if no cut. */
     inspectionSectionCaps?(plane: Plane): Result<IShape>;
+    /**
+     * Topology validity (BRepCheck_Analyzer). It does not test self-intersection. Run it on
+     * offset / thickened results before booleans or inspections.
+     */
     checkShape(): boolean;
     checkFaces(): { index: number; isValid: boolean; status: string[] }[];
+    /**
+     * true when the shape has no self-intersection (each solid tested on its own; a shape
+     * without solids as a whole), false when faces cross or the test could not complete. It
+     * intersects faces pairwise: expensive on shapes with many faces. An error when the kernel
+     * build has no such check.
+     */
+    checkSelfIntersection?(): Result<boolean>;
+    /** @unit length tolerance */
     fixShape(tolerance: number): IShape;
+    /** @unit length tolerance */
     fixSmallFace(tolerance: number): IShape;
+    /** @unit length tolerance */
     fixSolid(tolerance: number): IShape;
+    /** @unit length tolerance */
     shellSewing(tolerance: number): IShape;
+    /** @unit length tolerance */
     setTolerance(tolerance: number): void;
     volume(): number;
 }
@@ -87,15 +109,18 @@ export interface IEdge extends IShape {
     get curve(): ITrimmedCurve;
     firstParameter(): number;
     lastParameter(): number;
+    /** @unit none parameter */
     pointAt(parameter: number): XYZ;
     startPoint(): XYZ;
     endPoint(): XYZ;
     ends(): [start: XYZ, end: XYZ];
+    /** @unit length distance */
     offset(distance: number, dir: XYZ): Result<IEdge>;
     /**
      * Trims the edge to the parameter window [start, end]. Returns `undefined`
      * when the window is empty within tolerance — the kernel reports that as a
      * null edge instead of raising.
+     * @unit none start end
      */
     trim(start: number, end: number): IEdge | undefined;
     hasContinuity(face1: IFace, face2: IFace): boolean;
@@ -109,12 +134,15 @@ export type OffsetMode = "skin" | "pipe" | "rectoVerso";
 export interface IWire extends IShape {
     toFace(): Result<IFace>;
     edgeLoop(): IEdge[];
+    /** @unit length distance */
     offset(distance: number, joinType: JoinType): Result<IShape>;
 }
 
 export interface IFace extends IShape {
+    /** @unit none parameter */
     inspectionTrimmedIso?(direction: "u" | "v", parameter: number): IShape | undefined;
     inspectionUVBounds?(): Result<{ u1: number; u2: number; v1: number; v2: number }>;
+    /** @unit length minDistance maxDistance tolerance */
     inspectionRayHit?(
         point: XYZLike,
         direction: XYZLike,
@@ -123,9 +151,16 @@ export interface IFace extends IShape {
         tolerance?: number,
     ): Result<XYZ | undefined>;
     area(): number;
+    /**
+     * Point and outward unit normal at surface parameters (u, v), following the face orientation.
+     * The normal is the zero vector for a surface-less face or where the surface derivatives degenerate
+     * (|dS/du x dS/dv| <= 1e-12, e.g. at a sphere pole).
+     * @unit none u v
+     */
     normal(u: number, v: number): [point: XYZ, normal: XYZ];
     outerWire(): IWire;
     surface(): ISurface;
+    /** @unit length tolerance */
     intersectLine(point: XYZLike, direction: XYZLike, tolerance?: number): XYZ | undefined;
     segmentsOfEdgeOnFace(edge: IEdge):
         | undefined
@@ -133,12 +168,14 @@ export interface IFace extends IShape {
               start: number;
               end: number;
           };
+    /** @unit length tolerance */
     containsPoint(point: XYZLike, containsEdge: boolean, tolerance: number): boolean;
 }
 
 export interface IShell extends IShape {}
 
 export interface ISolid extends IShape {
+    /** @unit length tolerance */
     containsPoint(point: XYZLike, containsSurface: boolean, tolerance: number): boolean;
 }
 

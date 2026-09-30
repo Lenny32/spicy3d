@@ -27,6 +27,7 @@ import {
     Logger,
 } from "@spicy3d/core";
 import { DefaultDataExchange } from "./defaultDataExchange";
+import { watchKernelCrash } from "./kernelCrashBanner";
 import {
     DefaultRibbon,
     mergeRibbonProfiles,
@@ -212,6 +213,8 @@ export class AppBuilder {
         await this._window?.init(app);
         // Plain HTTP on a LAN address: say why accounts, clipboard etc. are missing.
         if (this._window) warnIfInsecureContext();
+        // The geometry kernel can die mid-session (an OCCT abort it does not survive): offer a reload.
+        if (this._window) watchKernelCrash();
         await this.loadDefaultPlugins(app);
         this.started = this.runStarted(app);
 

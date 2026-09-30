@@ -161,6 +161,12 @@ export interface ExtrudeDragData {
      * rebuilds). Absent: such a click does nothing special. Works while editing too.
      */
     toggleTarget?(node: INode): boolean;
+    /**
+     * True while the options tab's "Add" is on: a plain click on a body toggles it like a
+     * Ctrl/Cmd+click (see `toggleTarget`) instead of switching profiles or picking an extent face,
+     * and a click beside every body does nothing.
+     */
+    picksTarget?(): boolean;
     /** The handler registers itself so the command can push option/depth changes back. */
     onReady?(handler: ExtrudeDragHandler): void;
     /** The handler reports its cleanup so the command can drop the reference. */
@@ -516,9 +522,14 @@ export class ExtrudeDragHandler implements IEventHandler {
      * A click that is not a drag: Shift or Ctrl/Cmd on a face of the current node toggles that
      * profile; Ctrl/Cmd on a body toggles it as a target; any other click on a profile face
      * switches to it (replacing the profiles). Editing keeps the feature's own profiles (see
-     * `ExtrudeDragData.editing`), so only the target toggle applies there.
+     * `ExtrudeDragData.editing`), so only the target toggle applies there. While the options
+     * tab's "Add" is on (`picksTarget`), every click is a target toggle.
      */
     private handleClick(view: IView, event: PointerEvent) {
+        if (this.data.picksTarget?.() === true) {
+            this.toggleTargetAt(view, event);
+            return;
+        }
         const toggle = event.shiftKey || isToggleSelectEvent(event);
         if (!toggle && this.data.picksExtentFace?.() === true) {
             this.pickExtentFaceAt(view, event);
@@ -629,6 +640,10 @@ export class ExtrudeDragHandler implements IEventHandler {
             return;
         }
         this.setArrowHover(view, false);
+        if (this.data.picksTarget?.() === true) {
+            this.clearHover();
+            return;
+        }
         const picksExtent = this.data.picksExtentFace?.() === true;
         if (this.data.editing && !picksExtent) return;
 

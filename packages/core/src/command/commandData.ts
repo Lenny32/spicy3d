@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import type { Binding } from "../foundation";
+import type { I18nKeys } from "../i18n";
 import type { CommandKeys } from "./commandKeys";
 
 export type IconSvg = { type: "svg"; value: string };
@@ -18,7 +19,8 @@ export interface CommandData {
     key: CommandKeys;
     icon: CommandIcon;
     toggle?: Binding;
-    helpText?: string;
+    /** One line on what the command does, shown in its ribbon tooltip under the name. */
+    helpText?: I18nKeys;
     helpUrl?: string;
     isApplicationCommand?: boolean;
 }

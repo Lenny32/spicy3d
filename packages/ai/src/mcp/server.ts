@@ -20,6 +20,7 @@ import { parseAskRequest } from "../tools/askUser";
 import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
 import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
+import { takeSlowOpWarnings } from "../tools/opBudget";
 import { documentSnapshot } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
@@ -91,6 +92,17 @@ export function toCallToolResult(result: string | ToolResult): CallToolResult {
         ],
         ...(isErrorPayload(content) && { isError: true }),
     };
+}
+
+/**
+ * Appends the slow-op warnings (opBudget.ts `takeSlowOpWarnings`: the call that ran the slow op,
+ * and once more the next call, whose answer is the first to arrive when the relay gave up waiting)
+ * as a separate text part, so the payload's JSON stays intact.
+ */
+export function withSlowOpWarnings(result: CallToolResult): CallToolResult {
+    const warnings = takeSlowOpWarnings();
+    if (warnings.length) result.content.push({ type: "text", text: warnings.join("\n") });
+    return result;
 }
 
 /**
@@ -232,6 +244,8 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
                 result = toCallToolResult(JSON.stringify({ error: (err as Error).message }));
             }
             options.onToolCall?.(name, result.isError === true);
+            // A cancelled call's answer is never sent: its warnings wait for the next result.
+            if (!extra.signal.aborted) withSlowOpWarnings(result);
             return result;
         });
     });

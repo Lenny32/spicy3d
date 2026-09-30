@@ -2,17 +2,24 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    ANGLE_UNITS,
     EditableShapeNode,
+    evaluateExpression,
     I18n,
     type IDocument,
     type IEdge,
     type IFace,
+    type INode,
     type IShape,
     type IWire,
+    LENGTH_UNITS,
     Line,
     Matrix4,
+    NodeUtils,
     Plane,
     Result,
+    resolveUnitSpec,
+    type Scope,
     ShapeNode,
     type ShapeType,
     ShapeTypes,
@@ -25,8 +32,10 @@ import {
     queryCapabilities,
     type ShapeCapability,
     type ShapeCapabilityParam,
+    type ShapeParamUnit,
     shapeCapabilities,
 } from "./capabilities.generated";
+import { throwIfCancelled, timeOp } from "./opBudget";
 import { buildTransformMatrix } from "./transformMatrix";
 
 interface Op {
@@ -51,6 +60,19 @@ interface RemovedNode {
 }
 
 type RefKind = "shape" | "curve" | "surface";
+
+/**
+ * Numeric args of one op: the document's variable scope, taken once per run_program call, and
+ * the numbers the op's expression args resolved to (reported back under "resolved"). The value
+ * is resolved once — run_program nodes are direct shapes, not linked to the variables.
+ */
+interface NumericArgs {
+    readonly scope: Scope;
+    /** name -> error of the variables whose own expression does not evaluate (absent from `scope`) */
+    readonly broken: ReadonlyMap<string, string>;
+    /** param name -> resolved value, for the args given as expressions */
+    readonly resolved: Record<string, number>;
+}
 
 interface LocalRef {
     /** Scene node backing this ref; its live shape is re-read on every resolve. */
@@ -197,6 +219,9 @@ export const EDIT_METHODS: ReadonlySet<string> = new Set([
  * (transformedMul lives on IShape). Listed in the run_program method enum.
  */
 export const EXTRA_OP_METHODS = ["transformedMul"] as const;
+
+/** The query run as a derive op: its copy becomes a new scene node (see runClone). */
+const CLONE_METHOD = "shape.clone";
 
 function activeDocument(): IDocument {
     const doc = globalThis.app.activeView?.document;
@@ -398,10 +423,12 @@ function coerce(
     doc: IDocument,
     localRefs: Map<string, LocalRef>,
     consumed: Set<string>,
+    numeric: NumericArgs,
 ): unknown {
     if (v === undefined) return coerceMissing(p);
     switch (p.kind) {
         case "number":
+            return coerceNumber(p, v, numeric);
         case "boolean":
         case "string":
         case "enum":
@@ -431,11 +458,57 @@ function coerceMissing(p: ShapeCapabilityParam): unknown {
     throw new Error(I18n.translate("ai.error.missingParam", p.name));
 }
 
+const NUMBER_EXPECTATIONS: Record<ShapeParamUnit, string> = {
+    length: "a number or a length expression",
+    angle: "a number or an angle expression",
+    none: "a number or an expression",
+};
+
+/**
+ * A numeric arg: a number as given, or an expression string over the document variables,
+ * resolved once against `numeric.scope`. Lengths (mm) and angles (degrees) are unit-checked —
+ * `wall_t` for a thickness, never `draft_angle`; dimensionless params (parameters, counts,
+ * indexes, weights) take the expression's value without a unit check.
+ */
+function coerceNumber(p: ShapeCapabilityParam, v: unknown, numeric: NumericArgs): number {
+    if (typeof v === "number") {
+        if (!Number.isFinite(v)) throw new Error(`${p.name} must be a finite number, got ${describe(v)}`);
+        return v;
+    }
+    const unit = p.unit ?? "none";
+    const expected = NUMBER_EXPECTATIONS[unit];
+    if (typeof v !== "string" || v.trim() === "") {
+        throw new Error(`${p.name} must be ${expected}, got ${describe(v)}`);
+    }
+    const value = resolveNumericExpression(v, unit, numeric.scope);
+    if (!value.isOk) {
+        throw new Error(
+            `${p.name} must be ${expected}, got ${describe(v)} (${value.error}${brokenCause(value.error, numeric)})`,
+        );
+    }
+    numeric.resolved[p.name] = value.value;
+    return value.value;
+}
+
+/**
+ * Why an identifier the expression names is unknown when it is a document variable: a variable
+ * whose own expression does not evaluate is left out of the scope, so it reads as undefined.
+ */
+function brokenCause(error: string, numeric: NumericArgs): string {
+    const name = /^Unknown identifier: ([A-Za-z_][A-Za-z0-9_]*)/.exec(error)?.[1];
+    const cause = name === undefined ? undefined : numeric.broken.get(name);
+    return cause === undefined ? "" : ` (variable "${name}" does not evaluate: ${cause})`;
+}
+
+function resolveNumericExpression(source: string, unit: ShapeParamUnit, scope: Scope): Result<number> {
+    if (unit === "length") return resolveUnitSpec(source, scope, LENGTH_UNITS);
+    if (unit === "angle") return resolveUnitSpec(source, scope, ANGLE_UNITS);
+    const evaluated = evaluateExpression(source, scope);
+    return evaluated.isOk ? Result.ok(evaluated.value.value) : Result.err(evaluated.error);
+}
+
 function coercePrimitive(p: ShapeCapabilityParam, v: unknown): unknown {
     switch (p.kind) {
-        case "number":
-            if (!isFiniteNumber(v)) throw new Error(`${p.name} must be a finite number, got ${describe(v)}`);
-            return v;
         case "boolean":
             if (typeof v !== "boolean") throw new Error(`${p.name} must be a boolean, got ${describe(v)}`);
             return v;
@@ -689,13 +762,14 @@ function runQuery(
     doc: IDocument,
     localRefs: Map<string, LocalRef>,
     results: Record<string, unknown>,
+    numeric: NumericArgs,
 ) {
     if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
     if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
 
     const entry = resolveQueryTarget(cap, op.target, doc, localRefs);
     const target = entry.value as Record<string, unknown>;
-    const args = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set()));
+    const args = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric));
     const raw = invokeMember(cap, target, args);
 
     if (cap.returnKind === "mutate") {
@@ -817,13 +891,20 @@ function recordSubShapeRefs(
     results[opId] = { count: refs.length, refs, kind: "shape" };
 }
 
-async function runProgram(ops: Op[]): Promise<string> {
+async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const doc = activeDocument();
     const factory = globalThis.app.shapeProvider.factory;
     const localRefs = sessionRefs(doc);
     const created: CreatedNode[] = [];
     const removed: RemovedNode[] = [];
     const results: Record<string, unknown> = {};
+    // Expression args resolve against the variables as they are now, once for the whole program.
+    const evaluated = doc.variables.evaluate();
+    const variables: ProgramVariables = {
+        scope: evaluated.scope,
+        broken: brokenVariables(doc, evaluated.errors),
+    };
+    const resolved: Record<string, Record<string, number>> = {};
 
     // The transaction rolls the scene back on failure; refs registered by this program
     // would dangle (pointing at rolled-back nodes), and refs deleted mid-program belong to
@@ -833,7 +914,7 @@ async function runProgram(ops: Op[]): Promise<string> {
     const nullSnapshot = new Set(nullRefs);
     try {
         Transaction.execute(doc, "AI program", () => {
-            runOps(ops, doc, factory, localRefs, created, removed, results);
+            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, variables, signal);
             doc.selection.clearSelection();
             doc.visual.update();
         });
@@ -842,22 +923,60 @@ async function runProgram(ops: Op[]): Promise<string> {
         throw e;
     }
 
-    return JSON.stringify({ created, removed, results });
+    return JSON.stringify(
+        Object.keys(resolved).length
+            ? { created, removed, results, resolved }
+            : { created, removed, results },
+    );
 }
 
-/** Runs every op in order, restating any failure as an error naming the offending op. */
+/** The variables a program's expression args resolve against, taken once per run_program call. */
+type ProgramVariables = Omit<NumericArgs, "resolved">;
+
+/** The variables whose expression does not evaluate, by name (`errors` is keyed by variable id). */
+function brokenVariables(doc: IDocument, errors: ReadonlyMap<string, string>): Map<string, string> {
+    const broken = new Map<string, string>();
+    if (errors.size === 0) return broken;
+    for (const item of doc.variables.items ?? []) {
+        const error = errors.get(String(item.id));
+        if (error !== undefined && typeof item.name === "string") broken.set(item.name, error);
+    }
+    return broken;
+}
+
+/** What a program reports back; `resolved` = op id (or `ops[i]`) -> its expression args' values. */
+interface ProgramOutput {
+    created: CreatedNode[];
+    removed: RemovedNode[];
+    results: Record<string, unknown>;
+    resolved: Record<string, Record<string, number>>;
+}
+
+/**
+ * Runs every op in order, restating any failure as an error naming the offending op. A cancelled
+ * call stops before the next op (the caller's transaction rolls everything back); an op that
+ * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
+ */
 function runOps(
     ops: Op[],
     doc: IDocument,
     factory: unknown,
     localRefs: Map<string, LocalRef>,
-    created: CreatedNode[],
-    removed: RemovedNode[],
-    results: Record<string, unknown>,
+    output: ProgramOutput,
+    variables: ProgramVariables,
+    signal: AbortSignal | undefined,
 ): void {
-    for (const op of ops) {
+    const { created, removed, results } = output;
+    for (const [index, op] of ops.entries()) {
+        throwIfCancelled(signal, index, String(op.method));
+        const numeric: NumericArgs = { ...variables, resolved: {} };
         try {
-            runOp(op, doc, factory, localRefs, created, removed, results);
+            timeOp(String(op.method), () =>
+                runOp(op, doc, factory, localRefs, created, removed, results, numeric),
+            );
+            if (Object.keys(numeric.resolved).length) {
+                output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
+            }
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             const where = op.target !== undefined ? `target "${String(op.target)}"` : `id "${op.id ?? ""}"`;
@@ -907,7 +1026,11 @@ function runTransformedMul(
     addCreatedNode(op, doc, localRefs, created, op.name ?? op.method, Result.ok(transformed));
 }
 
-/** Create the scene node for an op result, register its ref and report it as created. */
+/**
+ * Create the scene node for an op result, register its ref and report it as created. With
+ * `after`, the node goes right behind that node in its parent (same folder); otherwise into
+ * the model manager's current folder.
+ */
 function addCreatedNode(
     op: Op,
     doc: IDocument,
@@ -915,11 +1038,45 @@ function addCreatedNode(
     created: CreatedNode[],
     name: string,
     shape: Result<IShape>,
-): void {
+    after?: INode,
+): EditableShapeNode {
     const node = new EditableShapeNode({ document: doc, name, shape });
-    doc.modelManager.addNode(node);
+    const parent = after?.parent;
+    if (after && parent && NodeUtils.isLinkedListNode(parent)) {
+        parent.insertAfter(after, node);
+    } else {
+        doc.modelManager.addNode(node);
+    }
     if (op.id) registerRef(doc, localRefs, op.id, { nodeId: node.id, kind: "shape", value: shape.value });
     created.push({ id: op.id, nodeId: node.id, name });
+    return node;
+}
+
+/**
+ * `shape.clone` is run as a derive op rather than a plain query: the copy becomes its own
+ * scene node next to the source and the op's ref is backed by that node. A ref still backed
+ * by the source node would make a later edit op (makeThickSolid, fillet, ...) on the "clone"
+ * consume — remove — the source. Node creation is recorded by the program's transaction, so a
+ * failing later op rolls the copy back together with its ref.
+ */
+function runClone(
+    cap: QueryCapability,
+    op: Op,
+    doc: IDocument,
+    localRefs: Map<string, LocalRef>,
+    created: CreatedNode[],
+    results: Record<string, unknown>,
+): void {
+    if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
+    if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
+
+    const entry = resolveQueryTarget(cap, op.target, doc, localRefs);
+    const copy = invokeMember(cap, entry.value as Record<string, unknown>, []) as IShape;
+    const source =
+        entry.nodeId === undefined ? undefined : doc.modelManager.findNodes((n) => n.id === entry.nodeId)[0];
+    const name = op.name ?? `${source?.name ?? "shape"}_copy`;
+    const node = addCreatedNode(op, doc, localRefs, created, name, Result.ok(copy), source);
+    results[op.id] = { ref: op.id, kind: "shape", nodeId: node.id };
 }
 
 function runOp(
@@ -930,6 +1087,7 @@ function runOp(
     created: CreatedNode[],
     removed: RemovedNode[],
     results: Record<string, unknown>,
+    numeric: NumericArgs,
 ): void {
     if (op.method === "transformedMul") {
         runTransformedMul(op, doc, localRefs, created);
@@ -937,17 +1095,19 @@ function runOp(
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
     if (!cap) {
-        runQueryOp(op, doc, localRefs, results);
+        runQueryOp(op, doc, localRefs, created, results, numeric);
         return;
     }
-    runShapeOp(cap, op, doc, factory, localRefs, created, removed, results);
+    runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric);
 }
 
 function runQueryOp(
     op: Op,
     doc: IDocument,
     localRefs: Map<string, LocalRef>,
+    created: CreatedNode[],
     results: Record<string, unknown>,
+    numeric: NumericArgs,
 ): void {
     const query = queryCapabilities.find((c) => c.method === op.method);
     if (!query) {
@@ -955,7 +1115,11 @@ function runQueryOp(
             `unknown method "${op.method}" — load_skill("modeling-api") lists the modeling methods and load_skill("shape-query") the query methods`,
         );
     }
-    runQuery(query, op, doc, localRefs, results);
+    if (query.method === CLONE_METHOD) {
+        runClone(query, op, doc, localRefs, created, results);
+        return;
+    }
+    runQuery(query, op, doc, localRefs, results, numeric);
 }
 
 /** The parameter each profile-sweeping op sweeps; everything else takes its args as given. */
@@ -1001,9 +1165,10 @@ function runShapeOp(
     created: CreatedNode[],
     removed: RemovedNode[],
     results: Record<string, unknown>,
+    numeric: NumericArgs,
 ): void {
     const consumed = new Set<string>();
-    const params = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed));
+    const params = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
     closeProfileParam(cap, op, params, factory);
     const raw = (factory as unknown as Record<string, (...a: unknown[]) => unknown>)[op.method](...params);
     const result = raw instanceof Result ? raw : Result.ok(raw);
@@ -1075,7 +1240,7 @@ function buildModelingTool(): Tool {
     return {
         name: "run_program",
         description:
-            'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results". The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it).',
+            'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results" (shape.clone also adds its copy as a new node, listed in "created", so edit ops on the clone never consume the source). The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it). Numeric args take a number or an expression string over the document variables ("wall_t / 2"; lengths in mm and angles in degrees are unit-checked), evaluated ONCE when the op runs — the nodes are not linked to the variables, so use run_parametric for dimensions that must follow them; the values expressions resolved to come back in "resolved" (per op id).',
         parameters: runProgramParameters(),
         handler: handleRunProgram,
     };
@@ -1134,7 +1299,7 @@ function allOpMethods(): string[] {
     ];
 }
 
-function handleRunProgram(args: Record<string, unknown>): Promise<string> {
+function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const ops = Array.isArray(args) ? args : (args as { ops?: unknown }).ops;
     if (!Array.isArray(ops)) {
         return Promise.resolve(
@@ -1143,7 +1308,7 @@ function handleRunProgram(args: Record<string, unknown>): Promise<string> {
             }),
         );
     }
-    return runProgram(ops as Op[]);
+    return runProgram(ops as Op[], signal);
 }
 
 export function buildCapabilityTools(): Tool[] {

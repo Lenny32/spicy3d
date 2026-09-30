@@ -3,7 +3,17 @@
 
 import { EMPTY_SCOPE, type ParameterValue, type Plane, Result, type Scope } from "@spicy3d/core";
 import { INCIDENCE_TOLERANCE } from "../features/refGeometry";
-import { ENTITY_PARAM_KINDS, PARAM_KIND_COORDINATE, PARAM_KIND_LENGTH } from "./entityLayout";
+import {
+    type BSplineOptions,
+    type BSplineParametrization,
+    type BSplinePoint,
+    bsplineFitParams,
+    bsplinePointAt,
+    bsplinePoints,
+    closestBSplineParameter,
+    interpolateBSpline,
+} from "./bsplineGeometry";
+import { entityParamKinds, PARAM_KIND_COORDINATE, PARAM_KIND_LENGTH } from "./entityLayout";
 import {
     type EntityTables,
     type ExternalEntityHost,
@@ -133,6 +143,22 @@ export class SketchSolver implements ExternalEntityHost {
     private readonly constructionEntities = new Set<number>();
     private readonly entityParams = new Map<number, number[]>();
     private readonly entityCache = new Map<number, number[]>();
+    /**
+     * Parametrization and closure of each bspline entity, as stored: an absent parametrization
+     * (hand-written data; the tools always write one) reads `chord` and stays absent, so a no-op
+     * session gives back the data it loaded.
+     */
+    private readonly bsplineOptions = new Map<
+        number,
+        { parametrization: BSplineParametrization | undefined; periodic: boolean }
+    >();
+    /**
+     * The solver curve of each bspline entity (`SolverSystem.add_bspline`): its poles follow the
+     * fit points, and curve constraints (point on it, end tangent) act through it. A bspline
+     * whose stored points do not interpolate (hand-edited data) has none — its fit points still
+     * solve, curve constraints on it are refused.
+     */
+    private readonly bsplineCurves = new Map<number, number>();
     private readonly constraints = new Map<number, ConstraintRecord>();
     /** solver param ids of the datum entities (origin, X/Y axes), keyed by reserved id. */
     private readonly datumParams = new Map<number, number[]>();
@@ -251,6 +277,64 @@ export class SketchSolver implements ExternalEntityHost {
         const id = this.registerEntity("spline", this.addEntityParams("spline", params.value));
         this.entityCache.set(id, [...params.value]);
         return Result.ok(id);
+    }
+
+    /**
+     * One interpolating B-spline through `points` in curve order (`bsplineGeometry.ts`): every fit
+     * point is a solver point (point index i = fit point i), the curve's poles follow them. A
+     * periodic curve closes smoothly without repeating its first point (a repeated one is dropped).
+     */
+    addBSpline(points: readonly BSplinePoint[], options: BSplineOptions = {}): Result<number> {
+        const periodic = options.periodic === true;
+        const parametrization = options.parametrization ?? "chord";
+        const params = bsplineFitParams(points, periodic);
+        if (!params.isOk) return Result.err(params.error);
+        const curve = interpolateBSpline(bsplinePoints(params.value), { periodic, parametrization });
+        if (!curve.isOk) return Result.err(curve.error);
+        const id = this.registerEntity("bspline", this.addEntityParams("bspline", params.value));
+        this.attachBSpline(id, parametrization, periodic);
+        return Result.ok(id);
+    }
+
+    /** Records a bspline entity's options and creates its solver curve (see `bsplineCurves`). */
+    private attachBSpline(
+        id: number,
+        parametrization: BSplineParametrization | undefined,
+        periodic: boolean,
+    ): void {
+        this.bsplineOptions.set(id, { parametrization, periodic });
+        try {
+            this.bsplineCurves.set(
+                id,
+                this.system.add_bspline(this.entityParams.get(id)!, periodic, parametrization ?? "chord"),
+            );
+        } catch {
+            // points that do not interpolate: the entity stays, without a solver curve
+        }
+    }
+
+    /** The solver curve of a bspline entity; throws for any other entity or a bspline without one. */
+    private bsplineCurveOf(entityId: number): number {
+        if (this.typeOf(entityId) !== "bspline") throw new Error(`Entity ${entityId} is not a bspline`);
+        const curve = this.bsplineCurves.get(entityId);
+        if (curve === undefined) throw new Error(`B-spline ${entityId} does not interpolate its points`);
+        return curve;
+    }
+
+    /**
+     * The end tangent leg of a bspline at the end `ref` addresses (fit point 0 or the last one): the
+     * param ids of the two poles a clamped curve leaves that end along.
+     */
+    private bsplineEndLegParams(ref: SketchPointRef): number[] {
+        const curve = this.bsplineCurveOf(ref.entityId);
+        if (this.bsplineOptions.get(ref.entityId)?.periodic) {
+            throw new Error(`B-spline ${ref.entityId} is periodic: it has no end to be tangent at`);
+        }
+        const poles = this.system.bspline_poles(curve);
+        const last = this.entityParams.get(ref.entityId)!.length / 2 - 1;
+        if (ref.pointIndex === 0) return poles.slice(0, 4);
+        if (ref.pointIndex === last) return poles.slice(poles.length - 4);
+        throw new Error(`Point ${ref.pointIndex} is no end of B-spline ${ref.entityId}`);
     }
 
     addPoint(x: number, y: number): number {
@@ -430,6 +514,8 @@ export class SketchSolver implements ExternalEntityHost {
                 removedConstraints.push(record.id);
             }
         }
+        const curve = this.bsplineCurves.get(id);
+        if (curve !== undefined) this.system.remove_bspline(curve);
         for (const paramId of paramIds) {
             this.system.remove_param(paramId);
         }
@@ -437,6 +523,8 @@ export class SketchSolver implements ExternalEntityHost {
         this.constructionEntities.delete(id);
         this.entityParams.delete(id);
         this.entityCache.delete(id);
+        this.bsplineOptions.delete(id);
+        this.bsplineCurves.delete(id);
         return removedConstraints;
     }
 
@@ -619,6 +707,12 @@ export class SketchSolver implements ExternalEntityHost {
                 const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
                 return projectOntoCircle(center, radius, u, v);
             }
+            case ConstraintKind.PointOnBSpline: {
+                const curve = this.bsplineCurves.get(record.refs[1].entityId);
+                if (curve === undefined) return undefined;
+                const shape = this.system.bspline_shape(curve);
+                return bsplinePointAt(shape, closestBSplineParameter(shape, [u, v]));
+            }
             default:
                 return undefined;
         }
@@ -665,12 +759,20 @@ export class SketchSolver implements ExternalEntityHost {
     entities(): SketchEntityData[] {
         return [...this.entityCache.entries()]
             .filter(([id]) => !this.fixedEntities.has(id))
-            .map(([id, params]) => ({
-                id,
-                type: this.entityTypes.get(id)!,
-                params: [...params],
-                ...(this.constructionEntities.has(id) ? { construction: true } : {}),
-            }));
+            .map(([id, params]) => this.entityDataOf(id, this.entityTypes.get(id)!, params));
+    }
+
+    /** An entity's data as it is persisted: params copied, the optional fields only when set. */
+    private entityDataOf(id: number, type: SketchEntityType, params: readonly number[]): SketchEntityData {
+        const options = this.bsplineOptions.get(id);
+        return {
+            id,
+            type,
+            params: [...params],
+            ...(this.constructionEntities.has(id) ? { construction: true } : {}),
+            ...(options?.parametrization === undefined ? {} : { parametrization: options.parametrization }),
+            ...(options?.periodic ? { periodic: true } : {}),
+        };
     }
 
     /** Current data of one entity, or undefined when unknown. Datum axes answer synthetic line data. */
@@ -678,14 +780,7 @@ export class SketchSolver implements ExternalEntityHost {
         if (id === SKETCH_X_AXIS_ID || id === SKETCH_Y_AXIS_ID) return datumEntityData(id);
         const type = this.entityTypes.get(id);
         const params = this.entityCache.get(id);
-        return type === undefined || params === undefined
-            ? undefined
-            : {
-                  id,
-                  type,
-                  params: [...params],
-                  ...(this.constructionEntities.has(id) ? { construction: true } : {}),
-              };
+        return type === undefined || params === undefined ? undefined : this.entityDataOf(id, type, params);
     }
 
     pointOf(ref: SketchPointRef): [number, number] {
@@ -701,6 +796,14 @@ export class SketchSolver implements ExternalEntityHost {
             throw new Error(`Unknown sketch entity: ${entityId}`);
         }
         switch (type) {
+            case "bspline": {
+                if (this.bsplineOptions.get(entityId)?.periodic) return [];
+                const last = this.entityParams.get(entityId)!.length / 2 - 1;
+                return [
+                    this.pointOf({ entityId, pointIndex: 0 }),
+                    this.pointOf({ entityId, pointIndex: last }),
+                ];
+            }
             case "spline":
             case "line":
                 return [this.pointOf({ entityId, pointIndex: 0 }), this.pointOf({ entityId, pointIndex: 1 })];
@@ -871,6 +974,8 @@ export class SketchSolver implements ExternalEntityHost {
         this.constructionEntities.clear();
         this.entityParams.clear();
         this.entityCache.clear();
+        this.bsplineOptions.clear();
+        this.bsplineCurves.clear();
         this.constraints.clear();
         this.fixedEntities.clear();
         this.external.clear();
@@ -1046,6 +1151,10 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     private addConstraintWithId(id: number, constraint: Omit<SketchConstraintData, "id">): void {
+        if (constraint.kind === ConstraintKind.PointOnBSpline) {
+            this.addPointOnBSpline(id, constraint);
+            return;
+        }
         const {
             params,
             datumParamIds,
@@ -1073,6 +1182,27 @@ export class SketchSolver implements ExternalEntityHost {
             direction: constraint.direction ? [...constraint.direction] : undefined,
             helperParams,
             helperConstraints,
+        });
+    }
+
+    /**
+     * refs = [point, any point of the bspline]: the point slides on the curve (its curve parameter
+     * is the solver's). A fit point of the same bspline lies on it by construction — refused.
+     */
+    private addPointOnBSpline(id: number, constraint: Omit<SketchConstraintData, "id">): void {
+        const [point, curveRef] = constraint.refs;
+        if (point === undefined || curveRef === undefined)
+            throw new Error("Point on B-spline takes two refs");
+        if (point.entityId === curveRef.entityId) {
+            throw new Error("A B-spline's own point already lies on it");
+        }
+        const [px, py] = this.pointParamIds(point);
+        const solverId = this.system.add_point_on_bspline(this.bsplineCurveOf(curveRef.entityId), px, py);
+        this.constraints.set(id, {
+            id,
+            kind: constraint.kind,
+            refs: constraint.refs.map((r) => ({ ...r })),
+            solverId,
         });
     }
 
@@ -1207,6 +1337,9 @@ export class SketchSolver implements ExternalEntityHost {
                     this.radiusParamId(refs[0].entityId),
                     ...this.arcParams(refs[1], refs[2]),
                 ];
+            case ConstraintKind.TangentLineBSpline:
+                // refs = [line start, line end, the bspline end it is tangent at]
+                return [...this.lineParams(refs[0], refs[1]), ...this.bsplineEndLegParams(refs[2])];
             default:
                 // A datum kind never reaches here — `buildConstraintParams` routes it first.
                 throw new Error(`Unsupported constraint kind: ${constraint.kind}`);
@@ -1409,6 +1542,14 @@ export class SketchSolver implements ExternalEntityHost {
         if ((type === "line" || type === "spline") && (ref.pointIndex === 0 || ref.pointIndex === 1)) {
             return [ref.pointIndex * 2, ref.pointIndex * 2 + 1];
         }
+        if (
+            type === "bspline" &&
+            Number.isInteger(ref.pointIndex) &&
+            ref.pointIndex >= 0 &&
+            ref.pointIndex * 2 + 1 < this.entityParams.get(ref.entityId)!.length
+        ) {
+            return [ref.pointIndex * 2, ref.pointIndex * 2 + 1];
+        }
         if ((type === "arc" || type === "ellipse") && ref.pointIndex >= 0 && ref.pointIndex <= 2) {
             return [ref.pointIndex * 2, ref.pointIndex * 2 + 1];
         }
@@ -1500,6 +1641,9 @@ export class SketchSolver implements ExternalEntityHost {
         for (const entity of data.entities) {
             this.registerEntity(entity.type, this.addEntityParams(entity.type, entity.params), entity.id);
             if (entity.type === "spline") this.entityCache.set(entity.id, [...entity.params]);
+            if (entity.type === "bspline") {
+                this.attachBSpline(entity.id, entity.parametrization, entity.periodic === true);
+            }
             if (entity.construction) this.constructionEntities.add(entity.id);
         }
         for (const constraint of data.constraints) {
@@ -1516,7 +1660,7 @@ export class SketchSolver implements ExternalEntityHost {
 
     private addEntityParams(type: SketchEntityType, values: number[]): number[] {
         const ids = this.system.add_params(
-            new Uint8Array(ENTITY_PARAM_KINDS[type]),
+            new Uint8Array(entityParamKinds(type, values)),
             new Float64Array(type === "spline" ? values.slice(0, 4) : values),
         );
         return Array.from(ids);

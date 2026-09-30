@@ -7,10 +7,31 @@ import { FolderNode, Node } from "../model";
 import { serializable } from "../serialize";
 import type { AnalysisDefinition, AnalysisSourceRef, AnalysisStatus } from "./types";
 
+/** Icon of each analysis kind: its inspect command's and its result node's. */
+export const ANALYSIS_ICONS: Readonly<Record<string, string>> = {
+    measure: "icon-measure",
+    section: "icon-sectionAnalysis",
+    interference: "icon-interference",
+    centerOfMass: "icon-centerOfMass",
+    curvatureComb: "icon-curvatureComb",
+    curvatureMap: "icon-curvatureMap",
+    draft: "icon-draftAnalysis",
+    environmentMap: "icon-environmentMap",
+    isocurves: "icon-isocurves",
+    zebra: "icon-zebra",
+    accessibility: "icon-accessibility",
+    minimumRadius: "icon-minimumRadius",
+    designAdvice: "icon-designAdvice",
+    fastenerStack: "icon-fastenerStack",
+    componentColors: "icon-componentColors",
+    meshFaceGroups: "icon-meshFaceGroups",
+    similarComponents: "icon-similarComponents",
+};
+
 @serializable()
 export class AnalysisGroup extends FolderNode {
     override get icon(): string {
-        return "icon-measureSelect";
+        return "icon-analysis";
     }
 }
 
@@ -28,7 +49,7 @@ export class AnalysisNode extends Node {
     readonly kind: string;
 
     get icon(): string {
-        return "icon-measureSelect";
+        return ANALYSIS_ICONS[this.kind] ?? "icon-analysis";
     }
 
     get sources(): AnalysisSourceRef[] {

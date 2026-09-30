@@ -12,6 +12,7 @@ import {
     type ExistingDocumentChoice,
     encodeDocumentFile,
     formatDateTime,
+    HomeBar,
     I18n,
     type I18nKeys,
     type IApplication,
@@ -45,12 +46,12 @@ interface ApplicationCommand {
 const applicationCommands = new ObservableCollection<ApplicationCommand>(
     {
         display: "command.doc.new",
-        icon: "icon-plus",
+        icon: "icon-file-plus",
         onclick: () => PubSub.default.pub("executeCommand", "doc.new"),
     },
     {
         display: "command.doc.open",
-        icon: "icon-folder",
+        icon: "icon-folder-open",
         onclick: () => PubSub.default.pub("executeCommand", "doc.open"),
     },
 );
@@ -263,6 +264,11 @@ export class Home extends HTMLElement {
     private rightSection() {
         return div(
             { className: style.right },
+            collection({
+                className: style.homeBarItems,
+                sources: HomeBar.items,
+                template: (item: HTMLElement) => item,
+            }),
             div(
                 { className: style.page },
                 div(

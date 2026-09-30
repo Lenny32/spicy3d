@@ -50,7 +50,7 @@ export abstract class ShapeNode extends GeometryNode {
      * override it so the three read apart at a glance.
      */
     get icon(): string {
-        return "icon-box";
+        return "icon-shape";
     }
 
     protected setShape(shape: Result<IShape>) {

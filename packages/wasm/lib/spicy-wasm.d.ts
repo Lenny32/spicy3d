@@ -688,6 +688,7 @@ interface EmbindModule {
     chamfer2d(_0: TopoDS_Face, _1: TopoDS_Edge, _2: TopoDS_Edge, _3: number): ShapeResult;
     polygon(_0: Array<Vector3>): ShapeResult;
     bezier(_0: Array<Vector3>, _1: Array<number>): ShapeResult;
+    bspline(_0: Array<Vector3>, _1: Array<number>, _2: Array<number>, _3: number, _4: boolean, _5: Array<number>): ShapeResult;
     fillet(_0: TopoDS_Shape, _1: Array<number>, _2: number): ShapeResult;
     chamfer(_0: TopoDS_Shape, _1: Array<number>, _2: number): ShapeResult;
     filletTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number): TrackedShapeResult;
@@ -881,6 +882,7 @@ interface EmbindModule {
     sectionSS(_0: TopoDS_Shape, _1: TopoDS_Shape): TopoDS_Shape;
     isClosed(_0: TopoDS_Shape): boolean;
     check(_0: TopoDS_Shape): boolean;
+    checkSelfIntersection(_0: TopoDS_Shape): boolean;
     hlr(_0: TopoDS_Shape, _1: gp_Pnt, _2: gp_Dir, _3: gp_Dir): TopoDS_Shape;
     shellSewing(_0: TopoDS_Shape, _1: number): TopoDS_Shape;
     setTolerance(_0: TopoDS_Shape, _1: number): void;

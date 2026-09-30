@@ -15,7 +15,7 @@ export function splineParams(points: readonly SplinePoint[]): Result<number[]> {
         return Result.err("Consecutive spline points must be distinct");
     }
     if (distance(points[0], points[points.length - 1]) < Precision.Distance) {
-        return Result.err("Closed splines are not supported");
+        return Result.err("Closed splines are not supported: use a periodic bspline for a closed curve");
     }
     return Result.ok([...points[0], ...points[points.length - 1], ...points.slice(1, -1).flat()]);
 }
@@ -31,7 +31,15 @@ function distance(a: SplinePoint, b: SplinePoint): number {
     return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
-/** Uniform Catmull–Rom, represented exactly as piecewise cubic Beziers for the kernel. */
+/**
+ * Uniform Catmull–Rom, represented exactly as piecewise cubic Beziers for the kernel: one segment
+ * (one edge) per pair of neighbouring points, each segment's inner handles a sixth of the chord
+ * between its neighbours — the end points stand in for their missing outer neighbours. Uniform
+ * means every segment gets the same parameter length whatever its chord, so unevenly spaced
+ * points overshoot next to long gaps and flatten short ones; the sketch `bspline` entity
+ * (`bsplineGeometry.ts`, one chord-length edge) is the curve for that. Kept as it is: saved
+ * fillets on these edges must keep resolving.
+ */
 export function splineSegments(params: readonly number[]): SplineSegment[] {
     const points = splinePoints(params);
     return points.slice(0, -1).map((p1, i) => {

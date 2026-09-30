@@ -29,6 +29,7 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 
@@ -472,11 +473,11 @@ EMSCRIPTEN_BINDINGS(Converter)
         .function("getChildren", &ShapeNode::getChildren);
 
     class_<Converter>("Converter")
-        .class_function("convertToBrep", &Converter::convertToBrep)
-        .class_function("convertFromBrep", &Converter::convertFromBrep)
-        .class_function("convertFromStep", &Converter::convertFromStep)
-        .class_function("convertFromIges", &Converter::convertFromIges)
-        .class_function("convertToStep", &Converter::convertToStep)
-        .class_function("convertToIges", &Converter::convertToIges)
-        .class_function("convertFromStl", &Converter::convertFromStl);
+        .class_function("convertToBrep", guardedEntry<&Converter::convertToBrep>("Converter.convertToBrep"))
+        .class_function("convertFromBrep", guardedEntry<&Converter::convertFromBrep>("Converter.convertFromBrep"))
+        .class_function("convertFromStep", guardedEntry<&Converter::convertFromStep>("Converter.convertFromStep"))
+        .class_function("convertFromIges", guardedEntry<&Converter::convertFromIges>("Converter.convertFromIges"))
+        .class_function("convertToStep", guardedEntry<&Converter::convertToStep>("Converter.convertToStep"))
+        .class_function("convertToIges", guardedEntry<&Converter::convertToIges>("Converter.convertToIges"))
+        .class_function("convertFromStl", guardedEntry<&Converter::convertFromStl>("Converter.convertFromStl"));
 }

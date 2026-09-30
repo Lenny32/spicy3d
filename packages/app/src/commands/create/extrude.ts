@@ -20,6 +20,7 @@ import { CreateFromSelectionCommand } from "../createCommand";
 
 @command({
     key: "create.extrude",
+    helpText: "tooltip.create.extrude",
     icon: "icon-prism",
 })
 export class ExtrudeCommand extends CreateFromSelectionCommand {

@@ -30,6 +30,8 @@ import {
 } from "../features/profileBuilder";
 import { syncNodeWatches } from "../nodeWatch";
 import { ensureVariableSync } from "../variableSync";
+import { bsplineEdges } from "./bsplineEdges";
+import type { BSplineOptions } from "./bsplineGeometry";
 import { normalizeSnapshot } from "./entityLayout";
 import { type ExternalResolveResult, resolveExternalRefs } from "./externalRef";
 import { type PlaneFaceRef, resolveFacePlane } from "./planeRef";
@@ -50,6 +52,10 @@ import { SketchSolver } from "./solver";
 import { splineParams, splinePoints, splineSegments } from "./splineGeometry";
 
 const NOT_A_PLANE = "Construction source is not a plane";
+
+function bsplineOptionsOf(entity: SketchEntityData): BSplineOptions {
+    return { parametrization: entity.parametrization, periodic: entity.periodic === true };
+}
 
 export interface SketchNodeOptions {
     document: IDocument;
@@ -350,6 +356,13 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
                 }
                 continue;
             }
+            if (entity.type === "bspline") {
+                // one edge, or one per span on kernels without the binding — see bsplineEdges.ts
+                const built = bsplineEdges(entity.params, bsplineOptionsOf(entity), this.plane);
+                if (!built.isOk) return Result.err(built.error);
+                edges.push(...built.value);
+                continue;
+            }
             const edge = this.entityEdge(entity);
             if (!edge.isOk) return Result.err(edge.error);
             edges.push(edge.value);
@@ -370,6 +383,14 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         switch (entity.type) {
             case "spline":
                 return Result.err("Splines produce multiple cubic edges");
+            case "bspline": {
+                // one edge with the kernel's B-spline binding; the Bezier fallback has several
+                const built = bsplineEdges(p, bsplineOptionsOf(entity), this.plane);
+                if (!built.isOk) return Result.err(built.error);
+                if (built.value.length === 1) return Result.ok(built.value[0]);
+                for (const edge of built.value) edge.dispose();
+                return Result.err("This kernel builds the B-spline as several Bezier edges");
+            }
             case "point":
                 return Result.err("Points do not produce profile edges");
             case "ellipse": {

@@ -1,0 +1,126 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 5,
+        "sketch": 2
+    },
+    "id": "fixture-sketch2-bspline",
+    "name": "Fixture sketch v2: an open chord-length B-spline closed by a line (with an end tangent and a point on the curve) and a periodic centripetal B-spline, each extruded",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"bspline\",\"params\":[0,0,8,7,20,11,32,8,40,0],\"parametrization\":\"chord\"},{\"id\":2,\"type\":\"line\",\"params\":[40,0,0,0]},{\"id\":3,\"type\":\"line\",\"params\":[0,0,-4.796460678268616,-5.765748018713035],\"construction\":true},{\"id\":4,\"type\":\"point\",\"params\":[13.786107401149545,9.784809036858405]}],\"constraints\":[{\"id\":1,\"kind\":0,\"refs\":[{\"entityId\":1,\"pointIndex\":4},{\"entityId\":2,\"pointIndex\":0}]},{\"id\":2,\"kind\":0,\"refs\":[{\"entityId\":2,\"pointIndex\":1},{\"entityId\":1,\"pointIndex\":0}]},{\"id\":3,\"kind\":0,\"refs\":[{\"entityId\":3,\"pointIndex\":0},{\"entityId\":1,\"pointIndex\":0}]},{\"id\":4,\"kind\":33,\"refs\":[{\"entityId\":3,\"pointIndex\":0},{\"entityId\":3,\"pointIndex\":1},{\"entityId\":1,\"pointIndex\":0}]},{\"id\":5,\"kind\":32,\"refs\":[{\"entityId\":4,\"pointIndex\":0},{\"entityId\":1,\"pointIndex\":0}]}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-open",
+                "name": "body.sketch1",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"bspline\",\"params\":[60,0,80,-5,90,10,75,25,55,15],\"parametrization\":\"centripetal\",\"periodic\":true}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-periodic",
+                "name": "body.sketch2",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-open\",\"type\":\"extrude\",\"sketchId\":\"sketch-open\",\"depth\":10}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-open",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-periodic\",\"type\":\"extrude\",\"sketchId\":\"sketch-periodic\",\"depth\":5}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-periodic",
+                "name": "body.parametricBody2",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

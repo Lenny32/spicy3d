@@ -1,0 +1,167 @@
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
+// See LICENSE file in the project root for full license information.
+
+import {
+    AsyncController,
+    CancelableCommand,
+    Combobox,
+    Continuities,
+    type Continuity,
+    command,
+    Id,
+    type IFace,
+    Matrix4,
+    PubSub,
+    property,
+    SelectShapeStep,
+    type ShapeMeshData,
+    ShapeTypes,
+    Transaction,
+    VisualConfig,
+} from "@spicy3d/core";
+import { evaluateFeature, type LoftFeatureData, type LoftSection } from "../features/feature";
+import { captureProfileRef } from "../features/profileRef";
+import { ParametricBodyNode } from "../parametricBodyNode";
+import { SketchNode } from "../sketch/sketchNode";
+import { SELECTED_PROFILE_STATE } from "./extrudeDragStep";
+import { showPreviewProblem } from "./featureEditPreview";
+
+/**
+ * Creates a parametric body lofted through sketch profiles: the user picks one profile per
+ * section, in loft order, and confirms. Every section stays a live reference to its sketch.
+ */
+@command({ key: "feature.loft", helpText: "tooltip.feature.loft", icon: "icon-loft" })
+export class LoftFeatureCommand extends CancelableCommand {
+    private readonly sections: { section: LoftSection; sketch: SketchNode; face: IFace }[] = [];
+    private visual: number | undefined;
+
+    @property("option.command.isSolid")
+    get solid() {
+        return this.getPrivateValue("solid", true);
+    }
+    set solid(value: boolean) {
+        this.setProperty("solid", value, () => this.displayPreview());
+    }
+
+    @property("option.command.isRuled")
+    get ruled() {
+        return this.getPrivateValue("ruled", false);
+    }
+    set ruled(value: boolean) {
+        this.setProperty("ruled", value, () => this.displayPreview());
+    }
+
+    @property("option.command.continuity", {
+        dependencies: [{ property: "ruled", value: false }],
+        combobox: Combobox.from([...Continuities]),
+    })
+    get continuity(): Continuity {
+        return this.getPrivateValue("continuity", "c2");
+    }
+    set continuity(value: Continuity) {
+        this.setProperty("continuity", value, () => this.displayPreview());
+    }
+
+    @property("common.confirm")
+    readonly confirm = () => {
+        this.controller?.success();
+    };
+
+    protected override async executeAsync(): Promise<void> {
+        try {
+            while (true) {
+                this.controller = new AsyncController();
+                const picked = await new SelectShapeStep(ShapeTypes.face, "prompt.select.loftSection", {
+                    nodeFilter: { allow: (node) => node instanceof SketchNode },
+                    shapeFilter: { allow: (shape) => (shape as IFace).surface().isPlanar() },
+                    selectedState: SELECTED_PROFILE_STATE,
+                }).execute(this.document, this.controller);
+                if (picked === undefined) {
+                    if (this.controller.result?.status !== "success") return;
+                    break;
+                }
+                const sketch = picked.nodes?.[0];
+                const face = picked.shapes[0]?.shape as IFace | undefined;
+                if (!(sketch instanceof SketchNode) || face === undefined) continue;
+                this.sections.push({
+                    section: { sketchId: sketch.id, profile: captureProfileRef(face) },
+                    sketch,
+                    face,
+                });
+                this.displayPreview();
+            }
+            if (this.sections.length < 2) return;
+            this.commit();
+        } finally {
+            showPreviewProblem(undefined);
+            this.removePreview();
+            this.document.selection.clearSelection();
+            this.document.visual.update();
+        }
+    }
+
+    private feature(): LoftFeatureData {
+        return {
+            id: Id.generate(),
+            type: "loft",
+            sections: this.sections.map(({ section }) => section),
+            ...(this.solid ? {} : { solid: false }),
+            ...(this.ruled ? { ruled: true } : {}),
+            ...(this.ruled || this.continuity === "c2" ? {} : { continuity: this.continuity }),
+        };
+    }
+
+    /** Adds the body and hides the section sketches it consumes, as one undo step. */
+    private commit(): void {
+        const node = new ParametricBodyNode({ document: this.document, features: [this.feature()] });
+        const shape = node.shape;
+        if (!shape.isOk) {
+            PubSub.default.pub("showToast", "error.default:{0}", shape.error);
+            node.dispose();
+            return;
+        }
+        Transaction.execute(this.document, "excute feature.loft", () => {
+            this.document.modelManager.addNode(node);
+            for (const { sketch } of this.sections) sketch.visible = false;
+        });
+    }
+
+    /** The picked sections outlined, and the loft through them once there are two. */
+    private displayPreview(): void {
+        this.removePreview();
+        // Nothing picked yet (an option set before the first pick): nothing to show.
+        if (this.sections.length === 0) return;
+        const meshes: ShapeMeshData[] = [];
+        for (const { face } of this.sections) {
+            const edges = face.mesh.edges;
+            if (edges === undefined) continue;
+            edges.color = VisualConfig.selectedEdgeColor;
+            edges.lineWidth = 3;
+            meshes.push(edges);
+        }
+        let problem: string | undefined;
+        if (this.sections.length >= 2) {
+            const shape = evaluateFeature(this.feature(), {
+                document: this.document,
+                host: { id: "", worldTransform: () => Matrix4.identity() },
+                scope: this.document.variables.evaluate().scope,
+            });
+            if (shape.isOk) {
+                const faces = shape.value.mesh.faces;
+                if (faces !== undefined) meshes.push(faces);
+                shape.value.dispose();
+            } else {
+                problem = shape.error;
+            }
+        }
+        showPreviewProblem(problem);
+        this.visual = this.document.visual.context.displayMesh(meshes, { meshOpacity: 0.5 });
+        this.document.visual.update();
+    }
+
+    private removePreview(): void {
+        if (this.visual === undefined) return;
+        this.document.visual.context.removeMesh(this.visual);
+        this.visual = undefined;
+    }
+}

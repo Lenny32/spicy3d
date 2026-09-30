@@ -22,6 +22,7 @@ import {
 
 @command({
     key: "modify.shell",
+    helpText: "tooltip.modify.shell",
     icon: "icon-shell",
 })
 export class ShellCommand extends MultistepCommand {
@@ -75,6 +76,8 @@ export class ShellCommand extends MultistepCommand {
             const shellShape = this.getShellShape(faces);
 
             if (!shellShape.isOk) {
+                // e.g. the kernel's refusal of an intersection join on a shape with many faces.
+                PubSub.default.pub("showToast", "error.default:{0}", shellShape.error);
                 return;
             }
 
@@ -160,7 +163,7 @@ export class ShellCommand extends MultistepCommand {
         const shellShape = this.getShellShape(selected.map((x) => x.shape as IFace));
         if (!shellShape.isOk) {
             nodeVisual.visible = true;
-            PubSub.default.pub("showToast", "error.default:{0}", "shell failed");
+            PubSub.default.pub("showToast", "error.default:{0}", shellShape.error);
             return;
         }
         this.disposeStack.add(shellShape.value);

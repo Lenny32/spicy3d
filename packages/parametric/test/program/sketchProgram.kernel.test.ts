@@ -17,6 +17,7 @@ import type { RevolveFeatureData } from "../../src/features/feature";
 import type { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
 import type { SketchInfo, SketchReport } from "../../src/program/sketchProgram";
+import { bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
 import { ConstraintKind, type SketchEntityData } from "../../src/sketch/sketchModel";
 import type { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
@@ -131,6 +132,115 @@ describe("sketch entities", () => {
         // arcs and ellipses carry their structural equations, as when drawn in the editor
         expect(kinds(sketch)).toEqual(["PointOnArc", "Perpendicular"]);
         expect(report(result, "s1").entities.map((e) => e.id)).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+
+    test("a bspline is one entity through every point; periodic closes it without a repeated point", () => {
+        const doc = newDoc();
+        const outline: [number, number][] = [
+            [0, 0],
+            [20, -5],
+            [30, 10],
+            [15, 25],
+            [-5, 15],
+        ];
+        const curve = interpolateBSpline(outline, { periodic: true }).value;
+        const onCurve = bsplinePointAt(curve, (curve.parameters[1] + curve.parameters[2]) / 2);
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [
+                    // the way the agent of the issue wrote it: first point repeated as the last
+                    { type: "bspline", points: [...outline, outline[0]], periodic: true, name: "outline" },
+                    { type: "bspline", params: [40, 0, 50, 5, 60, 0], parametrization: "centripetal" },
+                    { type: "point", params: onCurve },
+                    { type: "line", params: [60, 0, 70, 10] },
+                ],
+                constraints: [
+                    {
+                        kind: "Coincident",
+                        points: [
+                            { entity: 4, point: 0 },
+                            { entity: 2, point: 2 },
+                        ],
+                    },
+                    { kind: "Tangent", entities: [4, 2] },
+                    { kind: "PointOn", points: [{ entity: 3, point: 0 }], entities: ["outline"] },
+                ],
+            },
+            { op: "extrude", id: "e1", sketch: "s1", depth: 10 },
+        ]);
+        const sketch = sketchOf(doc, result, "s1");
+        const outlineEntity = entity(sketch, 1);
+        expect(outlineEntity).toMatchObject({
+            id: 1,
+            type: "bspline",
+            parametrization: "chord",
+            periodic: true,
+        });
+        // five fit points (the repetition dropped), where they were given
+        expect(outlineEntity.params).toHaveLength(10);
+        outlineEntity.params.forEach((value, i) => expect(value).toBeCloseTo(outline.flat()[i], 6));
+        expect(entity(sketch, 2).parametrization).toBe("centripetal");
+        expect(kinds(sketch)).toEqual(["P2PCoincident", "TangentLineBSpline", "PointOnBSpline"]);
+        // the tangent names the bspline end the line starts on
+        expect(sketch.data.constraints[1].refs[2]).toEqual({ entityId: 2, pointIndex: 2 });
+        expect(report(result, "s1").names["outline"]).toBe(1);
+        const body = nodeById(doc, result.created.find((c) => c.id === "e1")!.nodeId) as ParametricBodyNode;
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.volume()).toBeGreaterThan(5000);
+    });
+
+    test.each([
+        [
+            {
+                type: "bspline",
+                points: [
+                    [0, 0],
+                    [5, 5],
+                    [0, 0],
+                ],
+            },
+            "periodic: true",
+        ],
+        [
+            {
+                type: "bspline",
+                points: [
+                    [0, 0],
+                    [5, 5],
+                ],
+                periodic: true,
+            },
+            "at least three",
+        ],
+        [
+            {
+                type: "bspline",
+                points: [
+                    [0, 0],
+                    [5, 5],
+                ],
+                parametrization: "arc",
+            },
+            'unknown parametrization "arc"',
+        ],
+        [
+            {
+                type: "spline",
+                points: [
+                    [0, 0],
+                    [5, 5],
+                    [0, 0],
+                ],
+            },
+            "use a periodic bspline",
+        ],
+    ])("a bad curve %j names the fix", (spec, message) => {
+        const failure = runExpectingFailure(newDoc(), [
+            { op: "sketch", id: "s1", entities: [spec as never] },
+        ]);
+        expect(failure).toContain(message);
     });
 
     test("a constrained arc keeps its end on its circle", () => {
@@ -619,6 +729,110 @@ describe("construction geometry", () => {
         ]);
         expect(geometryOf(result, "p").origin[2]).toBeCloseTo(15, 6);
         expect(geometryOf(result, "info").point.map((x) => Math.round(x * 1e6) / 1e6)).toEqual([0, 0, 7.5]);
+    });
+
+    test("plane distances take expressions of variables and follow them", () => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "12", type: "length" }]);
+        const result = run(doc, [
+            {
+                op: "construct",
+                id: "p1",
+                definition: { kind: "plane-offset", source: "YZ", distance: "sec_x_1" },
+            },
+            {
+                op: "sketch",
+                id: "s1",
+                plane: { construction: "p1" },
+                entities: [{ type: "circle", params: [0, 0, 5] }],
+            },
+        ]);
+        expect(geometryOf(result, "p1").origin).toEqual([12, 0, 0]);
+        const plane = nodeById(doc, result.created.find((c) => c.id === "p1")!.nodeId) as ConstructionNode;
+        expect(plane.definition).toMatchObject({ distance: "sec_x_1" });
+        const sketch = sketchOf(doc, result, "s1");
+
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "30", type: "length" }]);
+
+        const geometry = plane.geometry.unchecked()!;
+        expect(geometry.kind === "plane" && geometry.plane.origin.x).toBeCloseTo(30, 6);
+        expect(sketch.shape.unchecked()!.boundingBox().min.x).toBeCloseTo(30, 1);
+
+        const edited = run(doc, [
+            {
+                op: "editConstruction",
+                node: plane.id,
+                definition: { kind: "plane-offset", source: "YZ", distance: "sec_x_1 * 2 + 1 cm" },
+            },
+        ]);
+        expect(geometryOf(edited, plane.id).origin).toEqual([70, 0, 0]);
+    });
+
+    test.each([
+        [
+            "construct",
+            { kind: "plane-offset", source: "YZ", distance: "sec_x_2" },
+            '"distance" must be a length or an expression of length variables, got "sec_x_2"',
+        ],
+        [
+            "construct",
+            { kind: "plane-offset", source: "YZ", distance: "tilt" },
+            '"distance" must be a length or an expression of length variables, got "tilt" (Dimension mismatch',
+        ],
+        [
+            "construct",
+            {
+                kind: "plane-angle",
+                axis: { axis: { direction: [1, 0, 0] } },
+                baseline: "XY",
+                angle: "sec_x_1",
+            },
+            '"angle" must be an angle or an expression of angle variables, got "sec_x_1"',
+        ],
+        [
+            "construct",
+            {
+                kind: "plane-three-points",
+                first: { point: [0, 0, 0] },
+                second: { point: [1, 0, 0] },
+                third: { point: [0, 1, 0] },
+                offset: "",
+            },
+            '"offset" must be a length or an expression of length variables, got ""',
+        ],
+        [
+            "construct",
+            {
+                kind: "point-along-path",
+                path: { axis: { direction: [1, 0, 0] } },
+                position: { kind: "distance", value: "nope" },
+            },
+            '"position.value" must be a length or an expression of length variables, got "nope"',
+        ],
+        [
+            "editConstruction",
+            { kind: "plane-offset", source: "YZ", distance: "sec_x_2" },
+            '"distance" must be a length or an expression of length variables, got "sec_x_2"',
+        ],
+    ])("%s with a bad parameter fails up front: %j", (op, definition, message) => {
+        const doc = newDoc();
+        doc.variables.setItems([
+            { id: "v1", name: "sec_x_1", expression: "12", type: "length" },
+            { id: "v2", name: "tilt", expression: "30", type: "angle" },
+        ]);
+        const base = run(doc, [
+            { op: "construct", id: "p0", definition: { kind: "plane-offset", source: "XY", distance: 1 } },
+        ]);
+        const nodes = doc.modelManager.findNodes(() => true).length;
+        const failure =
+            op === "construct"
+                ? runExpectingFailure(doc, [{ op: "construct", id: "p", definition }])
+                : runExpectingFailure(doc, [
+                      { op: "editConstruction", node: base.created[0].nodeId, definition },
+                  ]);
+        expect(failure).toContain(message);
+        expect(failure).not.toContain("NaN in XYZ");
+        expect(doc.modelManager.findNodes(() => true)).toHaveLength(nodes);
     });
 
     test("an invalid definition fails the program", () => {

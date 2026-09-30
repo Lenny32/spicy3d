@@ -7,8 +7,11 @@ import type { UnitSpec } from "./parameters/unitSpec";
 import type { Combobox } from "./ui";
 
 /** The controls that are more than a plain value editor; everything else edits by value. */
-/** `info` is a read-only line of text: the property's value, shown as it is. */
-export type PropertyType = "color" | "materialId" | "info";
+/**
+ * `info` is a read-only line of text: the property's value, shown as it is. `nodeList` is an
+ * editable list of nodes: the property's value is an `INodeList`.
+ */
+export type PropertyType = "color" | "materialId" | "info" | "nodeList";
 
 export interface Property {
     name: string;

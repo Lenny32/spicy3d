@@ -17,6 +17,7 @@ import {
     type StlExportOptions,
 } from "@spicy3d/core";
 import type { ShapeNode } from "../lib/spicy-wasm";
+import { guardKernelResults } from "./kernelGuard";
 import { OccShape } from "./shape";
 import { shapesToStl } from "./stlWriter";
 
@@ -55,6 +56,12 @@ export class OccShapeConverter implements IShapeConverter {
             this.addShapeNode(collector, childFolder, child, subChildren, getMaterialId);
         });
     };
+
+    constructor() {
+        // Once the kernel crashed, every conversion answers `Result.err` with the same message.
+        // biome-ignore lint/correctness/noConstructorReturn: the guarded facade replaces the instance
+        return guardKernelResults(this);
+    }
 
     convertToIGES(shapes: IShape[], options?: CadExportOptions): Result<string> {
         const occShapes = shapes.map((shape) => {
