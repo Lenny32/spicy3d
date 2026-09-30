@@ -1,0 +1,522 @@
+[
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 15; low user-reported impact.\n\nCurrent gap: For extrude with body/operation, ExtrudeFeatureData is created without op.name. The supplied name is only used when creating a new body, so every appended feature needs a separate rename.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:653](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L653). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Apply the caller's name to the appended extrusion feature for join/cut; test both operations and ensure the target body's existing name remains correct.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObAw",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 106,
+        "state": "OPEN",
+        "title": "Honor extrude names when appending to an existing body"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 14; low user-reported impact.\n\nCurrent gap: Exporting multiple ids currently merges them into one file. There is no separate-output/archive batch mode, and separate browser downloads can trigger a multiple-download prompt.\n\nCode evidence: [packages/ai/src/tools/fileTools.ts:69](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/fileTools.ts#L69). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Export requested models as distinct files in one archive or batch resource response, preserving filenames and reporting per-output errors.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 105,
+        "state": "OPEN",
+        "title": "Batch-export separate model files without repeated downloads"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 14; low user-reported impact.\n\nCurrent gap: MCP export unconditionally triggers a browser download. Agents cannot receive the exported data or an accessible resource directly.\n\nCode evidence: [packages/ai/src/tools/fileTools.ts:49](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/fileTools.ts#L49). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Offer an export result containing bytes or a retrievable resource, with filename/MIME metadata and payload limits; keep browser download available. A local filesystem path must have defined supported semantics.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 104,
+        "state": "OPEN",
+        "title": "Return exported model bytes or a resource through MCP"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 14; low user-reported impact.\n\nCurrent gap: StlExportOptions currently exposes binary/name, with no caller-selected tessellation tolerance.\n\nCode evidence: [packages/core/src/shape/shapeConverter.ts:35](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/core/src/shape/shapeConverter.ts#L35). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Expose validated tessellation tolerances through STL export and MCP; demonstrate that tolerance changes fidelity/file size without changing CAD geometry.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 103,
+        "state": "OPEN",
+        "title": "Expose STL tessellation tolerance in export"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 13; low user-reported impact.\n\nCurrent gap: Reference mesh infrastructure exists, but production code has no CAD-to-scan deviation measurement. The user needs model-quality comparisons inside CAD.\n\nCode evidence: [packages/core/src/model/meshNode.ts:22](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/core/src/model/meshNode.ts#L22). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Measure deviation against a reference mesh and present useful values/visualization, with documented units, sampling and accuracy. Coordinate with reference-mesh import.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 102,
+        "state": "OPEN",
+        "title": "Measure CAD-to-reference-mesh deviation"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 13; low user-reported impact.\n\nCurrent gap: MeshNode rendering and opacity already exist. Default STL import instead converts the scan through OCCT into a B-rep; no production mesh-only scan import path was found.\n\nCode evidence: [packages/builder/src/defaultDataExchange.ts:86](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/builder/src/defaultDataExchange.ts#L86). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add an explicit reference-mesh import path that reuses existing MeshNode storage/rendering and ghost opacity, with placement/visibility controls and no geometry-kernel conversion.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 101,
+        "state": "OPEN",
+        "title": "Import scan files as lightweight reference MeshNodes"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 12; low user-reported impact.\n\nCurrent gap: The store cap is 256. registerRef evicts old entries while findSubShapes registers a whole list, then returns every generated reference. A 600-edge response can therefore contain 344 already unusable references.\n\nCode evidence: [packages/ai/src/tools/capabilityEngine.ts:98](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/capabilityEngine.ts#L98). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Ensure every returned reference is usable immediately; support large results with a larger/bounded store, pagination or index queries. Add a >256-subshape regression and document lifetime semantics.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObAw",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 100,
+        "state": "OPEN",
+        "title": "Do not return subshape references already evicted from the ref store"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 11; low user-reported impact.\n\nCurrent gap: Every touched body returns the entire summarized feature list; MCP schema has no summary/quiet option. User reports 25–60 kB replies for simple edits.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:358](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L358). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add an explicit compact response mode returning created/changed features and essential errors/status only, while keeping the existing full response available.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 99,
+        "state": "OPEN",
+        "title": "Add compact run_parametric responses"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 10; medium user-reported impact.\n\nCurrent gap: Native exception guards and crash detection already exist. A confirmed fatal kernel crash remains final for the page; current guidance requires reload. Existing OccShape handles belong to the old module, so merely calling initWasm again is insufficient.\n\nCode evidence: [packages/core/src/shape/kernelState.ts:9](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/core/src/shape/kernelState.ts#L9). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Recreate the kernel execution context and rebuild valid document geometry safely, retaining edits and stable feature references; reject reuse of handles from the old module. Follow KERNEL-01.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 98,
+        "state": "OPEN",
+        "title": "Recover a crashed kernel without reloading the tab"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 10; medium user-reported impact.\n\nCurrent gap: Cancellation checks occur only between synchronous operations. An individual hung/slow OCCT call cannot be interrupted. KERNEL-01 describes worker timeout/cancellation.\n\nCode evidence: [packages/ai/src/tools/opBudget.ts:7](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/opBudget.ts#L7). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Cancel an active geometry call promptly, recover the execution context, and leave the document unchanged or rolled back. Coordinate with worker execution; distinguish cancellation from failure.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 97,
+        "state": "OPEN",
+        "title": "Cancel an in-flight kernel operation"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 10; medium user-reported impact.\n\nCurrent gap: The OCCT kernel runs synchronously on the main thread, blocking tools/UI. KERNEL-01 already describes a bounded worker design, but it is not implemented. Existing #50/#51 discuss open-time blocking and performance; this task is specifically kernel execution.\n\nCode evidence: [tickets/kernel-01-worker-kernel.md:90](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/tickets/kernel-01-worker-kernel.md#L90). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Implement the existing worker design with explicit time bounds; keep document/status queries and UI responsive during long geometry calls. Preserve serialized tool ordering and reference semantics.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 96,
+        "state": "OPEN",
+        "title": "Run expensive kernel operations in a bounded worker"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 9; medium user-reported impact.\n\nCurrent gap: Distance, through-all and explicit to-object face extents exist, but automatic up-to-next/body selection does not.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:150](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L150). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Find the next valid target intersection along the extrusion direction for bosses/ribs on curved walls; avoid manual face selection and report absent/ambiguous targets. Related: #59 and #60.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 95,
+        "state": "OPEN",
+        "title": "Add automatic up-to-next-face or body extrusion extent"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 9; medium user-reported impact.\n\nCurrent gap: Extrusion offers startOffset but no start-face reference. Explicit up-to-object and through-all end extents already exist. Bosses/ribs on curved walls still need a hand-computed start offset.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:150](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L150). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Start an extrusion from a selected target face, including curved walls; track that face and update the start after upstream edits. Related existing extent work: #59 and #60.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 94,
+        "state": "OPEN",
+        "title": "Add an associative from-face extrusion start"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 8; medium user-reported impact.\n\nCurrent gap: Periodic, chord/centripetal/uniform fit-point B-splines and single-edge output already exist; low-level run_program control-point NURBS exists too. Parametric sketch authoring still accepts interpolating fit points only.\n\nCode evidence: [packages/parametric/src/program/sketchProgram.ts:451](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/sketchProgram.ts#L451). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Expose editable control poles/weights and knot/degree settings for parametric sketch entities, while preserving existing fit-point behavior.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 93,
+        "state": "OPEN",
+        "title": "Support control-point and weighted NURBS in parametric sketches"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 7; medium user-reported impact.\n\nCurrent gap: Long rebuilds block the main thread and can exceed the relay's 120-second timeout. Between-operation checks and post-call warnings provide no live progress.\n\nCode evidence: [docs/kernel.md:22](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/docs/kernel.md#L22). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Offer asynchronous rebuild status/progress and a completion result for long operations; keep status observable while work is running. Coordinate with worker execution.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 92,
+        "state": "OPEN",
+        "title": "Expose asynchronous rebuild progress through MCP"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 7; medium user-reported impact.\n\nCurrent gap: Per-feature caching exists, but each cache key serializes the entire variable scope. An unrelated variable edit invalidates otherwise reusable feature results.\n\nCode evidence: [packages/parametric/src/parametricBodyNode.ts:968](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/parametricBodyNode.ts#L968). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Track variable dependencies including transitive expressions; an unrelated edit causes zero geometry evaluations, while affected features and downstream consumers rebuild.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 91,
+        "state": "OPEN",
+        "title": "Invalidate feature caches only for dependent variables"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 5; high user-reported impact.\n\nCurrent gap: No associative face-curve groove/rib operation exists. The reported model could not express the design crease, pad outline or rim lip.\n\nCode evidence: [packages/ai/src/tools/parametricTools.ts:364](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/parametricTools.ts#L364). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add an editable profile/curve/face feature with cut or join behavior, usable on curved walls; rebuild when its referenced geometry changes.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 90,
+        "state": "OPEN",
+        "title": "Add a parametric groove or rib along a curve on a face"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 5; high user-reported impact.\n\nCurrent gap: Low-level directional curveProjection already exists, but projection is absent from the parametric feature catalog.\n\nCode evidence: [packages/ai/src/tools/capabilities.generated.ts:417](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/capabilities.generated.ts#L417). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add associative curve/target-face references and projection direction; edits to either input update the projected result.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 89,
+        "state": "OPEN",
+        "title": "Add associative curve projection onto surfaces"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 5; high user-reported impact.\n\nCurrent gap: Low-level run_program sweep exists; the parametric operation catalog contains no sweep. Profile/path edits therefore cannot drive an associative sweep.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:84](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L84). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add editable profile and 3D-path references, rebuild dependencies and tracked output topology, reusing the existing low-level sweep.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 88,
+        "state": "OPEN",
+        "title": "Add a parametric sweep along a 3D path"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 4; high user-reported impact.\n\nCurrent gap: Callers must manually pick raw indexes even though the application tracks topology internally. Python BREP traversal was needed to identify edges in the reported model.\n\nCode evidence: [packages/ai/src/tools/parametricTools.ts:293](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/ai/src/tools/parametricTools.ts#L293). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Select edges by feature origin, adjoining face sets, outline/curve membership and analytic geometry such as cylinder radius/elevation; return stable references and explain empty/ambiguous matches.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 87,
+        "state": "OPEN",
+        "title": "Add rule-based edge selection through MCP"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 4; high user-reported impact.\n\nCurrent gap: Internal edge references already capture tracked IDs/fingerprints and re-resolve after rebuild. MCP callers still supply edgeIndexes and cannot query/reuse persistent references across calls.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:780](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L780). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Expose existing persistent identifiers for query and fillet/chamfer selection; prove a reference survives an upstream change that reorders edges.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 86,
+        "state": "OPEN",
+        "title": "Expose persistent edge references through MCP"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 2; high user-reported impact.\n\nCurrent gap: Associative loft, ruled/solid options and continuity are already implemented. LoftOp has no guide or boundary curve references.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:197](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L197). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Add associative guide/boundary inputs that follow upstream edits, preserve existing continuity options and reject incompatible curve/section combinations clearly.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 85,
+        "state": "OPEN",
+        "title": "Support guide and boundary curves in parametric lofts"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 3; high user-reported impact.\n\nCurrent gap: The public feature and kernel wrapper expose no corner-setback controls. The user requested setbacks at difficult free-form edge junctions.\n\nCode evidence: [cpp/src/factory.cpp:2087](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/cpp/src/factory.cpp#L2087). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Expose corner setbacks independently of constant-radius selection, with validation and useful failures.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 84,
+        "state": "OPEN",
+        "title": "Support fillet corner setbacks"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 3; high user-reported impact.\n\nCurrent gap: Fillets expose one radius ParameterValue; the kernel adds a constant radius per edge. The reported free-form model needs radius variation.\n\nCode evidence: [packages/parametric/src/program/parametricProgram.ts:218](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/packages/parametric/src/program/parametricProgram.ts#L218). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Provide an editable radius law along selected edges, expression evaluation and stable reference handling; validate the resulting B-rep.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: this task may need a persisted payload change. Obtain explicit prior boss approval before changing any saved field, module version or migration. Approval has not been granted.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 83,
+        "state": "OPEN",
+        "title": "Support variable-radius fillets"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 3; high user-reported impact.\n\nCurrent gap: Failures currently return generic Failed to fillet / Failed to chamfer messages. Native exception guards exist, but users cannot distinguish impossible geometry from an excessive radius or tangency problem.\n\nCode evidence: [cpp/src/factory.cpp:2091](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/cpp/src/factory.cpp#L2091). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Surface available OCCT diagnostics; identify radius and tangent-face failures when determinable, without claiming unsupported certainty.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObOw",
+                "name": "enhancement",
+                "description": "New feature or request",
+                "color": "a2eeef"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 82,
+        "state": "OPEN",
+        "title": "Report actionable fillet and chamfer failure diagnostics"
+    },
+    {
+        "body": "Source: user report from an LLM agent rebuilding Mouse Thumb from a 3D scan. Original report item 3; high user-reported impact.\n\nCurrent gap: Tracked and untracked fillet/chamfer paths accept IsDone() without a BRepCheck_Analyzer validity check. The user reported an invalid perimeter fillet on free-form geometry; that scan-specific result has not been reproduced on this build.\n\nCode evidence: [cpp/src/factory.cpp:2089](https://github.com/Lenny32/spicy3d/blob/1fab0f9be188dd243cd2a5bf6d996cc32094ccce/cpp/src/factory.cpp#L2089). Audited on develop at 1fab0f9 (2026-09-30).\n\nAcceptance criteria: Validate tracked and untracked results before accepting them; return Result errors for invalid shapes. Add a free-form regression showing later booleans remain safe.\n\nValidation: static code audit; the original scan-specific failure was not reproduced. The audit's 83 passing targeted tests verify existing expressions, loft/thicken, B-splines and kernel guards, not this missing task.\n\nSave-format constraint: saved document formats are frozen; preserve existing payloads. Any required format change must receive explicit prior boss approval.",
+        "labels": [
+            {
+                "id": "LA_kwDOUo4JL88AAAAC37ObAw",
+                "name": "bug",
+                "description": "Something isn't working",
+                "color": "d73a4a"
+            },
+            {
+                "id": "LA_kwDOUo4JL88AAAAC5yLq3Q",
+                "name": "user-report",
+                "description": "The user reported this problem and it is a high priority",
+                "color": "53fdd8"
+            }
+        ],
+        "number": 81,
+        "state": "OPEN",
+        "title": "Reject invalid fillet and chamfer results"
+    }
+]
