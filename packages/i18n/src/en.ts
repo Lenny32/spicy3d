@@ -279,6 +279,7 @@ export default {
         "command.edit.undo": "Undo",
         "command.file.export": "Export",
         "command.file.import": "Import",
+        "command.file.importReferenceMesh": "Import reference mesh (STL, mm)",
         "command.measure.angle": "Angle",
         "command.measure.length": "Length",
         "command.inspect.measure": "Measure",

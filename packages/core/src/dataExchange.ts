@@ -2,7 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "./document";
-import type { VisualNode } from "./model";
+import type { Result } from "./foundation/result";
+import type { Matrix4 } from "./math";
+import type { MeshNode, VisualNode } from "./model";
 import type { LengthUnit } from "./units/lengthUnit";
 
 /**
@@ -27,12 +29,28 @@ export interface DataExportOptions {
     readonly lengthUnit?: LengthUnit;
 }
 
+/** Runtime options only; reference scans use the existing MeshNode payload. */
+export interface ReferenceMeshImportOptions {
+    readonly lengthUnit?: LengthUnit;
+    /** Placement in millimetres, after converting the file coordinates. */
+    readonly transform?: Matrix4;
+    readonly opacity?: number;
+    readonly visible?: boolean;
+}
+
 export interface IDataExchange {
     importFormats(): string[];
     exportFormats(): string[];
     /** How `type` handles units; see `ExportUnitHandling`. */
     exportUnitHandling(type: string): ExportUnitHandling;
     import(document: IDocument, files: FileList | File[]): Promise<void>;
+    referenceMeshFormats?(): string[];
+    /** Adds a display mesh without converting any triangles to kernel topology. */
+    importReferenceMesh?(
+        document: IDocument,
+        file: File,
+        options?: ReferenceMeshImportOptions,
+    ): Promise<Result<MeshNode>>;
     export(type: string, nodes: VisualNode[], options?: DataExportOptions): Promise<BlobPart[] | undefined>;
 }
 

@@ -21,6 +21,7 @@ import {
     property,
     Result,
     readFilesAsync,
+    Transaction,
     VisualNode,
 } from "@spicy3d/core";
 import { importFiles } from "../utils";
@@ -38,6 +39,27 @@ export class Import implements ICommand {
             return;
         }
         importFiles(application, files.value);
+    }
+}
+
+@command({ key: "file.importReferenceMesh", icon: "icon-import" })
+export class ImportReferenceMesh implements ICommand {
+    async execute(application: IApplication): Promise<void> {
+        const importer = application.dataExchange.importReferenceMesh;
+        if (!importer) return;
+        const files = await readFilesAsync(
+            application.dataExchange.referenceMeshFormats?.().join(",") ?? ".stl",
+            true,
+        );
+        if (!files.isOk || files.value.length === 0) return;
+        const document = application.activeView?.document ?? (await application.newDocument("Untitled"));
+        await Transaction.executeAsync(document, "import reference mesh", async () => {
+            for (const file of files.value) {
+                const result = await importer.call(application.dataExchange, document, file);
+                if (!result.isOk) PubSub.default.pub("showToast", "error.default:{0}", result.error);
+            }
+        });
+        application.activeView?.cameraController.fitContent();
     }
 }
 

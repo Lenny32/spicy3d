@@ -272,6 +272,7 @@ export const I18N_KEYS = [
     "command.edit.undo",
     "command.file.export",
     "command.file.import",
+    "command.file.importReferenceMesh",
     "command.measure.angle",
     "command.measure.length",
     "command.inspect.measure",
