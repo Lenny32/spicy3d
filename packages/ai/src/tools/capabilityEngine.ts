@@ -87,6 +87,8 @@ interface LocalRef {
     args?: unknown[];
     /** Index into a list-valued member (sub-shape refs like `q1#2`). */
     index?: number;
+    /** A whole query list occupies one registry slot; its indexed refs resolve lazily. */
+    listCount?: number;
 }
 
 /**
@@ -96,6 +98,9 @@ interface LocalRef {
  */
 const refsByDocument = new WeakMap<IDocument, Map<string, LocalRef>>();
 const MAX_REFS = 256;
+// Creation extras cannot be re-derived, so bound their retained snapshot geometry too.
+const MAX_SNAPSHOT_REFS = 4096;
+const programRefIds = new WeakMap<Map<string, LocalRef>, Set<string>>();
 
 function sessionRefs(doc: IDocument): Map<string, LocalRef> {
     let refs = refsByDocument.get(doc);
@@ -109,9 +114,15 @@ function sessionRefs(doc: IDocument): Map<string, LocalRef> {
 function setRef(refs: Map<string, LocalRef>, id: string, entry: LocalRef): void {
     refs.delete(id);
     refs.set(id, entry);
+    const protectedIds = programRefIds.get(refs);
+    protectedIds?.add(id);
     while (refs.size > MAX_REFS) {
-        const oldest = refs.keys().next().value;
-        if (oldest === undefined) break;
+        const oldest = [...refs.keys()].find((key) => !protectedIds?.has(key));
+        if (oldest === undefined) {
+            throw new Error(
+                `A program can retain at most ${MAX_REFS} refs or list queries; split it across calls`,
+            );
+        }
         refs.delete(oldest);
     }
 }
@@ -131,6 +142,12 @@ function sessionNullRefs(doc: IDocument): Set<string> {
 /** Register a real ref; the id is no longer considered null-valued. */
 function registerRef(doc: IDocument, refs: Map<string, LocalRef>, id: string, entry: LocalRef): void {
     sessionNullRefs(doc).delete(id);
+    if (entry.listCount !== undefined) {
+        // A re-run replaces the family, including individually mutated members.
+        for (const key of refs.keys()) {
+            if (key.startsWith(id)) refs.delete(key);
+        }
+    }
     setRef(refs, id, entry);
 }
 
@@ -161,7 +178,11 @@ function bucketRefIdsByPrefix(refs: Map<string, LocalRef>): {
 } {
     const groups = new Map<string, number[]>();
     const tokens: string[] = [];
-    for (const id of refs.keys()) {
+    for (const [id, entry] of refs) {
+        if (entry?.listCount !== undefined) {
+            if (entry.listCount > 0) tokens.push(`${id}0..${id}${entry.listCount - 1}`);
+            continue;
+        }
         const m = /^(.*?)(\d+)$/.exec(id);
         if (!m) {
             tokens.push(id);
@@ -270,7 +291,8 @@ function resolveRefEntry(
     consumed: Set<string>,
 ): LocalRef {
     const id = String(v);
-    const hit = localRefs.get(id);
+    const direct = localRefs.get(id);
+    const hit = direct?.listCount === undefined ? (direct ?? indexedRef(id, localRefs)) : undefined;
     if (hit) return refreshEntry(id, hit, doc, localRefs, consumed, new Set());
     if (sessionNullRefs(doc).has(id)) {
         throw new Error(I18n.translate("ai.error.nullRef", id));
@@ -281,6 +303,24 @@ function resolveRefEntry(
         return { nodeId: node.id, kind: "shape", value: node.shape.value };
     }
     throw new Error(I18n.translate("ai.error.unknownRef", id, summarizeRefIds(localRefs)));
+}
+
+/** Resolve an indexed list member without retaining one geometry wrapper per sub-shape. */
+function indexedRef(id: string, refs: Map<string, LocalRef>): LocalRef | undefined {
+    const match = /^(.*#)(0|[1-9]\d*)$/.exec(id);
+    if (!match) return undefined;
+    const list = refs.get(match[1]);
+    const index = Number(match[2]);
+    if (list?.listCount === undefined || index >= list.listCount) return undefined;
+    return {
+        nodeId: list.nodeId,
+        kind: "shape",
+        value: list.name === undefined ? (list.value as unknown[])[index] : undefined,
+        parent: list.parent,
+        name: list.name,
+        args: list.args,
+        index: list.name === undefined ? undefined : index,
+    };
 }
 
 /**
@@ -864,7 +904,7 @@ function recordGeometryRef(
     results[opId] = { ref: opId, kind };
 }
 
-/** Sub-shape lists register one ref per element (`q1#0`, `q1#1`, ...) for later ops. */
+/** Sub-shape lists retain one derivation; each indexed ref (`q1#0`, ...) resolves on demand. */
 function recordSubShapeRefs(
     cap: QueryCapability,
     opId: string,
@@ -875,19 +915,17 @@ function recordSubShapeRefs(
     localRefs: Map<string, LocalRef>,
     results: Record<string, unknown>,
 ): void {
-    const refs = (raw as IShape[]).map((shape, i) => {
-        const ref = `${opId}#${i}`;
-        registerRef(doc, localRefs, ref, {
-            nodeId: entry.nodeId,
-            kind: "shape",
-            value: shape,
-            parent: entry,
-            name: cap.name,
-            args,
-            index: i,
-        });
-        return ref;
+    const count = (raw as IShape[]).length;
+    registerRef(doc, localRefs, `${opId}#`, {
+        nodeId: entry.nodeId,
+        kind: "shape",
+        value: undefined,
+        parent: entry,
+        name: cap.name,
+        args,
+        listCount: count,
     });
+    const refs = Array.from({ length: count }, (_, i) => `${opId}#${i}`);
     results[opId] = { count: refs.length, refs, kind: "shape" };
 }
 
@@ -912,6 +950,7 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const nullRefs = sessionNullRefs(doc);
     const refSnapshot = new Map(localRefs);
     const nullSnapshot = new Set(nullRefs);
+    programRefIds.set(localRefs, new Set());
     try {
         Transaction.execute(doc, "AI program", () => {
             runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, variables, signal);
@@ -921,6 +960,8 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     } catch (e) {
         restoreRefRegistries(localRefs, nullRefs, refSnapshot, nullSnapshot);
         throw e;
+    } finally {
+        programRefIds.delete(localRefs);
     }
 
     return JSON.stringify(
@@ -1202,11 +1243,17 @@ function recordExtras(
     if (!parent) return;
     for (const [key, value] of Object.entries(extras)) {
         if (!Array.isArray(value)) continue;
-        const refs = value.map((item, i) => {
-            const ref = `${op.id}#${key}#${i}`;
-            registerRef(doc, localRefs, ref, { nodeId: parent.nodeId, kind: "shape", value: item, parent });
-            return ref;
+        if (value.length > MAX_SNAPSHOT_REFS) {
+            throw new Error(`Extra output "${key}" exceeds the ${MAX_SNAPSHOT_REFS} snapshot-ref limit`);
+        }
+        registerRef(doc, localRefs, `${op.id}#${key}#`, {
+            nodeId: parent.nodeId,
+            kind: "shape",
+            value,
+            parent,
+            listCount: value.length,
         });
+        const refs = value.map((_, i) => `${op.id}#${key}#${i}`);
         results[`${op.id}.${key}`] = { count: refs.length, refs, kind: "shape" };
     }
 }
