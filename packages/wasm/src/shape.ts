@@ -82,7 +82,7 @@ type SelfIntersectionCheck = (shape: TopoDS_Shape) => boolean;
 
 /**
  * `Shape.checkSelfIntersection` of the loaded module, or undefined when the module predates it
- * (a build older than the binding, as the committed binary is): feature-detected on each call.
+ * (a build older than the binding; the committed binary has it): feature-detected on each call.
  */
 function selfIntersectionBinding(): SelfIntersectionCheck | undefined {
     const shapeClass = wasm.Shape as unknown as { checkSelfIntersection?: unknown };

@@ -88,8 +88,8 @@ type BSplineBinding = (
 ) => ShapeResult;
 
 /**
- * `ShapeFactory.bspline` of the loaded module, or undefined when the module predates it (as the
- * committed binary does): feature-detected on each call, so a rebuilt module is picked up.
+ * `ShapeFactory.bspline` of the loaded module, or undefined when the module predates it (the
+ * committed binary has it): feature-detected on each call, so any module build is handled.
  */
 function bsplineBinding(): BSplineBinding | undefined {
     const factoryClass = wasm.ShapeFactory as unknown as { bspline?: unknown };

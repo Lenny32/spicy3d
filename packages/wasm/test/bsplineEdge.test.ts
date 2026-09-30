@@ -25,13 +25,20 @@ afterEach(() => {
     owned = [];
 });
 
-/** Runs `run` with `binding` standing in for the C++ `ShapeFactory.bspline`, removed afterwards. */
-function withBinding(binding: Binding, run: () => void) {
-    factoryClass().bspline = binding;
+/**
+ * Runs `run` with `binding` standing in for the C++ `ShapeFactory.bspline` (undefined: a module
+ * without it), then puts back whatever the loaded module had.
+ */
+function withBinding(binding: Binding | undefined, run: () => void) {
+    const had = Object.hasOwn(factoryClass(), "bspline");
+    const original = factoryClass().bspline;
+    if (binding === undefined) delete factoryClass().bspline;
+    else factoryClass().bspline = binding;
     try {
         run();
     } finally {
-        delete factoryClass().bspline;
+        if (had) factoryClass().bspline = original;
+        else delete factoryClass().bspline;
     }
 }
 
@@ -43,11 +50,31 @@ const poles: XYZLike[] = [
 ];
 
 describe("bspline is feature-detected on the kernel build", () => {
-    test("the committed binary has no binding: an error and no capability, never a throw", () => {
-        expect(factoryClass().bspline).toBeUndefined();
-        expect(factory.supportsBSplineEdges).toBe(false);
+    test("a module without the binding: an error and no capability, never a throw", () => {
+        withBinding(undefined, () => {
+            expect(factoryClass().bspline).toBeUndefined();
+            expect(factory.supportsBSplineEdges).toBe(false);
+            const result = factory.bspline(poles, [0, 1], [4, 4], 3, false);
+            expect(result.isOk ? "" : result.error).toBe(BSPLINE_EDGE_UNAVAILABLE);
+        });
+    });
+
+    test("the committed binary has the binding: one real edge through the layout", () => {
+        expect(typeof factoryClass().bspline).toBe("function");
+        expect(factory.supportsBSplineEdges).toBe(true);
         const result = factory.bspline(poles, [0, 1], [4, 4], 3, false);
-        expect(result.isOk ? "" : result.error).toBe(BSPLINE_EDGE_UNAVAILABLE);
+        expect(result.isOk).toBe(true);
+        owned.push(result.value);
+        expect(result.value.shapeType).toBe(ShapeTypes.edge);
+        const edge = result.value;
+        const [start, end] = [edge.startPoint(), edge.endPoint()];
+        expect([start.x, start.y, end.x, end.y].map((x) => Math.round(x * 1e9) / 1e9)).toEqual([0, 0, 10, 0]);
+        // a single-span clamped cubic is its Bezier: at t = 0.5, (P0 + 3 P1 + 3 P2 + P3) / 8
+        const curve = edge.curve;
+        const mid = curve.value((curve.firstParameter() + curve.lastParameter()) / 2);
+        owned.push(curve);
+        expect(mid.x).toBeCloseTo(5, 9);
+        expect(mid.y).toBeCloseTo(3.75, 9);
     });
 
     test("a present binding gets the layout as given and its edge comes back", () => {

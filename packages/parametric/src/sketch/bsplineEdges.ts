@@ -21,8 +21,9 @@ import {
  *   are, periodic curves included — one face boundary edge, so offsets and booleans see a single
  *   smooth curve.
  * - **Fallback: one `bezier` edge per polynomial span** (the curve split at its knots,
- *   `bsplineBezierSegments`) on kernel builds that predate the binding — the committed binary until
- *   it is rebuilt. Geometrically the same curve, C2 across the joints, only split into several edges.
+ *   `bsplineBezierSegments`) on kernel builds that predate the binding (the committed binary has
+ *   it; older builds may still be loaded). Geometrically the same curve, C2 across the joints,
+ *   only split into several edges.
  *
  * Identity across the switch between the two: every edge of the entity carries the entity id
  * (`shapeEntityIds` lists it once per edge, `bsplineEdgeCount`), and a sweep seeds from that id

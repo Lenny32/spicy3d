@@ -266,7 +266,8 @@ function idHits(
  * binding) comes back as one edge on a kernel with it, and each span's length is not the curve's.
  * An id several edges carry (k spans, or an edge a boolean split) keeps the invariant check, and
  * so does an edge a boolean merged (its compound id holds the seed next to other ids: the entity's
- * curve is only part of it); a degenerate edge is never adopted.
+ * curve is only part of it) — also when the ref itself was captured from such a merged edge and
+ * the same compound id comes back; a degenerate edge is never adopted.
  */
 function uniqueEntityHit(
     edges: IEdge[],
@@ -274,8 +275,11 @@ function uniqueEntityHit(
     ref: EdgeRef,
     overlapping: readonly number[],
 ): boolean {
-    if (overlapping.length !== 1 || ref.kind !== "other" || !isEntitySeededId(ref.edgeId ?? "")) return false;
-    if (inputEdgeIds[overlapping[0]] !== ref.edgeId) return false;
+    const edgeId = ref.edgeId ?? "";
+    if (overlapping.length !== 1 || ref.kind !== "other") return false;
+    // the ref's own id must be the bare seed: a ref captured from a merged edge names the fusion
+    if (edgeId.includes(ID_COMPONENT_SEPARATOR) || !isEntitySeededId(edgeId)) return false;
+    if (inputEdgeIds[overlapping[0]] !== edgeId) return false;
     try {
         return edges[overlapping[0]].length() > 0;
     } catch {

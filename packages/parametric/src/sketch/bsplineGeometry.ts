@@ -170,7 +170,7 @@ export function interpolateBSpline(
 /**
  * The B-spline of a given knot layout through `points`, each at its given parameter — the poles
  * alone are solved for. `interpolateBSpline` picks the layout from the points; the solver keeps
- * a layout fixed while a drag moves the points (its native knots are rebuilt only between drags).
+ * a layout fixed within one solve (its native knots are rebuilt between solves).
  * Errors when the point count does not match the layout or the system is singular.
  */
 export function interpolateBSplineAt(

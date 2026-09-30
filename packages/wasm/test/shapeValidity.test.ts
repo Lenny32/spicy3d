@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDisposable, type IFace, type IShell, ShapeTypes } from "@spicy3d/core";
+import { type IDisposable, type IFace, type IShell, ShapeTypes, XYZ } from "@spicy3d/core";
 import type { TopoDS_Shape } from "../lib/spicy-wasm";
 import { OccShape, SELF_INTERSECTION_UNAVAILABLE } from "../src/shape";
 import { createBox, createTestFactory, unwrapOk } from "./helpers";
@@ -127,20 +127,52 @@ describe("inspections refuse invalid inputs before calling the kernel", () => {
 describe("checkSelfIntersection is feature-detected on the kernel build", () => {
     const shapeClass = () => wasm.Shape as unknown as ShapeClass;
 
-    function withBinding(binding: (shape: TopoDS_Shape) => boolean, run: () => void) {
-        shapeClass().checkSelfIntersection = binding;
+    /**
+     * Runs `run` with `binding` standing in for the C++ `Shape.checkSelfIntersection` (undefined:
+     * a module without it), then puts back whatever the loaded module had.
+     */
+    function withBinding(binding: ((shape: TopoDS_Shape) => boolean) | undefined, run: () => void) {
+        const had = Object.hasOwn(shapeClass(), "checkSelfIntersection");
+        const original = shapeClass().checkSelfIntersection;
+        if (binding === undefined) delete shapeClass().checkSelfIntersection;
+        else shapeClass().checkSelfIntersection = binding;
         try {
             run();
         } finally {
-            delete shapeClass().checkSelfIntersection;
+            if (had) shapeClass().checkSelfIntersection = original;
+            else delete shapeClass().checkSelfIntersection;
         }
     }
 
-    test("the committed binary has no binding: an error, never a throw", () => {
-        expect(shapeClass().checkSelfIntersection).toBeUndefined();
+    test("a module without the binding: an error, never a throw", () => {
         const box = occBox();
-        const result = box.checkSelfIntersection();
-        expect(result.isOk ? "" : result.error).toBe(SELF_INTERSECTION_UNAVAILABLE);
+        withBinding(undefined, () => {
+            expect(shapeClass().checkSelfIntersection).toBeUndefined();
+            const result = box.checkSelfIntersection();
+            expect(result.isOk ? "" : result.error).toBe(SELF_INTERSECTION_UNAVAILABLE);
+        });
+    });
+
+    test("the committed binary has the binding: a box has no self-intersection", () => {
+        expect(typeof shapeClass().checkSelfIntersection).toBe("function");
+        expect(unwrapOk(occBox().checkSelfIntersection())).toBe(true);
+    });
+
+    test("the committed binary's binding finds a prism of a self-crossing (bow-tie) outline", () => {
+        const bowTie = keep(
+            unwrapOk(
+                factory.polygon([
+                    { x: 0, y: 0, z: 0 },
+                    { x: 10, y: 10, z: 0 },
+                    { x: 10, y: 0, z: 0 },
+                    { x: 0, y: 10, z: 0 },
+                    { x: 0, y: 0, z: 0 },
+                ]),
+            ),
+        );
+        const face = keep(unwrapOk(factory.face([bowTie])));
+        const prism = keep(unwrapOk(factory.prism(face, new XYZ(0, 0, 5)))) as unknown as OccShape;
+        expect(unwrapOk(prism.checkSelfIntersection())).toBe(false);
     });
 
     test.each([true, false])("a present binding answers %s", (answer) => {

@@ -86,6 +86,57 @@ function tangentMismatch(solver: SketchSolver, id: number, line: number, index: 
     return Math.abs(cross) / Math.hypot(...tangent) / Math.hypot(...direction);
 }
 
+/** The fit points of entity `id`, in order. */
+function fitPoints(solver: SketchSolver, id: number): BSplinePoint[] {
+    return bsplinePoints(solver.entity(id)!.params);
+}
+
+/** Largest distance of each fit point of entity `id` from `from` (by index). */
+function fitMoves(solver: SketchSolver, id: number, from: BSplinePoint[]): number[] {
+    return fitPoints(solver, id).map(([u, v], i) => Math.hypot(u - from[i][0], v - from[i][1]));
+}
+
+/**
+ * The single end tangent of the review measurements: fit 0 fixed at the origin, tangent there to a
+ * fixed horizontal line. Returns the curve and line ids.
+ */
+function addEndTangent(solver: SketchSolver): { id: number; line: number } {
+    const id = add(solver);
+    const line = solver.addLine(0, 0, -10, 0);
+    solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(id, 0)], datums: [0, 0] });
+    solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(line, 0)], datums: [0, 0] });
+    solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(line, 1)], datums: [-10, 0] });
+    solver.addConstraint({
+        kind: ConstraintKind.TangentLineBSpline,
+        refs: [ref(line, 0), ref(line, 1), ref(id, 0)],
+    });
+    return { id, line };
+}
+
+/** A fixed point on the curve between fit points 1 and 2; returns it. */
+function addFixedPointOnCurve(solver: SketchSolver, id: number): BSplinePoint {
+    const curve = interpolateBSpline(points).value;
+    const [u, v] = bsplinePointAt(curve, 0.5 * (curve.parameters[1] + curve.parameters[2]));
+    const point = solver.addPoint(u, v);
+    solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(point, 0)], datums: [u, v] });
+    solver.addConstraint({ kind: ConstraintKind.PointOnBSpline, refs: [ref(point, 0), ref(id, 0)] });
+    return [u, v];
+}
+
+/** Drags `dragged` by (6, 5) mm in `frames` frames; returns the largest cursor lag of a frame. */
+function dragBy(solver: SketchSolver, dragged: SketchPointRef, frames = 30): number {
+    const [x0, y0] = solver.pointOf(dragged);
+    solver.beginDrag([dragged]);
+    const lags: number[] = [];
+    for (let frame = 1; frame <= frames; frame++) {
+        const [x, y] = [x0 + (6 * frame) / frames, y0 + (5 * frame) / frames];
+        expect(solver.dragTo(dragged, x, y).result).toMatch(/^Ok/);
+        const [px, py] = solver.pointOf(dragged);
+        lags.push(Math.hypot(px - x, py - y));
+    }
+    return Math.max(...lags);
+}
+
 describe("bspline entity", () => {
     test("every fit point is a solver point; the curve adds no degree of freedom", () => {
         withSolver((solver) => {
@@ -231,6 +282,196 @@ describe("bspline entity", () => {
             expectFitPointsAt(solver, id, [0, 1, 2], before);
             expectFitPointsAt(solver, id, [3], [...before.slice(0, 3), drop]);
             expect(tangentMismatch(solver, id, line, 4)).toBeLessThan(1e-7);
+        });
+    });
+
+    test("a redundant constraint elsewhere keeps the free fit points pinned when an end is pulled", () => {
+        withSolver((solver) => {
+            const id = add(solver);
+            const line = solver.addLine(0, 0, -10, 0);
+            solver.addConstraint({ kind: ConstraintKind.P2PCoincident, refs: [ref(id, 0), ref(line, 0)] });
+            solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(line, 1)], datums: [-10, 0] });
+            solver.addConstraint({
+                kind: ConstraintKind.P2PDistance,
+                refs: [ref(line, 0), ref(line, 1)],
+                datum: 30,
+            });
+            // the same equation twice: a redundant pair
+            solver.addConstraint({ kind: ConstraintKind.Horizontal, refs: [ref(line, 0), ref(line, 1)] });
+            solver.addConstraint({
+                kind: ConstraintKind.HorizontalAlign,
+                refs: [ref(line, 0), ref(line, 1)],
+            });
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            expect(solver.pointOf(ref(id, 0))[0]).toBeCloseTo(20, 9);
+            expectFitPointsAt(solver, id, [1, 2, 3, 4], points);
+        });
+    });
+
+    test("a constrained drag with the cursor off the constraint locus leaves the unnamed fit points alone", () => {
+        withSolver((solver) => {
+            const id = add(solver);
+            const circle = solver.addCircle(12, 9, 2);
+            const center = ref(circle, 0);
+            solver.addConstraint({ kind: ConstraintKind.P2PCoincident, refs: [center, ref(id, 2)] });
+            solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(id, 0)], datums: [0, 0] });
+            solver.addConstraint({ kind: ConstraintKind.P2PDistance, refs: [ref(id, 0), center], datum: 20 });
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            const before = [0, 1, 2, 3, 4].map((i) => solver.pointOf(ref(id, i)));
+            const start = Math.atan2(before[2][1], before[2][0]);
+            solver.beginDrag([center]);
+            for (let frame = 1; frame <= 40; frame++) {
+                const angle = start + (0.8 * frame) / 40;
+                solver.dragTo(center, 19.5 * Math.cos(angle), 19.5 * Math.sin(angle));
+                expect(fitDrift(solver, id, [1, 3, 4], before)).toBeLessThan(1e-6);
+            }
+            expect(solver.endDrag().result).toMatch(/^Ok/);
+            expectFitPointsAt(solver, id, [1, 3, 4], before);
+            const [u, v] = solver.pointOf(center);
+            expect(Math.hypot(u, v)).toBeCloseTo(20, 6);
+        });
+    });
+
+    test.each([
+        ["an unnamed fit point", false],
+        ["a fit point joined to a free point", true],
+    ])("a drag of %s under a fixed point on the curve follows the cursor exactly", (_, joined) => {
+        withSolver((solver) => {
+            const id = add(solver);
+            const fixed = addFixedPointOnCurve(solver, id);
+            const dragged = ref(id, 3);
+            if (joined) {
+                // a coincidence names the dragged fit point: the cursor is still on the locus
+                const point = solver.addPoint(...points[3]);
+                solver.addConstraint({ kind: ConstraintKind.P2PCoincident, refs: [ref(point, 0), dragged] });
+            }
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            const [x0, y0] = solver.pointOf(dragged);
+            expect(dragBy(solver, dragged)).toBeLessThan(1e-6);
+            const last = fitPoints(solver, id);
+            expect(solver.endDrag().result).toMatch(/^Ok/);
+            // the release re-knots the curve (chord-length knots follow the moved point): the released
+            // point stays at the cursor, the fixed point takes a small reshape of its neighbours
+            const [ex, ey] = solver.pointOf(dragged);
+            expect(Math.hypot(ex - (x0 + 6), ey - (y0 + 5))).toBeLessThan(1e-6);
+            expect(Math.max(...fitMoves(solver, id, last))).toBeLessThan(0.01);
+            expect(offCurve(solver, id, fixed)).toBeLessThan(1e-6);
+        });
+    });
+
+    test("one fine solve meets end tangents to two fixed lines on the real (re-knotted) curve", () => {
+        withSolver((solver) => {
+            const id = add(solver);
+            const first = solver.addLine(0, 0, -10, 0);
+            const last = solver.addLine(-4, 6, -14, 6);
+            for (const [line, [x1, y1, x2, y2], end] of [
+                [first, [0, 0, -10, 0], 0],
+                [last, [-4, 6, -14, 6], 4],
+            ] as const) {
+                solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(line, 0)], datums: [x1, y1] });
+                solver.addConstraint({ kind: ConstraintKind.Fix, refs: [ref(line, 1)], datums: [x2, y2] });
+                solver.addConstraint({
+                    kind: ConstraintKind.P2PCoincident,
+                    refs: [ref(line, 0), ref(id, end)],
+                });
+                solver.addConstraint({
+                    kind: ConstraintKind.TangentLineBSpline,
+                    refs: [ref(line, 0), ref(line, 1), ref(id, end)],
+                });
+            }
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            expect(tangentMismatch(solver, id, first, 0)).toBeLessThan(1e-7);
+            expect(tangentMismatch(solver, id, last, 4)).toBeLessThan(1e-7);
+            // each tangent turns the leg next to its end: the middle fit point stays, the moved ones
+            // stay within the reshape (measured 6.9 and 4.1 mm; the plain walk moved them 13.7 / 6.5 / 1.8)
+            const moves = fitMoves(solver, id, points);
+            expect(moves[2]).toBeLessThan(1e-6);
+            expect(Math.max(...moves)).toBeLessThan(8);
+        });
+    });
+
+    test("a fresh end tangent reshapes the curve next to its end only, as little as a single point would", () => {
+        withSolver((solver) => {
+            const { id, line } = addEndTangent(solver);
+            expect(solver.solve(true).result).toBe("OkUnderconstrained");
+            expect(tangentMismatch(solver, id, line, 0)).toBeLessThan(1e-7);
+            const moves = fitMoves(solver, id, points);
+            // moving fit 1 alone by 3.7 mm meets the tangent (grid search): stay within twice that
+            // (measured 5.8 mm; the plain walk moved fits 1 / 2 / 3 by 16.1 / 8.9 / 1.0 mm)
+            expect(moves[1]).toBeLessThan(7.4);
+            expect(Math.max(...moves.slice(2))).toBeLessThan(1e-6);
+        });
+    });
+
+    test.each([
+        1, 2, 3, 4,
+    ])("under an end tangent, dropping dragged fit %i leaves it at the cursor and the curve where it was", (index) => {
+        withSolver((solver) => {
+            const { id, line } = addEndTangent(solver);
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            const dragged = ref(id, index);
+            const [x0, y0] = solver.pointOf(dragged);
+            expect(dragBy(solver, dragged)).toBeLessThan(1e-6);
+            const last = fitPoints(solver, id);
+            expect(solver.endDrag().result).toMatch(/^Ok/);
+            const [ex, ey] = solver.pointOf(dragged);
+            expect(Math.hypot(ex - (x0 + 6), ey - (y0 + 5))).toBeLessThan(0.1);
+            // the frames re-knot as they go: the release only settles the last frame's knots
+            expect(Math.max(...fitMoves(solver, id, last))).toBeLessThan(1);
+            expect(tangentMismatch(solver, id, line, 0)).toBeLessThan(1e-7);
+        });
+    });
+
+    test("dragging a fit point out and back under an end tangent brings the curve back", () => {
+        withSolver((solver) => {
+            const { id } = addEndTangent(solver);
+            expect(solver.solve(true).result).toMatch(/^Ok/);
+            const start = fitPoints(solver, id);
+            const dragged = ref(id, 3);
+            for (let round = 0; round < 3; round++) {
+                solver.beginDrag([dragged]);
+                for (const frame of [...Array(31).keys(), ...[...Array(30).keys()].reverse()]) {
+                    solver.dragTo(dragged, start[3][0] + (6 * frame) / 30, start[3][1] + (5 * frame) / 30);
+                }
+                expect(solver.endDrag().result).toMatch(/^Ok/);
+            }
+            expect(Math.max(...fitMoves(solver, id, start))).toBeLessThan(1e-3);
+        });
+    });
+
+    test("an end tangent joined to a free line solves the same whatever was solved before on the page", () => {
+        // four drags under a fixed point on the curve first, each in a solver of its own: PlaneGCS
+        // orders its unknowns by address, so the heap they leave behind changes the iteration path
+        // (see the note on `pinLevels`); a solve that stays well-conditioned does not depend on it
+        for (let run = 0; run < 4; run++) {
+            withSolver((solver) => {
+                const id = add(solver);
+                addFixedPointOnCurve(solver, id);
+                expect(solver.solve(true).result).toMatch(/^Ok/);
+                dragBy(solver, ref(id, 3));
+                solver.endDrag();
+            });
+        }
+        const solved: BSplinePoint[][] = [];
+        for (let run = 0; run < 2; run++) {
+            withSolver((solver) => {
+                const { id, line } = addEndTangent(solver);
+                const free = solver.addLine(3, 12, 8, 16);
+                solver.addConstraint({
+                    kind: ConstraintKind.P2PCoincident,
+                    refs: [ref(free, 0), ref(id, 3)],
+                });
+                expect(solver.solve(true).result).toBe("OkUnderconstrained");
+                expect(tangentMismatch(solver, id, line, 0)).toBeLessThan(1e-7);
+                // the joined fit point moves with the reshape, but nowhere near the plain walk's
+                // hundreds of millions of mm
+                expect(Math.max(...fitMoves(solver, id, points))).toBeLessThan(7.4);
+                solved.push(fitPoints(solver, id));
+            });
+        }
+        solved[1].forEach(([u, v], i) => {
+            expect(u).toBeCloseTo(solved[0][i][0], 9);
+            expect(v).toBeCloseTo(solved[0][i][1], 9);
         });
     });
 

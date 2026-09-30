@@ -220,12 +220,13 @@ interface CurveRecord {
 const CURVE_TAG_BASE = 1 << 28;
 
 /**
- * A fine solve re-solves (at most this often) while the fit points moved off their knot values;
- * each pass shrinks the knot mismatch roughly twentyfold (an end tangent solved with the other fit
- * points held needs four to five passes to meet 1e-7).
+ * A fine solve re-solves against fresh knots for as long as the last pass moved a fit point by more
+ * than `CURVE_REFRESH_TOLERANCE`. Every pass keeps the pin level of the first (`pinLevels`), so only
+ * the fit points that had to move carry the knot correction, which shrinks several times per pass:
+ * a handful of passes settle it. This cap only guards against a sequence that never settles.
  */
-const CURVE_REFRESH_PASSES = 8;
-/** Fit points moving less than this since the knots were computed keep the solve as it is. */
+const CURVE_REFRESH_PASSES = 50;
+/** Fit points moving less than this in the last pass (since the knots were computed) end the refresh. */
 const CURVE_REFRESH_TOLERANCE = 1e-10;
 
 let planeGcs: ModuleStatic | undefined;
@@ -281,6 +282,8 @@ export class SolverSystem {
     private readonly constraints: (ConstraintRecord | undefined)[] = [];
     private readonly curves: (CurveRecord | undefined)[] = [];
     private readonly dragged = new Set<number>();
+    /** Params released from a drag since the last fine solve: held until its plain level (`pinLevels`). */
+    private readonly released = new Set<number>();
 
     private native: GcsSystem | undefined;
     /** Native B-spline objects by curve id, valid while `native` is current. */
@@ -498,9 +501,9 @@ export class SolverSystem {
     /**
      * Recomputes each curve's knot layout from its fit points' current values (chord-length and
      * centripetal knots follow the points); a layout that changed invalidates the native system,
-     * whose curves cache their knots. Run before a fine solve — never in a drag frame, which keeps
-     * the layout it started with and stays cheap. A fit set that no longer interpolates (two points
-     * dragged together) keeps its previous layout.
+     * whose curves cache their knots. Run before every solve, drag frames included (see
+     * `preparedNative`). A fit set that no longer interpolates (two points dragged together) keeps
+     * its previous layout.
      */
     private updateCurveKnots(): void {
         for (const curve of this.curves) {
@@ -510,8 +513,10 @@ export class SolverSystem {
                 periodic: curve.periodic,
                 parametrization: curve.parametrization,
             });
-            if (!shape.isOk || shape.value.poles.length * 2 !== curve.poles.length) continue;
+            // a fit set that does not interpolate keeps its layout, but counts as refreshed: nothing
+            // a further pass could compute differs (`curvesMoved`)
             curve.knotFit = values;
+            if (!shape.isOk || shape.value.poles.length * 2 !== curve.poles.length) continue;
             const same =
                 shape.value.degree === curve.shape.degree &&
                 shape.value.knots.every((knot, i) => knot === curve.shape.knots[i]) &&
@@ -528,8 +533,8 @@ export class SolverSystem {
      * curve's own equations start satisfied: dragging one fit point moves the poles, never the
      * other fit points (a least-change step would otherwise spread the drag over them). What a
      * constraint asks of a curve (an end pulled, an end tangent turned) is kept off the fit points
-     * no constraint names by `solveWithFreeFitPointsPinned`; they move only when the constraints
-     * cannot be met without them.
+     * no constraint names by `pinLevels`; they move only when the constraints cannot be met without
+     * them, the nearest to the constrained ones first.
      */
     private refreshCurvePoles(native: GcsSystem): void {
         for (const curve of this.curves) {
@@ -562,12 +567,36 @@ export class SolverSystem {
         );
     }
 
-    /** The native system, current, with every curve's knots and poles refreshed (see above). */
-    private preparedNative(fine: boolean): GcsSystem {
-        if (fine) this.updateCurveKnots();
+    /**
+     * The native system, current, with every curve's knots and poles refreshed (see above). Every
+     * solve re-knots — a drag frame too, so the knot correction of a constrained curve is spread over
+     * the drag instead of landing on mouse-up — which rebuilds the native system whenever the fit
+     * points moved (a chord-length or centripetal curve being dragged); a sketch without such a curve
+     * keeps reusing it.
+     */
+    private preparedNative(): GcsSystem {
+        const previous = this.native;
+        this.updateCurveKnots();
         const native = this.ensureBuilt();
         this.refreshCurvePoles(native);
+        if (native !== previous) this.primeDiagnosis(native);
         return native;
+    }
+
+    /**
+     * A native system takes its DOF count and its conflict / redundancy diagnosis from its first
+     * solve, with the fixed flags of that moment. So a new one first runs a one-iteration solve,
+     * thrown away, with only the datums fixed — the diagnosis of the sketch itself: neither the
+     * pinned fit points of a pre-solve nor a held drag counts (with the dragged point fixed, a
+     * distance between it and a fixed point would read as a conflict).
+     */
+    private primeDiagnosis(native: GcsSystem): void {
+        for (const id of this.dragged)
+            native.set_p_param(this.nativeIndex[id], this.values[id], this.datumParams.has(id));
+        native.set_max_iterations(1);
+        native.solve_system(DOG_LEG);
+        native.set_max_iterations(this.defaultMaxIterations);
+        this.pushValues(native);
     }
 
     /** @internal The native B-spline object of a curve, while the native system is current. */
@@ -585,6 +614,7 @@ export class SolverSystem {
             this.assertParam(id);
             this.dragged.add(id);
         }
+        this.released.clear();
         this.applyDragged(true);
     }
 
@@ -592,83 +622,101 @@ export class SolverSystem {
     clear_dragged(ids: Uint32Array): void {
         for (const id of ids) this.assertParam(id);
         this.applyDragged(false);
+        for (const id of this.dragged) this.released.add(id);
         this.dragged.clear();
     }
 
     // ------------------------------------------------------------------ Solving
 
-    /** Solves the system; `fine` is a full solve, otherwise a capped one for drag frames. */
+    /**
+     * Solves the system; `fine` is a full solve, otherwise a capped one for drag frames.
+     *
+     * Chord-length knots follow the fit points, so a fine solve that moved them re-solves against
+     * fresh knots (`CURVE_REFRESH_PASSES`) until the solved curve is the one the edges are built
+     * from. Every refresh pass keeps the release level the first pass settled on (`pinLevels`): the
+     * knot correction is carried by the fit points that had to move anyway, never spread over the
+     * rest of the curve pass after pass.
+     */
     solve(fine: boolean): SolveReport {
-        let { report, pinDropped } = this.solveOnce(fine, true);
-        // chord-length knots follow the fit points: a fine solve that moved them re-solves against
-        // fresh knots, so the solved curve is the one the edges are built from. Once the pinned
-        // solve was dropped, the free fit points have moved with the plain solve: the passes refine
-        // that solution plain too (pinning them again would pull it towards the dropped one)
-        let pin = !pinDropped;
+        let { report, level } = this.solveOnce(fine, 0);
         for (let pass = 0; fine && pass < CURVE_REFRESH_PASSES && this.curvesMoved(); pass++) {
-            ({ report, pinDropped } = this.solveOnce(fine, pin));
-            pin &&= !pinDropped;
+            ({ report, level } = this.solveOnce(fine, level));
         }
+        if (fine) this.released.clear();
         return report;
     }
 
     /**
-     * One solve against the current knots; `pin` runs the pinned pre-solve first
-     * (`solveWithFreeFitPointsPinned`). `pinDropped`: a pinned solve ran and its solution was not
-     * kept (it failed, collapsed a line, or left the full system unsolvable from there).
+     * One solve against the current knots. The candidates run in order and the first that solves
+     * is kept: the dragged params held at the cursor with the pin levels from `start` up to the
+     * plain solve, then — only when even the plain solve cannot hold the cursor (it is off the
+     * constraint locus) — the dragged params released, from the fully pinned level up. `level` is
+     * the held pin level that was kept (0 after a released solve: the next pass starts over).
      */
-    private solveOnce(fine: boolean, pin: boolean): { report: SolveReport; pinDropped: boolean } {
-        const previous = this.native;
-        let native = this.preparedNative(fine);
-        const fresh = native !== previous;
+    private solveOnce(fine: boolean, start: number): { report: SolveReport; level: number } {
+        const native = this.preparedNative();
         native.set_max_iterations(fine ? this.defaultMaxIterations : COARSE_MAX_ITERATIONS);
-        const pinned = pin ? this.solveWithFreeFitPointsPinned(native) : undefined;
-        let pinDropped = pinned !== undefined && !pinned.applied;
-        if (pinned !== undefined && fresh) {
-            // a native system takes its DOF count and conflict diagnosis from its first solve, so
-            // one first solved pinned is replaced: the solve below is the new one's first
-            native = this.rebuilt(fine);
-        }
-        // the solve that reports runs unpinned: after a pinned solve that succeeded it starts
-        // converged and moves nothing
-        let status = native.solve_system(DOG_LEG);
-        if (pinned?.applied && !this.reportable(native, status)) {
-            // the pinned solution satisfied the constraints in a way the full system cannot build
-            // on (a configuration it diagnoses, or one it cannot leave): drop it and solve plain
-            // from where the solve started
-            this.restoreValues(pinned.before);
-            pinDropped = true;
-            native = this.rebuilt(fine);
-            status = native.solve_system(DOG_LEG);
-        }
-        if (!isSolved(status) && this.dragged.size > 0) {
-            // the dragged position may be off the geometry's reach (a point held on a
-            // line, say): let the dragged params follow the constraints instead
+        const levels = this.pinLevels();
+        const plain = levels.length - 1;
+        const before = [...this.values];
+
+        const tryCandidate = (level: number, release: boolean): number | undefined => {
+            if (level === plain && !release) {
+                this.pushValues(native);
+                const status = native.solve_system(DOG_LEG);
+                if (isSolved(status)) {
+                    this.applySolution(native);
+                    return status;
+                }
+                this.pushValues(native);
+                return undefined;
+            }
+            const solved = this.solvePinned(native, levels[level], release, before);
+            if (!solved) return undefined;
+            // the solve that reports runs unpinned with the drag held; from a real solution it starts
+            // converged and moves nothing
+            const status = native.solve_system(DOG_LEG);
+            if (isSolved(status) && !native.has_conflicting() && !this.solutionMoved(native)) {
+                this.applySolution(native);
+                return status;
+            }
+            // the pinned solution is none the full system can build on: an equation over held params
+            // only is left out of a pinned solve, not met (the report solve then moves on from it),
+            // or the configuration reads as conflicting — drop it
+            this.restoreValues(before);
             this.pushValues(native);
-            this.applyDragged(false);
-            status = native.solve_system(DOG_LEG);
-            if (isSolved(status)) this.applySolution(native, true);
-            this.applyDragged(true);
-        } else if (isSolved(status)) {
-            this.applySolution(native);
+            return undefined;
+        };
+
+        let kept: { status: number; level: number } | undefined;
+        for (let level = Math.min(start, plain); kept === undefined && level <= plain; level++) {
+            const status = tryCandidate(level, false);
+            if (status !== undefined) kept = { status, level };
         }
-        // an unapplied solve may leave its iterate behind in the native params
-        if (!isSolved(status)) this.pushValues(native);
+        for (let level = 0; kept === undefined && this.dragged.size > 0 && level <= plain; level++) {
+            const status = tryCandidate(level, true);
+            if (status !== undefined) kept = { status, level: 0 };
+        }
+        let status = kept?.status;
+        if (status === undefined) {
+            // nothing solves: report the plain solve (its iterate is not kept)
+            this.pushValues(native);
+            status = native.solve_system(DOG_LEG);
+            this.pushValues(native);
+        }
         this.cachedDofs = native.dof();
-        return { report: { result: this.resultOf(native, status) }, pinDropped };
+        return { report: { result: this.resultOf(native, status) }, level: kept?.level ?? 0 };
     }
 
-    /** A fresh native system for the current values (knots kept: they were refreshed already). */
-    private rebuilt(fine: boolean): GcsSystem {
-        this.invalidate();
-        const native = this.preparedNative(false);
-        native.set_max_iterations(fine ? this.defaultMaxIterations : COARSE_MAX_ITERATIONS);
-        return native;
-    }
-
-    /** Whether a solve ended solved and without a conflict — a result worth reporting as is. */
-    private reportable(native: GcsSystem, status: number): boolean {
-        return isSolved(status) && !native.has_conflicting() && !native.has_redundant();
+    /** Whether a solve's solution leaves the model values (by more than `SOLUTION_MOVE_TOLERANCE`). */
+    private solutionMoved(native: GcsSystem): boolean {
+        native.apply_solution();
+        for (let id = 0; id < this.values.length; id++) {
+            if (!this.alive[id] || this.datumParams.has(id)) continue;
+            const moved = Math.abs(native.get_p_param(this.nativeIndex[id]) - this.values[id]);
+            if (moved > SOLUTION_MOVE_TOLERANCE) return true;
+        }
+        return false;
     }
 
     /** Writes back a snapshot of `values` (the params alive now), undoing every solve since. */
@@ -679,43 +727,33 @@ export class SolverSystem {
     }
 
     /**
-     * A curve adds no degree of freedom, but its fit points are free params: a least-norm solver
-     * step spreads whatever a constraint asks of a curve (an end pulled along, an end tangent
-     * turned) over every fit point, so points no constraint names would creep — and in a drag,
-     * where each frame re-interpolates the poles from the fit points, the spread of every frame is
-     * baked in and ratchets. So a solve first runs with those fit points (neither dragged, a datum
-     * nor named by any constraint) held fixed; only when that cannot be solved (a curve that must
-     * reshape to reach a fixed point on it, say) does the plain solve that follows move them.
-     *
-     * A pinned success is not trusted on its own: with the curve held, a constraint can be met
-     * trivially — a zero-length line satisfies the parallel equation an end tangent is emitted as.
-     * A solution that collapsed a line a direction constraint acts on is refused here, and the
-     * caller drops an applied one when the unpinned solve after it does not come out clean.
-     * Returns undefined when no pinned solve ran, else whether its solution was applied and the
-     * values from before it.
+     * One solve from the model values with the params `pinned` held fixed and, when `release`, the
+     * dragged params free to follow the constraints; applies its solution when it solved. A pinned
+     * success is not trusted on its own: with the curve held, a constraint can be met trivially — a
+     * zero-length line satisfies the parallel equation an end tangent is emitted as — so a solution
+     * that collapsed a line a direction constraint acts on is refused. Returns whether the solution
+     * was applied; the native params are back on the model values (unpinned) either way.
      */
-    private solveWithFreeFitPointsPinned(
+    private solvePinned(
         native: GcsSystem,
-    ): { applied: boolean; before: number[] } | undefined {
-        const pinned = this.freeFitParams();
-        if (pinned.length === 0) return undefined;
-        const pin = (fixed: boolean) => {
-            for (const id of pinned) native.set_p_param(this.nativeIndex[id], this.values[id], fixed);
-        };
-        const before = [...this.values];
-        pin(true);
-        const status = native.solve_system(DOG_LEG);
-        let applied = isSolved(status);
+        pinned: readonly number[],
+        release: boolean,
+        before: readonly number[],
+    ): boolean {
+        this.pushValues(native);
+        for (const id of pinned) native.set_p_param(this.nativeIndex[id], this.values[id], true);
+        if (release) this.applyDragged(false);
+        let applied = isSolved(native.solve_system(DOG_LEG));
         if (applied) {
-            this.applySolution(native);
-            if (this.collapsedLine(before)) {
+            this.applySolution(native, release);
+            if (pinned.length > 0 && this.collapsedLine(before)) {
                 this.restoreValues(before);
                 applied = false;
             }
         }
-        if (!applied) this.pushValues(native);
-        pin(false);
-        return { applied, before };
+        // back on the model values: every pin released, the drag held again
+        this.pushValues(native);
+        return applied;
     }
 
     /**
@@ -736,25 +774,100 @@ export class SolverSystem {
         return false;
     }
 
-    /** Fit point params that are neither dragged, datums nor referenced by any constraint. */
-    private freeFitParams(): number[] {
-        if (!this.curves.some((curve) => curve !== undefined)) return [];
+    /** Params some (non-removed) constraint references. */
+    private namedParams(): Set<number> {
         const named = new Set<number>();
         for (const record of this.constraints) {
             if (record !== undefined) for (const id of record.params) named.add(id);
         }
-        const free: number[] = [];
+        return named;
+    }
+
+    /**
+     * The pin sets a solve tries in turn, from every free fit point held (level 0) to none (the
+     * last level, the plain solve).
+     *
+     * A curve adds no degree of freedom, but its fit points are free params: a least-norm solver
+     * step spreads whatever a constraint asks of a curve (an end pulled along, an end tangent
+     * turned, a fixed point on it) over every fit point, so points no constraint names would creep,
+     * and the refresh passes (fresh chord-length knots after each solve) would compound that spread
+     * — each pass a new least-norm reshape from the last one's state, the walk measured at 16 mm on
+     * a 12 mm sketch for one end tangent. So the free fit points (neither dragged, a datum nor named
+     * by a constraint) are released a ring at a time, outwards from the curve's anchors: the fit
+     * points that are named, fixed, dragged or were dragged until this solve, and those whose pole
+     * a constraint names (an end tangent acts on the end pole leg, so on the fit point next to the
+     * end). Level k frees the free fit points fewer than k steps along the curve from an anchor;
+     * a fit point just released from a drag stays held until the plain level, so letting go of the
+     * mouse never moves it off the cursor. The first level that solves is kept, and the refresh
+     * passes stay on it: the knot correction is carried by the fit points that had to move anyway,
+     * and it shrinks from pass to pass because the reshape itself does not grow.
+     *
+     * Of the alternatives, re-solving each pass from the snapshot before the first one does not
+     * converge (knots from the solution, solution from the base is an unstable iteration), and
+     * freezing the knots after the first pass leaves the built curve (re-knotted from the stored
+     * fit points) off the solved one, so an end tangent would not hold on the real edge. A fit
+     * parameter of its own per fit point would change the entity's degrees of freedom. Levels
+     * change nothing the caller sees: a curve without anchors (a fixed point on an otherwise free
+     * curve) goes from all held to the plain solve, as before.
+     *
+     * The plain walk also made results depend on the page's history: after a few unrelated solvers
+     * had run (and been disposed) in the same PlaneGCS module, the identical sketch (an end tangent
+     * plus a free line joined to fit 3) was driven to a different far-off configuration (fit 3 at
+     * 3.4·10⁸ or 4.3·10⁸ mm), and in the review's variant to `Diverged` instead of
+     * `OkUnderconstrained`. PlaneGCS keeps part of its bookkeeping in pointer-keyed maps and sets,
+     * so what earlier systems allocated can change the order it treats unknowns in; that only
+     * shows in an ill-conditioned configuration like the walk's, and the levels do not reach one
+     * (`bspline.test.ts` replays the sequence).
+     */
+    private pinLevels(): number[][] {
+        const named = this.namedParams();
+        const anchored = (id: number) => named.has(id) || this.isFixed(id) || this.released.has(id);
+        const movable = (id: number) => !this.isFixed(id);
+        /** Free fit params with their distance (in fit points) from the nearest anchor. */
+        const rings: { id: number; distance: number }[] = [];
         for (const curve of this.curves) {
             if (curve === undefined) continue;
-            for (const id of curve.fit) if (!named.has(id) && !this.isFixed(id)) free.push(id);
+            const count = curve.fit.length / 2;
+            const anchors: number[] = [];
+            for (let i = 0; i < count; i++) {
+                const ids = [
+                    curve.fit[2 * i],
+                    curve.fit[2 * i + 1],
+                    curve.poles[2 * i],
+                    curve.poles[2 * i + 1],
+                ];
+                if (ids.slice(0, 2).some(anchored) || ids.slice(2).some((id) => named.has(id)))
+                    anchors.push(i);
+            }
+            for (let i = 0; i < count; i++) {
+                const distance = Math.min(
+                    ...anchors.map((a) => {
+                        const d = Math.abs(i - a);
+                        return curve.periodic ? Math.min(d, count - d) : d;
+                    }),
+                );
+                for (const id of [curve.fit[2 * i], curve.fit[2 * i + 1]]) {
+                    if (!movable(id)) continue;
+                    // a fit point just released from a drag is held until the plain level
+                    rings.push({ id, distance: this.released.has(id) ? Number.POSITIVE_INFINITY : distance });
+                }
+            }
         }
-        return free;
+        if (rings.length === 0) return [[]];
+        const finite = rings.map((ring) => ring.distance).filter(Number.isFinite);
+        const levels: number[][] = [];
+        for (let level = 0; level <= (finite.length > 0 ? Math.max(...finite) + 1 : 0); level++) {
+            const pinned = rings.filter((ring) => ring.distance >= level).map((ring) => ring.id);
+            if (pinned.length > 0 && pinned.length !== levels.at(-1)?.length) levels.push(pinned);
+        }
+        levels.push([]);
+        return levels;
     }
 
     /** Degrees of freedom of the whole system (dragged params count as free). */
     dofs(): number {
         if (this.cachedDofs === undefined || this.dirty) {
-            const native = this.preparedNative(true);
+            const native = this.preparedNative();
             native.solve_system(DOG_LEG);
             this.cachedDofs = native.dof();
             this.pushValues(native);
@@ -764,7 +877,7 @@ export class SolverSystem {
 
     /** Conflicting and redundant constraint ids, and the DOF count, as of a fresh solve. */
     diagnose(): SolverDiagnosis {
-        const native = this.preparedNative(true);
+        const native = this.preparedNative();
         native.solve_system(DOG_LEG);
         const diagnosis = {
             conflicting: this.constraintIdsOf(native.get_conflicting()),
@@ -933,8 +1046,8 @@ export class SolverSystem {
         this.nativeIndex = [];
         for (let id = 0; id < this.values.length; id++) {
             if (!this.alive[id]) continue;
-            // datums are fixed from the start; dragged params are toggled below so the
-            // native DOF count keeps treating them as free
+            // datums are fixed from the start; dragged params are held per solve (`applyDragged`),
+            // and the diagnosis solve (`primeDiagnosis`) counts them as free
             this.nativeIndex[id] = native.push_p_param(this.values[id], this.datumParams.has(id));
         }
         this.curves.forEach((curve, id) => {
@@ -1042,6 +1155,9 @@ export class SolverSystem {
     }
 }
 
+/** A solve from a solution that moves a param further than this did not start from a solution. */
+const SOLUTION_MOVE_TOLERANCE = 1e-9;
+
 /** Below this length a line a direction constraint acts on counts as collapsed (see `collapsedLine`). */
 const LINE_COLLAPSE_TOLERANCE = 1e-6;
 
@@ -1053,6 +1169,8 @@ function directionLines(record: ConstraintRecord): number[] {
     switch (record.kind) {
         case ConstraintKind.Horizontal:
         case ConstraintKind.Vertical:
+        case ConstraintKind.HorizontalAlign:
+        case ConstraintKind.VerticalAlign:
         case ConstraintKind.TangentLineCircle:
         case ConstraintKind.TangentLineArc:
         case ConstraintKind.Collinear:

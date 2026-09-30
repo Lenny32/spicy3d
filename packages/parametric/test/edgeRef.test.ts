@@ -355,6 +355,18 @@ describe("matchEdgeIndexesTracked — invariant verification and splits", () => 
         expect(result.unchecked()).toEqual([1]);
     });
 
+    test("keeps the invariant check for a ref captured from a merged edge whose compound id comes back", () => {
+        // the ref's own id is a fusion holding the seed: the entity alone does not name that edge
+        const compound = "sketch:sk1:e1.2.3.4:ent7|f2:3";
+        const ref: EdgeRef = { ...captureEdgeRef(splineEdge()), edgeId: compound };
+        const longer = { ...splineEdge(), length: () => 10 } as unknown as IEdge;
+        const shape = shapeWith(splineEdge(), longer);
+        const result = matchEdgeIndexesTracked(shape, [ref], ["f1:0", compound]);
+
+        // the grown edge is demoted; the fingerprint finds the unchanged look-alike instead
+        expect(result.unchecked()).toEqual([0]);
+    });
+
     test("adopts every piece of an edge split into fragments sharing one id", () => {
         // A boolean split the referenced [0,10] edge into [0,4]+[4,10]; both pieces
         // inherit the id, and the edge feature applies to the whole original span.
