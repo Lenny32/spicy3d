@@ -26,6 +26,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #93 | Editable control-pole and weighted sketch NURBS | 9d2acd98b606c739832e6fbd87e018a803202f06 |
 | #96 | Bounded worker operations with transactional rollback and responsive metadata | dadd98ce831e8ef831c3e415c3596979bb0531a8 |
 | #82 | Native corner preflight and actionable OCCT construction diagnostics | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 |
+| #97 | Terminate in-flight native workers and roll back cancelled programs | 5c6728d30a1995f787a75f030b32c57973add2a1 |
 
 Validation: 9,356 passing tests on the combined NURBS/worker integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
@@ -52,7 +53,10 @@ Additional #96 validation: actual Chromium/Firefox workers, exact program rollba
 metadata reads; combined full suite, TypeScript, lint and production app/plugins pass.
 Additional #82 validation: pinned native rebuild, 163 worker and 183 integrated native/worker tests.
 
-Remaining project work: #83–#85, #88–#90, #92, #94–#95, #97–#98, #103 (12 tickets).
+Additional #97 validation: 1159 worker tests, 37 integrated checks, TypeScript and required lint;
+actual native-entry cancellation in Chromium/Firefox, old-handle rejection and fresh geometry.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96.
+Remaining project work: #83–#85, #88–#90, #92, #94–#95, #98, #103 (11 tickets).
+
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97.
 Keep issues open and never merge this PR automatically.

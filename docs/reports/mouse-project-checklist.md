@@ -67,7 +67,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #94 Add an associative from-face extrusion start | Approved parametric 6 schema | Implementing | mouse_86 | mouse/94-from-face | Pending native verification | — | — |
 | #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
 | #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Done (pushed) | mouse_81 | mouse/96-bounded-worker | Real browser worker; 9356 integrated tests, 1 skip; tsc/check/build | dadd98ce831e8ef831c3e415c3596979bb0531a8 | — |
-| #97 Cancel an in-flight kernel operation | #96 | Implementing | mouse_81 | mouse/97-native-cancel | Real Chromium/Firefox cancellation passes; final checks pending | — | — |
+| #97 Cancel an in-flight kernel operation | #96 | Done (pushed) | mouse_81 | mouse/97-cancel-worker | 1159 worker tests; 37 integrated tests; real Chromium/Firefox cancellation; tsc/check/build | 5c6728d30a1995f787a75f030b32c57973add2a1 | — |
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
 | #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
 | #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
@@ -188,3 +188,9 @@ with one skip; TypeScript, scoped required checks and production app/plugins pas
 real-kernel diagnostics tests; 183 combined native/worker regressions pass on its rebuilt kernel.
 Fourteen tickets delivered; 12 remain. #94 uses the approved parametric-6 schema; #97 cancellation
 and #103 STL tolerance remain active. Existing document version 2 stays; sketch is now version 3.
+
+#97 is integrated and pushed: strict native cancellation terminates the worker generation,
+rolls back exact document/reference/history state and releases the queue for subsequent work.
+Integrated real-browser native-entry tests settle in 0.4 ms (Chromium) / 0 ms (Firefox), reject old
+handles and prove fresh native geometry. 37 focused tests, tsc and scoped check pass. Fifteen
+tickets delivered; 11 remain. Main-kernel recovery is being designed separately under #98.
