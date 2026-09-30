@@ -31,11 +31,22 @@ nothing is left half-built.
     point   params [x, y]                           point 0
     ellipse params [cx, cy, ax, ay, bx, by]         center and two perpendicular axis ends
                                                     points 0=center 1=first axis end 2=second axis end
-    spline  points [[u, v], ...] (curve order)      open interpolating spline; points 0=start 1=end
-            (or params [sx, sy, ex, ey, ...interior])
+    spline  points [[u, v], ...] (curve order)      uniform Catmull-Rom through the points, one cubic edge
+            (or params [sx, sy, ex, ey, ...interior]) per pair of neighbouring points; always OPEN (a closed
+                                                    one is refused); points 0=start 1=end; interior fixed
+    bspline points [[u, v], ...] (curve order)      ONE interpolating B-spline edge through every point;
+            (or params [x0, y0, x1, y1, ...])       parametrization: "chord" (default: no overshoot on
+                                                    uneven spacing) | "centripetal" | "uniform";
+                                                    periodic: true = closed C2 curve — do NOT repeat the
+                                                    first point; points i = fit point i (all constrainable).
+                                                    Prefer it for free-form outlines: one edge offsets,
+                                                    lofts and booleans far better than many.
+                                                    PointOn [point] + [bspline] slides a point on it;
+                                                    Tangent [line, bspline] = the line along its end tangent
   Any entity may carry construction: true (constrainable helper geometry, never part of a profile) and
   name: "..." (a name later refs in this call can use instead of the id).
-  A closed profile needs its segments in perimeter order with the first point repeated as the last.
+  A closed profile of lines/arcs needs its segments in perimeter order, each starting where the previous
+  one ends (the last one ending on the first one's start); a periodic bspline closes on its own.
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
 - { op: "sketchInfo", sketch, id? }   reads a sketch back: entities with their points, constraints with

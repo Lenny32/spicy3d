@@ -43,6 +43,10 @@ export const errorRecovery: Skill = {
 
 "To face failed" (wire.toFace) or "Failed to create prism" / "Prism failed: …" (prism) — the wire is not usable as a profile: polygon points must ALL lie on one plane and number at least 3 (fewer points or scattered 3D points produce an open/non-planar wire). Re-issue the corners on a single plane in perimeter order, repeating the first point as the last so the wire is closed.
 
+"Closed splines are not supported: …" / "An open B-spline cannot end where it starts" — a sketch spline is always open, and an open bspline must not end on its first point. For a smooth closed outline use { type: "bspline", points, periodic: true } and list each point once (do NOT repeat the first point as the last).
+
+"A B-spline's own point already lies on it" — PointOn named a fit point of the same bspline it slides on; every fit point is on its curve by construction, so drop that constraint.
+
 prism/revolve on a polygon wire returns a shell or breaks downstream booleans — the wire was not CLOSED (a closed one is turned into a face and sweeps a solid). Re-run polygon with the first point repeated as the last point, then extrude again.
 
 "Failed to create box / cylinder / face / polygon / solid / ellipse" — the factory rejected the parameters (a zero or negative size, a degenerate profile). Check the arguments the message names and re-run that op.

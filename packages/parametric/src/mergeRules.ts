@@ -214,7 +214,14 @@ registerMergePayload("sketch.data", {
                 segment: "entity",
                 item: {
                     kind: "object",
-                    fields: { id: scalar, type: scalar, params: atomic, construction: scalar },
+                    fields: {
+                        id: scalar,
+                        type: scalar,
+                        params: atomic,
+                        construction: scalar,
+                        parametrization: scalar,
+                        periodic: scalar,
+                    },
                 },
             },
             constraints: {
@@ -285,7 +292,8 @@ registerMergePayload("sketch.data", {
     normalize: normalizeSketchData,
     note:
         "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
-        "references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` " +
+        "references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), " +
+        "a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` " +
         "one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, " +
         "`dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min.",
 });

@@ -273,7 +273,9 @@ feature by its `type`:
 `SketchNode.dataJson` (`SketchData`) merges field by field:
 
 - `entities`: `stable` list of `entity` by `id`. `params` (the geometry) is **one value per
-  entity**; `type` scalar (never changes); `construction` scalar. Two devices moving one line
+  entity**; `type` scalar (never changes); `construction` scalar; a bspline's `parametrization`
+  and `periodic` scalar each (its fit points are its `params`, so a fit point added on one device and
+  another moved on the other is one `params` conflict). Two devices moving one line
   differently → `property` conflict at `node/<sketch>/entity/<id>/params`.
 - `constraints`: `stable` list of `constraint` by `id`; `kind` scalar; `refs` one value that must
   resolve (every `entityId` a merged entity, a datum id −1…−3, or a merged external); `datum` an
@@ -797,13 +799,15 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 
 #### Payload `sketch.data`
 
-`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry), a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
+`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
 
 - `entities`: list of `entity` by `id` (stable order)
   - `id`: scalar
   - `type`: scalar
   - `params`: atomic
   - `construction`: scalar
+  - `parametrization`: scalar
+  - `periodic`: scalar
 - `constraints`: list of `constraint` by `id` (stable order)
   - `id`: scalar
   - `kind`: scalar

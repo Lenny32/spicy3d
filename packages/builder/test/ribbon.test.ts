@@ -92,7 +92,10 @@ describe("SketchRibbonProfiles", () => {
         const finish = sketchTab.groups.at(-1)!;
         expect(finish.primary).toBe(true);
         expect(finish.items).toEqual(["sketch.exit", "sketch.autoConstrain"]);
-        expect(flattenItems(sketchTab.groups[0].items)).toContain("sketch.spline");
+        const create = flattenItems(sketchTab.groups[0].items);
+        expect(create).toContain("sketch.spline");
+        // the B-spline tool sits right after the spline tool
+        expect(create.indexOf("sketch.bspline")).toBe(create.indexOf("sketch.spline") + 1);
     });
 
     test("constraint group should be icon-only and hold all 18 constraint tools", () => {

@@ -3,7 +3,7 @@
 
 import { DocumentMigrations, migrateDocument } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
-import { PARAMETRIC_FORMAT_VERSION } from "../src/migrations";
+import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "../src/migrations";
 
 function fixture(name: string) {
     const found = loadDocumentFixtures().find((x) => x.name === name);
@@ -98,6 +98,56 @@ describe("parametric format 5 (thicken)", () => {
         expect(thickens).toEqual([
             ["-wall_t", 1],
             ["wall_t", 0],
+        ]);
+    });
+});
+
+/** Names of the fixtures stored at sketch format 1. */
+function sketchV1Fixtures(): string[] {
+    return loadDocumentFixtures()
+        .filter((x) => (x.data["moduleVersions"] as Record<string, number> | undefined)?.["sketch"] === 1)
+        .map((x) => x.name);
+}
+
+describe("sketch format 2 (bspline)", () => {
+    test("is the running version, reached from 1 without a gap", () => {
+        expect(SKETCH_FORMAT_VERSION).toBe(2);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(2);
+        expect(DocumentMigrations.findGaps()).toEqual([]);
+    });
+
+    test.each(sketchV1Fixtures())("%s (sketch 1) migrates with its sketches untouched", (name) => {
+        const { data } = fixture(name);
+        const original = structuredClone(data);
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 2 });
+        expect(migrated.value["models"]).toEqual(original["models"]);
+        expect(data).toEqual(original);
+    });
+
+    test("the sketch 1 corpus the migration test runs on is not empty", () => {
+        expect(sketchV1Fixtures().length).toBeGreaterThan(0);
+    });
+
+    test("a sketch 2 document with bsplines needs no migration and keeps them as stored", () => {
+        const { data } = fixture("v2/sketch2-bspline.json");
+        expect(data["moduleVersions"]).toMatchObject({ sketch: 2 });
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const entities = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "SketchNode")
+            .flatMap((x: any) => JSON.parse(x.dataJson).entities)
+            .filter((x: any) => x.type === "bspline")
+            .map((x: any) => [x.params.length / 2, x.parametrization, x.periodic ?? false]);
+        expect(entities).toEqual([
+            [5, "chord", false],
+            [5, "centripetal", true],
         ]);
     });
 });

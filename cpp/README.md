@@ -41,7 +41,7 @@ they remain the safety net for a module built without the guard.
 
 `packages/wasm/lib/spicy-wasm.{wasm,js,d.ts}` is built from the current sources (Release preset,
 Emscripten 5.0.7, OCCT V8_0_1, 2026-09-30): `guard.hpp`, `-fwasm-exceptions` and every binding,
-including `Shape.checkSelfIntersection`. After changing C++, rebuild with
+including `ShapeFactory.bspline` and `Shape.checkSelfIntersection`. After changing C++, rebuild with
 `cmake --build --preset release --target spicy-wasm` (in `cpp/`) and copy the three files from
 `build/target/release/` into `packages/wasm/lib/`. The TypeScript side still feature-detects the
 newer bindings, and the tests of those fallbacks stub the binding absent instead of relying on an

@@ -16,6 +16,8 @@ import {
     type XYZ,
 } from "@spicy3d/core";
 import type { EdgeRef } from "../features/edgeRef";
+import { bsplineEdgeCount } from "./bsplineEdges";
+import type { BSplineParametrization } from "./bsplineGeometry";
 import { ConstraintKind } from "./planegcs";
 
 export { ConstraintKind };
@@ -25,7 +27,7 @@ export const SKETCH_EDGE_LINE_WIDTH = 2;
 /** Profile faces are shaded translucent so a sketch reads as curves, not a solid disc. */
 export const SKETCH_PROFILE_OPACITY = 0.2;
 
-export type SketchEntityType = "line" | "circle" | "arc" | "point" | "ellipse" | "spline";
+export type SketchEntityType = "line" | "circle" | "arc" | "point" | "ellipse" | "spline" | "bspline";
 
 /**
  * line: params = [x1, y1, x2, y2]; circle: params = [cx, cy, r];
@@ -33,7 +35,11 @@ export type SketchEntityType = "line" | "circle" | "arc" | "point" | "ellipse" |
  * counter-clockwise sweep from start to end) — all in sketch (u, v) coordinates.
  * point: [x, y]; ellipse: [cx, cy, ax, ay, bx, by] (center and two
  * perpendicular axis endpoints; radii are the distances from the center).
- * spline: [sx, sy, ex, ey, ...fixedInteriorPoints] (open Catmull–Rom interpolation).
+ * spline: [sx, sy, ex, ey, ...fixedInteriorPoints] — uniform Catmull–Rom through the points
+ * (the end points' neighbours duplicated), built as one cubic Bezier edge per pair of neighbouring
+ * points; always open. Kept exactly as it is: saved fillets on its edges must keep resolving.
+ * bspline: [x0, y0, x1, y1, ...] — the fit points in curve order, ONE interpolating B-spline edge
+ * through all of them (`bsplineGeometry.ts`), with `parametrization` and `periodic` below.
  */
 export interface SketchEntityData {
     id: number;
@@ -41,12 +47,17 @@ export interface SketchEntityData {
     params: number[];
     /** Construction geometry is editable but never contributes profile edges. */
     construction?: boolean;
+    /** bspline only: where the fit points sit on the curve parameter (the tools always write it; absent reads `chord`). */
+    parametrization?: BSplineParametrization;
+    /** bspline only: a closed, C2 curve — the first fit point is not repeated as the last. */
+    periodic?: boolean;
 }
 
 /**
  * line: pointIndex 0 = start, 1 = end; circle: pointIndex 0 = center;
  * arc: pointIndex 0 = center, 1 = start, 2 = end.
  * spline: pointIndex 0 = start, 1 = end; interior points are not solver parameters.
+ * bspline: pointIndex i = fit point i (every one a solver point).
  * point: pointIndex 0 = location; ellipse: 0 = center, 1/2 = axis endpoints.
  */
 export interface SketchPointRef {
@@ -54,8 +65,8 @@ export interface SketchPointRef {
     pointIndex: number;
 }
 
-/** Addressable points per entity type (the `pointIndex` layout of `SketchPointRef`). */
-const ENTITY_POINT_COUNTS: Record<SketchEntityType, number> = {
+/** Addressable points per entity type (the `pointIndex` layout of `SketchPointRef`); a bspline has one per fit point. */
+const ENTITY_POINT_COUNTS: Record<Exclude<SketchEntityType, "bspline">, number> = {
     circle: 1,
     line: 2,
     arc: 3,
@@ -64,9 +75,20 @@ const ENTITY_POINT_COUNTS: Record<SketchEntityType, number> = {
     spline: 2,
 };
 
-/** Number of point refs an entity of `type` exposes (`pointIndex` runs 0..n−1). */
-export function entityPointCount(type: SketchEntityType): number {
-    return ENTITY_POINT_COUNTS[type];
+/**
+ * Number of point refs an entity of `type` exposes (`pointIndex` runs 0..n−1). A bspline's count
+ * follows its fit points, so it needs the entity's `params`.
+ */
+export function entityPointCount(type: SketchEntityType, params?: readonly number[]): number {
+    if (type !== "bspline") return ENTITY_POINT_COUNTS[type];
+    if (params === undefined) throw new Error("A B-spline's point count follows its params");
+    return Math.floor(params.length / 2);
+}
+
+/** The point indexes of a bspline's two ends, undefined for a periodic one (it has none). */
+export function bsplineEndIndexes(entity: SketchEntityData): [number, number] | undefined {
+    if (entity.type !== "bspline" || entity.periodic === true) return undefined;
+    return [0, entityPointCount("bspline", entity.params) - 1];
 }
 
 export interface SketchConstraintData {
@@ -307,20 +329,25 @@ export function profileExternalRefs(data: SketchData): ExternalRefData[] {
 /**
  * Entity ids parallel to the edges `SketchNode.generateShape` emits: the sketch's
  * own entities first, then the profile-role external refs. `sketchProfiles` maps
- * the kernel's source edge indexes through this list on the crossing path.
+ * the kernel's source edge indexes through this list on the crossing path. A spline
+ * repeats its id once per cubic edge; a bspline once per edge it produced on the
+ * loaded kernel — 1 with the kernel's B-spline binding, one per polynomial span on
+ * builds without it (`bsplineEdgeCount`).
  */
 export function shapeEntityIds(data: SketchData): number[] {
     return [
         ...data.entities
             .filter(isProfileEntity)
-            .flatMap(
-                (entity) =>
-                    Array(entity.type === "spline" ? entity.params.length / 2 - 1 : 1).fill(
-                        entity.id,
-                    ) as number[],
-            ),
+            .flatMap((entity) => Array(entityEdgeCount(entity)).fill(entity.id) as number[]),
         ...profileExternalRefs(data).map((r) => r.entityId),
     ];
+}
+
+/** Edges a profile entity contributes to the sketch shape. */
+function entityEdgeCount(entity: SketchEntityData): number {
+    if (entity.type === "spline") return entity.params.length / 2 - 1;
+    if (entity.type === "bspline") return bsplineEdgeCount(entity.params, entity.periodic === true);
+    return 1;
 }
 
 export function isProfileEntity(entity: SketchEntityData): boolean {

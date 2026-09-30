@@ -40,13 +40,24 @@ const POINT_REF_SCHEMA = {
 const ENTITY_SCHEMA = {
     type: "object",
     properties: {
-        type: { type: "string", enum: ["line", "circle", "arc", "point", "ellipse", "spline"] },
+        type: { type: "string", enum: ["line", "circle", "arc", "point", "ellipse", "spline", "bspline"] },
         params: { type: "array", items: { type: "number" } },
         points: {
             type: "array",
             items: { type: "array", items: { type: "number" } },
             description:
-                "spline only, instead of params: the interpolation points [[u,v], ...] in curve order",
+                "spline / bspline, instead of params: the points [[u,v], ...] in curve order (a bspline's fit points)",
+        },
+        parametrization: {
+            type: "string",
+            enum: ["chord", "centripetal", "uniform"],
+            description:
+                "bspline only: chord (default, follows unevenly spaced points without overshoot), centripetal (tighter at sharp turns) or uniform (evenly spaced points only)",
+        },
+        periodic: {
+            type: "boolean",
+            description:
+                "bspline only: a closed, smooth (C2) curve through the points — do NOT repeat the first point as the last",
         },
         construction: {
             type: "boolean",
@@ -212,13 +223,13 @@ const OPS_SCHEMA = {
         entities: {
             type: "array",
             description:
-                "Sketch geometry in sketch (u, v) coordinates: line [x1,y1,x2,y2]; circle [cx,cy,r]; arc [cx,cy,sx,sy,ex,ey] (center, start, end; counter-clockwise); point [x,y]; ellipse [cx,cy,ax,ay,bx,by] (center and two perpendicular axis ends); spline [sx,sy,ex,ey,...interior] or points. Entity ids are the 1-based position in this list. A closed profile needs its points in perimeter order, first point repeated as the last.",
+                "Sketch geometry in sketch (u, v) coordinates: line [x1,y1,x2,y2]; circle [cx,cy,r]; arc [cx,cy,sx,sy,ex,ey] (center, start, end; counter-clockwise); point [x,y]; ellipse [cx,cy,ax,ay,bx,by] (center and two perpendicular axis ends); spline [sx,sy,ex,ey,...interior] or points: uniform Catmull-Rom, one cubic edge per pair of neighbouring points, always open; bspline points (or params [x0,y0,x1,y1,...]): ONE interpolating B-spline edge through every point, chord-length parametrization by default, periodic: true for a closed smooth curve (first point NOT repeated) — prefer it for free-form outlines. Entity ids are the 1-based position in this list. A closed profile of lines/arcs needs its segments in perimeter order, each segment starting where the previous one ends.",
             items: ENTITY_SCHEMA,
         },
         constraints: {
             type: "array",
             description:
-                "Optional sketch constraints, applied after the entities. Omit entirely for a plain sketch of fixed coordinates — constraints are what makes the sketch re-solvable when a dimension changes. Point indexes: line 0=start 1=end; circle 0=center; arc 0=center 1=start 2=end; point 0; ellipse 0=center 1/2=axis ends; spline 0=start 1=end.",
+                "Optional sketch constraints, applied after the entities. Omit entirely for a plain sketch of fixed coordinates — constraints are what makes the sketch re-solvable when a dimension changes. Point indexes: line 0=start 1=end; circle 0=center; arc 0=center 1=start 2=end; point 0; ellipse 0=center 1/2=axis ends; spline 0=start 1=end; bspline i=fit point i (PointOn with a bspline entity slides a point along it — not one of that bspline's own fit points, which lie on it already and fail with \"A B-spline's own point already lies on it\"; Tangent of a line and an open bspline holds the line along the curve's end tangent).",
             items: CONSTRAINT_SCHEMA,
         },
         actions: {
