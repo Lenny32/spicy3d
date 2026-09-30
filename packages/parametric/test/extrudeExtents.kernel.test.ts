@@ -870,3 +870,143 @@ test("linked extrusion targets resolve the starting face before their own entry"
     expect(errors(host)).toEqual([undefined, undefined]);
     expect(errors(target)).toEqual([undefined, undefined]);
 });
+
+describe("automatic next-face extents", () => {
+    test("captures candidates once and retargets after an upstream placement edit", () => {
+        const doc = newDocument();
+        const near = block(doc, "near-next", 5, 0, 10);
+        const far = block(doc, "far-next", 5, 0, 30);
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const candidateIds = [near.id, far.id];
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "next-boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 1,
+                    extent: { type: "next", nodeIds: candidateIds },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(250, 4);
+        block(doc, "later-next", 5, 0, 5);
+        expect(volume(boss)).toBeCloseTo(250, 4);
+        near.transform = Matrix4.fromTranslation(0, 0, 25);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
+        expect(boss.features[0]).toMatchObject({ extent: { type: "next", nodeIds: candidateIds } });
+    });
+
+    test("same-host next cuts resolve against the state entering the feature", () => {
+        const doc = newDocument();
+        const body = block(doc, "next-host", 10);
+        const sketch = topSketch(doc, body);
+        append(body, {
+            id: "next-cut",
+            type: "extrude",
+            sketchId: sketch.id,
+            depth: -1,
+            operation: "cut",
+            extent: { type: "next", nodeIds: [] },
+        });
+        expect(errors(body)).toEqual([undefined, undefined]);
+        expect(volume(body)).toBeCloseTo(3750, 4);
+        body.setFeatureParameter("next-host-base", "depth", 20);
+        expect(errors(body)).toEqual([undefined, undefined]);
+        expect(volume(body)).toBeCloseTo(7500, 4);
+    });
+
+    test("a missing captured candidate fails explicitly", () => {
+        const doc = newDocument();
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(0, 0, 4, 4) });
+        doc.modelManager.addNode(sketch);
+        const body = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "missing-next",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 1,
+                    extent: { type: "next", nodeIds: ["deleted-candidate"] },
+                },
+            ],
+        });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(false);
+        expect(errors(body)[0]).toMatch(/next.*deleted-candidate|deleted-candidate.*next/i);
+    });
+});
+
+test("automatic next curved caps follow cylinder radius and preserve downstream edge references", () => {
+    const doc = newDocument();
+    const circle = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: { entities: [{ id: 1, type: "circle", params: [0, 0, 10] }], constraints: [] },
+    });
+    doc.modelManager.addNode(circle);
+    const cylinder = new ParametricBodyNode({
+        document: doc,
+        id: "next-cylinder",
+        features: [{ id: "next-cylinder-base", type: "extrude", sketchId: circle.id, depth: 20 }],
+    });
+    doc.modelManager.addNode(cylinder);
+    const square = new SketchNode({
+        document: doc,
+        plane: new Plane({ origin: new XYZ({ x: 15, y: 0, z: 0 }), normal: XYZ.unitX, xvec: XYZ.unitY }),
+        data: rect(-2, 8, 2, 12),
+    });
+    doc.modelManager.addNode(square);
+    const boss = new ParametricBodyNode({
+        document: doc,
+        features: [
+            {
+                id: "next-curved-boss",
+                type: "extrude",
+                sketchId: square.id,
+                depth: -1,
+                extent: { type: "next", nodeIds: [cylinder.id] },
+            },
+        ],
+    });
+    doc.modelManager.addNode(boss);
+    expect(errors(boss)).toEqual([undefined]);
+    const expected = (radius: number) =>
+        240 - 4 * (2 * Math.sqrt(radius * radius - 4) + radius * radius * Math.asin(2 / radius));
+    expect(volume(boss)).toBeCloseTo(expected(10), 3);
+    const ids = boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i));
+    const edges = boss.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    const picked = edges.findIndex((edge) =>
+        edge
+            .findSubShapes(ShapeTypes.vertex)
+            .every((vertex) => Math.abs((vertex as IVertex).point().x - 15) < 1e-6),
+    );
+    expect(picked).toBeGreaterThanOrEqual(0);
+    const ref = captureEdgeRef(edges[picked], boss.edgeIdAt(picked));
+    expect(ref.edgeId).not.toBeUndefined();
+    circle.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+        constraints: [],
+    });
+    expect(errors(boss)).toEqual([undefined]);
+    expect(volume(boss)).toBeCloseTo(expected(12), 3);
+    expect(new Set(boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i)))).toEqual(
+        new Set(ids),
+    );
+    append(boss, { id: "next-cap-fillet", type: "fillet", radius: 0.2, edges: [ref] } as never);
+    expect(errors(boss)).toEqual([undefined, undefined]);
+    circle.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 11] }],
+        constraints: [],
+    });
+    expect(errors(boss)).toEqual([undefined, undefined]);
+    expect((boss.features[1] as import("../src/features/feature").FilletFeatureData).edges[0].edgeId).toBe(
+        ref.edgeId,
+    );
+});

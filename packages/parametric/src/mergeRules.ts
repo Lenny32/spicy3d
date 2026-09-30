@@ -30,6 +30,11 @@ const extrudeExtent: MergeValueRule = {
     tag: "type",
     variants: {
         distance: { kind: "object", fields: { type: scalar } },
+        next: {
+            kind: "object",
+            atomic: true,
+            fields: { type: scalar, nodeIds: { kind: "atomic", of: nodeRef }, offset: expression },
+        },
         toObject: {
             kind: "object",
             fields: {

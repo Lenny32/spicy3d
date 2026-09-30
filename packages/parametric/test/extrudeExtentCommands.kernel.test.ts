@@ -37,6 +37,7 @@ import type { ExtrudeEditCommand } from "../src/commands/extrudeEditCommand";
 import {
     EXTENT_DISTANCE,
     EXTENT_FACE_OPACITY,
+    EXTENT_NEXT,
     EXTENT_THROUGH_ALL,
     EXTENT_TO_OBJECT,
 } from "../src/commands/extrudeExtentOptions";
@@ -399,4 +400,56 @@ test("an edit session restores the starting face and changes its depth as one un
     s.doc.history.undo();
     expect(s.left.features[1]).toMatchObject({ depth: 5, startFace: boss.startFace });
     expect(volume(s.left)).toBeCloseTo(4125, 3);
+});
+
+test("next create and edit sessions select automatically and undo an offset edit", async () => {
+    const s = scene();
+    const sketch = new SketchNode({ document: s.doc, plane: planeAtZ(10), data: rect(5, 5, 10, 10) });
+    s.doc.modelManager.addNode(sketch);
+    const { cmd, preview, commit } = extrudeCommand(s, sketch);
+    cmd.extent = EXTENT_NEXT;
+    cmd.depth = -1;
+    expect(cmd.isNext).toBe(true);
+    expect(cmd.hasExtentOffset).toBe(true);
+    expect(preview(-1).meshes.length).toBeGreaterThan(0);
+    commit();
+    expect(volume(s.left)).toBeCloseTo(3750, 4);
+    const cut = s.left.features[1] as ExtrudeFeatureData;
+    expect(cut.extent).toMatchObject({ type: "next" });
+    let opened: string | undefined;
+    s.drive((handler) => {
+        const command = s.app.executingCommand as ExtrudeEditCommand;
+        opened = command.extent;
+        command.refreshNextCandidates();
+        command.extentOffset = -1;
+        (handler as any).data.buildPreview((handler as any).state);
+        handler.keyDown?.(s.app.activeView!, new KeyboardEvent("keydown", { key: "Enter" }));
+    });
+    await s.left.editFeature(cut.id);
+    expect(opened).toBe(EXTENT_NEXT);
+    expect((s.left.features[1] as ExtrudeFeatureData).extent).toMatchObject({ type: "next", offset: -1 });
+    expect(volume(s.left)).toBeCloseTo(3775, 4);
+    s.doc.history.undo();
+    expect(volume(s.left)).toBeCloseTo(3750, 4);
+});
+
+test("next preview and commit refuse an absent forward target without selecting a face", () => {
+    const s = scene();
+    const sketch = new SketchNode({ document: s.doc, plane: planeAtZ(10), data: rect(5, 5, 10, 10) });
+    s.doc.modelManager.addNode(sketch);
+    const { cmd, data, preview, commit } = extrudeCommand(s, sketch);
+    cmd.extent = EXTENT_NEXT;
+    cmd.depth = 1;
+    expect(preview(1).meshes).toEqual([]);
+    expect(data().extentReady?.()).toBe(false);
+    const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
+    try {
+        commit();
+        expect(pub.mock.calls.filter((call) => call[0] === "showToast")).toHaveLength(1);
+    } finally {
+        pub.mockRestore();
+    }
+    expect(s.left.features).toHaveLength(1);
+    expect(s.right.features).toHaveLength(1);
+    expect(s.doc.modelManager.findNodes((node) => node instanceof ParametricBodyNode)).toHaveLength(2);
 });

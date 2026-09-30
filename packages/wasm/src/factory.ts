@@ -291,6 +291,14 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
             faceAncestors: toIntArray(result.faceAncestors),
             edgeAncestors: toIntArray(result.edgeAncestors),
             capFaces: toIntArray(result.capFaces),
+            ...(((result as unknown as { nextTargetIndex?: number }).nextTargetIndex ?? -1) < 0
+                ? {}
+                : {
+                      nextTarget: {
+                          candidateIndex: (result as unknown as { nextTargetIndex: number }).nextTargetIndex,
+                          faceIndex: (result as unknown as { nextFaceIndex: number }).nextFaceIndex,
+                      },
+                  }),
         });
     }
 
@@ -822,6 +830,35 @@ export class ShapeFactory implements IShapeFactory {
                 end.kind === "throughAll" && end.flush === true,
             ],
             "Prism",
+        );
+    }
+
+    prismNextTracked(
+        profile: IShape,
+        direction: XYZ,
+        candidates: IShape[],
+        offset = 0,
+        start?: { face: IFace; offset: number },
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                prismNextTracked?: (...args: unknown[]) => TrackedShapeResult;
+            }
+        ).prismNextTracked;
+        if (typeof binding !== "function")
+            return Result.err("This kernel cannot find the next extrusion face");
+        return convertTrackedShapeResult(
+            binding,
+            [
+                ensureOccShape(profile)[0],
+                direction,
+                ensureOccShape(candidates),
+                offset,
+                start !== undefined,
+                ensureOccShape(start?.face ?? profile)[0],
+                start?.offset ?? 0,
+            ],
+            "Prism next",
         );
     }
 

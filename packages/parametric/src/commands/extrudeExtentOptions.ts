@@ -21,15 +21,23 @@ import type { PreviewOverlay } from "./toolOverlay";
  * `features/extrudeExtent.ts` for what each extent does.
  */
 
+export const EXTENT_NEXT: I18nKeys = "option.command.extent.next";
+
 export const EXTENT_DISTANCE: I18nKeys = "option.command.extent.distance";
 export const EXTENT_TO_OBJECT: I18nKeys = "option.command.extent.toObject";
 export const EXTENT_THROUGH_ALL: I18nKeys = "option.command.extent.throughAll";
 
 /** The Extent combobox's items, in order. */
-export const EXTENT_OPTIONS: I18nKeys[] = [EXTENT_DISTANCE, EXTENT_TO_OBJECT, EXTENT_THROUGH_ALL];
+export const EXTENT_OPTIONS: I18nKeys[] = [
+    EXTENT_DISTANCE,
+    EXTENT_TO_OBJECT,
+    EXTENT_THROUGH_ALL,
+    EXTENT_NEXT,
+];
 
 const TYPES: Record<string, ExtrudeExtent["type"]> = {
     [EXTENT_DISTANCE]: "distance",
+    [EXTENT_NEXT]: "next",
     [EXTENT_TO_OBJECT]: "toObject",
     [EXTENT_THROUGH_ALL]: "throughAll",
 };
@@ -42,6 +50,8 @@ export function extentTypeOfKey(key: I18nKeys): ExtrudeExtent["type"] {
 /** The Extent combobox item of a stored extent (absent = distance). */
 export function extentKeyOf(extent: ExtrudeExtent | undefined): I18nKeys {
     switch (extent?.type) {
+        case "next":
+            return EXTENT_NEXT;
         case "toObject":
             return EXTENT_TO_OBJECT;
         case "throughAll":

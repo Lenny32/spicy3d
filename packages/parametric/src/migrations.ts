@@ -16,8 +16,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * those bodies with "Unknown feature type".
  * 6: associative extrusion starting faces; older builds would ignore the selected surface.
  * 7: variable fillet radius laws; older builds would ignore the law and use a constant radius.
+ * 8: automatic next-face extents with a captured candidate universe.
  */
-export const PARAMETRIC_FORMAT_VERSION = 7;
+export const PARAMETRIC_FORMAT_VERSION = 8;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -59,3 +60,6 @@ registerMigration("parametric", 5, (document) => document);
 
 // parametric 6 → 7: optional fillet radius laws; absent preserves the constant-radius operation.
 registerMigration("parametric", 6, (document) => document);
+
+// parametric 7 → 8: absent Next extents retain the existing boundaries verbatim.
+registerMigration("parametric", 7, (document) => document);
