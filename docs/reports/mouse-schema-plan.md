@@ -129,3 +129,29 @@ question about preserving committed edits, document IDs and feature references w
 native-bearing undo records. This permits an undo reset only after successful reconstruction.
 Failed preparation must retain the original live state. Runtime generation/checkpoint/recovery
 infrastructure must not change any saved payload, envelope or module version.
+
+## #88: associative sweep profile and 3D path
+
+Reserved owning module version: **parametric 9**, following #95's parametric 8.
+Add a new feature variant `{ type: "sweep"; section: LoftSection;
+path: { nodeId: string; edges: EdgeRef[] }; solid?: boolean; roundCorner?: boolean }`,
+alongside the existing feature identity/name fields. Reuse the sketch profile reference and
+existing stable edge references. The path is an ordered connected chain of whole edges,
+resolved in the appropriate source timeline and transformed into the host body's coordinates.
+Reject disconnected, ambiguous or missing inputs without a stored geometry fallback. Defaults
+are solid and existing right-corner behavior. Initially accept one hole-free section; report
+unsupported holes clearly. Existing features and saved fields retain their behavior.
+
+Reuse OCCT's existing pipe-shell sweep and add runtime native history channels for both section
+and path ancestry. Derive output identities from their combined stable source identities,
+including distinct caps and seam/junction edges; enumeration indexes must not masquerade as
+stable references. Require native validity and self-intersection checks with useful failures.
+Profile/path changes must invalidate dependencies and preserve references where topology remains
+compatible. Creation and editing support preview, cancel and one-step undo through UI and MCP.
+
+The pure parametric 8→9 migration is identity. Treat section and path as atomic reference fields
+and declare their node dependencies. Add a NEW immutable fixture with cloud roundtrip/merge,
+old-document compatibility, transformed/timeline inputs, multi-segment 3D and curved paths,
+closed paths, cap/seam identities, upstream changes and downstream fillet references tested.
+Version/migration/rule/fixture edits wait for #95's committed version-8 registration. Native
+artifact builds must preserve all previously integrated native sources and use the shared slot.
