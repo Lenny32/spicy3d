@@ -17,8 +17,10 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * 6: associative extrusion starting faces; older builds would ignore the selected surface.
  * 7: variable fillet radius laws; older builds would ignore the law and use a constant radius.
  * 8: automatic next-face extents with a captured candidate universe.
+ * 9: associative sweeps with a sketch section and an ordered 3D path reference.
+ * 10: associative directional projection of source curves onto one trimmed target face.
  */
-export const PARAMETRIC_FORMAT_VERSION = 8;
+export const PARAMETRIC_FORMAT_VERSION = 10;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -63,3 +65,9 @@ registerMigration("parametric", 6, (document) => document);
 
 // parametric 7 → 8: absent Next extents retain the existing boundaries verbatim.
 registerMigration("parametric", 7, (document) => document);
+
+// parametric 8 → 9: the sweep feature is new; all v8 feature lists retain their meaning verbatim.
+registerMigration("parametric", 8, (document) => document);
+
+// parametric 9 → 10: projection is a new feature; existing records retain their meanings verbatim.
+registerMigration("parametric", 9, (document) => document);

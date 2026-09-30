@@ -155,3 +155,119 @@ old-document compatibility, transformed/timeline inputs, multi-segment 3D and cu
 closed paths, cap/seam identities, upstream changes and downstream fillet references tested.
 Version/migration/rule/fixture edits wait for #95's committed version-8 registration. Native
 artifact builds must preserve all previously integrated native sources and use the shared slot.
+
+## #89: associative directional curve projection
+
+Reserved owning module version: **parametric 10**, following #88's parametric 9. Worker: `mouse_86`.
+Add `{ type: "projection"; source: { nodeId: string; edges: EdgeRef[] };
+target: { nodeId: string; face: ProfileRef }; direction: XYZLike }` alongside existing feature
+identity/name fields. The fixed saved direction is in world coordinates, finite and nonzero;
+convert it consistently when evaluating in host coordinates. Source is an ordered connected
+whole-edge chain, resolved with the shared sweep path resolver. Source/target edits resolve
+their correct timeline states, transforms, dependencies and re-anchored stable references.
+
+Project onto exactly one trimmed face along positive rays. Behind, disjoint, partial, folded
+or multiple forward branches fail explicitly. Prove full transverse source-curve coverage with
+exact curve intersections and lengths; endpoint samples do not establish coverage. Existing
+native projection and boolean operations may be reused without new bindings. Output identities
+combine actual stable source and target ancestry with node/feature provenance, never source
+array slots or invented kernel history. Honest split pieces may share a logical source identity
+and use the existing span/anchor machinery. Output is a curve/wire for later sweep or face-rib use.
+
+The pure parametric 9→10 migration is identity; source and target are atomic reference fields.
+Add a NEW immutable fixture and cloud roundtrip/merge, old-document, missing/ambiguous input,
+oblique direction, trimmed-hole coverage, upstream source/target edits and UI/MCP undo tests.
+Version/migration/rule/fixture edits wait for #88's committed version-9 registration.
+
+## #90: associative face-supported groove or rib
+
+Reserved owning module version: **parametric 11**, following #89's parametric 10. Worker: `mouse_81`.
+Add `{ type: "faceSweep"; section: LoftSection; path: { nodeId: string; edges: EdgeRef[] };
+support: { nodeId: string; face: ProfileRef }; operation: "join" | "cut";
+roundCorner?: boolean }` alongside existing feature identity/name fields. The entering host shape
+is the boolean operand. Resolve the section, ordered whole-edge path and exactly one trimmed
+support face in their correct timelines and host coordinates. Preserve authored section placement.
+
+Require complete exact path coverage on the selected trimmed face and a genuine support-normal
+sweep frame. Any native p-curves needed by that frame must describe the actual referenced curve;
+sampled normals or an ordinary unsupported sweep do not establish this behavior. Require a valid
+swept solid and an attaching/intersecting tracked join or cut. Missing, ambiguous, off-face,
+detached or incompatible inputs fail clearly. Preserve combined section/path/support ancestry
+through the boolean result, and rebuild after any referenced geometry changes.
+
+The pure parametric 10→11 migration is identity. Section, path and support are atomic reference
+fields with declared node dependencies. Add a NEW immutable fixture, old-document and cloud
+roundtrip/merge tests, curved-wall join/cut and upstream-edit proofs, transformed/timeline inputs,
+downstream references, UI/MCP editing, cancel and one-step undo. Version/migration/rule/fixture
+registration waits for #89's committed version-10 step. Native feasibility may proceed earlier
+after the sweep implementation, using the shared serialized build slot. #84 and #85 versions
+remain unassigned until their geometry and concrete payload designs pass review.
+
+## #84: independent fillet corner setbacks
+
+Reserved owning module version: **parametric 12**, following #90's parametric 11. Worker: `mouse_101`.
+Add optional `FilletFeatureData.cornerSetbacks` as a list of
+`{ edges: [EdgeRef, EdgeRef, EdgeRef]; distances: [ParameterValue, ParameterValue, ParameterValue] }`.
+Initially require exactly one triplet matching the feature's three selected edges, one unambiguous
+eligible trihedral corner and a constant radius; reject combination with `radiusLaw` explicitly.
+Absent setbacks preserve existing fillet behavior. Distances are independently editable expressions
+in millimetres, finite and positive, larger than the radius and shorter than each selected arc length.
+
+The accepted native feasibility construction trims actual rolling strips and support surfaces,
+fits a bounded tangent-constrained plate, repairs parameter consistency, sews and validates the
+result. Require the unchanged 0.0001 mm boundary/tolerance limit and 0.001 rad tangent limit,
+valid closed BREP, no self-interference, positive reduced volume, retained constant-radius strips
+and unchanged input geometry/display cache. Finite independent boundary checks are not a global
+mathematical certificate. Unsupported or failed fits return specific errors. The faster experimental
+quadrilateral construction has not met the tangent limit and is not approved for production.
+
+Native tracking must compose actual copy, fillet, trimming and sewing ancestry: retained supports,
+rolling strips, the new corner cap and connector/section edges keep their actual contributing
+input face/edge provenance. Do not manufacture history through positional or nearest-geometry IDs.
+Use a dedicated tracked worker operation for expensive live solves, retaining the existing
+**90-second** deadline, generation termination for cancel/timeout and no main-thread fallback.
+Handle synchronous shape reads and configuration flushes explicitly so they cannot invoke the
+expensive solver on the live main thread. Preview uses explicit recompute/confirm/cancel rather
+than continuous dragging. Explicit synchronous native proof/headless evaluation remains possible.
+
+The pure parametric 11→12 migration is identity. Setback picks and distances form one atomic
+coherent payload, with declared expression dependencies. Add a NEW immutable fixture, old-document
+and cloud roundtrip/merge tests, independent-distance geometry and actual history proofs,
+scalar/expression UI/MCP editing, rollback, cancel and one-step undo. Version/migration/rule/fixture
+registration waits for #90's committed version-11 step. Runtime/native implementation may proceed
+under the serialized native build slot. #85's owning version remains unassigned.
+
+## #85: associative guided loft with a controlling boundary
+
+Reserved owning module version: **parametric 13**, following #84's parametric 12. Worker: `mouse_86`.
+Add optional atomic `LoftFeatureData.guided` containing
+`{ spine: { nodeId: string; edges: EdgeRef[] }; boundary: { nodeId: string; edges: EdgeRef[] } }`.
+The explicitly referenced main spine and one genuinely frame-driving boundary reuse the ordered
+path resolver. Absent guided inputs preserve every existing loft option and default. Initial guided
+scope is 2–16 single hole-free planar sections, two open connected paths with 1–128 native edge
+pieces each and at most 512 generated side faces. Additional passive constraints are not advertised
+as additional shape-driving boundaries.
+
+The accepted native construction retains every section, uses the auxiliary guide trihedron in
+public OCCT NoContact mode and disables forced C1 approximation. It requests longitudinal C2
+surface construction, preserving polygonal section corners. Guided mode supports default/explicit
+C2; guided C0, C1 and ruled requests fail explicitly. Unguided C0/C1/C2, ruled and solid behavior
+remains unchanged. Require an unambiguous monotonic spine intersection with each section plane,
+the proper endpoint span and boundary-section stations, native validity/self-interference checks,
+and complete section and boundary-curve coverage on the generated SIDE faces. A residual curve
+length above 0.00001 mm fails; containment inside a solid and finite point sampling are insufficient.
+No requested section may be discarded, translated or scaled to force compatibility.
+
+Resolve all inputs in host coordinates, with timeline/pre-consumption cache dependencies and
+reanchoring. Native tracking reports actual section/spine derivations; boundary associations need
+actual history or exact whole-curve overlap. New guided outputs without proven ancestry must not
+receive reusable enumeration-index identities; use honest untracked/ephemeral identity or a proven
+semantic role. Require tracked upstream guide edits and compatible downstream references tested.
+Creation/editing supports referenced spine/boundary picks, repicking, preview, clear option errors,
+cancel and one-step undo; MCP captures validated indexes or persistent references before mutation.
+
+The pure parametric 12→13 migration is identity. Guided spine/boundary choices form one atomic
+group with declared node dependencies. Add a NEW immutable fixture, old-document rebuilds,
+reference deletion/conflicts, `.spicy` and cloud manifest/blob roundtrips. Version/migration/rule/
+fixture registration waits for #84's committed version-12 step. Native/runtime/UI/MCP work may
+proceed earlier, with serialized builds from all accepted native sources and all three artifacts.

@@ -310,6 +310,9 @@ const OPS_SCHEMA = {
                 "extrude",
                 "revolve",
                 "loft",
+                "sweep",
+                "editSweep",
+                "projection",
                 "fillet",
                 "chamfer",
                 "thicken",
@@ -328,7 +331,7 @@ const OPS_SCHEMA = {
         id: {
             type: "string",
             description:
-                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/construct.",
+                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/sweep/projection/construct.",
         },
         name: { type: "string", description: "Optional display name for the resulting node" },
         plane: {
@@ -354,6 +357,24 @@ const OPS_SCHEMA = {
                 "sketch: edits applied after entities/constraints; editSketch: the edits to apply — every sketch tool (rectangle, polygon, trim, split, extend, offset, move, rotate, mirror, paste, project edges, construction toggle, auto-constrain, auto-dimension, ...)",
         },
         sketch: { type: "string", description: "The sketch op id (or an existing sketch's node id)" },
+        source: {
+            type: "string",
+            description: "Projection: sketch or body node whose ordered whole edges are projected",
+        },
+        target: {
+            type: "string",
+            description: "Projection: parametric body holding the target trimmed face",
+        },
+        faceIndex: {
+            type: "integer",
+            minimum: 0,
+            description: "Projection target face index, captured as an associative reference",
+        },
+        direction: {
+            ...XYZ_SCHEMA,
+            description:
+                "Projection: fixed finite nonzero WORLD direction; positive rays only. Reverse explicitly. Partial or multiple branches fail.",
+        },
         depth: { description: "Extrude distance in mm (a number or an expression)" },
         symmetric: { type: "boolean", description: "Extrude by `depth` in both directions" },
         startFace: {
@@ -394,7 +415,36 @@ const OPS_SCHEMA = {
         },
         solid: {
             type: "boolean",
-            description: "Loft only: capped ends (default true); false = an open surface",
+            description: "Loft/sweep: capped ends (default true); false = an open surface",
+        },
+        section: {
+            type: "object",
+            properties: {
+                sketchId: { type: "string" },
+                profileIndex: { type: "integer", minimum: 0 },
+            },
+            required: ["sketchId"],
+            description:
+                "Sweep/editSweep: section sketch op id or node id. Omit profileIndex only when it has one profile. Holes are unsupported.",
+        },
+        path: {
+            type: "object",
+            properties: {
+                nodeId: { type: "string" },
+                edgeIndexes: {
+                    type: "array",
+                    items: { type: "integer", minimum: 0 },
+                    minItems: 1,
+                    maxItems: 256,
+                },
+            },
+            required: ["nodeId", "edgeIndexes"],
+            description:
+                "Sweep/editSweep: path source op id or node id and connected whole-edge topology indexes in traversal order. Captures stable source ancestry when available. An untracked source follows only unambiguous geometric re-matches.",
+        },
+        roundCorner: {
+            type: "boolean",
+            description: "Sweep/editSweep: round path junctions (default false).",
         },
         ruled: {
             type: "boolean",
@@ -422,7 +472,7 @@ const OPS_SCHEMA = {
         edgeRefs: {
             type: "array",
             description:
-                "fillet/chamfer: persistent reference objects returned by the edges op; use instead of edgeIndexes. Body-scoped, follows tracked topology through upstream rebuilds.",
+                "fillet/chamfer/projection: persistent reference objects returned by the edges op; use instead of edgeIndexes. Body-scoped, follows tracked topology through upstream rebuilds.",
             items: {
                 type: "object",
                 properties: {
@@ -451,7 +501,7 @@ const OPS_SCHEMA = {
             type: "array",
             items: { type: "number" },
             description:
-                "fillet/chamfer: indexes into the current body edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
+                "fillet/chamfer/projection: indexes into the current source edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
         },
         radius: { description: "Fillet radius in mm" },
         radiusLaw: {
@@ -539,7 +589,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, sweep, editSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },

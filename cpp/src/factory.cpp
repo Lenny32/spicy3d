@@ -163,6 +163,15 @@ struct TrackedShapeResult {
     std::vector<int> capFaces = { };
     int nextTargetIndex = -1;
     int nextFaceIndex = -1;
+    // Pipe-shell ancestry uses section inputs first, then spine inputs,
+    // separately for edges and vertices. These runtime channels retain BOTH
+    // source roles.
+    std::vector<int> pipeFaceEdges = { };
+    std::vector<int> pipeFaceVertices = { };
+    std::vector<int> pipeEdgeVertices = { };
+    std::vector<int> pipeStartEdges = { };
+    std::vector<int> pipeEndEdges = { };
+    std::vector<int> pipeStartFaces = { };
 };
 
 // Error results of a raise caught by guardedEntry (guard.hpp).
@@ -1587,6 +1596,125 @@ public:
             return ShapeResult { TopoDS_Shape(), false, "Failed to sweep profile" };
         }
         return ShapeResult { pipe.Shape(), true, "" };
+    }
+
+    static TrackedShapeResult sweepTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, bool solid,
+        bool roundCorner)
+    {
+        if (section.IsNull() || path.IsNull()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep requires a section and path wire");
+        }
+        if (!BRepCheck_Analyzer(section).IsValid() || !BRepCheck_Analyzer(path).IsValid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep input wire is invalid");
+        }
+        TopoDS_Vertex start, end;
+        TopExp::Vertices(path, start, end);
+        if (start.IsNull() || end.IsNull()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep path has no unambiguous endpoints");
+        }
+        BRepOffsetAPI_MakePipeShell pipe(path);
+        pipe.SetMode(true);
+        pipe.SetIsBuildHistory(true);
+        pipe.SetTransitionMode(roundCorner ? BRepBuilderAPI_RoundCorner
+                                           : BRepBuilderAPI_RightCorner);
+        if (roundCorner) {
+            pipe.SetForceApproxC1(true);
+        }
+        // Preserve the authored section placement; correction makes its plane
+        // orthogonal to the initial tangent, as required for round transitions.
+        pipe.Add(section, start, false, true);
+        pipe.Build();
+        if (!pipe.IsDone()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Failed to sweep section along path");
+        }
+        if (solid && !pipe.MakeSolid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep section does not enclose a solid");
+        }
+        const TopoDS_Shape& output = pipe.Shape();
+        if (output.IsNull() || !BRepCheck_Analyzer(output).IsValid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep result is invalid (BRepCheck_Analyzer)");
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        TrackedShapeResult result { output, true, "",
+            std::vector<int>(faces.Extent(), -1),
+            std::vector<int>(edges.Extent(), -1) };
+        result.faceEdgeMap.assign(faces.Extent(), -1);
+        auto history = [&](TopAbs_ShapeEnum inputType,
+                           const NCollection_IndexedMap<
+                               TopoDS_Shape, TopTools_ShapeMapHasher>& outMap,
+                           std::vector<int>& map, std::vector<int>& ancestors) {
+            int offset = 0;
+            for (const TopoDS_Shape& input :
+                { TopoDS_Shape(section), TopoDS_Shape(path) }) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputMap;
+                TopExp::MapShapes(input, inputType, inputMap);
+                for (int i = 1; i <= inputMap.Extent(); i++) {
+                    mapInputShape(pipe, inputMap.FindKey(i), offset + i - 1, outMap, map,
+                        &ancestors);
+                }
+                offset += inputMap.Extent();
+            }
+        };
+        history(TopAbs_EDGE, faces, result.faceEdgeMap, result.pipeFaceEdges);
+        history(TopAbs_EDGE, edges, result.edgeMap, result.edgeAncestors);
+        std::vector<int> faceVertices(faces.Extent(), -1),
+            edgeVertices(edges.Extent(), -1);
+        history(TopAbs_VERTEX, faces, faceVertices, result.pipeFaceVertices);
+        history(TopAbs_VERTEX, edges, edgeVertices, result.pipeEdgeVertices);
+        auto sectionEdges = [&](const TopoDS_Shape& boundary) {
+            std::vector<int> indexes;
+            if (!boundary.IsNull()) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                    boundaryEdges;
+                TopExp::MapShapes(boundary, TopAbs_EDGE, boundaryEdges);
+                for (int i = 1; i <= boundaryEdges.Extent(); i++) {
+                    int index = edges.FindIndex(boundaryEdges.FindKey(i));
+                    if (index > 0) {
+                        indexes.push_back(index - 1);
+                    }
+                }
+            }
+            return indexes;
+        };
+        result.pipeStartEdges = sectionEdges(pipe.FirstShape());
+        result.pipeEndEdges = sectionEdges(pipe.LastShape());
+        if (solid && !start.IsSame(end)) {
+            // MakeSolid returns section wires, so identify caps through their
+            // complete boundary, never face enumeration or geometric proximity.
+            auto caps = [&](const std::vector<int>& boundary) {
+                std::vector<int> indexes;
+                for (int i = 1; i <= faces.Extent(); i++) {
+                    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                        faceEdges;
+                    TopExp::MapShapes(faces.FindKey(i), TopAbs_EDGE, faceEdges);
+                    bool belongs = faceEdges.Extent() > 0;
+                    for (int j = 1; j <= faceEdges.Extent() && belongs; j++) {
+                        int index = edges.FindIndex(faceEdges.FindKey(j)) - 1;
+                        belongs = std::find(boundary.begin(), boundary.end(), index) != boundary.end();
+                    }
+                    if (belongs) {
+                        indexes.push_back(i - 1);
+                    }
+                }
+                return indexes;
+            };
+            result.pipeStartFaces = caps(result.pipeStartEdges);
+            result.capFaces = caps(result.pipeEndEdges);
+            if (result.pipeStartFaces.size() != 1 || result.capFaces.size() != 1) {
+                return failedResult(GuardTag<TrackedShapeResult> { },
+                    "Sweep cap ancestry is ambiguous");
+            }
+        }
+        return result;
     }
 
     static ShapeResult revolve(const TopoDS_Shape& profile, const Ax1& axis, double rad)
@@ -3352,7 +3480,13 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .property("edgeAncestors", &TrackedShapeResult::edgeAncestors)
         .property("capFaces", &TrackedShapeResult::capFaces)
         .property("nextTargetIndex", &TrackedShapeResult::nextTargetIndex)
-        .property("nextFaceIndex", &TrackedShapeResult::nextFaceIndex);
+        .property("nextFaceIndex", &TrackedShapeResult::nextFaceIndex)
+        .property("pipeFaceEdges", &TrackedShapeResult::pipeFaceEdges)
+        .property("pipeFaceVertices", &TrackedShapeResult::pipeFaceVertices)
+        .property("pipeEdgeVertices", &TrackedShapeResult::pipeEdgeVertices)
+        .property("pipeStartEdges", &TrackedShapeResult::pipeStartEdges)
+        .property("pipeEndEdges", &TrackedShapeResult::pipeEndEdges)
+        .property("pipeStartFaces", &TrackedShapeResult::pipeStartFaces);
 
     class_<ShapeFactory>("ShapeFactory")
         .class_function("box", guardedEntry<&ShapeFactory::box>("ShapeFactory.box"))
@@ -3391,6 +3525,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("combine", guardedEntry<&ShapeFactory::combine>("ShapeFactory.combine"))
         .class_function("fillet", guardedEntry<&ShapeFactory::fillet>("ShapeFactory.fillet"))
         .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
+        .class_function("sweepTracked", guardedEntry<&ShapeFactory::sweepTracked>("ShapeFactory.sweepTracked"))
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
         .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))

@@ -61,6 +61,15 @@ export interface TrackedShape {
     capFaces?: number[];
     /** Runtime-only automatic next-face selection, relative to the supplied candidate shapes. */
     nextTarget?: { candidateIndex: number; faceIndex: number };
+    /** Runtime pipe-shell history. Inputs enumerate section then path, separately by topology type. */
+    pipeHistory?: {
+        faceEdges: number[];
+        faceVertices: number[];
+        edgeVertices: number[];
+        startEdges: number[];
+        endEdges: number[];
+        startFaces: number[];
+    };
 }
 
 export interface IShapeFactory {
@@ -148,6 +157,8 @@ export interface IShapeFactory {
     pushPull(shape: IShape, face: IShape, vec: XYZ): Result<IShape>;
     fuse(bottom: IShape, top: IShape): Result<IShape>;
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
+    /** A single section swept along a path, retaining both profile and path ancestry. */
+    sweepTracked?(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape>;
     /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;
@@ -211,19 +222,22 @@ export interface IShapeFactory {
      * direction, behind the profile, or not bounding it.
      * @unit length offset
      */
-    /** Exact nearest complete candidate cap; never reverses direction or extends a trimmed target. */
+    prismUntilTracked?(
+        profile: IShape,
+        direction: XYZ,
+        untilFace: IFace,
+        offset?: number,
+    ): Result<TrackedShape>;
+    /**
+     * Exact nearest complete candidate cap; never reverses direction or extends a trimmed target.
+     * @unit length offset
+     */
     prismNextTracked?(
         profile: IShape,
         direction: XYZ,
         candidates: IShape[],
         offset?: number,
         start?: { face: IFace; offset: number },
-    ): Result<TrackedShape>;
-    prismUntilTracked?(
-        profile: IShape,
-        direction: XYZ,
-        untilFace: IFace,
-        offset?: number,
     ): Result<TrackedShape>;
     /**
      * Tool prism of `profile` along `direction` through everything in `bounds`: it ends on
