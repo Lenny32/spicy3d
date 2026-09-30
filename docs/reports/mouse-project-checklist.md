@@ -54,13 +54,13 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #81 Reject invalid fillet and chamfer results | — | Done (pushed) | mouse_81 | mouse/81-valid-corners | Pinned native rebuild; 182 worker/integrated tests; tsc/check | 0b8655a0701c86211723a4fe4dc1980f4ea95922 | — |
 | #82 Report actionable fillet and chamfer failure diagnostics | #81 | Done (pushed) | root | mouse/82-corner-diagnostics | Pinned native rebuild; 163 worker/183 integrated tests; tsc/check | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 | — |
 | #83 Support variable-radius fillets | #81, #82; parametric 7 | Done (pushed) | mouse_101 | mouse/83-variable-fillet | 230 worker tests; full9495pass1skip; tsc/check/build/native rebuild | 948b0d5a85576d788e16f6115085817da2c544af | — |
-| #84 Support fillet corner setbacks | #81, #82; shared schema | Native feasibility proof | mouse_101 | mouse/84-corner-setbacks | Independent trimmed corner patch proof; no payload change yet | — | Free-form support feasibility |
-| #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Native feasibility proof | mouse_86 | mouse/85-guide-loft | Rebuilt auxiliary-guide contact proof rejects incompatible construction; no saved schema yet | — | Exact guide/section contact feasibility |
+| #84 Support fillet corner setbacks | #81, #82; reserved parametric 12 | Implementation | mouse_101 | mouse/84-corner-setback | Valid unequal native setbacks; tracked cancellable worker; tsc | — | Final UI/MCP, compatibility and integration |
+| #85 Support guide and boundary curves in parametric lofts | Reserved parametric 13 after #84 | Implementation | mouse_86 | mouse/85-guide-loft | Five accepted native guide/section proofs; approved payload | — | Tracked product API, UI/MCP and compatibility |
 | #86 Expose persistent edge references through MCP | #100 | Done (pushed) | mouse_86 | mouse/86-persistent-edges | 127 worker tests; 57 integrated tests; tsc/check | 91f48b5e47ac39c510a31a0dd0546874f226b224 | — |
 | #87 Add rule-based edge selection through MCP | #86 | Done (pushed) | mouse_86 | mouse/87-edge-selectors | 138 worker tests; 65 integrated tests; tsc/check | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 | — |
-| #88 Add a parametric sweep along a 3D path | Reserved parametric 9 | Feature/UI/MCP implementation | mouse_81 | mouse/88-associative-path-sweep | 43 native/history tests; ordered associative resolver checkpoints | — | Final feature and compatibility validation |
-| #89 Add associative curve projection onto surfaces | Reserved parametric 10 after #88 | Feature/UI/MCP implementation | mouse_86 | mouse/89-associative-projection | 34 geometry/reference tests plus two real rebuild tests; tsc | — | #88 version registration before migration |
-| #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Assigned after sweep | mouse_81 | — | Pending | — | Upstream sweep/projection integration |
+| #88 Add a parametric sweep along a 3D path | Parametric 9 | Done (pushed) | mouse_81 | mouse/88-associative-path-sweep | 293 worker tests; 144 focused and 314 native/fixture checks; tsc/check | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 | — |
+| #89 Add associative curve projection onto surfaces | Parametric 10 | Done (pushed) | mouse_86 | mouse/89-associative-projection | 171 worker tests; 103 combined integration tests; tsc/check | 279b538db3f00c5b26b55ce37f45c791b3afb54b | — |
+| #90 Add a parametric groove or rib along a curve on a face | #88, #89; reserved parametric 11 | Implementation | mouse_81 | mouse/90-face-sweep | Approved Darboux support-normal design and payload | — | Native, UI/MCP and compatibility implementation |
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96, #97 | Done (pushed) | root | mouse/92-async-progress | 462 worker regressions; full9423pass1skip; tsc/check/build | 55abf61354b2c0e6750655a35de7dfafac71932a | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Done (pushed) | mouse_86 | mouse/93-control-nurbs | 1186 worker/182 focused integrated tests; full suite/tsc/check/build | 9d2acd98b606c739832e6fbd87e018a803202f06 | — |
@@ -249,3 +249,22 @@ auxiliary-contact construction fails explicitly, so it is not an accepted loft i
 the agent is testing a constrained multi-patch construction without relaxing geometric tolerances.
 #90 is assigned to mouse_81 after sweep. Root coordinates native builds, reviews, integration and
 publication. These five tickets remain unfinished, and PR #107 remains draft.
+
+## Sweep and projection integration
+
+#88 and #89 are reviewed, integrated, validated and pushed. Sweep follows ordered associative
+3D paths with real native section/path history and stable cap/seam roles. Projection retains
+tracked source and target ancestry, recomputes upstream edits and rejects incomplete, ambiguous
+or untracked coverage. Both have creation/edit previews, cancellation, one-step undo and actual
+MCP JSON-reference workflows. Parametric versions 9 and 10 add pure migrations, atomic references
+and immutable fixtures; document version 2 and sketch version 3 remain unchanged.
+
+**23 of 26 tickets delivered.** Remaining #90, #84 and #85 are delegated concurrently.
+Their approved payloads reserve parametric versions 11, 12 and 13 respectively. Setbacks have
+accepted strict asymmetric native geometry and bounded cancellable worker execution; guided
+lofts have accepted two/three-section native proofs with whole-curve side-boundary validation.
+Their product integrations and compatibility checks are still in progress. PR #107 stays draft.
+
+The combined 23-ticket integration passes **9,650 tests across 583 files, one skip**,
+TypeScript and the production app plus all three plugins. Full-suite guards exposed a missing
+projection sprite name and stale exhaustive MCP/ribbon expectations; these are corrected.

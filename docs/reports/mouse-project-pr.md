@@ -39,7 +39,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #95 | Automatic exact next-face extrusion with bounded search | d3c3715ffce28f8eeb0410b17b808049a17e0cc7 |
 | #98 | Reconstruct open documents in a fresh kernel without reloading | 9f3b108a36f3b889197f286d47cfafa7b617b317 |
 
-Validation: 9,560 passing tests on the latest combined integration, one skip; production build, TypeScript and required
+Validation: 9,650 passing tests across 583 files on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
 concurrency. Existing lint and bundle-size warnings remain. All 21 listed integrations are validated
 and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain
