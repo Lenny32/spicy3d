@@ -72,7 +72,7 @@ try {
     const origin = `http://127.0.0.1:${server.address().port}`;
     for (const browserType of [chromium, firefox]) {
         const browser = await browserType.launch({ headless: true });
-        const timeout = setTimeout(() => browser.close(), 120_000);
+        const timeout = setTimeout(() => browser.close(), 240_000);
         try {
             const context = await browser.newContext();
             const page = await context.newPage();

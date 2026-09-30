@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 export * from "./curve";
+export * from "./filletCornerSetback";
 export * from "./filletRadiusLaw";
 export * from "./geometry";
 export * from "./geometryUtils";

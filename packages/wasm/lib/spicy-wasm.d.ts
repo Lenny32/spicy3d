@@ -565,6 +565,24 @@ export interface IntVector extends ClassHandle, Iterable<number> {
   set(_0: number, _1: number): boolean;
 }
 
+export type CornerSetbackResult = {
+  shape: TopoDS_Shape,
+  isOk: boolean,
+  error: EmbindString,
+  g0Error: number,
+  g1Error: number,
+  fitDistanceError: number,
+  fitAngleError: number,
+  boundaryCount: number,
+  patchCount: number,
+  faceMap: IntVector,
+  edgeMap: IntVector,
+  faceEdgeMap: IntVector,
+  faceAncestors: IntVector,
+  edgeAncestors: IntVector,
+  cornerFaces: IntVector
+};
+
 export type ExportMeshData = {
   position: Array<number>,
   index: Array<number>
@@ -703,6 +721,7 @@ interface EmbindModule {
     fillet2d(_0: TopoDS_Face, _1: TopoDS_Edge, _2: TopoDS_Edge, _3: number): ShapeResult;
     chamfer2d(_0: TopoDS_Face, _1: TopoDS_Edge, _2: TopoDS_Edge, _3: number): ShapeResult;
     polygon(_0: Array<Vector3>): ShapeResult;
+    filletCornerSetbackTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number, _3: Array<number>): CornerSetbackResult;
     bezier(_0: Array<Vector3>, _1: Array<number>): ShapeResult;
     bspline(_0: Array<Vector3>, _1: Array<number>, _2: Array<number>, _3: number, _4: boolean, _5: Array<number>): ShapeResult;
     fillet(_0: TopoDS_Shape, _1: Array<number>, _2: number): ShapeResult;

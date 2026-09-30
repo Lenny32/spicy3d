@@ -3,6 +3,7 @@
 
 import {
     type AsyncTrackedBoolean,
+    type AsyncTrackedCorner,
     type BoundedShapeRequest,
     type IAsyncShapeFactory,
     type IAsyncShapeOperation,
@@ -13,8 +14,10 @@ import {
     ShapeTypes,
     type TrackedShape,
     VisualConfig,
+    validateFilletCornerSetback,
 } from "@spicy3d/core";
 import type { TopoDS_Shape } from "../lib/spicy-wasm";
+import { validateCornerReplica } from "./cornerTracking";
 import { refuseIntersectionJoin, ShapeFactory } from "./factory";
 import { prepareLoftSection } from "./loftSections";
 import { replicaTopology, sameReplicaTopology } from "./replicaTopology";
@@ -25,6 +28,7 @@ import { workerProfile } from "./workerProfile";
 import type {
     BooleanReplica,
     BoundedReplicaRequest,
+    CornerReplica,
     KernelHandle,
     KernelResult,
     ReplicaInput,
@@ -202,6 +206,144 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
             canFallback: false,
             take: () => Result.err(message),
             cancel: () => {},
+        };
+    }
+
+    cornerSetbackTracked(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { mesh?: boolean },
+    ): IAsyncShapeOperation<AsyncTrackedCorner> {
+        const failed = (message: string): IAsyncShapeOperation<AsyncTrackedCorner> => ({
+            ready: Promise.resolve(),
+            canFallback: false,
+            take: () => Result.err(message),
+            cancel: () => {},
+        });
+        const validation = validateFilletCornerSetback(edges, radius, distances);
+        if (validation) return failed(validation);
+        if (this.nativeFailure) return failed(this.nativeFailure);
+        if (this.disabled) return failed("Corner setbacks require the geometry worker; it is unavailable");
+        if (!(shape instanceof OccShape)) return failed("The corner worker requires OCC geometry");
+        let input: OccShape | undefined;
+        let topology: ReplicaTopology;
+        let snapshot: ShapeReplica;
+        let worker: KernelWorkerClient;
+        try {
+            input = copyReplica(shape.shape);
+            topology = replicaTopology(wasm, input.shape);
+            if (!sameReplicaTopology(inspectTopology(shape.shape), topology))
+                throw new Error("Input clone topology order changed");
+            if (edges.some((index) => index >= topology.edges.length))
+                throw new Error("Corner setback edge index is outside the input topology");
+            snapshot = { brep: exportBrep(input.shape, "input"), topology };
+            if (!this.worker) {
+                this.worker = this.createWorker();
+                this.removeFailureHandler = this.worker.addNativeFailureHandler((error) =>
+                    this.quarantine(error.message),
+                );
+            }
+            worker = this.worker;
+        } catch (error) {
+            this.mainTrapped = error instanceof WebAssembly.RuntimeError;
+            if (this.mainTrapped)
+                this.quarantine("Main geometry runtime failed while capturing a corner replica");
+            else input?.dispose();
+            return failed(error instanceof Error ? error.message : "Corner worker input capture failed");
+        }
+        let reply: KernelResult<CornerReplica> | undefined;
+        let consumed = false;
+        const abort = new AbortController();
+        const cancel = () => {
+            if (consumed) return;
+            consumed = true;
+            this.active.delete(cancel);
+            reply = undefined;
+            if (!this.mainTrapped) input?.dispose();
+            input = undefined;
+            abort.abort();
+        };
+        this.active.add(cancel);
+        const ready = worker
+            .request(
+                "cornerSetbackReplica",
+                {
+                    shape: snapshot,
+                    edges: [...edges],
+                    radius,
+                    distances: [...distances],
+                    mesh: options?.mesh,
+                },
+                abort.signal,
+                { terminateOnAbort: true },
+            )
+            .then((answer) => {
+                if (!consumed) reply = answer;
+                if (!answer.ok && (answer.error.code === "timeout" || answer.error.code === "cancelled"))
+                    this.retireWorker(worker);
+            });
+        return {
+            ready,
+            canFallback: false,
+            cancel,
+            take: () => {
+                if (consumed || !reply)
+                    return Result.err(this.nativeFailure ?? "Corner worker result unavailable");
+                consumed = true;
+                this.active.delete(cancel);
+                const answer = reply;
+                reply = undefined;
+                let output: OccShape | undefined;
+                let accepted = false;
+                try {
+                    if (!answer.ok) {
+                        if (answer.error.code === "unavailable") this.disable();
+                        return Result.err(answer.error.message);
+                    }
+                    const malformed = validateCornerReplica(answer.value, topology);
+                    if (malformed) return Result.err(malformed);
+                    output = importReplica(answer.value);
+                    if (!sameReplicaTopology(answer.value.topology, replicaTopology(wasm, output.shape)))
+                        return Result.err("Output corner BREP topology order changed");
+                    if (answer.value.mesh) installMesh(output, answer.value.mesh);
+                    const tracking = answer.value.tracking;
+                    const captured = input;
+                    if (!captured) return Result.err("Corner input replica was released");
+                    input = undefined;
+                    accepted = true;
+                    return Result.ok({
+                        inputs: [captured],
+                        result: {
+                            shape: output,
+                            faceMap: Array.from(tracking.faceMap),
+                            edgeMap: Array.from(tracking.edgeMap),
+                            faceEdgeMap: Array.from(tracking.faceEdgeMap),
+                            faceAncestors: Array.from(tracking.faceAncestors),
+                            edgeAncestors: Array.from(tracking.edgeAncestors),
+                            cornerFaces: Array.from(answer.value.cornerFaces),
+                            g0Error: answer.value.g0Error,
+                            g1Error: answer.value.g1Error,
+                            fitDistanceError: answer.value.fitDistanceError,
+                            fitAngleError: answer.value.fitAngleError,
+                        },
+                    });
+                } catch (error) {
+                    this.mainTrapped = error instanceof WebAssembly.RuntimeError;
+                    if (this.mainTrapped)
+                        this.quarantine("Main geometry runtime failed while installing a corner replica");
+                    return Result.err(
+                        error instanceof Error ? error.message : "Corner worker replica installation failed",
+                    );
+                } finally {
+                    if (!accepted && !this.mainTrapped) {
+                        output?.dispose();
+                        input?.dispose();
+                    }
+                    input = undefined;
+                }
+            },
         };
     }
 

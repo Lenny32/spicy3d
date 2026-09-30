@@ -34,6 +34,13 @@ MainModuleFactory()
             probe?.postMessage("native-returned");
             return result;
         };
+        const corner = module.ShapeFactory.filletCornerSetbackTracked;
+        module.ShapeFactory.filletCornerSetbackTracked = (...args) => {
+            probe?.postMessage("corner-native-entered");
+            const result = corner(...args);
+            probe?.postMessage("corner-native-returned");
+            return result;
+        };
         host = new KernelWorkerHost(new WorkerKernel(module), (response, transfers) =>
             scope.postMessage(response, transfers),
         );

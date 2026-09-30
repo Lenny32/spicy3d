@@ -2,6 +2,8 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    CORNER_SETBACK_ANGLE_TOLERANCE,
+    CORNER_SETBACK_DISTANCE_TOLERANCE,
     Config,
     type Continuity,
     type FilletRadiusSample,
@@ -27,7 +29,9 @@ import {
     Result,
     ShapeTypes,
     ShapeTypeUtils,
+    type TrackedCornerResult,
     type TrackedShape,
+    validateFilletCornerSetback,
     validateFilletRadiusLaw,
     type XYZ,
     type XYZLike,
@@ -427,6 +431,107 @@ export class ShapeFactory implements IShapeFactory {
             [shape.shape, edges, law.flatMap((sample) => [sample.position, sample.radius])],
             "Variable-radius fillet",
         );
+    }
+
+    filletCornerSetbackTracked(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { synchronousProof?: true },
+    ): Result<TrackedCornerResult> {
+        if (typeof window !== "undefined" && options?.synchronousProof !== true)
+            return Result.err("Corner setbacks require cancelable worker evaluation in the browser");
+        const validation = validateFilletCornerSetback(edges, radius, distances);
+        if (validation) return Result.err(validation);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        type NativeCorner = {
+            shape: TopoDS_Shape;
+            isOk: boolean;
+            error: string;
+            g0Error: number;
+            g1Error: number;
+            fitDistanceError: number;
+            fitAngleError: number;
+            faceMap: IntVector;
+            edgeMap: IntVector;
+            faceEdgeMap: IntVector;
+            faceAncestors: IntVector;
+            edgeAncestors: IntVector;
+            cornerFaces: IntVector;
+        };
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                filletCornerSetbackTracked?: (
+                    shape: TopoDS_Shape,
+                    edges: number[],
+                    radius: number,
+                    distances: number[],
+                ) => NativeCorner;
+            }
+        ).filletCornerSetbackTracked;
+        if (!binding) return Result.err("Corner setbacks are not available in this kernel build");
+        let native: NativeCorner;
+        try {
+            native = binding(shape.shape, edges, radius, distances);
+        } catch (error) {
+            return Result.err(kernelCallFailure("Corner setback fillet", error));
+        }
+        // Value-object vector fields are owning wrappers. Cache and delete each exactly once,
+        // including failed results; the plain value object itself has no delete() method.
+        const vectors = {
+            faceMap: native.faceMap,
+            edgeMap: native.edgeMap,
+            faceEdgeMap: native.faceEdgeMap,
+            faceAncestors: native.faceAncestors,
+            edgeAncestors: native.edgeAncestors,
+            cornerFaces: native.cornerFaces,
+        };
+        const nativeShape = native.shape;
+        let accepted = false;
+        try {
+            if (!native.isOk) return Result.err(native.error);
+            const arrays = Object.fromEntries(
+                Object.entries(vectors).map(([key, vector]) => [
+                    key,
+                    Array.from({ length: vector.size() }, (_, index) => vector.get(index)!),
+                ]),
+            ) as Record<keyof typeof vectors, number[]>;
+            if (
+                arrays.cornerFaces.length !== 1 ||
+                arrays.cornerFaces.some(
+                    (index) => !Number.isInteger(index) || index < 0 || index >= arrays.faceMap.length,
+                ) ||
+                !Number.isFinite(native.g0Error) ||
+                native.g0Error < 0 ||
+                native.g0Error > CORNER_SETBACK_DISTANCE_TOLERANCE ||
+                !Number.isFinite(native.g1Error) ||
+                native.g1Error < 0 ||
+                native.g1Error > CORNER_SETBACK_ANGLE_TOLERANCE ||
+                !Number.isFinite(native.fitDistanceError) ||
+                native.fitDistanceError < 0 ||
+                native.fitDistanceError > CORNER_SETBACK_DISTANCE_TOLERANCE ||
+                !Number.isFinite(native.fitAngleError) ||
+                native.fitAngleError < 0 ||
+                native.fitAngleError > CORNER_SETBACK_ANGLE_TOLERANCE
+            )
+                return Result.err(
+                    "Corner setback kernel returned invalid construction history or continuity",
+                );
+            const result: TrackedCornerResult = {
+                shape: OccShape.wrap(nativeShape),
+                ...arrays,
+                g0Error: native.g0Error,
+                g1Error: native.g1Error,
+                fitDistanceError: native.fitDistanceError,
+                fitAngleError: native.fitAngleError,
+            };
+            accepted = true;
+            return Result.ok(result);
+        } finally {
+            for (const vector of Object.values(vectors)) vector.delete();
+            if (!accepted) nativeShape.delete();
+        }
     }
 
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape> {

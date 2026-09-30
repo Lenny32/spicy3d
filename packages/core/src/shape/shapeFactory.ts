@@ -203,6 +203,20 @@ export interface IShapeFactory {
         edges: number[],
         law: readonly FilletRadiusSample[],
     ): Result<TrackedShape>;
+    /**
+     * Three independent arc-length setbacks at one trihedral corner, constant radius only.
+     * Expensive synchronous entry for deliberate kernel evaluation; live features use the
+     * strict cancelable worker capability and never fall back to this main-thread method.
+     * Distances are supplied in millimetres, one per selected edge.
+     * @unit length radius
+     */
+    filletCornerSetbackTracked?(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { synchronousProof?: true },
+    ): Result<TrackedCornerResult>;
     /** @unit length distance */
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape>;
     prismTracked?(shape: IShape, vec: XYZ): Result<TrackedShape>;
@@ -335,6 +349,20 @@ export interface AsyncTrackedBoolean {
     readonly inputs: IShape[];
 }
 
+/** Kernel construction roles and measured quality, never stored in a document. */
+export interface TrackedCornerResult extends TrackedShape {
+    cornerFaces: number[];
+    g0Error: number;
+    g1Error: number;
+    fitDistanceError: number;
+    fitAngleError: number;
+}
+
+export interface AsyncTrackedCorner {
+    readonly result: TrackedCornerResult;
+    readonly inputs: IShape[];
+}
+
 export interface IAsyncShapeFactory {
     readonly available?: boolean;
     /** Persistent native failure. Synchronous compatibility paths must not bypass this quarantine. */
@@ -346,6 +374,14 @@ export interface IAsyncShapeFactory {
         tools: IShape[],
         options?: { mesh?: boolean },
     ): IAsyncShapeOperation<AsyncTrackedBoolean> | undefined;
+    /** Strict worker path; absent/unavailable must produce a useful feature error, no sync fallback. */
+    cornerSetbackTracked?(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { mesh?: boolean },
+    ): IAsyncShapeOperation<AsyncTrackedCorner> | undefined;
 }
 
 /** Whitelisted factory operations. Native handles never leave their owning realm. */
