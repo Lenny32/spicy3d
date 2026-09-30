@@ -5,6 +5,7 @@
 #include <emscripten/val.h>
 
 #include "guard.hpp"
+#include "guidedLoftValidation.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BOPAlgo_BuilderFace.hxx>
@@ -103,6 +104,7 @@
 #include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
 #include <iomanip>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1498,40 +1500,50 @@ public:
         return ShapeResult { cylinder.Solid(), true, "" };
     }
 
-    // Experimental guide-contact feasibility proof. Not a saved feature or a public TS API.
-    static ShapeResult loftGuideProof(const ShapeArray& sections, const TopoDS_Wire& spine,
-        const TopoDS_Wire& auxiliary, bool solid, int guideMode)
+    static TrackedShapeResult loftGuidedTracked(const ShapeArray& sections, const TopoDS_Wire& originalSpine,
+        const TopoDS_Wire& originalAuxiliary, bool solid)
     {
-        const auto profiles = vecFromJSArray<TopoDS_Shape>(sections);
-        if (profiles.size() < 2)
-            return ShapeResult { TopoDS_Shape(), false, "Guided loft needs at least two sections" };
-        if (guideMode < 0 || guideMode > 2)
-            return ShapeResult { TopoDS_Shape(), false, "Unsupported guided loft diagnostic mode" };
+        auto originalInputs = vecFromJSArray<TopoDS_Shape>(sections);
+        if (originalInputs.size() < 2 || originalInputs.size() > 16)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft requires 2 to 16 sections" };
+        const size_t sectionCount = originalInputs.size();
+        originalInputs.push_back(originalSpine);
+        originalInputs.push_back(originalAuxiliary);
+        std::vector<std::unique_ptr<BRepBuilderAPI_Copy>> copies;
+        std::vector<TopoDS_Shape> copiedInputs;
+        for (const auto& input : originalInputs) {
+            if (input.IsNull())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input is missing" };
+            auto copy = std::make_unique<BRepBuilderAPI_Copy>(input, true, false);
+            if (!copy->IsDone())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input copy failed" };
+            copiedInputs.push_back(copy->Shape());
+            copies.push_back(std::move(copy));
+        }
+        const std::vector<TopoDS_Shape> profiles(copiedInputs.begin(), copiedInputs.begin() + sectionCount);
+        const auto spine = TopoDS::Wire(copiedInputs[sectionCount]);
+        const auto auxiliary = TopoDS::Wire(copiedInputs[sectionCount + 1]);
+        const auto error = GuidedLoft::validate(profiles, spine, auxiliary);
+        if (!error.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, error };
         BRepOffsetAPI_MakePipeShell builder(spine);
-        builder.SetMode(auxiliary, false, guideMode == 2 ? BRepFill_ContactOnBorder : guideMode == 1 ? BRepFill_Contact
-                                                                                                     : BRepFill_NoContact);
+        builder.SetMode(auxiliary, false, BRepFill_NoContact);
         builder.SetTolerance(1e-7, 1e-7, 1e-5);
         builder.SetMaxDegree(12);
         builder.SetMaxSegments(64);
         builder.SetForceApproxC1(false);
-        // OCCT's ContactOnBorder automatic law clears previous sections on every Add.
-        // Use one section deliberately; validate every requested section against the resulting sides.
         builder.SetIsBuildHistory(true);
-        if (guideMode == 2)
-            builder.Add(profiles.front(), false, false);
-        else {
-            for (const auto& profile : profiles)
-                builder.Add(profile, false, false);
-        }
+        for (const auto& profile : profiles)
+            builder.Add(profile, false, false);
         if (!builder.IsReady())
-            return ShapeResult { TopoDS_Shape(), false, "Incompatible guided loft sections" };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Incompatible guided loft sections" };
         builder.Build();
         if (!builder.IsDone())
-            return ShapeResult { TopoDS_Shape(), false, "Guided loft contact failed (status " + std::to_string(static_cast<int>(builder.GetStatus())) + ")" };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft contact failed (status " + std::to_string(static_cast<int>(builder.GetStatus())) + ")" };
         if (solid && !builder.MakeSolid())
-            return ShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
         if (!BRepCheck_Analyzer(builder.Shape()).IsValid())
-            return ShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
         BRep_Builder topology;
         TopoDS_Compound sides;
         topology.MakeCompound(sides);
@@ -1547,27 +1559,124 @@ public:
                 }
             }
         }
+        if (seen.Extent() > 512)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft exceeds the 512-side-face budget" };
         if (seen.IsEmpty())
-            return ShapeResult { TopoDS_Shape(), false, "Guided loft side history missing" };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft side history missing" };
         for (const auto& profile : profiles) {
-            BRepAlgoAPI_Cut uncovered(profile, sides);
+            BRepAlgoAPI_Cut uncovered;
+            NCollection_List<TopoDS_Shape> arguments, tools;
+            arguments.Append(profile);
+            tools.Append(sides);
+            uncovered.SetArguments(arguments);
+            uncovered.SetTools(tools);
+            uncovered.SetNonDestructive(true);
             uncovered.Build();
-            if (!uncovered.IsDone())
-                return ShapeResult { TopoDS_Shape(), false, "Guided loft section coverage failed" };
+            if (!uncovered.IsDone() || uncovered.HasErrors())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft section coverage failed" };
             GProp_GProps remaining;
             BRepGProp::LinearProperties(uncovered.Shape(), remaining);
-            if (remaining.Mass() > 1e-5)
-                return ShapeResult { TopoDS_Shape(), false, "Guides are incompatible with a requested section" };
+            if (!std::isfinite(remaining.Mass()) || remaining.Mass() < 0 || remaining.Mass() > 1e-5)
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guides are incompatible with a requested section" };
         }
-        BRepAlgoAPI_Cut uncoveredGuide(auxiliary, sides);
+        BRepAlgoAPI_Cut uncoveredGuide;
+        NCollection_List<TopoDS_Shape> guideArguments, guideTools;
+        guideArguments.Append(auxiliary);
+        guideTools.Append(sides);
+        uncoveredGuide.SetArguments(guideArguments);
+        uncoveredGuide.SetTools(guideTools);
+        uncoveredGuide.SetNonDestructive(true);
         uncoveredGuide.Build();
-        if (!uncoveredGuide.IsDone())
-            return ShapeResult { TopoDS_Shape(), false, "Guided loft boundary coverage failed" };
+        if (!uncoveredGuide.IsDone() || uncoveredGuide.HasErrors())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft boundary coverage failed" };
         GProp_GProps guideRemaining;
         BRepGProp::LinearProperties(uncoveredGuide.Shape(), guideRemaining);
-        if (guideRemaining.Mass() > 1e-5)
-            return ShapeResult { builder.Shape(), false, "Auxiliary guide does not lie completely on the loft sides; residual length " + std::to_string(guideRemaining.Mass()) + "; side faces " + std::to_string(seen.Extent()) };
-        return ShapeResult { builder.Shape(), true, "" };
+        if (!std::isfinite(guideRemaining.Mass()) || guideRemaining.Mass() < 0 || guideRemaining.Mass() > 1e-5)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Auxiliary guide does not lie completely on the loft sides; residual length " + std::to_string(guideRemaining.Mass()) + "; side faces " + std::to_string(seen.Extent()) };
+        const TopoDS_Shape& output = builder.Shape();
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        TrackedShapeResult result { output, true, "",
+            std::vector<int>(faces.Extent(), -1),
+            std::vector<int>(edges.Extent(), -1) };
+        result.faceEdgeMap.assign(faces.Extent(), -1);
+        bool historyMissing = false;
+        auto history = [&](TopAbs_ShapeEnum inputType,
+                           const NCollection_IndexedMap<
+                               TopoDS_Shape, TopTools_ShapeMapHasher>& outMap,
+                           std::vector<int>& map, std::vector<int>& ancestors) {
+            int offset = 0;
+            for (size_t inputIndex = 0; inputIndex < originalInputs.size(); inputIndex++) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputMap;
+                TopExp::MapShapes(originalInputs[inputIndex], inputType, inputMap);
+                for (int i = 1; i <= inputMap.Extent(); i++) {
+                    const auto& copied = copies[inputIndex]->ModifiedShape(inputMap.FindKey(i));
+                    if (copied.IsNull()) {
+                        historyMissing = true;
+                        continue;
+                    }
+                    mapInputShape(builder, copied, offset + i - 1, outMap, map,
+                        &ancestors);
+                }
+                offset += inputMap.Extent();
+            }
+        };
+        history(TopAbs_EDGE, faces, result.faceEdgeMap, result.pipeFaceEdges);
+        history(TopAbs_EDGE, edges, result.edgeMap, result.edgeAncestors);
+        std::vector<int> faceVertices(faces.Extent(), -1),
+            edgeVertices(edges.Extent(), -1);
+        history(TopAbs_VERTEX, faces, faceVertices, result.pipeFaceVertices);
+        history(TopAbs_VERTEX, edges, edgeVertices, result.pipeEdgeVertices);
+        if (historyMissing)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input copy lost topology ancestry" };
+        auto sectionEdges = [&](const TopoDS_Shape& boundary) {
+            std::vector<int> indexes;
+            if (!boundary.IsNull()) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                    boundaryEdges;
+                TopExp::MapShapes(boundary, TopAbs_EDGE, boundaryEdges);
+                for (int i = 1; i <= boundaryEdges.Extent(); i++) {
+                    int index = edges.FindIndex(boundaryEdges.FindKey(i));
+                    if (index > 0) {
+                        indexes.push_back(index - 1);
+                    }
+                }
+            }
+            return indexes;
+        };
+        result.pipeStartEdges = sectionEdges(builder.FirstShape());
+        result.pipeEndEdges = sectionEdges(builder.LastShape());
+        if (solid) {
+            // MakeSolid returns section wires, so identify caps through their
+            // complete boundary, never face enumeration or geometric proximity.
+            auto caps = [&](const std::vector<int>& boundary) {
+                std::vector<int> indexes;
+                for (int i = 1; i <= faces.Extent(); i++) {
+                    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                        faceEdges;
+                    TopExp::MapShapes(faces.FindKey(i), TopAbs_EDGE, faceEdges);
+                    bool belongs = faceEdges.Extent() > 0;
+                    for (int j = 1; j <= faceEdges.Extent() && belongs; j++) {
+                        int index = edges.FindIndex(faceEdges.FindKey(j)) - 1;
+                        belongs = std::find(boundary.begin(), boundary.end(), index) != boundary.end();
+                    }
+                    if (belongs) {
+                        indexes.push_back(i - 1);
+                    }
+                }
+                return indexes;
+            };
+            result.pipeStartFaces = caps(result.pipeStartEdges);
+            result.capFaces = caps(result.pipeEndEdges);
+            if (result.pipeStartFaces.size() != 1 || result.capFaces.size() != 1) {
+                return failedResult(GuardTag<TrackedShapeResult> { },
+                    "Guided loft cap ancestry is ambiguous");
+            }
+        }
+        if (seen.Extent() + result.pipeStartFaces.size() + result.capFaces.size() != static_cast<size_t>(faces.Extent()))
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft side ancestry is incomplete" };
+        return result;
     }
 
     static ShapeResult sweep(const ShapeArray& sections, const TopoDS_Wire& path, bool isFrenet, bool isForceC1)
@@ -3497,7 +3606,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("cylinder", guardedEntry<&ShapeFactory::cylinder>("ShapeFactory.cylinder"))
         .class_function("pyramid", guardedEntry<&ShapeFactory::pyramid>("ShapeFactory.pyramid"))
         .class_function("sweep", guardedEntry<&ShapeFactory::sweep>("ShapeFactory.sweep"))
-        .class_function("loftGuideProof", guardedEntry<&ShapeFactory::loftGuideProof>("ShapeFactory.loftGuideProof"))
+        .class_function("loftGuidedTracked", guardedEntry<&ShapeFactory::loftGuidedTracked>("ShapeFactory.loftGuidedTracked"))
         .class_function("revolve", guardedEntry<&ShapeFactory::revolve>("ShapeFactory.revolve"))
         .class_function("prism", guardedEntry<&ShapeFactory::prism>("ShapeFactory.prism"))
         .class_function("pushPull", guardedEntry<&ShapeFactory::pushPull>("ShapeFactory.pushPull"))

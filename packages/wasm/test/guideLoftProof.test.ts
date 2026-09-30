@@ -10,8 +10,7 @@ import {
     ShapeTypes,
     XYZ,
 } from "@spicy3d/core";
-import type { ShapeResult, TopoDS_Shape, TopoDS_Wire } from "../lib/spicy-wasm";
-import { OccShape } from "../src/shape";
+import { OccShapeConverter } from "../src/converter";
 import { createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
 
@@ -40,33 +39,14 @@ function section(z: number, right: number): IWire {
     );
 }
 
-function nativeProof(sections: IWire[], spine: IWire, guide: IWire, guideMode = 0): ShapeResult {
-    const native = (shape: IShape): TopoDS_Shape => {
-        if (!(shape instanceof OccShape)) throw new Error("Expected native proof shape");
-        return shape.shape;
-    };
-    const binding = wasm.ShapeFactory as unknown as {
-        loftGuideProof(
-            sections: TopoDS_Shape[],
-            spine: TopoDS_Wire,
-            guide: TopoDS_Wire,
-            solid: boolean,
-            guideMode: number,
-        ): ShapeResult;
-    };
-    return binding.loftGuideProof(
-        sections.map(native),
-        native(spine) as TopoDS_Wire,
-        native(guide) as TopoDS_Wire,
-        true,
-        guideMode,
-    );
+function nativeProof(sections: IWire[], spine: IWire, guide: IWire) {
+    return factory.loftGuidedTracked(sections, spine, guide, true);
 }
 
-function prove(sections: IWire[], spine: IWire, guide: IWire, guideMode = 0): IShape {
-    const result = nativeProof(sections, spine, guide, guideMode);
+function prove(sections: IWire[], spine: IWire, guide: IWire): IShape {
+    const result = nativeProof(sections, spine, guide);
     expect(result.isOk, result.error).toBe(true);
-    return keep(OccShape.wrap(result.shape));
+    return keep(result.value.shape);
 }
 
 function helicalFixture(radius = Math.sqrt(34)) {
@@ -122,45 +102,132 @@ test("NoContact controls a complete helical boundary between unchanged sections"
 test("NoContact preserves a genuinely authored intermediate section on the guided sides", () => {
     const { first, second, spine, guide, at } = helicalFixture();
     const middle = at(10, Math.PI / 4);
-    const guided = prove([first, middle, second], spine, guide, 0);
+    const guided = prove([first, middle, second], spine, guide);
     expect(guided.checkShape()).toBe(true);
     expect(guided.volume()).toBeGreaterThan(1000);
 });
 
 test("NoContact rejects an interior guide despite section containment", () => {
     const { first, second, spine, guide } = helicalFixture(2);
-    const native = nativeProof([first, second], spine, guide, 0);
-    try {
-        expect(native.isOk).toBe(false);
-        expect(native.error).toMatch(/does not lie completely on the loft sides/);
-    } finally {
-        native.shape.delete();
-    }
+    const native = nativeProof([first, second], spine, guide);
+    expect(native.isOk).toBe(false);
+    expect(native.error).toMatch(/boundary.*section|does not lie completely/);
 });
 
 test("NoContact rejects an intermediate section incompatible with the boundary guide", () => {
     const { first, second, spine, guide, at } = helicalFixture();
     const wrongMiddle = keep(at(10, Math.PI / 4).transformedMul(Matrix4.fromTranslation(1, 0, 0)) as IWire);
-    const native = nativeProof([first, wrongMiddle, second], spine, guide, 0);
-    try {
-        expect(native.isOk).toBe(false);
-        expect(native.error).toMatch(/incompatible|does not lie completely/);
-    } finally {
-        native.shape.delete();
-    }
+    const native = nativeProof([first, wrongMiddle, second], spine, guide);
+    expect(native.isOk).toBe(false);
+    expect(native.error).toMatch(/incompatible|boundary.*section|does not lie completely/);
 });
 
-test("NoContact resolves an oppositely oriented boundary guide without dropping full coverage", () => {
+test("NoContact resolves oppositely oriented paths without dropping full coverage", () => {
     const { first, second, spine, guide } = helicalFixture();
     const reversed = keep(guide.clone() as IWire);
+    const reversedSpine = keep(spine.clone() as IWire);
     reversed.reserve();
-    const native = nativeProof([first, second], spine, reversed, 0);
-    try {
-        expect(native.isOk, native.error).toBe(true);
-        const guided = OccShape.wrap(native.shape);
-        expect(guided.checkShape()).toBe(true);
-        expect(guided.volume()).toBeGreaterThan(1000);
-    } finally {
-        native.shape.delete();
-    }
+    reversedSpine.reserve();
+    const guided = prove([first, second], reversedSpine, reversed);
+    expect(guided.checkShape()).toBe(true);
+    expect(guided.volume()).toBeGreaterThan(1000);
+});
+
+test.each([true, false])("guided request accepted=%s preserves unprimed input BREP", (accepted) => {
+    const { first, second, spine, guide } = helicalFixture(accepted ? Math.sqrt(34) : 2);
+    const inputs = [first, second, spine, guide];
+    const converter = new OccShapeConverter();
+    const before = inputs.map((input) => unwrapOk(converter.convertToBrep(input)));
+    const result = nativeProof([first, second], spine, guide);
+    expect(result.isOk, result.error).toBe(accepted);
+    if (result.isOk) keep(result.value.shape);
+    expect(inputs.map((input) => unwrapOk(converter.convertToBrep(input)))).toEqual(before);
+});
+
+test.each([true, false])("guided request accepted=%s preserves existing display meshes", (accepted) => {
+    const { first, second, spine, guide } = helicalFixture(accepted ? Math.sqrt(34) : 2);
+    const inputs = [first, second, spine, guide];
+    const meshes = inputs.map((input) => input.mesh);
+    const snapshot = () =>
+        inputs.map((input) => ({
+            edgePosition: input.mesh.edges?.position.slice(),
+            facePosition: input.mesh.faces?.position.slice(),
+            faceNormal: input.mesh.faces?.normal.slice(),
+            faceIndex: input.mesh.faces?.index.slice(),
+        }));
+    const snapshots = snapshot();
+    const result = nativeProof([first, second], spine, guide);
+    expect(result.isOk, result.error).toBe(accepted);
+    if (result.isOk) keep(result.value.shape);
+    expect(snapshot()).toEqual(snapshots);
+    for (const [index, input] of inputs.entries()) expect(input.mesh).toBe(meshes[index]);
+});
+
+test("guided tracking maps actual original section topology and separate semantic caps", () => {
+    const { first, second, spine, guide } = helicalFixture();
+    const result = nativeProof([first, second], spine, guide);
+    expect(result.isOk, result.error).toBe(true);
+    const tracked = result.value;
+    keep(tracked.shape);
+    expect(tracked.faceMap).toHaveLength(tracked.shape.findSubShapes(ShapeTypes.face).length);
+    expect(tracked.edgeMap).toHaveLength(tracked.shape.findSubShapes(ShapeTypes.edge).length);
+    expect(tracked.pipeHistory?.startFaces).toHaveLength(1);
+    expect(tracked.capFaces).toHaveLength(1);
+    expect(tracked.pipeHistory?.startFaces).not.toEqual(tracked.capFaces);
+    expect(tracked.pipeHistory?.faceEdges.length).toBeGreaterThanOrEqual(8);
+    expect(tracked.pipeHistory?.edgeVertices.length).toBeGreaterThanOrEqual(8);
+    expect(
+        tracked.pipeHistory?.faceEdges
+            .filter((_, index) => index % 2 === 1)
+            .every((input) => input >= 0 && input < 10),
+    ).toBe(true);
+});
+
+test.each([
+    "overshoot",
+    "closed",
+    "multiple-plane-crossings",
+])("guided loft rejects a %s main spine", (kind) => {
+    const { first, second, guide } = helicalFixture();
+    const points =
+        kind === "overshoot"
+            ? [
+                  { x: 0, y: 0, z: -1 },
+                  { x: 0, y: 0, z: 21 },
+              ]
+            : kind === "closed"
+              ? [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 0, y: 0, z: 20 },
+                    { x: 1, y: 0, z: 10 },
+                    { x: 0, y: 0, z: 0 },
+                ]
+              : [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 0, y: 0, z: 10 },
+                    { x: 1, y: 0, z: -1 },
+                    { x: 1, y: 0, z: 20 },
+                ];
+    const spine = keep(unwrapOk(factory.polygon(points)));
+    const result = nativeProof([first, second], spine, guide);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toMatch(/open|exactly once|monotonic/);
+});
+
+test("guided loft rejects a nonplanar closed section", () => {
+    const { second, spine, guide } = helicalFixture();
+    const warped = keep(
+        unwrapOk(
+            factory.polygon([
+                { x: -5, y: -3, z: 0 },
+                { x: 5, y: -3, z: 0 },
+                { x: 5, y: 3, z: 1 },
+                { x: -5, y: 3, z: 0 },
+                { x: -5, y: -3, z: 0 },
+            ]),
+        ),
+    );
+    const result = nativeProof([warped, second], spine, guide);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toMatch(/planar/);
 });

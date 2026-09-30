@@ -1119,6 +1119,26 @@ export class ShapeFactory implements IShapeFactory {
             for (const shape of created) shape.dispose();
         }
     }
+    loftGuidedTracked(
+        sections: IWire[],
+        spine: IWire,
+        boundary: IWire,
+        solid: boolean,
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                loftGuidedTracked?: (...args: unknown[]) => TrackedShapeResult;
+            }
+        ).loftGuidedTracked;
+        if (!binding) return Result.err("Guided loft requires a newer geometry kernel");
+        if (sections.length < 2 || sections.length > 16)
+            return Result.err("Guided loft requires 2 to 16 sections");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(sections), ensureOccShape(spine)[0], ensureOccShape(boundary)[0], solid],
+            "GuidedLoft",
+        );
+    }
     curveProjection(curve: IEdge | IWire, targetFace: IFace, vec: XYZ): Result<IShape> {
         return convertShapeResult(
             wasm.ShapeFactory.curveProjection,

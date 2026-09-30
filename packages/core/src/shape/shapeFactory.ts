@@ -275,6 +275,16 @@ export interface IShapeFactory {
      * chains are an error naming the section. Open chains are valid sections.
      */
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
+    /**
+     * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
+     * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
+     */
+    loftGuidedTracked?(
+        sections: IWire[],
+        spine: IWire,
+        boundary: IWire,
+        solid: boolean,
+    ): Result<TrackedShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(
         shape: IShape,
