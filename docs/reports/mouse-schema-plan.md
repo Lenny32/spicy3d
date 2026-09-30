@@ -178,3 +178,27 @@ The pure parametric 9→10 migration is identity; source and target are atomic r
 Add a NEW immutable fixture and cloud roundtrip/merge, old-document, missing/ambiguous input,
 oblique direction, trimmed-hole coverage, upstream source/target edits and UI/MCP undo tests.
 Version/migration/rule/fixture edits wait for #88's committed version-9 registration.
+
+## #90: associative face-supported groove or rib
+
+Reserved owning module version: **parametric 11**, following #89's parametric 10. Worker: `mouse_81`.
+Add `{ type: "faceSweep"; section: LoftSection; path: { nodeId: string; edges: EdgeRef[] };
+support: { nodeId: string; face: ProfileRef }; operation: "join" | "cut";
+roundCorner?: boolean }` alongside existing feature identity/name fields. The entering host shape
+is the boolean operand. Resolve the section, ordered whole-edge path and exactly one trimmed
+support face in their correct timelines and host coordinates. Preserve authored section placement.
+
+Require complete exact path coverage on the selected trimmed face and a genuine support-normal
+sweep frame. Any native p-curves needed by that frame must describe the actual referenced curve;
+sampled normals or an ordinary unsupported sweep do not establish this behavior. Require a valid
+swept solid and an attaching/intersecting tracked join or cut. Missing, ambiguous, off-face,
+detached or incompatible inputs fail clearly. Preserve combined section/path/support ancestry
+through the boolean result, and rebuild after any referenced geometry changes.
+
+The pure parametric 10→11 migration is identity. Section, path and support are atomic reference
+fields with declared node dependencies. Add a NEW immutable fixture, old-document and cloud
+roundtrip/merge tests, curved-wall join/cut and upstream-edit proofs, transformed/timeline inputs,
+downstream references, UI/MCP editing, cancel and one-step undo. Version/migration/rule/fixture
+registration waits for #89's committed version-10 step. Native feasibility may proceed earlier
+after the sweep implementation, using the shared serialized build slot. #84 and #85 versions
+remain unassigned until their geometry and concrete payload designs pass review.
