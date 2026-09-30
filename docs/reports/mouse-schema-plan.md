@@ -155,3 +155,26 @@ old-document compatibility, transformed/timeline inputs, multi-segment 3D and cu
 closed paths, cap/seam identities, upstream changes and downstream fillet references tested.
 Version/migration/rule/fixture edits wait for #95's committed version-8 registration. Native
 artifact builds must preserve all previously integrated native sources and use the shared slot.
+
+## #89: associative directional curve projection
+
+Reserved owning module version: **parametric 10**, following #88's parametric 9. Worker: `mouse_86`.
+Add `{ type: "projection"; source: { nodeId: string; edges: EdgeRef[] };
+target: { nodeId: string; face: ProfileRef }; direction: XYZLike }` alongside existing feature
+identity/name fields. The fixed saved direction is in world coordinates, finite and nonzero;
+convert it consistently when evaluating in host coordinates. Source is an ordered connected
+whole-edge chain, resolved with the shared sweep path resolver. Source/target edits resolve
+their correct timeline states, transforms, dependencies and re-anchored stable references.
+
+Project onto exactly one trimmed face along positive rays. Behind, disjoint, partial, folded
+or multiple forward branches fail explicitly. Prove full transverse source-curve coverage with
+exact curve intersections and lengths; endpoint samples do not establish coverage. Existing
+native projection and boolean operations may be reused without new bindings. Output identities
+combine actual stable source and target ancestry with node/feature provenance, never source
+array slots or invented kernel history. Honest split pieces may share a logical source identity
+and use the existing span/anchor machinery. Output is a curve/wire for later sweep or face-rib use.
+
+The pure parametric 9→10 migration is identity; source and target are atomic reference fields.
+Add a NEW immutable fixture and cloud roundtrip/merge, old-document, missing/ambiguous input,
+oblique direction, trimmed-hole coverage, upstream source/target edits and UI/MCP undo tests.
+Version/migration/rule/fixture edits wait for #88's committed version-9 registration.

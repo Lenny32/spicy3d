@@ -31,8 +31,10 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #92 | Runtime background programs, live status/cancellation and retained results | 55abf61354b2c0e6750655a35de7dfafac71932a |
 | #94 | Associative curved-face extrusion starts with exact caps | 3c5cf59763791d8f3a4314cf9460569b7776bbad |
 | #83 | Editable expression-based variable-radius fillets | 948b0d5a85576d788e16f6115085817da2c544af |
+| #95 | Automatic exact next-face extrusion with bounded search | d3c3715ffce28f8eeb0410b17b808049a17e0cc7 |
+| #98 | Reconstruct open documents in a fresh kernel without reloading | 9f3b108a36f3b889197f286d47cfafa7b617b317 |
 
-Validation: 9,495 passing tests on the latest combined integration, one skip; production build, TypeScript and required
+Validation: 9,560 passing tests on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
 concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are validated and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain unconfirmed without original data.
 
@@ -76,7 +78,18 @@ Additional #83 validation: 230 worker tests, native radius/direction/periodic/ta
 editable UI undo, expressions, migrations and cloud merge/roundtrip. Approved parametric7 migration
 and atomic radius law; natural parameter direction may change after upstream reparameterization.
 
-Remaining project work: #84–#85, #88–#90, #95, #98 (7 tickets).
+Additional #95 validation: 234 worker tests; exact curved/thin-wall caps, timeline retargeting,
+UI/MCP editing, native budgets, atomic merge and all historical fixtures. Approved parametric8
+migration and new fixture. Initial scope requires one uniformly nearest full face per profile.
+Additional #98 validation: 212 recovery and 150 existing modeling regressions, plus actual app
+startup/UI recovery in Chromium153 and Firefox155. Committed edits, stable IDs, references and
+dirty/view/camera state survive. User explicitly approved clearing undo/redo after successful
+reconstruction. Failed preparation is atomic; old native handles never revive. Browser tests
+inject a fatal-generation state rather than claiming a reproduced scan-specific crash.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83.
+Remaining project work: #84–#85, #88–#90 (5 tickets). Delegated agents stopped because workspace
+credits were exhausted; partial worktrees and #89 geometry/reference checkpoints are preserved.
+21 tickets are delivered. Keep this PR draft until all 26 are complete and reviewed.
+
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
 Keep issues open and never merge this PR automatically.

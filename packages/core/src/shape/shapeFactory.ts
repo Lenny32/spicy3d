@@ -211,19 +211,22 @@ export interface IShapeFactory {
      * direction, behind the profile, or not bounding it.
      * @unit length offset
      */
-    /** Exact nearest complete candidate cap; never reverses direction or extends a trimmed target. */
+    prismUntilTracked?(
+        profile: IShape,
+        direction: XYZ,
+        untilFace: IFace,
+        offset?: number,
+    ): Result<TrackedShape>;
+    /**
+     * Exact nearest complete candidate cap; never reverses direction or extends a trimmed target.
+     * @unit length offset
+     */
     prismNextTracked?(
         profile: IShape,
         direction: XYZ,
         candidates: IShape[],
         offset?: number,
         start?: { face: IFace; offset: number },
-    ): Result<TrackedShape>;
-    prismUntilTracked?(
-        profile: IShape,
-        direction: XYZ,
-        untilFace: IFace,
-        offset?: number,
     ): Result<TrackedShape>;
     /**
      * Tool prism of `profile` along `direction` through everything in `bounds`: it ends on

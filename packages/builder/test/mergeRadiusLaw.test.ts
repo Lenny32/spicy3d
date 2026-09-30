@@ -11,6 +11,7 @@ import {
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import type { FilletFeatureData } from "@spicy3d/parametric";
 import "@spicy3d/parametric";
+import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric/src/migrations";
 import "@spicy3d/app";
 import "@spicy3d/wasm";
 
@@ -88,7 +89,7 @@ describe("variable fillet persistence and merge", () => {
         const encoded = await encodeDocumentFile(b);
         const decoded = await decodeDocumentFile(encoded);
         expect(decoded.isOk).toBe(true);
-        expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: 7 });
+        expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: PARAMETRIC_FORMAT_VERSION });
         expect(fillet(decoded.value)).toEqual(fillet(b));
     });
 });
