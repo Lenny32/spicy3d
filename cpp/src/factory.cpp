@@ -1162,6 +1162,64 @@ static std::string chamferBuildFailure(BRepFilletAPI_MakeChamfer& builder, doubl
         + "). The chamfer builder provides no specific failure status; try a smaller distance or another edge selection";
 }
 
+static std::string prepareVariableFillet(BRepFilletAPI_MakeFillet& builder, const TopoDS_Shape& shape,
+    const NumberArray& edges, const NumberArray& law, double& maximumRadius)
+{
+    const int count = law["length"].as<int>();
+    if (count < 4 || count > 128 || count % 2 != 0)
+        return "Variable-radius fillet requires 2 to 64 position/radius pairs";
+    if (law[0].as<double>() != 0 || law[count - 2].as<double>() != 1)
+        return "Radius law must start at position 0 and end at position 1";
+    double previous = -1;
+    maximumRadius = 0;
+    for (int i = 0; i < count; i += 2) {
+        const double position = law[i].as<double>();
+        const double radius = law[i + 1].as<double>();
+        if (!std::isfinite(position) || position < 0 || position > 1 || position <= previous)
+            return "Radius law positions must be finite and strictly increasing from 0 to 1";
+        if (!std::isfinite(radius) || radius <= 0)
+            return "Radius law radii must be positive and finite";
+        previous = position;
+        maximumRadius = std::max(maximumRadius, radius);
+    }
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
+    const auto inputFailure = cornerInputFailure(shape, edges, maximumRadius,
+        "variable-radius fillet", "maximum radius", edgeMap);
+    if (!inputFailure.empty())
+        return inputFailure;
+    std::set<int> selectedContours;
+    for (const auto index : vecFromJSArray<int>(edges)) {
+        const auto selected = TopoDS::Edge(edgeMap.FindKey(index + 1));
+        builder.Add(selected);
+        const int contour = builder.Contour(selected);
+        if (contour == 0)
+            return cornerContourFailure(shape, selected, index, "variable-radius fillet", maximumRadius, "maximum radius");
+        if (!selectedContours.insert(contour).second)
+            return "Variable-radius fillet requires one selected edge per tangent contour; select only one of the tangent-connected edges";
+        if (builder.Closed(contour) && law[1].as<double>() != law[count - 1].as<double>())
+            return "A closed fillet contour requires equal radius-law endpoint values";
+        int edgeInContour = 0;
+        for (int i = 1; i <= builder.NbEdges(contour); ++i) {
+            if (builder.Edge(contour, i).IsSame(selected)) {
+                edgeInContour = i;
+                break;
+            }
+        }
+        if (edgeInContour == 0)
+            return "Variable-radius fillet could not locate the selected edge in its contour";
+        // UandR is relative arc length of this edge in contour direction; API samples use natural curve direction.
+        const bool reverse = builder.Edge(contour, edgeInContour).Orientation() == TopAbs_REVERSED;
+        NCollection_Array1<gp_Pnt2d> samples(1, count / 2);
+        for (int i = 0; i < count / 2; ++i) {
+            const int source = reverse ? count - 2 - 2 * i : 2 * i;
+            const double position = law[source].as<double>();
+            samples(i + 1) = gp_Pnt2d(reverse ? 1 - position : position, law[source + 1].as<double>());
+        }
+        builder.SetRadius(samples, contour, edgeInContour);
+    }
+    return "";
+}
+
 class ShapeFactory {
 public:
     static ShapeResult box(const Pln& ax3, double x, double y, double z)
@@ -2471,6 +2529,49 @@ public:
             edgeHistory(makeFillet, shape, result) };
     }
 
+    static ShapeResult filletVariableRadius(const TopoDS_Shape& shape, const NumberArray& edges, const NumberArray& law)
+    {
+        if (shape.IsNull())
+            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet input shape is null" };
+        BRepFilletAPI_MakeFillet builder(shape);
+        double maximumRadius = 0;
+        const auto failure = prepareVariableFillet(builder, shape, edges, law, maximumRadius);
+        if (!failure.empty())
+            return ShapeResult { TopoDS_Shape(), false, failure };
+        builder.Build();
+        if (!builder.IsDone())
+            return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius) };
+        const auto result = builder.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" };
+        return ShapeResult { result, true, "" };
+    }
+
+    static TrackedShapeResult filletVariableRadiusTracked(const TopoDS_Shape& shape, const NumberArray& edges, const NumberArray& law)
+    {
+        if (shape.IsNull())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet input shape is null", { }, { } };
+        BRepFilletAPI_MakeFillet builder(shape);
+        double maximumRadius = 0;
+        const auto failure = prepareVariableFillet(builder, shape, edges, law, maximumRadius);
+        if (!failure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, failure, { }, { } };
+        builder.Build();
+        if (!builder.IsDone())
+            return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius), { }, { } };
+        const auto result = builder.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)", { }, { } };
+        std::vector<int> faceAncestors;
+        std::vector<int> edgeAncestors;
+        TrackedShapeResult tracked { result, true, "",
+            faceHistory(builder, shape, result, &faceAncestors),
+            edgeHistory(builder, shape, result, &edgeAncestors) };
+        tracked.faceAncestors = std::move(faceAncestors);
+        tracked.edgeAncestors = std::move(edgeAncestors);
+        return tracked;
+    }
+
     static ShapeResult chamfer(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
     {
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
@@ -2969,6 +3070,8 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("booleanCutTracked", guardedEntry<&ShapeFactory::booleanCutTracked>("ShapeFactory.booleanCutTracked"))
         .class_function("booleanFuseTracked", guardedEntry<&ShapeFactory::booleanFuseTracked>("ShapeFactory.booleanFuseTracked"))
         .class_function("filletTracked", guardedEntry<&ShapeFactory::filletTracked>("ShapeFactory.filletTracked"))
+        .class_function("filletVariableRadius", guardedEntry<&ShapeFactory::filletVariableRadius>("ShapeFactory.filletVariableRadius"))
+        .class_function("filletVariableRadiusTracked", guardedEntry<&ShapeFactory::filletVariableRadiusTracked>("ShapeFactory.filletVariableRadiusTracked"))
         .class_function("chamferTracked", guardedEntry<&ShapeFactory::chamferTracked>("ShapeFactory.chamferTracked"))
         .class_function("fillet2d", guardedEntry<&ShapeFactory::fillet2d>("ShapeFactory.fillet2d"))
         .class_function("chamfer2d", guardedEntry<&ShapeFactory::chamfer2d>("ShapeFactory.chamfer2d"))

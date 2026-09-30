@@ -4,6 +4,7 @@
 import {
     Config,
     type Continuity,
+    type FilletRadiusSample,
     GeometryUtils,
     type ICompound,
     type ICurve,
@@ -27,6 +28,7 @@ import {
     ShapeTypes,
     ShapeTypeUtils,
     type TrackedShape,
+    validateFilletRadiusLaw,
     type XYZ,
     type XYZLike,
 } from "@spicy3d/core";
@@ -353,6 +355,36 @@ export class ShapeFactory implements IShapeFactory {
             return convertShapeResult(wasm.ShapeFactory.fillet, [shape.shape, edges, radius], "Fillet");
         }
         return Result.err("Not OccShape");
+    }
+
+    filletVariableRadius(shape: IShape, edges: number[], law: readonly FilletRadiusSample[]): Result<IShape> {
+        const error = validateFilletRadiusLaw(law);
+        if (error) return Result.err(error);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        const binding = wasm.ShapeFactory.filletVariableRadius;
+        if (!binding) return Result.err("Variable-radius fillets are not available in this kernel build");
+        return convertShapeResult(
+            binding,
+            [shape.shape, edges, law.flatMap((sample) => [sample.position, sample.radius])],
+            "Variable-radius fillet",
+        );
+    }
+
+    filletVariableRadiusTracked(
+        shape: IShape,
+        edges: number[],
+        law: readonly FilletRadiusSample[],
+    ): Result<TrackedShape> {
+        const error = validateFilletRadiusLaw(law);
+        if (error) return Result.err(error);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        const binding = wasm.ShapeFactory.filletVariableRadiusTracked;
+        if (!binding) return Result.err("Variable-radius fillets are not available in this kernel build");
+        return convertTrackedShapeResult(
+            binding,
+            [shape.shape, edges, law.flatMap((sample) => [sample.position, sample.radius])],
+            "Variable-radius fillet",
+        );
     }
 
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape> {

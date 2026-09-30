@@ -4,6 +4,7 @@
 import type { Result } from "../foundation";
 import type { Line, Plane, XYZ, XYZLike } from "../math";
 import type { Continuity, ICurve } from "./curve";
+import type { FilletRadiusSample } from "./filletRadiusLaw";
 import type {
     ICompound,
     IEdge,
@@ -170,9 +171,30 @@ export interface IShapeFactory {
     ): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
+    /** OCCT smooth radius interpolation per selected edge; normalized arc length, natural curve direction.
+     * Tangent edges propagate automatically. Select one edge per tangent contour; closed contours require equal endpoint radii.
+     * Optional for older kernels: callers must report unavailable support rather than substitute a constant radius.
+     */
+    filletVariableRadius?(shape: IShape, edges: number[], law: readonly FilletRadiusSample[]): Result<IShape>;
+    filletVariableRadiusTracked?(
+        shape: IShape,
+        edges: number[],
+        law: readonly FilletRadiusSample[],
+    ): Result<TrackedShape>;
     /** @unit length distance */
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape>;
     prismTracked?(shape: IShape, vec: XYZ): Result<TrackedShape>;
+    /**
+     * Exact curved starting cap, with profile-relative history; offset is along direction.
+     * @unit length offset
+     */
+    prismFromTracked?(
+        profile: IShape,
+        direction: XYZ,
+        fromFace: IFace,
+        offset: number,
+        end: PrismFromEnd,
+    ): Result<TrackedShape>;
     /**
      * Tool prism of the planar `profile` face(s) along `direction` (only its sense counts),
      * ending on `untilFace` moved by `offset` along the direction — any surface: planar,
@@ -187,14 +209,6 @@ export interface IShapeFactory {
      * direction, behind the profile, or not bounding it.
      * @unit length offset
      */
-    /** Exact curved starting cap, with profile-relative history; offset is along direction. */
-    prismFromTracked?(
-        profile: IShape,
-        direction: XYZ,
-        fromFace: IFace,
-        offset: number,
-        end: PrismFromEnd,
-    ): Result<TrackedShape>;
     prismUntilTracked?(
         profile: IShape,
         direction: XYZ,

@@ -1,0 +1,84 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 7,
+        "sketch": 3
+    },
+    "id": "fixture-parametric7-variable-fillet",
+    "name": "Fixture parametric v7: variable fillet with editable expression radii",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[0,0,20,0]},{\"id\":2,\"type\":\"line\",\"params\":[20,0,20,20]},{\"id\":3,\"type\":\"line\",\"params\":[20,20,0,20]},{\"id\":4,\"type\":\"line\",\"params\":[0,20,0,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-block",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"type\":\"extrude\",\"id\":\"feature-block\",\"depth\":10,\"sketchId\":\"sketch-block\"},{\"type\":\"fillet\",\"id\":\"feature-law\",\"radiusLaw\":[{\"radius\":\"small\",\"position\":0},{\"radius\":\"small * 1.5\",\"position\":0.5},{\"radius\":2,\"position\":1}],\"radius\":1,\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":10},\"edgeId\":\"feature-block:4\"}]}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-block",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "variable-small",
+            "name": "small",
+            "expression": "1 mm",
+            "type": "length"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}
