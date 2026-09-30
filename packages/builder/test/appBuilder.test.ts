@@ -2,8 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
+import * as app from "@spicy3d/app";
 import { ExternalContentPolicy, type IApplication, type IWindow, Logger } from "@spicy3d/core";
-import { mockLocalStorage } from "@spicy3d/core/test-utils";
+import { createMockApplication, mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ThreeVisulFactory } from "@spicy3d/three";
 import { MainWindow } from "@spicy3d/ui";
 import { OccShapeProvider } from "@spicy3d/wasm";
@@ -17,14 +18,22 @@ import { DefaultRibbon } from "../src/ribbon";
 
 // The use*() inits dynamically import the feature packages; mock them so the
 // assembly tests can run without wasm binaries, WebGL, or the real UI.
-const wasmMock = rs.hoisted(() => ({ initWasmCalls: 0 }));
+const wasmMock = rs.hoisted(() => ({ initWasmCalls: 0, recoveryContextCalls: 0, resetCalls: 0 }));
 const uiMock = rs.hoisted(() => ({ mainWindowArgs: [] as unknown[][] }));
 
 rs.mock("@spicy3d/wasm", () => ({
     initWasm: async () => {
         wasmMock.initWasmCalls++;
     },
-    OccShapeProvider: class OccShapeProvider {},
+    createWasmRecoveryContext: async () => {
+        wasmMock.recoveryContextCalls++;
+        return { run: <T>(action: () => T) => action(), publish: () => {}, dispose: () => {} };
+    },
+    OccShapeProvider: class OccShapeProvider {
+        resetKernel() {
+            wasmMock.resetCalls++;
+        }
+    },
 }));
 
 rs.mock("@spicy3d/three", () => ({
@@ -215,6 +224,30 @@ describe("AppBuilder", () => {
 
             expect(wasmMock.initWasmCalls).toBe(callsBefore + 1);
             expect((builder as any)._shapeProvider).toBeInstanceOf(OccShapeProvider);
+        });
+
+        test("useWasmOcc installs recovery after application startup with fresh-context and provider reset hooks", async () => {
+            const builder = new AppBuilder();
+            builder.useWasmOcc();
+            await lastInit(builder)();
+            const application = createMockApplication();
+            const started = (builder as any)._started as ((app: IApplication) => Promise<void>)[];
+            expect(started).toHaveLength(1);
+            const install = rs.spyOn(app, "startKernelRecovery").mockImplementation(() => () => {});
+            try {
+                await started[0](application);
+                expect(install).toHaveBeenCalledTimes(1);
+                const [installedApplication, hooks] = install.mock.calls[0];
+                expect(installedApplication).toBe(application);
+                const contextsBefore = wasmMock.recoveryContextCalls;
+                await hooks.createContext();
+                expect(wasmMock.recoveryContextCalls).toBe(contextsBefore + 1);
+                const resetsBefore = wasmMock.resetCalls;
+                hooks.resetProvider();
+                expect(wasmMock.resetCalls).toBe(resetsBefore + 1);
+            } finally {
+                install.mockRestore();
+            }
         });
 
         test("useThree init should set the visual factory with a property handler", async () => {

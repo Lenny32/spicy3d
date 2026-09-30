@@ -98,3 +98,83 @@ The pure parametric 6→7 migration is identity. Treat radiusLaw as one atomic m
 NEW fixture. Worker may implement native/runtime/feature/UI/MCP code now, but must wait for #94's
 committed version-6 registration before editing version/migration/rule/fixture sections.
 Serialize native artifact builds after #94 and retain all earlier committed C++ sources.
+
+## #95: automatic next-face extrusion extent
+
+Reserved owning module version: **parametric 8**, following #83's parametric 7. Worker: `mouse_86`.
+Add an extent/secondExtent union variant `{ type: "next"; nodeIds: string[]; offset?: ParameterValue }`.
+Capture eligible existing candidate body IDs automatically at authoring time, with host input
+implicit. Freeze that candidate universe to prevent future downstream bodies introducing cycles;
+editing may explicitly refresh candidates. Resolve each referenced body's appropriate timeline
+state and recompute the nearest valid face on every rebuild. Missing candidates fail explicitly.
+
+Choose the uniformly nearest complete trimmed surface by exact tool containment, not a center
+sample or face index. Crossing or tied minima and incomplete coverage report useful ambiguity.
+Initial scope requires one full-coverage face per profile; piecewise caps are unsupported explicitly.
+Choose the unoffset target first, then apply the axial offset and rebuild. Do not reverse a
+one-sided search automatically; depth sign chooses direction and symmetric sides search separately.
+Enforce bounded candidate/face/tool inspection with clear limit errors and geometric pruning.
+
+The pure parametric 7→8 migration is identity; the next variant is atomic with node references and
+its offset expression declared. Add a NEW immutable fixture. Migration/rule/version edits wait
+for #83's committed version-7 step. Native builds follow #83 and preserve all earlier sources.
+Required proof covers moving/curved candidates, full and partial coverage, thin curved walls,
+ties/crossing order, offsets, both signs/symmetric, #94 starts, transformed/linked timelines,
+UI/MCP edits/undo, old fixtures, atomic merge and cloud payload round trips.
+
+## #98 runtime recovery boundary
+
+The user directly approved "Allow undo/redo reset during recovery" in response to the explicit
+question about preserving committed edits, document IDs and feature references while clearing
+native-bearing undo records. This permits an undo reset only after successful reconstruction.
+Failed preparation must retain the original live state. Runtime generation/checkpoint/recovery
+infrastructure must not change any saved payload, envelope or module version.
+
+## #88: associative sweep profile and 3D path
+
+Reserved owning module version: **parametric 9**, following #95's parametric 8.
+Add a new feature variant `{ type: "sweep"; section: LoftSection;
+path: { nodeId: string; edges: EdgeRef[] }; solid?: boolean; roundCorner?: boolean }`,
+alongside the existing feature identity/name fields. Reuse the sketch profile reference and
+existing stable edge references. The path is an ordered connected chain of whole edges,
+resolved in the appropriate source timeline and transformed into the host body's coordinates.
+Reject disconnected, ambiguous or missing inputs without a stored geometry fallback. Defaults
+are solid and existing right-corner behavior. Initially accept one hole-free section; report
+unsupported holes clearly. Existing features and saved fields retain their behavior.
+
+Reuse OCCT's existing pipe-shell sweep and add runtime native history channels for both section
+and path ancestry. Derive output identities from their combined stable source identities,
+including distinct caps and seam/junction edges; enumeration indexes must not masquerade as
+stable references. Require native validity and self-intersection checks with useful failures.
+Profile/path changes must invalidate dependencies and preserve references where topology remains
+compatible. Creation and editing support preview, cancel and one-step undo through UI and MCP.
+
+The pure parametric 8→9 migration is identity. Treat section and path as atomic reference fields
+and declare their node dependencies. Add a NEW immutable fixture with cloud roundtrip/merge,
+old-document compatibility, transformed/timeline inputs, multi-segment 3D and curved paths,
+closed paths, cap/seam identities, upstream changes and downstream fillet references tested.
+Version/migration/rule/fixture edits wait for #95's committed version-8 registration. Native
+artifact builds must preserve all previously integrated native sources and use the shared slot.
+
+## #89: associative directional curve projection
+
+Reserved owning module version: **parametric 10**, following #88's parametric 9. Worker: `mouse_86`.
+Add `{ type: "projection"; source: { nodeId: string; edges: EdgeRef[] };
+target: { nodeId: string; face: ProfileRef }; direction: XYZLike }` alongside existing feature
+identity/name fields. The fixed saved direction is in world coordinates, finite and nonzero;
+convert it consistently when evaluating in host coordinates. Source is an ordered connected
+whole-edge chain, resolved with the shared sweep path resolver. Source/target edits resolve
+their correct timeline states, transforms, dependencies and re-anchored stable references.
+
+Project onto exactly one trimmed face along positive rays. Behind, disjoint, partial, folded
+or multiple forward branches fail explicitly. Prove full transverse source-curve coverage with
+exact curve intersections and lengths; endpoint samples do not establish coverage. Existing
+native projection and boolean operations may be reused without new bindings. Output identities
+combine actual stable source and target ancestry with node/feature provenance, never source
+array slots or invented kernel history. Honest split pieces may share a logical source identity
+and use the existing span/anchor machinery. Output is a curve/wire for later sweep or face-rib use.
+
+The pure parametric 9→10 migration is identity; source and target are atomic reference fields.
+Add a NEW immutable fixture and cloud roundtrip/merge, old-document, missing/ambiguous input,
+oblique direction, trimmed-hole coverage, upstream source/target edits and UI/MCP undo tests.
+Version/migration/rule/fixture edits wait for #88's committed version-9 registration.

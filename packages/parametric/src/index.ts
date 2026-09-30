@@ -8,3 +8,21 @@ export * from "./program";
 export * from "./sketch";
 import "./commands";
 import "./mergeRules";
+
+import { KernelRecoveryValidation } from "@spicy3d/core";
+import { ParametricBodyNode } from "./parametricBodyNode";
+
+KernelRecoveryValidation.register(
+    (document, action) => ParametricBodyNode.withSynchronousEvaluation(document, action),
+    (document) => {
+        for (const node of document.modelManager.findNodes()) {
+            if (node instanceof ParametricBodyNode) node.cancelForKernelRecovery();
+        }
+    },
+    (node) => {
+        if (node instanceof ParametricBodyNode) {
+            const failure = node.featureItems().find((item) => item.error);
+            if (failure) throw new Error(`Recovery feature rebuild failed for ${node.id}: ${failure.error}`);
+        }
+    },
+);

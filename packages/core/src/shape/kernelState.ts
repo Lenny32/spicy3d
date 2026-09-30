@@ -7,7 +7,8 @@ export type KernelStatus = "ok" | "crashed";
 
 /**
  * The geometry kernel stopped working (an abort it did not survive, a trap): its module is dead and
- * every shape handle into it with it, so it cannot be recovered in this page. Thrown (or returned as `Result.err(message)`) by every kernel
+ * every shape handle into it with it. Recovery must replace the module and reconstruct document
+ * graphs; it never revives those handles. Thrown (or returned as `Result.err(message)`) by every kernel
  * call after the crash, with one stable message.
  */
 export class KernelCrashedError extends Error {
@@ -24,8 +25,8 @@ export function kernelCrashedMessage(reason: string): string {
 /**
  * Whether the geometry kernel (the WASM module) still works. SDK-free, so every module can read it
  * without depending on the kernel: the kernel package reports the crash (`markCrashed`), tools
- * refuse to start work, the UI offers a reload. Observable (`status`). A crash is final: the
- * state never goes back to `ok` in this page (except `reset` in tests).
+ * refuse to start work, the UI offers installed recovery or reload. Observable (`status`). Recovery
+ * clears this public state only after publishing a fresh module and reconstructed document graphs.
  */
 export class KernelState extends Observable {
     static readonly current: KernelState = new KernelState();
@@ -65,7 +66,7 @@ export class KernelState extends Observable {
         if (this.isCrashed && reason !== undefined) throw new KernelCrashedError(reason);
     }
 
-    /** Tests only: a fresh kernel. */
+    /** Clear public state after recovery publication, or in tests; retired native handles stay retired. */
     reset(): void {
         this.crashReason = undefined;
         this.setProperty("status", "ok");
