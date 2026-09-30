@@ -30,7 +30,7 @@ function dependencies(feature: ProjectionFeatureData, document: IDocument) {
 
 const handler: FeatureHandler<ProjectionFeatureData> = {
     display: "command.feature.projection",
-    icon: "icon-project",
+    icon: "icon-projectEdges",
     nodeIds: (feature) => [...new Set([feature.source.nodeId, feature.target.nodeId])],
     cacheRefIds: (feature, document) => dependencies(feature, document).refIds,
     cacheKey: (feature, document) => dependencies(feature, document).key,

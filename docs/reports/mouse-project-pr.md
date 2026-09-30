@@ -42,7 +42,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #88 | Associative path sweep with real section/path history and editable UI/MCP | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 |
 | #89 | Associative directional projection with complete trimmed-face coverage | 279b538db3f00c5b26b55ce37f45c791b3afb54b |
 
-Validation: 9,560 passing tests on the latest combined integration, one skip; production build, TypeScript and required
+Validation: 9,650 passing tests across 583 files on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
 concurrency. Existing lint and bundle-size warnings remain. All 23 listed integrations are validated
 and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain

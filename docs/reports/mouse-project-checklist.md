@@ -264,3 +264,7 @@ Their approved payloads reserve parametric versions 11, 12 and 13 respectively. 
 accepted strict asymmetric native geometry and bounded cancellable worker execution; guided
 lofts have accepted two/three-section native proofs with whole-curve side-boundary validation.
 Their product integrations and compatibility checks are still in progress. PR #107 stays draft.
+
+The combined 23-ticket integration passes **9,650 tests across 583 files, one skip**,
+TypeScript and the production app plus all three plugins. Full-suite guards exposed a missing
+projection sprite name and stale exhaustive MCP/ribbon expectations; these are corrected.

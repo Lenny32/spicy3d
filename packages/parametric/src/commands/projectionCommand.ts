@@ -28,7 +28,7 @@ import {
 } from "./featureEditPreview";
 import { registerFeatureEditor } from "./featureEditRegistry";
 
-@command({ key: "feature.projection", icon: "icon-project" })
+@command({ key: "feature.projection", icon: "icon-projectEdges" })
 export class ProjectionCommand extends CancelableCommand {
     private feature: ProjectionFeatureData | undefined;
     private preview: FeatureChainPreview | undefined;
