@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type IDocument,
     type IEdge,
     type IShape,
     type IWire,
@@ -56,6 +57,36 @@ interface SourcePath {
     ids?: readonly (string | undefined)[];
     world: Matrix4;
 }
+const timelineShapeTokens = new WeakMap<IShape, number>();
+let nextTimelineToken = 0;
+
+/** A consumed source contributes its entering state, never its final shape containing this host. */
+export function pathReferenceDependencies(
+    reference: Pick<PathReference, "nodeId">,
+    document: IDocument,
+    hostId: string,
+): { refIds: string[]; key?: string } {
+    if (reference.nodeId === hostId) return { refIds: [] };
+    const node = document.modelManager.findNode((candidate) => candidate.id === reference.nodeId);
+    if (isBodyTimelineNode(node)) {
+        const index = node.consumingFeatureIndex(hostId);
+        if (index !== undefined) {
+            const shape = node.timelineStateAt(index)?.shape;
+            let token = shape && timelineShapeTokens.get(shape);
+            if (shape && token === undefined) {
+                token = ++nextTimelineToken;
+                timelineShapeTokens.set(shape, token);
+            }
+            const world = node instanceof ShapeNode ? node.worldTransform().toArray() : undefined;
+            return {
+                refIds: [],
+                key: JSON.stringify([reference.nodeId, index, token, world, node.rollbackIndex]),
+            };
+        }
+    }
+    return { refIds: [reference.nodeId] };
+}
+
 interface Piece {
     edge: IEdge;
     seed: string;

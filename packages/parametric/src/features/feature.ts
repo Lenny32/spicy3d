@@ -43,6 +43,7 @@ export type FeatureData =
     | ExtrudeTargetFeatureData
     | LoftFeatureData
     | ProjectionFeatureData
+    | SweepFeatureData
     | ThickenFeatureData;
 
 /** Associative whole-curve projection along positive rays of a fixed world-space vector. */
@@ -169,6 +170,17 @@ export interface LoftFeatureData extends FeatureBase {
     readonly ruled?: boolean;
     /** Continuity of a smooth loft's surfaces; absent = C2. Ignored when `ruled`. */
     readonly continuity?: Continuity;
+}
+
+/** A sweep with one sketch section and an authored, ordered chain of whole 3D edges (format 9). */
+export interface SweepFeatureData extends FeatureBase {
+    readonly type: "sweep";
+    readonly section: LoftSection;
+    readonly path: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    /** A capped solid by default; false leaves a shell. */
+    readonly solid?: boolean;
+    /** Default right corners; true requests OCCT round-corner transitions. */
+    readonly roundCorner?: boolean;
 }
 
 /**
