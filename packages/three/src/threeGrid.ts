@@ -1,11 +1,12 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { VisualConfig, type VisualItemConfig } from "@spicy3d/core";
+import { type Plane, VisualConfig, type VisualItemConfig } from "@spicy3d/core";
 import {
     type Camera,
     Color,
     DoubleSide,
+    Matrix4,
     Mesh,
     OrthographicCamera,
     PerspectiveCamera,
@@ -28,6 +29,10 @@ void main() {
 // the grid refines when zooming in and coarsens when zooming out, cross-fading between
 // decades so that no level pops in. Lines are 1px wide, anti-aliased with fwidth.
 const fragmentShader = /* glsl */ `
+uniform vec3 uOrigin;
+uniform vec3 uPlaneX;
+uniform vec3 uPlaneY;
+uniform vec3 uPlaneNormal;
 uniform vec3 uColor;
 uniform vec3 uAxisXColor;
 uniform vec3 uAxisYColor;
@@ -55,7 +60,8 @@ float axisLine(float v) {
 }
 
 void main() {
-    vec2 p = vWorld.xy;
+    vec3 relative = vWorld - uOrigin;
+    vec2 p = vec2(dot(relative, uPlaneX), dot(relative, uPlaneY));
     vec2 fw = fwidth(p);
     float footprint = max(fw.x, fw.y);
     float lod = max(log(footprint * uMinPixels / uBaseSpacing) / log(10.0), 0.0);
@@ -81,7 +87,7 @@ void main() {
 
     // fade towards the horizon, where the plane is seen edge-on
     vec3 viewDir = uOrtho ? uViewDir : normalize(cameraPosition - vWorld);
-    alpha *= smoothstep(0.0, 0.3, abs(viewDir.z));
+    alpha *= smoothstep(0.0, 0.3, abs(dot(viewDir, uPlaneNormal)));
 
     if (alpha < 0.002) discard;
     gl_FragColor = vec4(color, alpha);
@@ -90,6 +96,10 @@ void main() {
 
 function createUniforms() {
     return {
+        uOrigin: { value: new Vector3() },
+        uPlaneX: { value: new Vector3(1, 0, 0) },
+        uPlaneY: { value: new Vector3(0, 1, 0) },
+        uPlaneNormal: { value: new Vector3(0, 0, 1) },
         uColor: { value: new Color(VisualConfig.gridColor) },
         uAxisXColor: { value: new Color(0xe0474c) },
         uAxisYColor: { value: new Color(0x4caf50) },
@@ -136,6 +146,21 @@ export class ThreeGrid extends Mesh<PlaneGeometry, ShaderMaterial> {
         }
     };
 
+    setWorkplane(plane: Plane) {
+        const uniforms = this._uniforms;
+        uniforms.uOrigin.value.copy(plane.origin);
+        uniforms.uPlaneX.value.copy(plane.xvec);
+        uniforms.uPlaneY.value.copy(plane.yvec);
+        uniforms.uPlaneNormal.value.copy(plane.normal);
+        this.quaternion.setFromRotationMatrix(
+            new Matrix4().makeBasis(
+                uniforms.uPlaneX.value,
+                uniforms.uPlaneY.value,
+                uniforms.uPlaneNormal.value,
+            ),
+        );
+    }
+
     // the grid is decoration: never hit by picking
     override raycast() {}
 
@@ -148,7 +173,10 @@ export class ThreeGrid extends Mesh<PlaneGeometry, ShaderMaterial> {
             const extent = Math.max(camera.right - camera.left, camera.top - camera.bottom) / camera.zoom;
             size = Math.max(camera.far, extent) * 2;
         }
-        this.position.set(camera.position.x, camera.position.y, 0);
+        const normal = this._uniforms.uPlaneNormal.value;
+        const origin = this._uniforms.uOrigin.value;
+        this.position.copy(camera.position);
+        this.position.addScaledVector(normal, -this.position.clone().sub(origin).dot(normal));
         this.scale.set(size, size, 1);
         this.updateMatrixWorld();
 
