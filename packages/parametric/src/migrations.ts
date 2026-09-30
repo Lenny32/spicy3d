@@ -15,8 +15,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * 5: `thicken` features (a shell / thicken of the previous shape) — a build reading only v4 would fail
  * those bodies with "Unknown feature type".
  * 6: associative extrusion starting faces; older builds would ignore the selected surface.
+ * 7: variable fillet radius laws; older builds would ignore the law and use a constant radius.
  */
-export const PARAMETRIC_FORMAT_VERSION = 6;
+export const PARAMETRIC_FORMAT_VERSION = 7;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -55,3 +56,6 @@ registerMigration("sketch", 2, (document) => document);
 
 // parametric 5 → 6: optional associative starting faces; absent preserves old extrusions.
 registerMigration("parametric", 5, (document) => document);
+
+// parametric 6 → 7: optional fillet radius laws; absent preserves the constant-radius operation.
+registerMigration("parametric", 6, (document) => document);

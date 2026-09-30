@@ -19,6 +19,7 @@ export * from "./profileGeometry";
 export * from "./profileMatcher";
 export * from "./profileRef";
 export * from "./profileSeeds";
+export * from "./radiusLaw";
 export * from "./refGeometry";
 export * from "./revolve";
 export * from "./sourceFaceMatcher";

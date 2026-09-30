@@ -22,6 +22,7 @@ import {
 import type { EdgeRef } from "./edgeRef";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import type { ProfileRef } from "./profileRef";
+import type { FilletRadiusPoint } from "./radiusLaw";
 
 export interface FeatureBase {
     readonly id: string;
@@ -188,6 +189,8 @@ export interface ThickenFeatureData extends FeatureBase {
 export interface FilletFeatureData extends FeatureBase {
     readonly type: "fillet";
     readonly radius: ParameterValue;
+    /** Optional smooth law, normalized arc length along each selected edge's natural curve direction. */
+    readonly radiusLaw?: FilletRadiusPoint[];
     readonly edges: EdgeRef[];
 }
 

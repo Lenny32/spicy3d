@@ -150,7 +150,12 @@ registerMergePayload("parametric.features", {
                         axis: ["axis", "axisSource", "constructionAxisRef"],
                     },
                 },
-                fillet: { kind: "object", fields: { ...featureBase, radius: expression, edges } },
+                // A radius law is one interpolation function: merging individual knots could make
+                // their order or endpoint values invalid, so resolve the whole law atomically.
+                fillet: {
+                    kind: "object",
+                    fields: { ...featureBase, radius: expression, radiusLaw: atomic, edges },
+                },
                 chamfer: { kind: "object", fields: { ...featureBase, distance: expression, edges } },
                 boolean: {
                     kind: "object",

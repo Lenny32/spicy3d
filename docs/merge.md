@@ -749,6 +749,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `radius`: expression
+      - `radiusLaw`: atomic
       - `edges`: atomic of ref → edge
     - `type: "chamfer"`
       - `id`: scalar

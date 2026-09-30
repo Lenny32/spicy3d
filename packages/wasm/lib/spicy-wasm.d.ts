@@ -697,6 +697,8 @@ interface EmbindModule {
     fillet(_0: TopoDS_Shape, _1: Array<number>, _2: number): ShapeResult;
     chamfer(_0: TopoDS_Shape, _1: Array<number>, _2: number): ShapeResult;
     filletTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number): TrackedShapeResult;
+    filletVariableRadius(_0: TopoDS_Shape, _1: Array<number>, _2: Array<number>): ShapeResult;
+    filletVariableRadiusTracked(_0: TopoDS_Shape, _1: Array<number>, _2: Array<number>): TrackedShapeResult;
     chamferTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number): TrackedShapeResult;
     sweep(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: boolean, _3: boolean): ShapeResult;
     makeThickSolidByJoin(_0: TopoDS_Shape, _1: Array<TopoDS_Shape>, _2: number, _3: GeomAbs_JoinType, _4: BRepOffset_Mode, _5: boolean): ShapeResult;
