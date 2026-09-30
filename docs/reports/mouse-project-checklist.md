@@ -3,7 +3,7 @@
 Integration branch: `enhancement-mouse-project`, based on `origin/develop` at
 `103a5640b97068b07510dc819995b156119fad8d`. Final target: `develop`; never push to or merge into it.
 
-Source instructions: [mouse-plan.md](../../mouse-plan.md). Original audit remains unchanged in
+Source instructions: [mouse-plan.md](../../mouse-plan.md). Original audit evidence is preserved in
 [mcp-user-report-2026-09-30.json](mcp-user-report-2026-09-30.json).
 [Captured GitHub requirements](mouse-issues-2026-09-30.json) were read on 2026-09-30; all 26 are open.
 The audit's scan-specific failures remain unconfirmed without the original inputs.
@@ -45,30 +45,29 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 
 | Ticket | Dependencies | Status | Agent | Task branch | Validation | Integration commit | Blockers |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| #81 Reject invalid fillet and chamfer results |  | Queued | — | — | Pending | — | — |
-| #82 Report actionable fillet and chamfer failure diagnostics |  | Queued | — | — | Pending | — | — |
-| #83 Support variable-radius fillets |  | Queued | — | — | Pending | — | — |
-| #84 Support fillet corner setbacks |  | Queued | — | — | Pending | — | — |
-| #85 Support guide and boundary curves in parametric lofts |  | Queued | — | — | Pending | — | — |
-| #86 Expose persistent edge references through MCP |  | Queued | — | — | Pending | — | — |
-| #87 Add rule-based edge selection through MCP |  | Queued | — | — | Pending | — | — |
-| #88 Add a parametric sweep along a 3D path |  | Queued | — | — | Pending | — | — |
-| #89 Add associative curve projection onto surfaces |  | Queued | — | — | Pending | — | — |
-| #90 Add a parametric groove or rib along a curve on a face |  | Queued | — | — | Pending | — | — |
-| #91 Invalidate feature caches only for dependent variables |  | Queued | — | — | Pending | — | — |
-| #92 Expose asynchronous rebuild progress through MCP |  | Queued | — | — | Pending | — | — |
-| #93 Support control-point and weighted NURBS in parametric sketches |  | Queued | — | — | Pending | — | — |
-| #94 Add an associative from-face extrusion start |  | Queued | — | — | Pending | — | — |
-| #95 Add automatic up-to-next-face or body extrusion extent |  | Queued | — | — | Pending | — | — |
-| #96 Run expensive kernel operations in a bounded worker |  | Queued | — | — | Pending | — | — |
-| #97 Cancel an in-flight kernel operation |  | Queued | — | — | Pending | — | — |
-| #98 Recover a crashed kernel without reloading the tab |  | Queued | — | — | Pending | — | — |
-| #99 Add compact run_parametric responses |  | Queued | — | — | Pending | — | — |
-| #100 Do not return subshape references already evicted from the ref store |  | Implementing | mouse_100 | mouse/100-subshape-refs | Pending | — | — |
-| #101 Import scan files as lightweight reference MeshNodes |  | Queued | — | — | Pending | — | — |
-| #102 Measure CAD-to-reference-mesh deviation |  | Queued | — | — | Pending | — | — |
-| #103 Expose STL tessellation tolerance in export |  | Queued | — | — | Pending | — | — |
-| #104 Return exported model bytes or a resource through MCP |  | Queued | — | — | Pending | — | — |
-| #105 Batch-export separate model files without repeated downloads |  | Queued | — | — | Pending | — | — |
-| #106 Honor extrude names when appending to an existing body |  | Implementing | mouse_106 | mouse/106-extrude-names | Pending | — | — |
-
+| #81 Reject invalid fillet and chamfer results | — | Queued | — | — | Pending | — | — |
+| #82 Report actionable fillet and chamfer failure diagnostics | #81 | Queued | — | — | Pending | — | — |
+| #83 Support variable-radius fillets | #81, #82; shared schema | Queued | — | — | Pending | — | — |
+| #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
+| #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
+| #86 Expose persistent edge references through MCP | #100 | Queued | — | — | Pending | — | — |
+| #87 Add rule-based edge selection through MCP | #86 | Queued | — | — | Pending | — | — |
+| #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
+| #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
+| #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
+| #91 Invalidate feature caches only for dependent variables | — | Implementing | mouse_91 | mouse/91-dependent-cache | Pending | — | — |
+| #92 Expose asynchronous rebuild progress through MCP | #96; worker architecture | Queued | — | — | Pending | — | — |
+| #93 Support control-point and weighted NURBS in parametric sketches | Shared sketch schema | Queued | — | — | Pending | — | — |
+| #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
+| #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
+| #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Queued | — | — | Pending | — | — |
+| #97 Cancel an in-flight kernel operation | #96 | Queued | — | — | Pending | — | — |
+| #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
+| #99 Add compact run_parametric responses | #106 (shared program file) | Implementing | mouse_99 | mouse/99-compact-responses | Pending | — | — |
+| #100 Do not return subshape references already evicted from the ref store | — | Implementing | mouse_100 | mouse/100-subshape-refs | Pending | — | — |
+| #101 Import scan files as lightweight reference MeshNodes | — | Queued | — | — | Pending | — | — |
+| #102 Measure CAD-to-reference-mesh deviation | #101 | Queued | — | — | Pending | — | — |
+| #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
+| #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
+| #105 Batch-export separate model files without repeated downloads | #104 | Queued | — | — | Pending | — | — |
+| #106 Honor extrude names when appending to an existing body | — | Integrated; awaiting push | mouse_106 | mouse/106-extrude-names | 38 real-kernel program tests; npm run check | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 | Publishing approval pending (auto-review) |
