@@ -34,6 +34,7 @@ interface Step {
     id: string;
     type: string;
     revision?: number;
+    variable?: string;
     refs?: string[];
     fail?: boolean;
     suppressed?: boolean;
@@ -99,7 +100,11 @@ beforeEach(() => {
             if (!context.tracking) throw new Error("Body omitted tracking");
             context.tracking.outputFaceIds = [`${feature.id}:face`];
             context.tracking.outputEdgeIds = [`${feature.id}:edge`];
-            return Result.ok(shape(`${feature.id}@${feature.revision ?? 0}`));
+            const value =
+                feature.variable === undefined
+                    ? (feature.revision ?? 0)
+                    : (context.scope.get(feature.variable)?.value ?? 0);
+            return Result.ok(shape(`${feature.id}@${value}`));
         },
     });
 });
@@ -263,7 +268,9 @@ test("editing a rolled-back suffix preserves its prefix and invalidates all late
 });
 
 test("variables changed during rollback invalidate retained entries on restoration", async () => {
-    const node = body(12);
+    const features = steps(12);
+    features[0].variable = "depth";
+    const node = body(12, features);
     warm(node);
     node.setRollbackIndex(0);
     calls = [];
@@ -271,6 +278,24 @@ test("variables changed during rollback invalidate retained entries on restorati
     node.requestRollbackIndex(undefined);
     await node.whenRebuilt();
     expect(calls.map((call) => call.id)).toEqual(steps(12).map((step) => step.id));
+});
+
+test("unrelated variables changed during rollback preserve retained entries on restoration", async () => {
+    document.variables.setItems([{ id: "depth", name: "depth", type: "unitless", expression: "20" }]);
+    const features = steps(12);
+    features[0].variable = "depth";
+    const node = body(12, features);
+    const full = warm(node);
+    node.setRollbackIndex(0);
+    calls = [];
+    document.variables.setItems([
+        { id: "depth", name: "depth", type: "unitless", expression: "20" },
+        { id: "other", name: "other", type: "unitless", expression: "99" },
+    ]);
+    node.requestRollbackIndex(undefined);
+    expect(await node.whenRebuilt()).toBe(true);
+    expect(calls).toEqual([]);
+    expect(node.shape.value).toBe(full);
 });
 
 test.each(["shape", "transform"])("a referenced %s change invalidates only its suffix", (kind) => {

@@ -7,6 +7,7 @@ import {
     BoundingBox,
     type I18nKeys,
     type INode,
+    type IShape,
     isCancelableCommand,
     LENGTH_UNITS,
     Matrix4,
@@ -19,6 +20,7 @@ import {
     ShapeTypes,
     Signal,
     Transaction,
+    type VariableData,
     VisualStates,
     type XYZ,
 } from "@spicy3d/core";
@@ -39,6 +41,7 @@ import type {
     RevolveFeatureData,
 } from "../src/features/feature";
 
+import { type FeatureContext, registerFeature } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../src/sketch";
 
@@ -1042,6 +1045,170 @@ describe("ParametricBodyNode", () => {
         expect(mocks.fillet).toHaveBeenCalledTimes(1);
         const [, , radius] = mocks.fillet.mock.calls[0] as unknown as [any, number[], number];
         expect(radius).toBe(5);
+    });
+
+    function variables(width = "10", unrelated = "3"): VariableData[] {
+        return [
+            { id: "v1", name: "width", type: "length", expression: width },
+            { id: "v2", name: "depth", type: "length", expression: "width * 2" },
+            { id: "v3", name: "radius", type: "length", expression: "depth / 10" },
+            { id: "v4", name: "unrelated", type: "length", expression: unrelated },
+        ];
+    }
+
+    test.each([
+        "4",
+        "missing",
+        "1 / 0",
+    ])("an unrelated variable edit (%s) performs no geometry evaluations", (expression) => {
+        doc.variables.setItems(variables());
+        const body = bodyWith([
+            { ...extrudeFeature(sketch.id), depth: "depth" },
+            { id: "f2", type: "fillet", radius: "radius", edges: [EDGE_REF] },
+        ]);
+        const shape = body.shape.unchecked();
+        mocks.prism.mockClear();
+        mocks.fillet.mockClear();
+        mocks.line.mockClear();
+        mocks.face.mockClear();
+
+        doc.variables.setItems(variables("10", expression));
+
+        expect(body.shape.unchecked()).toBe(shape);
+        expect(mocks.prism).not.toHaveBeenCalled();
+        expect(mocks.fillet).not.toHaveBeenCalled();
+        expect(mocks.line).not.toHaveBeenCalled();
+        expect(mocks.face).not.toHaveBeenCalled();
+    });
+
+    test("editing a transitive variable rebuilds affected features and their downstream consumers", () => {
+        doc.variables.setItems(variables());
+        const body = bodyWith([
+            { ...extrudeFeature(sketch.id), depth: "depth" },
+            { id: "f2", type: "fillet", radius: 2, edges: [EDGE_REF] },
+        ]);
+        expect(body.shape.isOk).toBe(true);
+        mocks.prism.mockClear();
+        mocks.fillet.mockClear();
+
+        doc.variables.setItems(variables("15"));
+
+        expect(mocks.prism).toHaveBeenCalledTimes(1);
+        expect(mocks.prism.mock.calls[0][1].z).toBe(30);
+        expect(mocks.fillet).toHaveBeenCalledTimes(1);
+    });
+
+    test("a later variable-dependent feature preserves the cached prefix", () => {
+        doc.variables.setItems(variables());
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { id: "f2", type: "fillet", radius: "radius", edges: [EDGE_REF] },
+        ]);
+        expect(body.shape.isOk).toBe(true);
+        mocks.prism.mockClear();
+        mocks.fillet.mockClear();
+
+        doc.variables.setItems(variables("15"));
+
+        expect(mocks.prism).not.toHaveBeenCalled();
+        expect(mocks.fillet).toHaveBeenCalledTimes(1);
+        expect(mocks.fillet.mock.calls[0][2]).toBe(3);
+    });
+
+    test.each([
+        "missing",
+        "1 / 0",
+    ])("a broken transitive variable (%s) fails without geometry and recovers after repair", (expression) => {
+        doc.variables.setItems(variables());
+        const body = bodyWith([{ ...extrudeFeature(sketch.id), depth: "depth" }]);
+        const shape = body.shape.unchecked();
+        mocks.prism.mockClear();
+
+        doc.variables.setItems(variables(expression));
+
+        expect(body.shape.unchecked()).toBe(shape);
+        expect(body.featureItems()[0].error).toBe("Unknown identifier: depth");
+        expect(mocks.prism).not.toHaveBeenCalled();
+
+        doc.variables.setItems(variables("15"));
+
+        expect(body.featureItems()[0].error).toBeUndefined();
+        expect(mocks.prism).toHaveBeenCalledTimes(1);
+        expect(mocks.prism.mock.calls[0][1].z).toBe(30);
+    });
+
+    test("a renamed used variable fails, then adding it again recovers", () => {
+        doc.variables.setItems(variables());
+        const body = bodyWith([{ ...extrudeFeature(sketch.id), depth: "depth" }]);
+        expect(body.shape.isOk).toBe(true);
+        mocks.prism.mockClear();
+        const renamed = variables().map((item) =>
+            item.name === "depth" ? { ...item, name: "height" } : item,
+        );
+
+        doc.variables.setItems(renamed);
+
+        expect(body.featureItems()[0].error).toBe("Unknown identifier: depth");
+        expect(mocks.prism).not.toHaveBeenCalled();
+
+        doc.variables.setItems(variables("20"));
+
+        expect(body.featureItems()[0].error).toBeUndefined();
+        expect(mocks.prism).toHaveBeenCalledTimes(1);
+        expect(mocks.prism.mock.calls[0][1].z).toBe(40);
+    });
+
+    test("custom handlers track optional scope reads and whole-scope iteration", () => {
+        doc.variables.setItems(variables());
+        const optional = rs.fn((_feature: FeatureData, context: FeatureContext) => {
+            const height = context.scope.has("optional") ? context.scope.get("optional")!.value : 5;
+            return Result.ok(
+                mocks.prism(undefined, { x: 0, y: 0, z: height } as XYZ).unchecked() as unknown as IShape,
+            );
+        });
+        const iterating = rs.fn((_feature: FeatureData, context: FeatureContext) => {
+            const total = [...context.scope.values()].reduce((sum, value) => sum + value.value, 0);
+            return Result.ok(
+                mocks.prism(undefined, { x: 0, y: 0, z: total } as XYZ).unchecked() as unknown as IShape,
+            );
+        });
+        const base = {
+            display: "command.feature.extrude" as const,
+            nodeIds: () => [],
+            parameters: () => [],
+            setParameter: (feature: FeatureData) => feature,
+        };
+        registerFeature("cache-optional-test", { ...base, evaluate: optional });
+        registerFeature("cache-iterating-test", { ...base, evaluate: iterating });
+        const optionalBody = new ParametricBodyNode({
+            document: doc,
+            featuresJson: JSON.stringify([{ id: "optional-feature", type: "cache-optional-test" }]),
+        });
+        const iteratingBody = new ParametricBodyNode({
+            document: doc,
+            featuresJson: JSON.stringify([{ id: "iterating-feature", type: "cache-iterating-test" }]),
+        });
+        doc.modelManager.addNode(optionalBody);
+        doc.modelManager.addNode(iteratingBody);
+        expect(optionalBody.shape.isOk).toBe(true);
+        expect(iteratingBody.shape.isOk).toBe(true);
+        optional.mockClear();
+        iterating.mockClear();
+
+        doc.variables.setItems(variables("10", "4"));
+
+        expect(optional).not.toHaveBeenCalled();
+        expect(iterating).toHaveBeenCalledTimes(1);
+
+        doc.variables.setItems([
+            ...variables("10", "4"),
+            { id: "extra", name: "optional", type: "length", expression: "9" },
+        ]);
+
+        expect(optional).toHaveBeenCalledTimes(1);
+        expect(optionalBody.shape.unchecked()).toBe(mocks.prismShapes.at(-2));
+        expect(mocks.prism.mock.calls.at(-2)![1].z).toBe(9);
+        expect(iterating).toHaveBeenCalledTimes(2);
     });
 
     test("a sketch change invalidates the whole chain", () => {
