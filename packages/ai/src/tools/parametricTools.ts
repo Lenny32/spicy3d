@@ -310,6 +310,7 @@ const OPS_SCHEMA = {
                 "extrude",
                 "revolve",
                 "loft",
+                "editLoft",
                 "sweep",
                 "editSweep",
                 "faceSweep",
@@ -414,6 +415,42 @@ const OPS_SCHEMA = {
             items: { type: "string" },
             description:
                 "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
+        },
+        guided: {
+            type: ["object", "null"],
+            properties: {
+                spine: {
+                    type: "object",
+                    properties: {
+                        nodeId: { type: "string" },
+                        edgeIndexes: {
+                            type: "array",
+                            items: { type: "integer", minimum: 0 },
+                            minItems: 1,
+                            maxItems: 128,
+                        },
+                        edgeRefs: { type: "array", items: { type: "object" }, minItems: 1, maxItems: 128 },
+                    },
+                    required: ["nodeId"],
+                },
+                boundary: {
+                    type: "object",
+                    properties: {
+                        nodeId: { type: "string" },
+                        edgeIndexes: {
+                            type: "array",
+                            items: { type: "integer", minimum: 0 },
+                            minItems: 1,
+                            maxItems: 128,
+                        },
+                        edgeRefs: { type: "array", items: { type: "object" }, minItems: 1, maxItems: 128 },
+                    },
+                    required: ["nodeId"],
+                },
+            },
+            required: ["spine", "boundary"],
+            description:
+                "Loft/editLoft: optional associative main spine and full side-boundary guide, each an open connected path from one node. Each path requires exactly one of ordered edgeIndexes or persistent edgeRefs returned by edges. Supports 2–16 planar sections and smooth C2 only; ruled/C0/C1 fail. Sections keep their authored placement and must meet both paths in strict station order. The entire boundary must lie on generated sides. editLoft guided:null clears both guides.",
         },
         solid: {
             type: "boolean",
@@ -599,7 +636,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },

@@ -198,6 +198,18 @@ registerMergePayload("parametric.features", {
                                 fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
                             },
                         },
+                        guided: {
+                            kind: "object",
+                            atomic: true,
+                            fields: {
+                                spine: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                                boundary: {
+                                    kind: "object",
+                                    atomic: true,
+                                    fields: { nodeId: nodeRef, edges },
+                                },
+                            },
+                        },
                         solid: scalar,
                         ruled: scalar,
                         continuity: scalar,

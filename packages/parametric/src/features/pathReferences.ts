@@ -200,7 +200,19 @@ export function resolvePathReferences(
         if (indexes.some((index) => taken.has(index)))
             return Result.err("Path references overlap or repeat an edge");
         for (const index of indexes) taken.add(index);
-        const matchedAnchor = match?.value.anchors[0] ?? captureEdgeRef(source.edges[indexes[0]]);
+        // Refresh a unique native edge even when its tracked ID hit; the common matcher deliberately
+        // retains that old anchor. A logical split span keeps its complete authored fingerprint.
+        let matchedAnchor: EdgeRef;
+        try {
+            matchedAnchor =
+                indexes.length === 1
+                    ? captureEdgeRef(source.edges[indexes[0]], source.ids?.[indexes[0]], ref.splitPiece)
+                    : (match?.value.anchors[0] ?? captureEdgeRef(source.edges[indexes[0]]));
+        } catch (error) {
+            return Result.err(
+                `Path edge could not be re-anchored: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
         const anchor = authored ? { ...matchedAnchor, edgeId: authored } : matchedAnchor;
         anchors.push(anchor);
         // Fingerprints are an explicit fallback for sources that expose no persistent topology identity.

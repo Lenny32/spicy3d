@@ -93,3 +93,21 @@ test("the approved next/from-face fixture rebuilds its exact depth and offset af
     expect(Math.abs(boss.shape.value.volume())).toBeCloseTo(16 * (10 - 2), 4);
     expect(doc.modelManager.serialize()).toEqual(data["models"]);
 });
+
+test("the approved guided loft fixture loads both real guides and preserves its exact section volume", async () => {
+    const fixture = loadDocumentFixtures().find((item) => item.name === "v2/parametric13-guided-loft.json");
+    expect(fixture).not.toBeUndefined();
+    if (fixture === undefined) throw new Error("Missing approved guided loft fixture");
+    const data = migrateDocument(fixture.data).value;
+    const doc = new TestDocument({ application: createMockApplication() });
+    doc.visual = createMockVisualWithDocument(doc);
+    await doc.modelManager.deserialize(structuredClone(data["models"]));
+    const body = doc.modelManager.findNode((node) => node.id === "body-guided-loft") as ParametricBodyNode;
+    expect(body).toBeInstanceOf(ParametricBodyNode);
+    expect(await body.whenRebuilt()).toBe(true);
+    expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+    expect(body.shape.isOk).toBe(true);
+    expect(Math.abs(body.shape.value.volume())).toBeCloseTo(1200, 4);
+    expect(doc.modelManager.serialize()).toEqual(data["models"]);
+    doc.dispose();
+});

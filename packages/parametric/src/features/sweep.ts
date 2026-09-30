@@ -110,7 +110,7 @@ export function resolveSweepSection(
 }
 
 /** Native vertex enumeration is associated through incident source edges and endpoint roles. */
-function vertexSeeds(
+export function sectionVertexSeeds(
     wire: IWire,
     edges: readonly IEdge[],
     seeds: readonly string[],
@@ -160,8 +160,8 @@ export function trackSweep(
             ...path.edgeSeeds.map((seed) => `path:${seed}`),
         ];
         const inputVertices = [
-            ...vertexSeeds(section.wire, section.edges, section.edgeSeeds),
-            ...vertexSeeds(path.wire, path.edges, path.edgeSeeds, path),
+            ...sectionVertexSeeds(section.wire, section.edges, section.edgeSeeds),
+            ...sectionVertexSeeds(path.wire, path.edges, path.edgeSeeds, path),
         ];
         const faceEdges = ancestorInputs(
             faces.map(() => -1),

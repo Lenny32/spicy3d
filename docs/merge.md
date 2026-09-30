@@ -779,6 +779,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `sections`: atomic of { sketchId: ref → node; profile: ref → profile }
+      - `guided`: atomic { spine: atomic { nodeId: ref → node; edges: atomic of ref → edge }; boundary: atomic { nodeId: ref → node; edges: atomic of ref → edge } }
       - `solid`: scalar
       - `ruled`: scalar
       - `continuity`: scalar

@@ -21,8 +21,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * 10: associative directional projection of source curves onto one trimmed target face.
  * 11: support-normal face sweeps with section/path/support picks and join/cut behavior.
  * 12: independently editable fillet corner setbacks; older readers would silently omit the corner patch.
+ * 13: optional loft spine and boundary guides; older readers would silently build an unguided loft.
  */
-export const PARAMETRIC_FORMAT_VERSION = 12;
+export const PARAMETRIC_FORMAT_VERSION = 13;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -79,3 +80,6 @@ registerMigration("parametric", 10, (document) => document);
 
 // parametric 11 → 12: absent corner setbacks retain the prior constant/variable fillet operation.
 registerMigration("parametric", 11, (document) => document);
+
+// parametric 12 → 13: absent guides preserve the existing loft operation verbatim.
+registerMigration("parametric", 12, (document) => document);

@@ -35,6 +35,7 @@ describe("parametricTools", () => {
             "extrude",
             "revolve",
             "loft",
+            "editLoft",
             "sweep",
             "editSweep",
             "faceSweep",

@@ -182,6 +182,11 @@ export interface LoftFeatureData extends FeatureBase {
     readonly ruled?: boolean;
     /** Continuity of a smooth loft's surfaces; absent = C2. Ignored when `ruled`. */
     readonly continuity?: Continuity;
+    /** Optional associative C2 guidance (format 13); absent retains the ordinary loft. */
+    readonly guided?: {
+        readonly spine: { readonly nodeId: string; readonly edges: EdgeRef[] };
+        readonly boundary: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    };
 }
 
 /** A sweep with one sketch section and an authored, ordered chain of whole 3D edges (format 9). */

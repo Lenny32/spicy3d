@@ -896,7 +896,10 @@ export class ParametricBodyNode
         const index = this.features.findIndex(
             (feature) =>
                 (feature.type === "boolean" && feature.toolIds.includes(nodeId)) ||
-                (feature.type === "faceSweep" && feature.path.nodeId === nodeId),
+                (feature.type === "faceSweep" && feature.path.nodeId === nodeId) ||
+                (feature.type === "loft" &&
+                    (feature.guided?.spine?.nodeId === nodeId ||
+                        feature.guided?.boundary?.nodeId === nodeId)),
         );
         return index < 0 ? undefined : index;
     }
@@ -1124,7 +1127,11 @@ export class ParametricBodyNode
                 ? feature.toolIds
                 : feature.type === "faceSweep"
                   ? [feature.path.nodeId]
-                  : [];
+                  : feature.type === "loft" && feature.guided
+                    ? [feature.guided.spine?.nodeId, feature.guided.boundary?.nodeId].filter(
+                          (id): id is string => typeof id === "string",
+                      )
+                    : [];
         for (const toolId of tools) {
             const node = this.document.modelManager.findNode((n) => n.id === toolId);
             if (node === this || !(node instanceof ParametricBodyNode)) continue;

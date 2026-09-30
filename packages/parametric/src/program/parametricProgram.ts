@@ -99,6 +99,7 @@ export type ParametricOp =
     | ExtrudeOp
     | RevolveOp
     | LoftOp
+    | EditLoftOp
     | SweepOp
     | EditSweepOp
     | FaceSweepOp
@@ -244,6 +245,27 @@ export interface LoftOp {
     ruled?: boolean;
     /** A smooth loft's surface continuity (default "c2"). */
     continuity?: Continuity;
+    /** Referenced main spine and full side-boundary curve; smooth C2 only. */
+    guided?: { spine: GuidedLoftPathInput; boundary: GuidedLoftPathInput };
+}
+
+export interface GuidedLoftPathInput {
+    nodeId: string;
+    /** Exactly one of topology indexes or JSON references returned by edges. */
+    edgeIndexes?: number[];
+    edgeRefs?: PersistentEdgeReference[];
+}
+
+export interface EditLoftOp {
+    op: "editLoft";
+    body: string;
+    featureId: string;
+    sections?: string[];
+    solid?: boolean;
+    ruled?: boolean;
+    continuity?: Continuity;
+    /** null clears the guide pair and restores ordinary lofting. */
+    guided?: LoftOp["guided"] | null;
 }
 
 export interface SweepSectionInput {
@@ -548,6 +570,9 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "loft":
             runLoftOp(state, op);
+            break;
+        case "editLoft":
+            runEditLoftOp(state, op);
             break;
         case "sweep":
             runSweepOp(state, op);
@@ -1000,6 +1025,8 @@ function runLoftOp(state: State, op: LoftOp): void {
         throw new Error(`"continuity" must be one of ${Continuities.join(", ")}`);
     }
     const sketches = op.sections.map((section) => resolveSketch(state, section));
+    const guided = op.guided === undefined ? undefined : guidedLoftInput(state, op.guided);
+    validateLoftOptions(op, guided !== undefined);
     const feature: LoftFeatureData = {
         id: Id.generate(),
         type: "loft",
@@ -1009,10 +1036,106 @@ function runLoftOp(state: State, op: LoftOp): void {
         ...(op.ruled === true || op.continuity === undefined || op.continuity === "c2"
             ? {}
             : { continuity: op.continuity }),
+        ...(guided ? { guided } : {}),
     };
     createBody(state, op.id, op.name, [feature], () => {
         for (const sketch of sketches) sketch.visible = false;
     });
+}
+
+function validateLoftOptions(
+    op: { solid?: boolean; ruled?: boolean; continuity?: Continuity },
+    guided: boolean,
+): void {
+    for (const key of ["solid", "ruled"] as const) {
+        if (op[key] !== undefined && typeof op[key] !== "boolean")
+            throw new Error(`Loft ${key} must be boolean`);
+    }
+    if (op.continuity !== undefined && !(Continuities as readonly string[]).includes(op.continuity))
+        throw new Error(`Loft continuity must be one of ${Continuities.join(", ")}`);
+    if (guided && (op.ruled || (op.continuity !== undefined && op.continuity !== "c2")))
+        throw new Error("Guided loft supports smooth C2 only; ruled, C0 and C1 are unsupported");
+}
+
+function guidedLoftInput(
+    state: State,
+    input: NonNullable<LoftOp["guided"]>,
+): NonNullable<LoftFeatureData["guided"]> {
+    if (!input?.spine || !input.boundary) throw new Error("Guided loft requires both spine and boundary");
+    const path = (given: GuidedLoftPathInput) => {
+        if (!given || typeof given.nodeId !== "string") throw new Error("Guided loft path requires nodeId");
+        if ((given.edgeIndexes !== undefined) === (given.edgeRefs !== undefined))
+            throw new Error("Guided loft path requires exactly one of edgeIndexes or edgeRefs");
+        const node = resolveNode(state, given.nodeId, "guided loft path");
+        if (!(node instanceof ShapeNode) || !node.shape.isOk)
+            throw new Error("Guided loft path source is unavailable");
+        if (given.edgeRefs !== undefined) {
+            if (!(node instanceof ParametricBodyNode))
+                throw new Error("Persistent guide references require a parametric source body");
+            if (!Array.isArray(given.edgeRefs) || !given.edgeRefs.length || given.edgeRefs.length > 128)
+                throw new Error("Guided loft requires 1–128 edge references per path");
+            return { nodeId: node.id, edges: persistentEdges(given.edgeRefs, node) };
+        }
+        const indexes = given.edgeIndexes;
+        const count = node.shape.value.findSubShapes(ShapeTypes.edge).length;
+        if (
+            !Array.isArray(indexes) ||
+            !indexes.length ||
+            indexes.length > 128 ||
+            new Set(indexes).size !== indexes.length ||
+            indexes.some((index) => !Number.isInteger(index) || index < 0 || index >= count)
+        )
+            throw new Error("Guided loft requires 1–128 distinct valid edge indexes per path");
+        return {
+            nodeId: node.id,
+            edges: indexes.map((index) => {
+                const captured = capturePathReference(node, index);
+                if (!captured.isOk) throw new Error(captured.error);
+                return captured.value;
+            }),
+        };
+    };
+    return { spine: path(input.spine), boundary: path(input.boundary) };
+}
+
+function runEditLoftOp(state: State, op: EditLoftOp): void {
+    if ([op.sections, op.solid, op.ruled, op.continuity, op.guided].every((value) => value === undefined))
+        throw new Error("editLoft requires sections, a guide pair or an option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "loft") throw new Error("editLoft requires a loft feature");
+    if (op.sections !== undefined && (!Array.isArray(op.sections) || op.sections.length < 2))
+        throw new Error("Loft requires at least two section sketches");
+    const guided =
+        op.guided === null
+            ? undefined
+            : op.guided !== undefined
+              ? guidedLoftInput(state, op.guided)
+              : feature.guided;
+    const options = {
+        solid: op.solid ?? feature.solid,
+        ruled: op.ruled ?? feature.ruled,
+        continuity: op.continuity ?? feature.continuity,
+    };
+    validateLoftOptions(options, guided !== undefined);
+    const { solid: _solid, ruled: _ruled, continuity: _continuity, guided: _guided, ...rest } = feature;
+    const edited: LoftFeatureData = {
+        ...rest,
+        sections:
+            op.sections === undefined
+                ? feature.sections
+                : op.sections.map((id) => ({ sketchId: resolveSketch(state, id).id })),
+        ...(options.solid === false ? { solid: false } : {}),
+        ...(options.ruled === true ? { ruled: true } : {}),
+        ...(options.continuity !== undefined && options.continuity !== "c2"
+            ? { continuity: options.continuity }
+            : {}),
+        ...(guided ? { guided } : {}),
+    };
+    const before = erroredFeatureIds(body);
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
 }
 
 function sweepSectionInput(state: State, input: SweepSectionInput): SweepFeatureData["section"] {

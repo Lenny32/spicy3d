@@ -13,6 +13,7 @@ import {
     type ShapeTracking,
     trackedIds,
 } from "./feature";
+import { evaluateGuidedLoft, guidedLoftDependencies } from "./guidedLoft";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import { resolveProfiles } from "./profileBuilder";
 import { captureProfileRef } from "./profileRef";
@@ -35,14 +36,37 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
     display: "command.feature.loft",
     icon: "icon-loft",
 
-    nodeIds: (feature) => [...new Set(sectionsOf(feature).map((section) => section.sketchId))],
+    nodeIds: (feature) => [
+        ...new Set([
+            ...sectionsOf(feature).map((section) => section.sketchId),
+            ...(feature.guided?.spine?.nodeId ? [feature.guided.spine.nodeId] : []),
+            ...(feature.guided?.boundary?.nodeId ? [feature.guided.boundary.nodeId] : []),
+        ]),
+    ],
+    cacheRefIds: (feature, document) => guidedLoftDependencies(feature, document).refIds,
+    cacheKey: (feature, document) => guidedLoftDependencies(feature, document).key,
 
-    references: (feature) =>
-        sectionsOf(feature).map((section, index) => ({
+    references: (feature) => [
+        ...sectionsOf(feature).map((section, index) => ({
             key: `sections.${index}`,
-            display: "body.sketch",
+            display: "body.sketch" as const,
             nodeId: section.sketchId,
         })),
+        ...(feature.guided?.spine && feature.guided?.boundary
+            ? [
+                  {
+                      key: "guided.spine",
+                      display: "loft.spine" as const,
+                      nodeId: feature.guided.spine.nodeId,
+                  },
+                  {
+                      key: "guided.boundary",
+                      display: "loft.boundary" as const,
+                      nodeId: feature.guided.boundary.nodeId,
+                  },
+              ]
+            : []),
+    ],
 
     parameters: (feature) => [
         { key: "solid", display: "option.command.isSolid", value: feature.solid !== false },
@@ -51,20 +75,38 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
 
     setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
 
-    applyResolvedRefs: (feature, { resolvedProfiles }) => {
-        if (resolvedProfiles === undefined || resolvedProfiles.length !== feature.sections.length) {
-            return feature;
-        }
+    applyResolvedRefs: (feature, { resolvedProfiles, resolvedEdges }) => {
         // Only picked profiles are re-anchored: an absent one keeps meaning "the sketch's only profile".
         return {
             ...feature,
-            sections: feature.sections.map((section, index) =>
-                section.profile === undefined ? section : { ...section, profile: resolvedProfiles[index] },
-            ),
+            sections:
+                resolvedProfiles?.length === feature.sections.length
+                    ? feature.sections.map((section, index) =>
+                          section.profile === undefined
+                              ? section
+                              : { ...section, profile: resolvedProfiles[index] },
+                      )
+                    : feature.sections,
+            ...(feature.guided &&
+            resolvedEdges?.length === feature.guided.spine.edges.length + feature.guided.boundary.edges.length
+                ? {
+                      guided: {
+                          spine: {
+                              ...feature.guided.spine,
+                              edges: resolvedEdges.slice(0, feature.guided.spine.edges.length),
+                          },
+                          boundary: {
+                              ...feature.guided.boundary,
+                              edges: resolvedEdges.slice(feature.guided.spine.edges.length),
+                          },
+                      },
+                  }
+                : {}),
         };
     },
 
     evaluate(feature, context): Result<IShape> {
+        if (feature.guided !== undefined) return evaluateGuidedLoft(feature, context);
         const sections = resolveLoftSections(feature, context);
         if (!sections.isOk) return Result.err(sections.error);
         const tracking = context.tracking;

@@ -92,12 +92,21 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   for a UCS member "X"/"Y"/"Z", default Z) | { nodeId, edgeIndex } (a linear edge of a node, e.g. a
   construction line drawn in a sketch). The two references follow their source when it changes.
   Always starts a new body — there is no join/cut revolve. angle is in degrees, default 360.
-- { op: "loft", id, sections, solid?, ruled?, continuity? }
+- { op: "loft", id, sections, solid?, ruled?, continuity?, guided? }
   sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes
   (e.g. a rectangle on XY, a circle on an offset plane); consecutive sections must not share a plane.
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
+  guided: { spine: { nodeId, edgeIndexes? , edgeRefs? }, boundary: { nodeId, edgeIndexes?, edgeRefs? } }
+  references an open main spine and one curve that genuinely controls the side boundary. Each path
+  uses exactly one of whole-edge indexes or persistent references returned by edges, with 1–128
+  pieces. Guided lofts support 2–16 closed planar sections and smooth C2 only; ruled/C0/C1 fail.
+  Keep sections in their authored planes: both paths must meet them once in strict station order,
+  and the complete boundary must lie on generated side faces. Interior guides are rejected.
+- { op: "editLoft", body, featureId, sections?, solid?, ruled?, continuity?, guided? }
+  changes the loft inputs/options as one undo step. guided:null clears both paths and restores
+  ordinary lofting; replacing the guided group must supply both spine and boundary.
 - { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
 - { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
   Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at

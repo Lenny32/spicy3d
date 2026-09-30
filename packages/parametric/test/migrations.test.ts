@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 12 (independent corner setbacks)", () => {
+describe("parametric format 13 (guided loft)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(12);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(12);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(13);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(13);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -31,6 +31,8 @@ describe("parametric format 12 (independent corner setbacks)", () => {
         ["v2/parametric9-sweep.json", 9],
         ["v2/parametric10-projection.json", 10],
         ["v2/parametric11-face-sweep.json", 11],
+        ["v2/parametric12-corner-setback.json", 12],
+        ["v2/parametric13-guided-loft.json", 13],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -39,7 +41,7 @@ describe("parametric format 12 (independent corner setbacks)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 12 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 13 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
