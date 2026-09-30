@@ -1688,3 +1688,61 @@ test("run_parametric captures a JSON starting-face pick and rebuilds it after an
     expectClean(boss);
     expect(extent(boss)).toEqual([5, 5, 30, 10, 10, 35]);
 });
+
+test("run_parametric discovers next candidates across JSON calls and tracks upstream height", () => {
+    const doc = newDoc();
+    const boundary = createdBody(doc, run(doc, plate(20)), "b1");
+    const result = run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "next-profile", plane: "XY", entities: rect(5, 5, 10, 10) },
+                { op: "extrude", id: "next-boss", sketch: "next-profile", depth: 1, extent: "next" },
+            ]),
+        ),
+    );
+    const boss = createdBody(doc, result, "next-boss");
+    expectClean(boss);
+    expect(boss.features[0]).toMatchObject({ extent: { type: "next", nodeIds: [boundary.id] } });
+    expect(extent(boss)).toEqual([5, 5, 0, 10, 10, 20]);
+    run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                {
+                    op: "editFeature",
+                    body: boundary.id,
+                    featureId: boundary.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 30,
+                },
+            ]),
+        ),
+    );
+    expectClean(boss);
+    expect(extent(boss)).toEqual([5, 5, 0, 10, 10, 30]);
+    expect(boss.features[0]).toMatchObject({ extent: { nodeIds: [boundary.id] } });
+});
+
+test("run_parametric rejects caller-provided next candidates rather than manual target selection", () => {
+    const doc = newDoc();
+    const boundary = createdBody(doc, run(doc, plate(20)), "b1");
+    const message = runExpectingFailure(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "bad-next-profile", plane: "XY", entities: rect(5, 5, 10, 10) },
+                {
+                    op: "extrude",
+                    id: "bad-next",
+                    sketch: "bad-next-profile",
+                    depth: 1,
+                    extent: { type: "next", nodeIds: [boundary.id] },
+                },
+            ]),
+        ),
+    );
+    expect(message).toContain("automatically");
+    expect(doc.modelManager.findNodes((node) => node instanceof ParametricBodyNode)).toHaveLength(1);
+});

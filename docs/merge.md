@@ -258,9 +258,11 @@ feature by its `type`:
   axis `axis` + `axisSource` + `constructionAxisRef` at `…/param/axis`.
 - **Extents** (parametric 3): an extrude's `extent` / `secondExtent` merge by their `type`; a changed
   type is one value. A to-object extent's `face` (a `ProfileRef`) + `nodeId` are one pick, its `offset`
-  an expression of its own.
+  an expression of its own. A next extent (parametric 8) stores its automatically captured
+  candidate `nodeIds` and offset atomically, so refreshes and offsets cannot merge into an
+  unreviewed target universe. The host input remains implicit; the winning face is recomputed.
 - **References** (checked by the integrity pass): `sketchId`, `source.nodeId`, `axisSource.nodeId`,
-  `extent.nodeId`, `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id`,
+  `extent.nodeId`, `extent.nodeIds[]` / `secondExtent.nodeIds[]`, `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id`,
   `extent.face.id` → tracked sub-shape ids; `profiles[].entities` → entities of the feature's sketch; `constructionAxisRef` → a
   construction ref (its `featureIndex` a timeline position).
 - A feature type this build does not know: base fields as above, every other field one value.
@@ -703,9 +705,11 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `startFace`: atomic { nodeId: ref → node; face: atomic }
       - `operation`: scalar
       - `profiles`: atomic of ref → profile
-      - `extent`: union on `type` (distance, toObject, throughAll, any other)
+      - `extent`: union on `type` (distance, next, toObject, throughAll, any other)
         - `type: "distance"`
           - `type`: scalar
+        - `type: "next"`
+          - atomic { type: scalar; nodeIds: atomic of ref → node; offset: expression }
         - `type: "toObject"`
           - `type`: scalar
           - `face`: ref → profile
@@ -716,9 +720,11 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
           - `type`: scalar
         - any other `type`
           - atomic
-      - `secondExtent`: union on `type` (distance, toObject, throughAll, any other)
+      - `secondExtent`: union on `type` (distance, next, toObject, throughAll, any other)
         - `type: "distance"`
           - `type`: scalar
+        - `type: "next"`
+          - atomic { type: scalar; nodeIds: atomic of ref → node; offset: expression }
         - `type: "toObject"`
           - `type`: scalar
           - `face`: ref → profile

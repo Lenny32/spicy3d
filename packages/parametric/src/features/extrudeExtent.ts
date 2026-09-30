@@ -27,10 +27,12 @@ import { captureProfileRef, type ProfileRef, profileScore } from "./profileRef";
 import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher";
 
 /**
- * Extrude extents (Fusion's Distance / To object / Through all, parametric format 3).
+ * Extrude extents: Distance / To object / Through all (format 3), From face (6), Next (8).
  *
- * - **Kernel.** A distance side is the classic `prism(Tracked)`; the other two are the tracked
- *   `prismUntilTracked` / `prismThruAllTracked` ops. All three return the TOOL with the same
+ * - **Kernel.** A distance side is the classic `prism(Tracked)`; picked/all extents use the tracked
+ *   `prismUntilTracked` / `prismThruAllTracked` ops, and Next uses exact `prismNextTracked`.
+ *   Next selects automatically within a captured candidate universe; it never reverses direction.
+ *   All extents return the TOOL with the same
  *   profile-relative history channels, so the extrude's id pipeline (`sweepProfileTracked`) and
  *   the tracked booleans that combine the tool with the body do not know which one ran — and ids
  *   downstream stay stable when the target face moves or the body resizes.
@@ -57,6 +59,12 @@ import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher"
 
 /** One side of an extrude, ready for the kernel. */
 export type SweepSide =
+    | {
+          readonly kind: "next";
+          readonly direction: XYZ;
+          readonly candidates: readonly IShape[];
+          readonly offset: number;
+      }
     | {
           readonly kind: "fromFace";
           readonly direction: XYZ;
@@ -143,7 +151,7 @@ export function resolveExtents(
     if (symmetric && feature.secondExtent === undefined && first.type === "toObject") {
         return Result.err(SYMMETRIC_TO_OBJECT_ERROR);
     }
-    const owned: IFace[] = [];
+    const owned: IShape[] = [];
     const dispose = () => owned.forEach((x) => x.dispose());
     let start: { face: IFace; offset: number } | undefined;
     if (feature.startFace) {
@@ -189,6 +197,7 @@ export function resolveExtents(
 
 /** Where one side ends, resolved: what `extentSides` turns into kernel sides. */
 export type ExtentEnd =
+    | { readonly kind: "next"; readonly candidates: readonly IShape[]; readonly offset: number }
     | { readonly kind: "distance" }
     | { readonly kind: "toObject"; readonly face: IFace; readonly offset: number }
     | { readonly kind: "throughAll"; readonly bounds: readonly IShape[]; readonly flush: boolean };
@@ -214,6 +223,8 @@ export function extentSides(
 
 function sideOf(end: ExtentEnd, direction: XYZ, vec: XYZ, reversible: boolean): SweepSide {
     switch (end.kind) {
+        case "next":
+            return { kind: "next", direction, candidates: end.candidates, offset: end.offset };
         case "toObject":
             return { kind: "toObject", direction, face: end.face, offset: end.offset, reversible };
         case "throughAll":
@@ -235,9 +246,17 @@ function resolveEnd(
     extent: ExtrudeExtent,
     feature: ExtrudeFeatureData,
     env: ExtentEnvironment,
-    owned: IFace[],
+    owned: IShape[],
 ): Result<ExtentEnd> {
     switch (extent.type) {
+        case "next": {
+            const offset = resolveUnitSpec(extent.offset ?? 0, env.scope, LENGTH_UNITS);
+            if (!offset.isOk) return Result.err(offset.error);
+            const candidates = resolveNextCandidates(extent, feature, env, owned);
+            return candidates.isOk
+                ? Result.ok({ kind: "next", candidates: candidates.value, offset: offset.value })
+                : Result.err(candidates.error);
+        }
         case "throughAll":
             if (env.bounds.length === 0) return Result.err(THROUGH_ALL_NO_BODY_ERROR);
             return Result.ok({ kind: "throughAll", bounds: env.bounds, flush: env.flush });
@@ -252,6 +271,44 @@ function resolveEnd(
         default:
             return Result.ok({ kind: "distance" });
     }
+}
+
+/** Candidate shape snapshots in the tool host's coordinates, with the same timeline guards as picked faces. */
+function resolveNextCandidates(
+    extent: Extract<ExtrudeExtent, { type: "next" }>,
+    feature: ExtrudeFeatureData,
+    env: ExtentEnvironment,
+    owned: IShape[],
+): Result<IShape[]> {
+    if (
+        !Array.isArray(extent.nodeIds) ||
+        extent.nodeIds.some((id) => typeof id !== "string" || id.length === 0)
+    )
+        return Result.err("Next-face candidate ids must be nonempty node ids");
+    if (extent.nodeIds.length > 1024) return Result.err("Next-face candidate snapshot exceeds 1024 bodies");
+    const result: IShape[] = [];
+    const ids = [...new Set([env.toolHost.id, ...extent.nodeIds])];
+    for (const id of ids) {
+        const context = extentFaceContext(env, feature.id, id);
+        if (!context.isOk) return Result.err(`Next-face candidate ${id}: ${context.error}`);
+        if (id === env.toolHost.id && context.value.host.id === id && context.value.input === undefined)
+            continue;
+        const faces = resolveSourceFaces({ nodeId: id, profiles: [] }, context.value);
+        if (!faces.isOk) return Result.err(`Next-face candidate ${id}: ${faces.error}`);
+        try {
+            const combined = shapeFactory.combine(faces.value.worldFaces);
+            if (!combined.isOk) return Result.err(`Next-face candidate ${id}: ${combined.error}`);
+            owned.push(combined.value);
+            const local = combined.value.transformedMul(
+                env.toolHost.worldTransform().invert() ?? Matrix4.identity(),
+            );
+            owned.push(local);
+            result.push(local);
+        } finally {
+            faces.value.owned.forEach((face) => face.dispose());
+        }
+    }
+    return Result.ok(result);
 }
 
 /**
@@ -433,8 +490,11 @@ export function extentDependencies(
 ): { refIds: string[]; key: string[] } {
     const refIds: string[] = [];
     const key: string[] = [];
-    for (const [, extent] of toObjectExtents(feature)) {
-        const id = extent.nodeId ?? hostId;
+    const ids = [
+        ...toObjectExtents(feature).map(([, extent]) => extent.nodeId ?? hostId),
+        ...nextExtents(feature).flatMap((extent) => extent.nodeIds),
+    ];
+    for (const id of new Set(ids)) {
         if (id === evaluatingId) continue;
         const node = featureListNode(document, id);
         const index = node === undefined ? undefined : linkedIndex(node, hostId, feature.id);
@@ -449,16 +509,42 @@ export function extentDependencies(
 }
 
 /** The bodies the to-object faces of `feature` are on (the host's own omitted). */
-export function extentNodeIds(feature: ExtrudeFeatureData): string[] {
-    return toObjectExtents(feature).flatMap(([, extent]) =>
-        extent.nodeId === undefined ? [] : [extent.nodeId],
+export function nextExtents(feature: ExtrudeFeatureData): Extract<ExtrudeExtent, { type: "next" }>[] {
+    return [feature.extent, ...(feature.symmetric ? [feature.secondExtent] : [])].filter(
+        (extent): extent is Extract<ExtrudeExtent, { type: "next" }> => extent?.type === "next",
     );
+}
+
+export function extentNodeIds(feature: ExtrudeFeatureData): string[] {
+    return [
+        ...new Set([
+            ...toObjectExtents(feature).flatMap(([, extent]) =>
+                extent.nodeId === undefined ? [] : [extent.nodeId],
+            ),
+            ...nextExtents(feature).flatMap((extent) => extent.nodeIds),
+        ]),
+    ];
 }
 
 /** One side's tool with kernel history (channels relative to the profile, see `prismTracked`). */
 export function sweepSideTracked(face: IFace, side: SweepSide): Result<TrackedShape> {
     switch (side.kind) {
+        case "next": {
+            const next = shapeFactory.prismNextTracked?.bind(shapeFactory);
+            return next === undefined
+                ? Result.err("This kernel cannot find the next extrusion face")
+                : next(face, side.direction, [...side.candidates], side.offset);
+        }
         case "fromFace": {
+            if (side.end.kind === "next") {
+                const next = shapeFactory.prismNextTracked?.bind(shapeFactory);
+                return next === undefined
+                    ? Result.err("This kernel cannot find the next extrusion face")
+                    : next(face, side.direction, [...side.end.candidates], side.end.offset, {
+                          face: side.face,
+                          offset: side.offset,
+                      });
+            }
             const from = shapeFactory.prismFromTracked?.bind(shapeFactory);
             if (!from) return Result.err("This kernel cannot start an extrusion from a face");
             const end = side.end;
@@ -508,12 +594,14 @@ export function sweepSide(face: IFace, side: SweepSide): Result<IShape> {
 /** True when every side of `sides` is a distance with a usable kernel for the tracked path. */
 export function canSweepTracked(sides: readonly SweepSide[]): boolean {
     return sides.every((side) =>
-        side.kind === "fromFace"
-            ? shapeFactory.prismFromTracked !== undefined
-            : side.kind === "distance"
-              ? shapeFactory.prismTracked !== undefined
-              : side.kind === "toObject"
-                ? shapeFactory.prismUntilTracked !== undefined
-                : shapeFactory.prismThruAllTracked !== undefined,
+        side.kind === "next" || (side.kind === "fromFace" && side.end.kind === "next")
+            ? shapeFactory.prismNextTracked !== undefined
+            : side.kind === "fromFace"
+              ? shapeFactory.prismFromTracked !== undefined
+              : side.kind === "distance"
+                ? shapeFactory.prismTracked !== undefined
+                : side.kind === "toObject"
+                  ? shapeFactory.prismUntilTracked !== undefined
+                  : shapeFactory.prismThruAllTracked !== undefined,
     );
 }

@@ -76,6 +76,12 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   it follows the face on rebuild — a hole cut to a block's bottom face stays through when the block
   grows). With symmetric, extent applies to both sides; secondExtent gives the second side its own
   (a to-object extent cannot be mirrored).
+  "next" | {type:"next",offset?} automatically chooses the nearest full-coverage face in eligible
+  candidate bodies captured when authored. Rebuilds may select another candidate after upstream edits.
+  Candidate IDs are a fixed search universe; hide unrelated bodies before authoring. Editing can
+  refresh that snapshot. Depth sign chooses direction; Next never reverses itself. Offset translates
+  the selected end along that direction after selection. Tied, crossing, partial/piecewise or absent
+  boundaries fail explicitly. One complete face per profile is the initial supported boundary.
   startFace: {nodeId, faceIndex} selects an associative starting surface, including curved walls.
   startOffset moves that surface along the sketch normal; expressions are supported. With distance,
   depth separates the surface and its exact translated end cap. Upstream edits rebuild both caps.

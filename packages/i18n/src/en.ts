@@ -869,6 +869,8 @@ export default {
         "option.command.extent.distance": "Distance",
         "option.command.extent.toObject": "To object",
         "option.command.extent.throughAll": "Through all",
+        "option.command.extent.next": "To next",
+        "option.command.next.refresh": "Refresh next candidates",
         "option.command.extentFace": "Up to",
         "option.command.extentFace.none": "Click the face to extrude up to",
         "option.command.extentFace.picked": "Face selected (click another to change)",

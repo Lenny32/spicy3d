@@ -102,6 +102,7 @@ export interface ExtrudeFeatureData extends FeatureBase {
  *   `depth`'s sign.
  */
 export type ExtrudeExtent =
+    | { readonly type: "next"; readonly nodeIds: string[]; readonly offset?: ParameterValue }
     | { readonly type: "distance" }
     | {
           readonly type: "toObject";

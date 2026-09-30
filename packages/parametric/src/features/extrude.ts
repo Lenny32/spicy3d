@@ -69,7 +69,7 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
     // entering the entry (`extrudeExtent.ts`): a token of that state is part of the key, and the
     // body's shape is no cache ref.
     cacheKey: (feature, document) => {
-        if (toObjectExtents(feature).length === 0) return undefined;
+        if (toObjectExtents(feature).length === 0 && extentNodeIds(feature).length === 0) return undefined;
         const host = extrudeHostOf(document, feature);
         return host === undefined
             ? undefined
@@ -78,7 +78,7 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
 
     cacheRefIds: (feature, document) => {
         const base = [feature.sketchId, feature.source?.nodeId].filter((x): x is string => x !== undefined);
-        if (toObjectExtents(feature).length === 0) return base;
+        if (toObjectExtents(feature).length === 0 && extentNodeIds(feature).length === 0) return base;
         const host = extrudeHostOf(document, feature);
         const extent =
             host === undefined
@@ -103,7 +103,7 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
             unit: LENGTH_UNITS,
         },
         { key: "symmetric", display: "option.command.symmetric", value: feature.symmetric ?? false },
-        ...(feature.extent?.type === "toObject"
+        ...(feature.extent?.type === "toObject" || feature.extent?.type === "next"
             ? [
                   {
                       key: EXTENT_OFFSET,
@@ -118,7 +118,11 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
     setParameter: (feature, key, value) => {
         if (key === "symmetric") return { ...feature, symmetric: value === true || value === "true" };
         if (key === EXTENT_OFFSET) {
-            if (feature.extent?.type !== "toObject" || typeof value === "boolean") return feature;
+            if (
+                (feature.extent?.type !== "toObject" && feature.extent?.type !== "next") ||
+                typeof value === "boolean"
+            )
+                return feature;
             return { ...feature, extent: { ...feature.extent, offset: value } };
         }
         return { ...feature, [key]: value };

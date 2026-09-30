@@ -24,6 +24,7 @@ import {
     type UnitSpec,
     type XYZLike,
 } from "@spicy3d/core";
+import { captureNextCandidateIds } from "../commands/nextExtentCandidates";
 import { isBodyTrackingNode } from "../features/bodyTracking";
 import { matchEdgesAnchored } from "../features/edgeMatcher";
 import { captureEdgeRef, type EdgeRef } from "../features/edgeRef";
@@ -184,6 +185,8 @@ export interface ExtrudeOp {
 export type ExtrudeExtentSpec =
     | "distance"
     | "throughAll"
+    | "next"
+    | { type: "next"; offset?: ParameterValue }
     | { type: "distance" | "throughAll" }
     | { type: "toObject"; face: { nodeId: string; faceIndex: number }; offset?: ParameterValue };
 
@@ -717,7 +720,16 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
             '"secondExtent" is the second side of a two-sided extrude: it needs "symmetric": true',
         );
     }
-    const extent = op.extent === undefined ? undefined : resolveExtent(state, op.extent, "extent", scope);
+    const extent =
+        op.extent === undefined
+            ? undefined
+            : resolveExtent(
+                  state,
+                  op.extent,
+                  "extent",
+                  scope,
+                  op.body === undefined ? undefined : resolveNode(state, op.body, "body").id,
+              );
     const from =
         op.startFace === undefined
             ? undefined
@@ -725,7 +737,13 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
     const secondExtent =
         op.secondExtent === undefined
             ? undefined
-            : resolveExtent(state, op.secondExtent, "secondExtent", scope);
+            : resolveExtent(
+                  state,
+                  op.secondExtent,
+                  "secondExtent",
+                  scope,
+                  op.body === undefined ? undefined : resolveNode(state, op.body, "body").id,
+              );
     const feature: ExtrudeFeatureData = {
         id: Id.generate(),
         type: "extrude",
@@ -758,12 +776,32 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
 }
 
 /** A program's extent spec as feature data: a to-object face captured like the interactive pick. */
-function resolveExtent(state: State, given: ExtrudeExtentSpec, what: string, scope: Scope): ExtrudeExtent {
+function resolveExtent(
+    state: State,
+    given: ExtrudeExtentSpec,
+    what: string,
+    scope: Scope,
+    hostId?: string,
+): ExtrudeExtent {
     const type = typeof given === "string" ? given : given?.type;
+    if (type === "next") {
+        const spec =
+            typeof given === "object" ? (given as Extract<ExtrudeExtentSpec, { type: "next" }>) : undefined;
+        if (spec && "nodeIds" in spec)
+            throw new Error("Next-face candidate bodies are discovered automatically");
+        if (spec?.offset !== undefined) ensureUnit(spec.offset, scope, LENGTH_UNITS, `${what}.offset`);
+        const ids = captureNextCandidateIds(state.document, hostId);
+        if (!ids.isOk) throw new Error(ids.error);
+        return {
+            type: "next",
+            nodeIds: ids.value,
+            ...(spec?.offset === undefined ? {} : { offset: spec.offset }),
+        };
+    }
     if (type === "distance" || type === "throughAll") return { type };
     if (type !== "toObject" || typeof given !== "object") {
         throw new Error(
-            `"${what}" must be "distance", "throughAll" or { type: "toObject", face: { nodeId, faceIndex } }`,
+            `"${what}" must be "distance", "throughAll", "next", { type: "next", offset? } or { type: "toObject", face: { nodeId, faceIndex } }`,
         );
     }
     const spec = given as Extract<ExtrudeExtentSpec, { type: "toObject" }>;

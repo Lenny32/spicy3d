@@ -366,7 +366,7 @@ const OPS_SCHEMA = {
         startOffset: { description: "Distance the extrusion starts away from the profile plane" },
         extent: {
             description:
-                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
+                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), "next" or {type:"next", offset?} (automatically find the uniformly nearest complete face in an authoring-time candidate body snapshot; curved caps are exact, missing/tied/crossing/piecewise targets fail; no automatic direction reversal), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
         },
         secondExtent: {
             description:

@@ -821,6 +821,8 @@ export const I18N_KEYS = [
     "option.command.extent.distance",
     "option.command.extent.toObject",
     "option.command.extent.throughAll",
+    "option.command.extent.next",
+    "option.command.next.refresh",
     "option.command.extentFace",
     "option.command.extentFace.none",
     "option.command.extentFace.picked",

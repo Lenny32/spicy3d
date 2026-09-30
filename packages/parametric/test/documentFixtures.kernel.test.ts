@@ -67,3 +67,19 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
         expect(doc.modelManager.serialize()).toEqual(data["models"]);
     });
 });
+
+test("the approved next/from-face fixture rebuilds its exact depth and offset after load", async () => {
+    const fixture = loadDocumentFixtures().find((item) => item.name === "v2/parametric8-next.json");
+    expect(fixture).not.toBeUndefined();
+    if (fixture === undefined) throw new Error("Missing approved next fixture");
+    const data = migrateDocument(fixture.data).value;
+    const doc = new TestDocument({ application: createMockApplication() });
+    doc.visual = createMockVisualWithDocument(doc);
+    doc.variables.setItems(data["variables"]);
+    await doc.modelManager.deserialize(structuredClone(data["models"]));
+    const boss = doc.modelManager.findNode((node) => node.id === "body-boss") as ParametricBodyNode;
+    expect(boss).toBeInstanceOf(ParametricBodyNode);
+    expect(boss.shape.isOk).toBe(true);
+    expect(Math.abs(boss.shape.value.volume())).toBeCloseTo(16 * (10 - 2), 4);
+    expect(doc.modelManager.serialize()).toEqual(data["models"]);
+});
