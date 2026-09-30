@@ -6,6 +6,8 @@ Incremental plan to expand Spicy3D sketch capabilities to match Fusion 360 funct
 
 For 3D construction planes, axes, points, and coordinate systems, see the separate [Construct Panel Enhancement Roadmap](construct-roadmap.md), covering tickets CONSTRUCT-01 through CONSTRUCT-07.
 
+For the geometry kernel's runtime (moving OCCT and the model evaluation to a Web Worker so a hung operation can be cancelled), see [KERNEL-01](kernel-01-worker-kernel.md).
+
 ## Phases Overview
 
 | Phase | Focus | Complexity | Est. PRs | Blockers |

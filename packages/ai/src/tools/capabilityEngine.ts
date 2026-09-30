@@ -35,6 +35,7 @@ import {
     type ShapeParamUnit,
     shapeCapabilities,
 } from "./capabilities.generated";
+import { throwIfCancelled, timeOp } from "./opBudget";
 import { buildTransformMatrix } from "./transformMatrix";
 
 interface Op {
@@ -874,7 +875,7 @@ function recordSubShapeRefs(
     results[opId] = { count: refs.length, refs, kind: "shape" };
 }
 
-async function runProgram(ops: Op[]): Promise<string> {
+async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const doc = activeDocument();
     const factory = globalThis.app.shapeProvider.factory;
     const localRefs = sessionRefs(doc);
@@ -893,7 +894,7 @@ async function runProgram(ops: Op[]): Promise<string> {
     const nullSnapshot = new Set(nullRefs);
     try {
         Transaction.execute(doc, "AI program", () => {
-            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, scope);
+            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, scope, signal);
             doc.selection.clearSelection();
             doc.visual.update();
         });
@@ -917,7 +918,11 @@ interface ProgramOutput {
     resolved: Record<string, Record<string, number>>;
 }
 
-/** Runs every op in order, restating any failure as an error naming the offending op. */
+/**
+ * Runs every op in order, restating any failure as an error naming the offending op. A cancelled
+ * call stops before the next op (the caller's transaction rolls everything back); an op that
+ * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
+ */
 function runOps(
     ops: Op[],
     doc: IDocument,
@@ -925,12 +930,16 @@ function runOps(
     localRefs: Map<string, LocalRef>,
     output: ProgramOutput,
     scope: Scope,
+    signal: AbortSignal | undefined,
 ): void {
     const { created, removed, results } = output;
     for (const [index, op] of ops.entries()) {
+        throwIfCancelled(signal, index, String(op.method));
         const numeric: NumericArgs = { scope, resolved: {} };
         try {
-            runOp(op, doc, factory, localRefs, created, removed, results, numeric);
+            timeOp(String(op.method), () =>
+                runOp(op, doc, factory, localRefs, created, removed, results, numeric),
+            );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
             }
@@ -1256,7 +1265,7 @@ function allOpMethods(): string[] {
     ];
 }
 
-function handleRunProgram(args: Record<string, unknown>): Promise<string> {
+function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const ops = Array.isArray(args) ? args : (args as { ops?: unknown }).ops;
     if (!Array.isArray(ops)) {
         return Promise.resolve(
@@ -1265,7 +1274,7 @@ function handleRunProgram(args: Record<string, unknown>): Promise<string> {
             }),
         );
     }
-    return runProgram(ops as Op[]);
+    return runProgram(ops as Op[], signal);
 }
 
 export function buildCapabilityTools(): Tool[] {

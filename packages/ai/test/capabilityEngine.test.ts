@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import {
     BoundingBox,
+    Config,
     EditableShapeNode,
     FolderNode,
     type IDocument,
@@ -15,6 +16,7 @@ import {
 } from "@spicy3d/core";
 import { createMockApplication, createMockDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { buildCapabilityTools, summarizeRefIds } from "../src/tools/capabilityEngine";
+import { takeSlowOpWarnings } from "../src/tools/opBudget";
 
 describe("capabilityEngine", () => {
     test("exposes a single run_program tool with the full method enum", () => {
@@ -1592,6 +1594,103 @@ describe("capabilityEngine", () => {
 
             expect(result.created[0].name).toBe("shell");
             expect(nodeById(doc, result.created[0].nodeId)?.name).toBe("shell");
+        });
+    });
+
+    // Ops are synchronous: a cancellation is seen between ops, never inside one.
+    describe("cancellation and slow ops", () => {
+        function setup(factory: Record<string, unknown>) {
+            const doc = new TestDocument();
+            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            const app = createMockApplication({ shapeProvider: { factory } as any });
+            (app as any).activeView = { document: doc };
+            rs.stubGlobal("app", app);
+            return doc;
+        }
+
+        const solid = () => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape);
+        const defaultBudget = Config.instance.slowOpWarningSeconds;
+
+        afterEach(() => {
+            rs.unstubAllGlobals();
+            rs.restoreAllMocks();
+            Config.instance.slowOpWarningSeconds = defaultBudget;
+            takeSlowOpWarnings();
+            takeSlowOpWarnings();
+        });
+
+        test("a signal aborted during op 0 stops before op 1, rolls back and reports cancelled", async () => {
+            const controller = new AbortController();
+            const box = rs.fn(() => {
+                controller.abort();
+                return solid();
+            });
+            const cylinder = rs.fn(solid);
+            const doc = setup({ box, cylinder });
+            const before = doc.modelManager.findNodes().map((n) => n.id);
+
+            const tool = buildCapabilityTools()[0];
+            await expect(
+                tool.handler(
+                    {
+                        ops: [
+                            { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                            { id: "c", method: "cylinder", args: { radius: 1, dz: 1 } },
+                        ],
+                    },
+                    controller.signal,
+                ),
+            ).rejects.toThrow('cancelled before op 1 ("cylinder"); the whole program was rolled back');
+
+            expect(box.mock.calls.length).toBe(1);
+            expect(cylinder.mock.calls.length).toBe(0);
+            expect(doc.modelManager.findNodes().map((n) => n.id)).toEqual(before);
+            // The rolled-back box's ref is gone too.
+            await expect(
+                tool.handler({ ops: [{ id: "v", method: "shape.volume", target: "b" }] }),
+            ).rejects.toThrow("ai.error.unknownRef");
+        });
+
+        test("an op over the slow-op budget is noted with its name and duration", async () => {
+            let now = 0;
+            rs.spyOn(performance, "now").mockImplementation(() => now);
+            const box = rs.fn(() => {
+                now += 48_000;
+                return solid();
+            });
+            const cylinder = rs.fn(() => {
+                now += 5_000;
+                return solid();
+            });
+            setup({ box, cylinder });
+
+            await buildCapabilityTools()[0].handler({
+                ops: [
+                    { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                    { id: "c", method: "cylinder", args: { radius: 1, dz: 1 } },
+                ],
+            });
+
+            const warnings = takeSlowOpWarnings();
+            expect(warnings.length).toBe(1);
+            expect(warnings[0]).toContain('op "box" took 48 s (slow-op budget 30 s)');
+        });
+
+        test("the budget comes from Config", async () => {
+            Config.instance.slowOpWarningSeconds = 2;
+            let now = 0;
+            rs.spyOn(performance, "now").mockImplementation(() => now);
+            const cylinder = rs.fn(() => {
+                now += 5_000;
+                return solid();
+            });
+            setup({ cylinder });
+
+            await buildCapabilityTools()[0].handler({
+                ops: [{ id: "c", method: "cylinder", args: { radius: 1, dz: 1 } }],
+            });
+
+            expect(takeSlowOpWarnings()).toEqual([expect.stringContaining('op "cylinder" took 5 s')]);
         });
     });
 });

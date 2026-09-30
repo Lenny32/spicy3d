@@ -123,7 +123,12 @@ export interface IShapeFactory {
     combine(shapes: IShape[]): Result<ICompound>;
     /** @unit length thickness */
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape>;
-    /** @unit length thickness */
+    /**
+     * `joinType: "intersection"` on a shape with more faces than
+     * `Config.thickSolidIntersectionMaxFaces` is refused: OCCT's intersection join may never
+     * finish on many narrow faces, and a kernel call cannot be interrupted (docs/kernel.md).
+     * @unit length thickness
+     */
     makeThickSolidByJoin(
         shape: IShape,
         openFaces: IShape[],

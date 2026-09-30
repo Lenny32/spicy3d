@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    Config,
     type Continuity,
     GeometryUtils,
     type ICompound,
@@ -21,6 +22,7 @@ import {
     type Plane,
     Precision,
     Result,
+    ShapeTypes,
     type TrackedShape,
     type XYZ,
     type XYZLike,
@@ -108,6 +110,23 @@ function validThickSolid(result: Result<IShape, string>, op: string): Result<ISh
     if (result.value.checkShape()) return result;
     result.value.dispose();
     return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+}
+
+/**
+ * The error for an intersection join on an input with more faces than
+ * `Config.thickSolidIntersectionMaxFaces`, undefined when the call may go ahead. OCCT's
+ * intersection join (`BRepOffset_MakeOffset`, `GeomAbs_Intersection`) intersects the offset faces
+ * pairwise; on a shell of many narrow faces it may never finish, and a kernel call on the main
+ * thread cannot be interrupted, so the tab hangs. Arc joins and simple offsets do not.
+ */
+function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
+    if (joinType !== "intersection") return undefined;
+    const limit = Config.instance.thickSolidIntersectionMaxFaces;
+    const faces = shape.findSubShapes(ShapeTypes.face);
+    const count = faces.length;
+    for (const face of faces) face.dispose();
+    if (count <= limit) return undefined;
+    return `MakeThickSolidByJoin refused: joinType "intersection" on a shape with ${count} faces (limit ${limit}) may never finish and would freeze the tab; use joinType "arc" or makeThickSolidBySimple (Config.thickSolidIntersectionMaxFaces raises the limit)`;
 }
 
 function convertShapesResult<P extends unknown[] = unknown[]>(
@@ -782,6 +801,8 @@ export class ShapeFactory implements IShapeFactory {
         mode: OffsetMode = "skin",
         intersection: boolean = false,
     ): Result<IShape> {
+        const refused = refuseIntersectionJoin(shape, joinType);
+        if (refused) return Result.err(refused);
         return validThickSolid(
             convertShapeResult(
                 wasm.ShapeFactory.makeThickSolidByJoin,

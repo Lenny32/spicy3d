@@ -26,6 +26,11 @@ Validity checks (offset / thickened results):
 - checkShape does not test self-intersection (offset faces crossing at steep, narrow ends). shape.checkSelfIntersection does (true = none found); it is expensive on shapes with many faces, and older kernel builds answer an error "not available in this kernel build".
 - makeThickSolid* already fail with "Thick solid is invalid" when the result does not pass checkShape; shape.inspectionCommonVolume / shape.inspectionMass refuse an input that does not pass it.
 
+Long kernel ops (the tab freezes while one runs):
+- Every kernel op runs synchronously in the page: while one runs, the viewport, get_document_state and every other tool call wait, and the op cannot be cancelled — only a reload stops it. A cancelled call stops between ops (the program rolls back), never inside one.
+- makeThickSolidByJoin with joinType "intersection" on a shell with many faces (a lofted or swept skin, G2 lofts in particular) may NEVER finish: OCCT intersects the offset faces pairwise. It is refused above 40 input faces (error "MakeThickSolidByJoin refused: … N faces (limit 40) …"). Use joinType "arc", or makeThickSolidBySimple for an open skin; build the skin with fewer sections before thickening.
+- An op that took longer than the slow-op budget (30 s by default) is reported as a "Warning: op … took N s" line in the next tool result: do not repeat it as it was; choose a cheaper variant.
+
 Flange (base plate + boss + bolt circle):
 1. base: box(plane at corner, dx, dy, dz) id "base".
 2. boss: cylinder(normal +Z, center at plate center on top face, radius r, dz h) id "boss".

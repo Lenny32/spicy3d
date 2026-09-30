@@ -1,0 +1,92 @@
+# Geometry kernel at runtime
+
+How the OCCT kernel runs in the page, how it fails, and what keeps a single operation from taking
+the tab down. Build details are in `cpp/README.md`; the plan to move the kernel off the main thread
+is [KERNEL-01](../tickets/kernel-01-worker-kernel.md).
+
+## Where it runs
+
+OCCT 8.0 is compiled to one WebAssembly module (`packages/wasm/lib/spicy-wasm.wasm`,
+`-sENVIRONMENT=web`, no pthreads, 256 MB initial memory growing up to `-sMAXIMUM_MEMORY=4GB`). The
+page loads one instance of it, **on the main thread**. Every `IShapeFactory` / `IShape` call is a
+synchronous embind call that returns a `Result`; parametric rebuilds, previews, meshing, imports and
+exports all chain such calls.
+
+While one call runs, nothing else in the tab runs: no rendering, no input, no autosave or cloud sync,
+and no WebSocket traffic, so the MCP relay gets no answer either. JavaScript cannot interrupt
+synchronous code, so a call that never returns freezes the tab until it is reloaded. A call whose
+memory keeps growing may take the browser tab (or the browser) down when it reaches the 4 GB cap.
+
+### MCP tool calls
+
+- Tool calls run one at a time in one `SerialQueue` per page (`packages/ai/src/mcp/server.ts`),
+  because `run_program` refs chain across calls. A long kernel op therefore blocks every later call,
+  read-only ones such as `get_document_state` included. The relay gives up after 120 s ("The Spicy3D
+  tab did not answer within 120 seconds"). That text comes from the server, and the page keeps
+  working on the call.
+- **Cancellation.** A call cancelled while it waits in the queue never starts. `run_program` and
+  `run_parametric` also check the call's signal before every op: once it is aborted, the program
+  throws `cancelled before op N ("<method>")` and its transaction rolls the whole program back. An
+  op that is already running is never interrupted. All ops of one program run in one synchronous
+  stretch, so today a cancellation that arrives over the WebSocket while a program runs is only
+  read once the program has ended. The check between ops only has an effect once ops yield to the
+  event loop, which is what the worker kernel (KERNEL-01) makes possible.
+- **Slow-op warning.** Each op's wall time is measured (`packages/ai/src/tools/opBudget.ts`). An op
+  that took longer than `Config.slowOpWarningSeconds` (30 s by default, page-level, not saved) adds
+  a separate text line to the tool result: `Warning: op "makeThickSolidByJoin" took 48 s (slow-op
+  budget 30 s) …`. The next result repeats it once, marked `(earlier call)`, because the call that
+  ran the slow op is often the one whose answer the relay no longer waited for. This is a soft
+  budget: it reports a slow op after the fact and cannot stop one.
+
+## How a kernel call fails
+
+- **OCCT exceptions.** OCCT reports failures by throwing `Standard_Failure`. The Release build now
+  uses native WebAssembly exceptions (`-fwasm-exceptions`), and every binding entry goes through
+  `cpp/src/guard.hpp`, which turns a raise into the binding's error channel: an error result
+  (`isOk: false`), `undefined`, or a JS `Error`. The TS wrappers answer
+  `"<Op> failed: <message>"`. **The committed binary predates this change.** Until
+  `npm run setup:wasm && npm run build:wasm` rebuilds it, an OCCT raise still aborts the module
+  (`RuntimeError: Aborted(…)`).
+- **Aborts and traps.** An abort (out of memory, a C++ bug, or any raise in an old binary) or a trap
+  (`unreachable`, `table index is out of bounds`, `null function or function signature mismatch`,
+  `memory access out of bounds`) abandons the C++ stack mid-operation. The call fails with
+  `"<Op> failed: …"`.
+- **Validation.** Thick-solid results (`makeThickSolidBySimple` / `ByJoin`) are checked with
+  `BRepCheck_Analyzer` in C++ and `checkShape()` in TS: an invalid one is an error
+  (`Thick solid is invalid`), not a solid. The inspections (`inspectionCommonVolume`,
+  `inspectionMass`) refuse an input that fails `checkShape()`. They also run a bounded
+  self-intersection test (`BOPAlgo_ArgumentAnalyzer`, up to 200 faces per shape).
+  `Shape.checkSelfIntersection` is feature-detected: an older binary answers "not available".
+
+## Dead-kernel state
+
+After an abort or a fatal trap, `packages/wasm/src/kernelGuard.ts` runs a small probe (a unit box)
+against the module. Often the module survives, and nothing changes. If the probe fails, core's
+`KernelState` records the kernel as crashed with the first reason, and from then on nothing
+re-enters the module. Every factory and converter call fails at once with
+`Kernel crashed (<reason>); reload the page`. The module cannot be re-created in place, because
+every `OccShape` wraps a handle into it. The MCP kernel tools (`KERNEL_TOOLS` in `kernelTools.ts`)
+answer that error without starting work. `get_document_state` and the `spicy3d://document`
+resource report `kernel: "crashed"`, and the error-recovery skill tells agents not to retry. The app
+shows one persistent banner with a Reload action. Reading, viewing, selecting and saving keep
+working.
+
+A hang is not a crash: nothing in the page can detect or end a call that never returns.
+
+## Guard rails against known hangs
+
+- **Intersection join on many faces.** `makeThickSolidByJoin` with `joinType: "intersection"` runs
+  `BRepOffset_MakeOffset` in `GeomAbs_Intersection` mode, which intersects the offset faces pairwise.
+  On a shell of many narrow faces (a G2 loft of 61 faces in the original report) it may never finish.
+  `packages/wasm/src/factory.ts` refuses such a call before entering the kernel when the input has
+  more faces than `Config.thickSolidIntersectionMaxFaces` (40 by default, page-level, not saved;
+  `Infinity` lifts the guard). The `Result.err` names the face count, the limit and the alternatives
+  (`joinType: "arc"`, `makeThickSolidBySimple`). The guard sits in the factory, so it covers every
+  caller: `run_program`, the Shell command (whose preview and confirm now toast the kernel's error)
+  and the parametric thicken feature on a solid with open faces. Arc and tangent joins are not
+  limited. The capability doc and the `modeling-recipes` skill warn agents about it.
+
+## Plan
+
+Moving the kernel and the model evaluation to a Web Worker, so that a hung call can be ended with
+`terminate()` and the kernel re-created, is [KERNEL-01](../tickets/kernel-01-worker-kernel.md).

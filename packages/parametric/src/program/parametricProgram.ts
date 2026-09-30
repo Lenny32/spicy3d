@@ -316,8 +316,23 @@ function refsFor(document: IDocument): Map<string, string> {
     return refs;
 }
 
+/** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
+export interface ProgramRunOptions {
+    /**
+     * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
+     * transaction rolls it back. An op already running is never interrupted.
+     */
+    signal?: AbortSignal;
+    /** Called after every op, failed ones included, with its wall time. */
+    onOpFinished?: (op: string, milliseconds: number) => void;
+}
+
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
-export function runParametricProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
+export function runParametricProgram(
+    document: IDocument,
+    ops: readonly ParametricOp[],
+    options: ProgramRunOptions = {},
+): ProgramResult {
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -328,10 +343,16 @@ export function runParametricProgram(document: IDocument, ops: readonly Parametr
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
+        if (options.signal?.aborted) {
+            throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
+        }
+        const start = performance.now();
         try {
             runOp(state, op);
         } catch (err) {
             throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
+        } finally {
+            options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
     state.out.bodies = [...state.touched].map((body) => ({
