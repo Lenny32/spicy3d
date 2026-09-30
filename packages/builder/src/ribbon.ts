@@ -118,6 +118,7 @@ export const DefaultRibbon: RibbonTabProfile[] = [
                     "measure.length",
                     "measure.angle",
                     "measure.select",
+                    "measure.referenceDeviation",
                     "create.section",
                     "modify.checkShape",
                 ],
