@@ -186,6 +186,74 @@ const ACTION_SCHEMA = {
     required: ["action"],
 };
 
+const FACE_SELECTION_SCHEMA = { anyOf: [{ type: "integer", minimum: 0 }, { type: "string" }] };
+const FACE_SET_SCHEMA = { type: "array", items: FACE_SELECTION_SCHEMA, minItems: 1 };
+const EDGE_SELECTOR_SCHEMA = {
+    type: "object",
+    description:
+        "edges query: intersect predicates to select stable edge references. Geometry is body-local in mm. Load parametric-modeling for semantics.",
+    additionalProperties: false,
+    properties: {
+        featureIds: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            description: "Edges born at these feature ids (union); includes surviving boolean descendants.",
+        },
+        adjoiningFaces: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                all: FACE_SET_SCHEMA,
+                any: FACE_SET_SCHEMA,
+                exact: FACE_SET_SCHEMA,
+            },
+            description:
+                "Incident face sets: use current face indexes or tracked face ids. all=every given face, any=at least one, exact=the whole adjacent set.",
+        },
+        outlineOfFaces: {
+            ...FACE_SET_SCHEMA,
+            description: "Edges on the outer wire of any listed face (holes excluded).",
+        },
+        curves: {
+            type: "array",
+            minItems: 1,
+            items: { type: "object" },
+            description:
+                "Persistent reference objects returned by edges. Resolve to current topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
+        },
+        geometry: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                kind: { type: "string", enum: ["line", "circle", "other"] },
+                radius: { type: "number", exclusiveMinimum: 0, description: "Circle-edge radius." },
+                cylinderRadius: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description:
+                        "Radius of at least one adjacent analytic cylindrical face (includes circular rims and linear seams).",
+                },
+                elevation: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        axis: { type: "string", enum: ["x", "y", "z"] },
+                        value: { type: "number" },
+                    },
+                    required: ["value"],
+                    description: "Entire edge lies at this coordinate, axis z by default.",
+                },
+            },
+        },
+        tolerance: {
+            type: "number",
+            exclusiveMinimum: 0,
+            description: "Absolute geometry tolerance in mm (default 0.000001).",
+        },
+    },
+};
+
 const OPS_SCHEMA = {
     type: "object",
     properties: {
@@ -290,6 +358,13 @@ const OPS_SCHEMA = {
             enum: ["fuse", "cut", "common"],
             description:
                 "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve and loft have no join/cut form.)",
+        },
+        selector: EDGE_SELECTOR_SCHEMA,
+        expectedCount: {
+            type: "integer",
+            minimum: 1,
+            description:
+                "edges query: require this many candidates; empty/ambiguous selection status explains mismatches without applying an edit.",
         },
         edgeRefs: {
             type: "array",
