@@ -4,6 +4,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include "cornerSetback.hpp"
 #include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
@@ -175,6 +176,11 @@ struct TrackedShapeResult {
 };
 
 // Error results of a raise caught by guardedEntry (guard.hpp).
+CornerSetbackResult failedResult(GuardTag<CornerSetbackResult>, const std::string& error)
+{
+    return CornerSetback::failure(error);
+}
+
 ShapeResult failedResult(GuardTag<ShapeResult>, const std::string& error)
 {
     return ShapeResult { TopoDS_Shape(), false, error };
@@ -1355,6 +1361,23 @@ static std::string prepareVariableFillet(BRepFilletAPI_MakeFillet& builder, cons
 
 class ShapeFactory {
 public:
+    static CornerSetbackResult filletCornerSetbackTracked(const TopoDS_Shape& shape, const NumberArray& edges,
+        double radius, const NumberArray& distances)
+    {
+        if (edges["length"].as<int>() != 3 || distances["length"].as<int>() != 3)
+            return CornerSetback::failure("three selected edges and three setback lengths are required");
+        std::array<int, 3> indexes;
+        std::array<double, 3> offsets;
+        for (int i = 0; i < 3; ++i) {
+            const double index = edges[i].as<double>();
+            if (!std::isfinite(index) || index < 0 || index != std::floor(index) || index > 2147483646)
+                return CornerSetback::failure("edge indexes must be finite nonnegative integers");
+            indexes[i] = static_cast<int>(index);
+            offsets[i] = distances[i].as<double>();
+        }
+        // A fixed finite fit budget; live callers also enforce the existing 90-second worker deadline.
+        return CornerSetback::build(shape, indexes, radius, offsets, 512);
+    }
     static ShapeResult box(const Pln& ax3, double x, double y, double z)
     {
         gp_Pln pln = Pln::toPln(ax3);
@@ -3374,6 +3397,22 @@ public:
 
 EMSCRIPTEN_BINDINGS(ShapeFactory)
 {
+    value_object<CornerSetbackResult>("CornerSetbackResult")
+        .field("shape", &CornerSetbackResult::shape)
+        .field("isOk", &CornerSetbackResult::isOk)
+        .field("error", &CornerSetbackResult::error)
+        .field("g0Error", &CornerSetbackResult::g0Error)
+        .field("g1Error", &CornerSetbackResult::g1Error)
+        .field("fitDistanceError", &CornerSetbackResult::fitDistanceError)
+        .field("fitAngleError", &CornerSetbackResult::fitAngleError)
+        .field("boundaryCount", &CornerSetbackResult::boundaryCount)
+        .field("patchCount", &CornerSetbackResult::patchCount)
+        .field("faceMap", &CornerSetbackResult::faceMap)
+        .field("edgeMap", &CornerSetbackResult::edgeMap)
+        .field("faceEdgeMap", &CornerSetbackResult::faceEdgeMap)
+        .field("faceAncestors", &CornerSetbackResult::faceAncestors)
+        .field("edgeAncestors", &CornerSetbackResult::edgeAncestors)
+        .field("cornerFaces", &CornerSetbackResult::cornerFaces);
     class_<ShapeResult>("ShapeResult")
         .property("shape", &ShapeResult::shape, return_value_policy::reference())
         .property("isOk", &ShapeResult::isOk)
@@ -3417,6 +3456,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .property("pipeStartFaces", &TrackedShapeResult::pipeStartFaces);
 
     class_<ShapeFactory>("ShapeFactory")
+        .class_function("filletCornerSetbackTracked", guardedEntry<&ShapeFactory::filletCornerSetbackTracked>("ShapeFactory.filletCornerSetbackTracked"))
         .class_function("box", guardedEntry<&ShapeFactory::box>("ShapeFactory.box"))
         .class_function("cone", guardedEntry<&ShapeFactory::cone>("ShapeFactory.cone"))
         .class_function("sphere", guardedEntry<&ShapeFactory::sphere>("ShapeFactory.sphere"))

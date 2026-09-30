@@ -45,6 +45,14 @@ export type BooleanReplica = ShapeReplica & {
     nativeMs?: number;
 };
 
+export type CornerReplica = BooleanReplica & {
+    cornerFaces: Int32Array;
+    g0Error: number;
+    g1Error: number;
+    fitDistanceError: number;
+    fitAngleError: number;
+};
+
 export type BoundedReplicaRequest =
     | {
           method: "booleanFuse" | "booleanCut" | "booleanCommon";
@@ -72,6 +80,10 @@ export type BoundedReplicaRequest =
       };
 
 export type KernelOperations = {
+    cornerSetbackReplica: {
+        args: { shape: ShapeReplica; edges: number[]; radius: number; distances: number[]; mesh?: boolean };
+        result: CornerReplica;
+    };
     boundedReplica: { args: BoundedReplicaRequest; result: ShapeReplica };
     ready: { args: undefined; result: undefined };
     box: { args: { origin: Vector3; size: Vector3 }; result: KernelHandle };

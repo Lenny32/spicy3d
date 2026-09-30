@@ -13,7 +13,9 @@ import type {
 import { replicaTopology, sameReplicaTopology } from "./replicaTopology";
 import type {
     BoundedReplicaRequest,
+    CornerReplica,
     KernelHandle,
+    KernelOperations,
     KernelRequest,
     KernelResult,
     ShapeReplica,
@@ -67,6 +69,8 @@ export class WorkerKernel {
             for (const handle of referenced) this.replicaLeases.delete(handle);
         }
         switch (request.operation) {
+            case "cornerSetbackReplica":
+                return this.cornerSetbackReplica(request.args);
             case "boundedReplica":
                 return this.boundedReplica(request.args);
             case "ready":
@@ -246,6 +250,115 @@ export class WorkerKernel {
                 );
             }
         }
+    }
+
+    private cornerSetbackReplica(
+        request: KernelOperations["cornerSetbackReplica"]["args"],
+    ): KernelResult<CornerReplica> {
+        const m = this.module;
+        const owned: TopoDS_Shape[] = [];
+        const invalid = (message: string): KernelResult<CornerReplica> => ({
+            ok: false,
+            error: { code: "invalid", message },
+        });
+        if (
+            request.edges.length !== 3 ||
+            request.distances.length !== 3 ||
+            new Set(request.edges).size !== 3 ||
+            !Number.isFinite(request.radius) ||
+            request.radius <= 0 ||
+            request.edges.some(
+                (index) =>
+                    !Number.isSafeInteger(index) || index < 0 || index >= request.shape.topology.edges.length,
+            ) ||
+            request.distances.some(
+                (distance) => !Number.isFinite(distance) || distance <= request.radius + 1e-4,
+            )
+        )
+            return invalid("Invalid corner setback edges, radius or distances");
+        type NativeCorner = {
+            shape: TopoDS_Shape;
+            isOk: boolean;
+            error: string;
+            g0Error: number;
+            g1Error: number;
+            fitDistanceError: number;
+            fitAngleError: number;
+            faceMap: IntVector;
+            edgeMap: IntVector;
+            faceEdgeMap: IntVector;
+            faceAncestors: IntVector;
+            edgeAncestors: IntVector;
+            cornerFaces: IntVector;
+        };
+        const binding = (
+            m.ShapeFactory as unknown as {
+                filletCornerSetbackTracked?: (
+                    shape: TopoDS_Shape,
+                    edges: number[],
+                    radius: number,
+                    distances: number[],
+                ) => NativeCorner;
+            }
+        ).filletCornerSetbackTracked;
+        if (!binding)
+            return {
+                ok: false,
+                error: {
+                    code: "unavailable",
+                    message: "Corner setbacks are not available in this worker kernel",
+                },
+            };
+        return this.native(
+            () => {
+                const input = m.Converter.convertFromBrep(request.shape.brep);
+                owned.push(input);
+                if (input.isNull() || !sameReplicaTopology(request.shape.topology, replicaTopology(m, input)))
+                    return invalid("Input BREP topology order changed");
+                const result = this.measure(
+                    "worker.kernel.operation",
+                    () => binding(input, request.edges, request.radius, request.distances),
+                    "filletCornerSetback",
+                );
+                owned.push(result.shape); // Value-object shape is owning, unlike ShapeResult's borrowed getter.
+                const vectors = {
+                    faceMap: result.faceMap,
+                    edgeMap: result.edgeMap,
+                    faceEdgeMap: result.faceEdgeMap,
+                    faceAncestors: result.faceAncestors,
+                    edgeAncestors: result.edgeAncestors,
+                    cornerFaces: result.cornerFaces,
+                };
+                return this.native(
+                    () => {
+                        if (!result.isOk) return invalid(result.error);
+                        const arrays = Object.fromEntries(
+                            Object.entries(vectors).map(([key, vector]) => [key, Int32Array.from(vector)]),
+                        ) as Record<keyof typeof vectors, Int32Array>;
+                        return {
+                            ok: true,
+                            value: {
+                                ...this.exportReplica(result.shape),
+                                tracking: { ...arrays, capFaces: new Int32Array() },
+                                cornerFaces: arrays.cornerFaces,
+                                g0Error: result.g0Error,
+                                g1Error: result.g1Error,
+                                fitDistanceError: result.fitDistanceError,
+                                fitAngleError: result.fitAngleError,
+                                nativeMs: this.nativeMs,
+                                mesh: request.mesh ? this.mesh(result.shape, true) : undefined,
+                            },
+                        };
+                    },
+                    () => {
+                        for (const vector of Object.values(vectors)) vector.delete();
+                    },
+                );
+            },
+            () => {
+                for (const shape of owned.reverse()) shape.delete();
+            },
+        );
     }
 
     private boundedReplica(request: BoundedReplicaRequest): KernelResult<ShapeReplica> {

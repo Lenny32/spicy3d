@@ -6,6 +6,7 @@ import { replicaTopology } from "../../src/replicaTopology";
 import { KernelWorkerClient } from "../../src/workerClient";
 import { createKernelWorker } from "../../src/workerFactory";
 import type { KernelResult } from "../../src/workerProtocol";
+import { cornerWorkerSmoke } from "./cornerWorkerSmoke";
 
 function ok<T>(result: KernelResult<T>): T {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
@@ -224,9 +225,11 @@ async function run() {
         ok(await client.request("release", { handles: [handle, ...tools, fused] }));
         check(ok(await client.request("stats", undefined)).shapes === 0, "Cancelled/released shapes leaked");
         const cancellation = await cancelActiveNative();
+        const corner = await cornerWorkerSmoke(main, client);
         samples.sort((a, b) => a - b);
         return {
             ...cancellation,
+            corner,
             initializationMs,
             boundsRoundTripMedianMs: samples[12],
             boundsRoundTripMaxMs: samples[24],
