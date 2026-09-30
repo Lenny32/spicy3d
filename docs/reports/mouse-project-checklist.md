@@ -66,13 +66,13 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #93 Support control-point and weighted NURBS in parametric sketches | Shared sketch schema | Queued | — | — | Pending | — | — |
 | #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
 | #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
-| #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Queued | — | — | Pending | — | — |
+| #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Implementing | mouse_81 | mouse/96-bounded-worker | Pending | — | — |
 | #97 Cancel an in-flight kernel operation | #96 | Queued | — | — | Pending | — | — |
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
 | #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
 | #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
-| #101 Import scan files as lightweight reference MeshNodes | — | Implementing | mouse_101 | mouse/101-reference-mesh | Pending | — | — |
-| #102 Measure CAD-to-reference-mesh deviation | #101 | Queued | — | — | Pending | — | — |
+| #101 Import scan files as lightweight reference MeshNodes | — | Done (pushed) | mouse_101 | mouse/101-reference-mesh | 109 worker and integrated tests; tsc/check | 73abad86b68290bf386951c62a0df85d82684ffa | — |
+| #102 Measure CAD-to-reference-mesh deviation | #101 | Implementing | mouse_101 | mouse/102-reference-deviation | Pending | — | — |
 | #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
 | #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
 | #105 Batch-export separate model files without repeated downloads | #104 | Queued | — | — | Pending | — | — |
@@ -131,3 +131,15 @@ before feature append. Five tickets are delivered; 21 remain. #87 is now active 
 The initial OCCT compilation on `/mnt/d` was too slow. The pinned toolchain and final #81 sources
 are being copied to a unique WSL `/tmp/spicy3d-mouse-native.*` build directory; release artifacts
 will be copied back to #81's worktree before native regression validation and integration.
+
+#101 is integrated: a separate STL reference-mesh import skips OCCT and creates an existing MeshNode
+with ghost opacity, placement and visibility. Binary/ASCII parsing, malformed input, millimetre/unit
+conversion, saved-class roundtrip and undo/redo pass. MCP imports raw base64 up to 32 MiB; the ribbon
+entry assumes mm. Six tickets are delivered; 20 remain. #102 now adds sampled mesh deviation metrics.
+
+#96 architecture is approved: extend the existing worker protocol with a whitelisted BREP factory
+operation boundary, finite 90-second deadlines and worker generation teardown/recreation. Program
+mutations remain serialized and use asynchronous transactions with exact reference rollback;
+safe metadata reads expose committed state while geometry is pending. Runtime editing locks block
+interactive mutations during the transaction. Existing hybrid parametric opt-in stays unchanged.
+Worker cancellation, full main-kernel recovery and async progress remain separate #97/#98/#92 tasks.

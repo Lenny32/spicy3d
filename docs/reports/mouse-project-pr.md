@@ -4,6 +4,7 @@ Appended join/cut extrusion operations now retain the caller's feature name, and
 queries keep every returned reference usable. The integration also adds compact parametric
 responses and reuses feature geometry when unrelated document variables change.
 Persistent MCP edge references also survive upstream topology reordering across separate calls.
+STL scans can be imported directly as lightweight ghost reference meshes through the ribbon or MCP.
 
 This is the single draft integration PR for the 26-ticket mouse project. Keep it draft while the
 remaining work is queued. Follow [the durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
@@ -16,6 +17,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #99 | Explicit compact response mode; default full response remains | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 |
 | #91 | Cache keys depend on actual variable reads, including transitive values | 9c18b315741371a09d9b5a0d5679a056b2bced57 |
 | #86 | Body-scoped persistent edge query and fillet/chamfer selections | 91f48b5e47ac39c510a31a0dd0546874f226b224 |
+| #101 | Binary/ASCII STL reference mesh import without kernel conversion | 73abad86b68290bf386951c62a0df85d82684ffa |
 
 Validation: 9,181 passing tests across 542 files, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
@@ -27,9 +29,10 @@ features start. Backward-compatible format changes for the project's remaining t
 approved in mouse-plan.md and require the compatibility evidence described there.
 
 Additional #86 validation: 127 worker tests, 57 integrated tests, TypeScript and required check pass.
+Additional #101 validation: 109 worker and integrated tests, TypeScript and required check pass.
 
-Remaining project work: #81–#85, #87–#90, #92–#98, #101–#105 (21 tickets). Next correctness work is #81/#82;
+Remaining project work: #81–#85, #87–#90, #92–#98, #102–#105 (20 tickets). Next correctness work is #81/#82;
 C++ changes require setting up/rebuilding WASM because no local emsdk/OCCT build tree is present.
 Worker work follows KERNEL-01, with one shared cancellation/recovery protocol before splitting it.
 
-Refs #106, #100, #99, #91, #86. Keep issues open and never merge this PR automatically.
+Refs #106, #100, #99, #91, #86, #101. Keep issues open and never merge this PR automatically.
