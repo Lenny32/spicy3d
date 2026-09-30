@@ -13,6 +13,31 @@ import {
     VisualNode,
 } from "@spicy3d/core";
 import type { Tool } from "../llm/types";
+import { imageByteBudget } from "./imageEncoding";
+
+const DEFAULT_EXPORT_BYTES = 1024 * 1024;
+const MAX_EXPORT_BYTES = 8 * DEFAULT_EXPORT_BYTES;
+
+function exportMimeType(format: string): string {
+    switch (format.replace(" binary", "")) {
+        case ".step":
+            return "model/step";
+        case ".iges":
+            return "model/iges";
+        case ".stl":
+            return "model/stl";
+        default:
+            return "application/octet-stream";
+    }
+}
+
+function encodeExport(bytes: Uint8Array): string {
+    const chunks: string[] = [];
+    for (let offset = 0; offset < bytes.length; offset += 32768) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+    }
+    return btoa(chunks.join(""));
+}
 
 function getDocument(): IDocument | undefined {
     return globalThis.app.activeView?.document;
@@ -47,6 +72,28 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     const doc = getDocument();
     if (!doc) return JSON.stringify({ error: I18n.translate("ai.error.noDocument") });
 
+    const delivery = args["delivery"] === undefined ? "download" : args["delivery"];
+    if (delivery !== "download" && delivery !== "base64")
+        return JSON.stringify({ error: 'delivery must be "download" or "base64"' });
+    const maxBytes = args["maxBytes"] === undefined ? DEFAULT_EXPORT_BYTES : args["maxBytes"];
+    if (
+        typeof maxBytes !== "number" ||
+        !Number.isInteger(maxBytes) ||
+        maxBytes < 1 ||
+        maxBytes > MAX_EXPORT_BYTES
+    )
+        return JSON.stringify({ error: `maxBytes must be an integer from 1 to ${MAX_EXPORT_BYTES}` });
+    if (
+        args["filename"] !== undefined &&
+        (typeof args["filename"] !== "string" ||
+            /[/\\]/.test(args["filename"]) ||
+            Array.from(args["filename"]).some((character) => {
+                const code = character.charCodeAt(0);
+                return code < 32 || code === 127;
+            }))
+    )
+        return JSON.stringify({ error: "filename must be a file name, not a filesystem path" });
+
     const format = args["format"] as string;
     const formatError = validateFormat(app, format);
     if (formatError) return JSON.stringify({ error: formatError });
@@ -62,13 +109,47 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     }
 
     const filename = resolveFilename(visuals, format, args["filename"]);
-    download(data, filename);
-    return JSON.stringify({
+    const blob = new Blob(data);
+    const metadata = {
         ok: true,
         filename,
-        bytes: new Blob(data).size,
+        mimeType: exportMimeType(format),
+        bytes: blob.size,
         nodes: visuals.map((n) => n.id),
-    });
+    };
+    if (delivery === "base64") {
+        if (blob.size > maxBytes) {
+            return JSON.stringify({
+                error: "Export exceeds maxBytes; increase the limit or use browser download",
+                bytes: blob.size,
+                maxBytes,
+                filename,
+                mimeType: metadata.mimeType,
+            });
+        }
+        const result = JSON.stringify({
+            ...metadata,
+            encoding: "base64",
+            data: encodeExport(new Uint8Array(await blob.arrayBuffer())),
+        });
+        const budget = imageByteBudget();
+        // The relay budget reserves space for the JSON-RPC envelope. Include text escaping too.
+        const responseBytes = new TextEncoder().encode(
+            JSON.stringify({ content: [{ type: "text", text: result }] }),
+        ).byteLength;
+        if (budget !== undefined && responseBytes > budget) {
+            return JSON.stringify({
+                error: "Export exceeds the relay response limit; use browser download or export less geometry",
+                filename,
+                bytes: blob.size,
+                responseBytes,
+                responseByteLimit: budget,
+            });
+        }
+        return result;
+    }
+    download(data, filename);
+    return JSON.stringify(metadata);
 }
 
 export function buildReferenceMeshImportTool(): Tool {
@@ -108,7 +189,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to a CAD file and download it in the browser. format is one of the app's export formats ('.step', '.iges', '.brep' for B-rep geometry; '.stl', '.stl binary', '.ply', '.ply binary', '.obj' for meshes). Nodes merge into a single file. Omit ids to export all top-level nodes.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; base64 returns exact bytes with filename/MIME metadata. Returned bytes default to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes.",
             parameters: {
                 type: "object",
                 properties: {
@@ -118,6 +199,18 @@ export function buildFileTools(): Tool[] {
                         description: "Node ids to export; omit to export all top-level nodes",
                     },
                     format: { type: "string", description: "Export format, e.g. '.step'" },
+                    delivery: {
+                        type: "string",
+                        enum: ["download", "base64"],
+                        description: "Browser download (default) or returned base64 bytes",
+                    },
+                    maxBytes: {
+                        type: "integer",
+                        minimum: 1,
+                        maximum: MAX_EXPORT_BYTES,
+                        default: DEFAULT_EXPORT_BYTES,
+                        description: "Maximum decoded bytes for base64 delivery; relay limits also apply",
+                    },
                     filename: {
                         type: "string",
                         description: "Optional file name; the format extension is appended when missing",
