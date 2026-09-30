@@ -165,6 +165,7 @@ export interface ExtrudeOp {
     depth: ParameterValue;
     symmetric?: boolean;
     startOffset?: ParameterValue;
+    startFace?: { nodeId: string; faceIndex: number };
     /** Omit to create a new body; otherwise the body to append the feature to. */
     body?: string;
     operation?: BooleanOperation;
@@ -712,6 +713,10 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         );
     }
     const extent = op.extent === undefined ? undefined : resolveExtent(state, op.extent, "extent", scope);
+    const from =
+        op.startFace === undefined
+            ? undefined
+            : resolveExtent(state, { type: "toObject", face: op.startFace }, "startFace", scope);
     const secondExtent =
         op.secondExtent === undefined
             ? undefined
@@ -723,6 +728,7 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         depth: op.depth,
         ...(op.symmetric === true ? { symmetric: true } : {}),
         ...(op.startOffset !== undefined ? { startOffset: op.startOffset } : {}),
+        ...(from?.type === "toObject" ? { startFace: { nodeId: from.nodeId, face: from.face } } : {}),
         ...(extent === undefined || extent.type === "distance" ? {} : { extent }),
         ...(secondExtent === undefined ? {} : { secondExtent }),
     };

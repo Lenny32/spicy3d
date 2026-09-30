@@ -700,6 +700,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `depth`: expression
       - `symmetric`: scalar
       - `startOffset`: expression
+      - `startFace`: atomic { nodeId: ref → node; face: atomic }
       - `operation`: scalar
       - `profiles`: atomic of ref → profile
       - `extent`: union on `type` (distance, toObject, throughAll, any other)

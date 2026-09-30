@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 5 (thicken)", () => {
+describe("parametric format 6 (associative starting faces)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(5);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(5);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(6);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(6);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -24,6 +24,7 @@ describe("parametric format 5 (thicken)", () => {
         ["v1/parametric3-extrude-extents.json", 3],
         ["v1/parametric4-loft.json", 4],
         ["v2/construction-expressions.json", 4],
+        ["v2/parametric5-thicken.json", 5],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -32,7 +33,7 @@ describe("parametric format 5 (thicken)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 5 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 6 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
@@ -82,7 +83,7 @@ describe("parametric format 5 (thicken)", () => {
         ]);
     });
 
-    test("a parametric 5 document with thickens needs no migration", () => {
+    test("a parametric 5 document keeps its thickens unchanged", () => {
         const { data } = fixture("v2/parametric5-thicken.json");
         expect(data["moduleVersions"]).toMatchObject({ parametric: 5 });
 

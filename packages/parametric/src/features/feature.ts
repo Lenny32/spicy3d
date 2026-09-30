@@ -62,6 +62,8 @@ export interface ExtrudeFeatureData extends FeatureBase {
      * on the profile plane.
      */
     readonly startOffset?: ParameterValue;
+    /** Starting surface, matched on its body's pre-feature timeline; absent starts on the profile. */
+    readonly startFace?: { readonly nodeId?: string; readonly face: ProfileRef };
     /**
      * How the prism combines with the preceding feature's shape on the host body —
      * Fusion-style join (fuse) / cut / intersect (common). Undefined creates standalone

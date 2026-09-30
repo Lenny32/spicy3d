@@ -28,6 +28,8 @@
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepFeat_MakePrism.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
@@ -68,6 +70,7 @@
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <HelixBRep_BuilderHelix.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <Precision.hxx>
@@ -94,6 +97,8 @@
 #include <gp.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
 #include <iomanip>
 #include <set>
@@ -598,6 +603,175 @@ static TrackedShapeResult boundedPrism(const TopoDS_Shape& profile, const gp_Vec
 static TrackedShapeResult trackedError(const std::string& error)
 {
     return TrackedShapeResult { TopoDS_Shape(), false, error, { }, { } };
+}
+
+// A witness selects a split cell; the complete bounding faces, never this point, make its caps.
+static bool profileWitness(const TopoDS_Face& profile, gp_Pnt& witness)
+{
+    Handle(Geom_Surface) surface = BRep_Tool::Surface(profile);
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(profile, u0, u1, v0, v1);
+    for (int i = 0; i < 121; i++) {
+        double u = i == 0 ? (u0 + u1) / 2 : u0 + (u1 - u0) * ((i - 1) % 11 + 0.5) / 11;
+        double v = i == 0 ? (v0 + v1) / 2 : v0 + (v1 - v0) * ((i - 1) / 11 + 0.5) / 11;
+        BRepClass_FaceClassifier classifier(profile, gp_Pnt2d(u, v), Precision::Confusion());
+        if (classifier.State() == TopAbs_IN) {
+            witness = surface->Value(u, v);
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::vector<double> rayParameters(const TopoDS_Face& face, const gp_Pnt& origin, const gp_Dir& dir, double reach)
+{
+    IntCurvesFace_ShapeIntersector intersections;
+    intersections.Load(face, Precision::Confusion());
+    intersections.Perform(gp_Lin(origin, dir), -reach, reach);
+    std::vector<double> values;
+    if (!intersections.IsDone())
+        return values;
+    for (int i = 1; i <= intersections.NbPnt(); i++)
+        values.push_back(intersections.WParameter(i));
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end(), [](double a, double b) {
+        return std::abs(a - b) <= Precision::Confusion();
+    }),
+        values.end());
+    return values;
+}
+
+// Split a generous planar-profile prism by BOTH limiting surfaces. Its projected footprint
+// stays the sketch's; the cell containing the selected branch witness has exact curved caps.
+static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp_Dir& dir,
+    const TopoDS_Face& from, const TopoDS_Face& until, double exactDepth = 0)
+{
+    Bnd_Box scene;
+    double profileLow, profileHigh, fromLow, fromHigh, untilLow, untilHigh;
+    if (!boxOf(profile, scene) || !boxOf(from, scene) || !boxOf(until, scene)
+        || !projectedRange(profile, dir, profileLow, profileHigh)
+        || !projectedRange(from, dir, fromLow, fromHigh) || !projectedRange(until, dir, untilLow, untilHigh))
+        return trackedError("The starting face or profile has no extent");
+    double margin = 2 * std::sqrt(scene.SquareExtent()) + 1;
+    gp_Pnt origin;
+    if (!profileWitness(profile, origin))
+        return trackedError("The profile has no interior witness");
+    double low = std::min({ profileLow, fromLow, untilLow }) - margin;
+    double high = std::max({ profileHigh, fromHigh, untilHigh }) + margin;
+    gp_Trsf shift;
+    shift.SetTranslation(gp_Vec(dir) * (low - profileLow));
+    TopoDS_Shape proxy = profile.Moved(TopLoc_Location(shift));
+    BRepPrimAPI_MakePrism prism(proxy, gp_Vec(dir) * (high - low));
+    if (!prism.IsDone())
+        return trackedError("Failed to create the from-face prism");
+    const TopoDS_Shape swept = prism.Shape();
+
+    for (int pass = 0; pass < 2; pass++) {
+        // The picked starting patch must cover the profile; extending it could silently
+        // create a boss outside the selected face. Only an up-to ending surface may extend.
+        TopoDS_Face start = from;
+        TopoDS_Face end = pass == 0 || exactDepth > 0 ? until : extendedFace(until, margin);
+        if (start.IsNull() || end.IsNull())
+            continue;
+        auto starts = rayParameters(start, origin, dir, 2 * (high - low));
+        auto ends = rayParameters(end, origin, dir, 2 * (high - low));
+        if (starts.empty() || ends.empty())
+            continue;
+        // Prefer the first forward hit; when the sketch lies beyond the surface, the nearest
+        // backward hit selects the wall. Equal geometric hits were deduplicated above.
+        auto forward = std::find_if(starts.begin(), starts.end(), [](double t) { return t >= -Precision::Confusion(); });
+        double fromT = forward == starts.end() ? starts.back() : *forward;
+        double endT = 0;
+        if (exactDepth > 0)
+            endT = fromT + exactDepth;
+        else {
+            auto beyond = std::find_if(ends.begin(), ends.end(), [fromT](double t) { return t > fromT + Precision::Confusion(); });
+            if (beyond == ends.end())
+                continue;
+            endT = *beyond;
+        }
+        gp_Pnt witness = origin.Translated(gp_Vec(dir) * ((fromT + endT) / 2));
+        BRepAlgoAPI_Splitter splitter;
+        NCollection_List<TopoDS_Shape> arguments, tools;
+        arguments.Append(swept);
+        tools.Append(start);
+        tools.Append(end);
+        splitter.SetArguments(arguments);
+        splitter.SetTools(tools);
+        splitter.SetNonDestructive(true);
+        splitter.Build();
+        if (!splitter.IsDone() || splitter.HasErrors() || splitter.Shape().IsNull())
+            continue;
+        ShapeIndexMap splitFaces;
+        TopExp::MapShapes(splitter.Shape(), TopAbs_FACE, splitFaces);
+        auto fromImages = faceImagesOf(splitter, start, splitFaces);
+        auto untilImages = faceImagesOf(splitter, end, splitFaces);
+        auto originalStart = faceImagesOf(splitter, prism.FirstShape(), splitFaces);
+        auto originalEnd = faceImagesOf(splitter, prism.LastShape(), splitFaces);
+        std::vector<TopoDS_Shape> kept;
+        for (TopExp_Explorer it(splitter.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+            const TopoDS_Shape& solid = it.Current();
+            if (!solidHasAny(solid, splitFaces, fromImages) || !solidHasAny(solid, splitFaces, untilImages)
+                || solidHasAny(solid, splitFaces, originalStart) || solidHasAny(solid, splitFaces, originalEnd))
+                continue;
+            BRepClass3d_SolidClassifier classifier(solid, witness, Precision::Confusion());
+            if (classifier.State() == TopAbs_IN || classifier.State() == TopAbs_ON)
+                kept.push_back(solid);
+        }
+        if (kept.size() > 1)
+            return trackedError("The starting face has ambiguous extrusion intersections");
+        if (kept.empty())
+            continue;
+        const TopoDS_Shape output = kept.front();
+        if (!BRepCheck_Analyzer(output).IsValid())
+            continue;
+        // For translated bounding surfaces the exact volume is projected profile area * depth.
+        // This rejects a cap that only intercepted part of the profile without approximating it.
+        if (exactDepth > 0) {
+            GProp_GProps area, volume;
+            BRepGProp::SurfaceProperties(profile, area);
+            BRepGProp::VolumeProperties(output, volume);
+            double expected = area.Mass() * exactDepth;
+            if (std::abs(std::abs(volume.Mass()) - expected) > 1e-6 * std::max(1.0, expected))
+                continue;
+        }
+        TrackedShapeResult result { output, true, "",
+            composeHistory(splitter, swept, faceHistory(prism, proxy, swept), output, TopAbs_FACE),
+            composeHistory(splitter, swept, edgeHistory(prism, proxy, swept), output, TopAbs_EDGE),
+            composeHistory(splitter, swept, faceFromEdgeHistory(prism, proxy, swept), output, TopAbs_FACE) };
+        ShapeIndexMap faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        auto bottom = faceImagesOf(splitter, start, faces);
+        for (int index : bottom)
+            result.faceMap[index] = 0;
+        for (int index : faceImagesOf(splitter, end, faces))
+            result.capFaces.push_back(index);
+        // Intersection edges no longer contain the proxy's original edges. Recover each curved
+        // bottom edge from its uniquely seeded side face, retaining the sketch entity's identity.
+        for (int e = 1; e <= edges.Extent(); e++) {
+            bool onBottom = false;
+            std::set<int> origins;
+            for (int f = 1; f <= faces.Extent(); f++) {
+                bool adjacent = false;
+                for (TopExp_Explorer it(faces.FindKey(f), TopAbs_EDGE); it.More(); it.Next())
+                    if (it.Current().IsSame(edges.FindKey(e))) {
+                        adjacent = true;
+                        break;
+                    }
+                if (!adjacent)
+                    continue;
+                if (bottom.count(f - 1))
+                    onBottom = true;
+                if (result.faceEdgeMap[f - 1] >= 0)
+                    origins.insert(result.faceEdgeMap[f - 1]);
+            }
+            if (onBottom && origins.size() == 1)
+                result.edgeMap[e - 1] = *origins.begin();
+        }
+        return result;
+    }
+    return trackedError("The starting and ending faces do not fully bound the extrusion, or their intersections are ambiguous");
 }
 
 // Compute the plane formed by two edges at their shared vertex from their tangent vectors.
@@ -1201,6 +1375,65 @@ public:
             edgeHistory(prism, profile, prism.Shape()), faceFromEdgeHistory(prism, profile, prism.Shape()) };
         result.capFaces = sweepCapFaces(prism, prism.Shape());
         return result;
+    }
+
+    // Exact from-surface tool. endMode: 0 = translated start surface (distance),
+    // 1 = selected until surface, 2 = through the supplied bodies to a planar far cap.
+    static TrackedShapeResult prismFromTracked(const TopoDS_Shape& profile, const Vector3& direction,
+        const TopoDS_Shape& fromFace, double startOffset, int endMode, double depth,
+        const TopoDS_Shape& untilFace, double untilOffset, const ShapeArray& bounds, bool flush)
+    {
+        if (!isUsableDirection(direction))
+            return trackedError("The extrude direction is zero");
+        gp_Dir dir = Vector3::toDir(direction);
+        std::string error = profileError(profile, dir);
+        if (!error.empty())
+            return trackedError(error);
+        if (profile.ShapeType() != TopAbs_FACE)
+            return trackedError("From-face extrusion requires one planar profile face");
+        if (fromFace.IsNull() || fromFace.ShapeType() != TopAbs_FACE)
+            return trackedError("The starting object is not a face");
+        if (!std::isfinite(startOffset))
+            return trackedError("The starting offset is not a number");
+        TopoDS_Face start = TopoDS::Face(fromFace);
+        Handle(Geom_Surface) surface = BRep_Tool::Surface(start);
+        if (surface.IsNull() || isParallelTo(untrimmedSurface(surface), dir))
+            return trackedError("The starting face is parallel to the extrusion");
+        gp_Trsf startShift;
+        startShift.SetTranslation(gp_Vec(dir) * startOffset);
+        start = TopoDS::Face(start.Moved(TopLoc_Location(startShift)));
+        TopoDS_Face end;
+        if (endMode == 0) {
+            if (!std::isfinite(depth) || depth <= Precision::Confusion())
+                return trackedError("From-face extrusion depth must be positive");
+            gp_Trsf endShift;
+            endShift.SetTranslation(gp_Vec(dir) * depth);
+            end = TopoDS::Face(start.Moved(TopLoc_Location(endShift)));
+        } else if (endMode == 1) {
+            if (untilFace.IsNull() || untilFace.ShapeType() != TopAbs_FACE || !std::isfinite(untilOffset))
+                return trackedError("The ending object is not a valid face");
+            gp_Trsf endShift;
+            endShift.SetTranslation(gp_Vec(dir) * untilOffset);
+            end = TopoDS::Face(untilFace.Moved(TopLoc_Location(endShift)));
+        } else if (endMode == 2) {
+            TopoDS_Compound targets = compoundOf(vecFromJSArray<TopoDS_Shape>(bounds));
+            double low, high;
+            Bnd_Box scene;
+            if (!projectedRange(targets, dir, low, high) || !boxOf(targets, scene) || !boxOf(profile, scene) || !boxOf(start, scene))
+                return trackedError("There is nothing to extrude through");
+            double size = std::sqrt(scene.SquareExtent()) + 1;
+            double distance = high + (flush ? 0 : size * 0.1 + 1);
+            double xmin, ymin, zmin, xmax, ymax, zmax;
+            scene.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+            gp_Pnt center((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2);
+            gp_Pnt origin = center.Translated(gp_Vec(dir) * (distance - gp_Vec(center.XYZ()).Dot(gp_Vec(dir))));
+            BRepBuilderAPI_MakeFace plane(gp_Pln(origin, dir), -size, size, -size, size);
+            if (!plane.IsDone())
+                return trackedError("Failed to create the extrusion end plane");
+            end = plane.Face();
+        } else
+            return trackedError("Unknown from-face extrusion extent");
+        return prismBetweenFaces(TopoDS::Face(profile), dir, start, end, endMode == 0 ? depth : 0);
     }
 
     // Tool prism of `profile` along `direction` up to `untilFace` (moved by `offset` along
@@ -2723,6 +2956,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
+        .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))
         .class_function("prismUntilTracked", guardedEntry<&ShapeFactory::prismUntilTracked>("ShapeFactory.prismUntilTracked"))
         .class_function("prismThruAllTracked", guardedEntry<&ShapeFactory::prismThruAllTracked>("ShapeFactory.prismThruAllTracked"))
         .class_function("booleanCommonTracked", guardedEntry<&ShapeFactory::booleanCommonTracked>("ShapeFactory.booleanCommonTracked"))

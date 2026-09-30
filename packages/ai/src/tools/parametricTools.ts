@@ -356,6 +356,13 @@ const OPS_SCHEMA = {
         sketch: { type: "string", description: "The sketch op id (or an existing sketch's node id)" },
         depth: { description: "Extrude distance in mm (a number or an expression)" },
         symmetric: { type: "boolean", description: "Extrude by `depth` in both directions" },
+        startFace: {
+            type: "object",
+            properties: { nodeId: { type: "string" }, faceIndex: { type: "integer", minimum: 0 } },
+            required: ["nodeId", "faceIndex"],
+            description:
+                "Associative starting surface, including curved walls. startOffset offsets this surface axially; distance depth separates exact translated caps.",
+        },
         startOffset: { description: "Distance the extrusion starts away from the profile plane" },
         extent: {
             description:

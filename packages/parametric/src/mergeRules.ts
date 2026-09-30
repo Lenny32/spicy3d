@@ -114,6 +114,11 @@ registerMergePayload("parametric.features", {
                         depth: expression,
                         symmetric: scalar,
                         startOffset: expression,
+                        startFace: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, face: atomic },
+                        },
                         operation: scalar,
                         profiles,
                         // where each side ends (parametric 3)

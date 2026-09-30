@@ -17,6 +17,12 @@ import type {
     OffsetMode,
 } from "./shape";
 
+/** Ending boundary of an exact from-face prism; runtime options, never a saved payload. */
+export type PrismFromEnd =
+    | { kind: "distance"; depth: number }
+    | { kind: "toObject"; face: IFace; offset?: number }
+    | { kind: "throughAll"; bounds: IShape[]; flush?: boolean };
+
 export interface TrackedShape {
     shape: IShape;
     /** output face index (findSubShapes order) -> input face index, -1 = new face */
@@ -181,6 +187,14 @@ export interface IShapeFactory {
      * direction, behind the profile, or not bounding it.
      * @unit length offset
      */
+    /** Exact curved starting cap, with profile-relative history; offset is along direction. */
+    prismFromTracked?(
+        profile: IShape,
+        direction: XYZ,
+        fromFace: IFace,
+        offset: number,
+        end: PrismFromEnd,
+    ): Result<TrackedShape>;
     prismUntilTracked?(
         profile: IShape,
         direction: XYZ,
