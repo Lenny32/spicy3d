@@ -46,7 +46,12 @@ function nativeProof(sections: IWire[], spine: IWire, guide: IWire) {
 function prove(sections: IWire[], spine: IWire, guide: IWire): IShape {
     const result = nativeProof(sections, spine, guide);
     expect(result.isOk, result.error).toBe(true);
-    return keep(result.value.shape);
+    const shape = keep(result.value.shape);
+    const checked = shape.checkSelfIntersection?.();
+    expect(checked?.isOk).toBe(true);
+    if (!checked) throw new Error("Self-interference check missing");
+    expect(checked.value).toBe(true);
+    return shape;
 }
 
 function helicalFixture(radius = Math.sqrt(34)) {

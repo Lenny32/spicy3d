@@ -21,6 +21,8 @@ All requested sections are retained in NoContact construction with C2 and ForceA
 Non-destructive boolean cuts prove every full section and the complete boundary lie on the
 generated SIDE-face compound. HasErrors, nonfinite/negative residual lengths and remaining
 length above 1e-5 mm fail. No finite sampling or solid containment establishes acceptance.
+Output self-interference is rejected by the native argument analyzer; accepted native geometry
+also passes the public self-interference query in every positive proof.
 
 Fourteen native tests pass, including two/three sections, guide influence versus ordinary loft,
 interior/incompatible guides, both paths reversed, overshooting/closed/multiple-plane spines,
@@ -28,7 +30,8 @@ nonplanar section rejection, actual original topology history and distinct seman
 Success and failure preserve unprimed input BREP strings and existing display mesh identities
 and numeric buffers. Local-alias TypeScript and scoped npm check pass.
 
-The compiled artifacts match the accepted #88/#89 source baseline plus this guided binding.
-They deliberately exclude uncommitted #84/#90 bindings; final combined artifacts will be rebuilt
-after accepted #90 source and its copyTracked follow-up are incorporated. This native checkpoint
-can be cherry-picked for source preservation before the full parametric-13 feature/UI/MCP work.
+The combined compiled artifacts match accepted #88/#89, strict #90 faceSweepTracked and
+copyTracked source plus this guided binding. All 72 tests in eight affected native, sweep,
+projection and ordinary loft suites pass. Local-alias TypeScript and scoped npm check pass.
+This checkpoint excludes the separate #84 corner binding; its accepted source will be combined
+in a subsequent serialized rebuild. No parametric-13 version registration is included here.

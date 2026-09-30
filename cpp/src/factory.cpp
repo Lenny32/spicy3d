@@ -1548,6 +1548,13 @@ public:
             return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
         if (!BRepCheck_Analyzer(builder.Shape()).IsValid())
             return TrackedShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
+        BOPAlgo_ArgumentAnalyzer selfIntersection;
+        selfIntersection.SetShape1(builder.Shape());
+        selfIntersection.SelfInterMode() = true;
+        selfIntersection.StopOnFirstFaulty() = true;
+        selfIntersection.Perform();
+        if (selfIntersection.HasFaulty())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft output self-intersects or could not be checked" };
         BRep_Builder topology;
         TopoDS_Compound sides;
         topology.MakeCompound(sides);
