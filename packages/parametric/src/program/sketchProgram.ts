@@ -21,6 +21,7 @@ import {
 } from "../sketch/bsplineGeometry";
 import { addPolygon } from "../sketch/commands/sketchPolygon";
 import { addRectangle } from "../sketch/commands/sketchRectangle";
+import { type ControlBSplineSettings, defineControlBSpline } from "../sketch/controlBSplineGeometry";
 import { applyDimensions, suggestDimensions } from "../sketch/editor/constraintAnalyzer";
 import { captureExternalRef, isEdgeCoplanarWithPlane } from "../sketch/externalRef";
 import { editableCurve, extendCurve, offsetCurve, splitCurve, trimCurve } from "../sketch/geometryEditing";
@@ -82,6 +83,11 @@ export interface SketchEntitySpec {
      * last are its endpoints; a bspline's are all fit points (point index i = point i).
      */
     points?: [number, number][];
+    poles?: [number, number][];
+    degree?: number;
+    knots?: number[];
+    multiplicities?: number[];
+    weights?: number[];
     /** Bspline only: `chord` (default), `centripetal` or `uniform`. */
     parametrization?: BSplineParametrization;
     /** Bspline only: a closed C2 curve; the first point is not repeated as the last. */
@@ -117,6 +123,7 @@ export const SKETCH_ACTION_NAMES = [
     "setDatum",
     "setConstruction",
     "movePoint",
+    "setBSpline",
     "trim",
     "split",
     "extend",
@@ -151,6 +158,7 @@ export type SketchAction =
     | { action: "setDatum"; constraint: number | string; value: ParameterValue; index?: number }
     | { action: "setConstruction"; entities: SketchEntityKey[]; value?: boolean }
     | { action: "movePoint"; entity: SketchEntityKey; point: number; to: [number, number] }
+    | ({ action: "setBSpline"; entity: SketchEntityKey; poles?: [number, number][] } & ControlBSplineSettings)
     | { action: "trim"; entity: SketchEntityKey; at: [number, number] }
     | { action: "split"; entity: SketchEntityKey; at: [number, number] }
     | { action: "extend"; entity: SketchEntityKey; to: SketchEntityKey; end?: "start" | "end" }
@@ -348,6 +356,11 @@ export class SketchSession {
                     this.solver.setConstruction(this.editableEntity(key).id, action.value ?? true);
                 }
                 return;
+            case "setBSpline": {
+                const result = this.solver.setControlBSpline(this.editableEntity(action.entity).id, action);
+                if (!result.isOk) throw new Error(result.error);
+                break;
+            }
             case "movePoint":
                 this.movePoint(action);
                 return;
@@ -449,6 +462,30 @@ export class SketchSession {
 
     private createEntity(spec: SketchEntitySpec): number {
         if (spec.type === "bspline") {
+            if (spec.poles !== undefined) {
+                if (
+                    spec.points !== undefined ||
+                    spec.params !== undefined ||
+                    spec.parametrization !== undefined
+                ) {
+                    throw new Error("Control B-splines use poles, without fit points or parametrization");
+                }
+                const definition = defineControlBSpline(spec.poles, spec);
+                if (!definition.isOk) throw new Error(definition.error);
+                const id = this.solver.addBSpline(spec.poles, {
+                    control: definition.value,
+                    periodic: spec.periodic,
+                });
+                if (!id.isOk) throw new Error(id.error);
+                return id.value;
+            }
+            if (
+                [spec.degree, spec.knots, spec.multiplicities, spec.weights].some(
+                    (value) => value !== undefined,
+                )
+            ) {
+                throw new Error("Degree, knots and weights require control poles");
+            }
             const parametrization = spec.parametrization ?? "chord";
             if (!BSPLINE_PARAMETRIZATIONS.includes(parametrization)) {
                 throw new Error(

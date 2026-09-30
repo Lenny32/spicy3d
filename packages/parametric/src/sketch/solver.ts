@@ -13,6 +13,12 @@ import {
     closestBSplineParameter,
     interpolateBSpline,
 } from "./bsplineGeometry";
+import {
+    type ControlBSplineDefinition,
+    type ControlBSplineSettings,
+    controlBSplineCurve,
+    defineControlBSpline,
+} from "./controlBSplineGeometry";
 import { entityParamKinds, PARAM_KIND_COORDINATE, PARAM_KIND_LENGTH } from "./entityLayout";
 import {
     type EntityTables,
@@ -150,7 +156,11 @@ export class SketchSolver implements ExternalEntityHost {
      */
     private readonly bsplineOptions = new Map<
         number,
-        { parametrization: BSplineParametrization | undefined; periodic: boolean }
+        {
+            parametrization: BSplineParametrization | undefined;
+            periodic: boolean;
+            control?: ControlBSplineDefinition;
+        }
     >();
     /**
      * The solver curve of each bspline entity (`SolverSystem.add_bspline`): its poles follow the
@@ -204,7 +214,12 @@ export class SketchSolver implements ExternalEntityHost {
         this.system = newSolverSystem();
         this.seedDatum();
         if (data !== undefined) {
-            this.loadData(data);
+            try {
+                this.loadData(data);
+            } catch (error) {
+                this.system.free();
+                throw error;
+            }
         }
     }
 
@@ -286,6 +301,15 @@ export class SketchSolver implements ExternalEntityHost {
      */
     addBSpline(points: readonly BSplinePoint[], options: BSplineOptions = {}): Result<number> {
         const periodic = options.periodic === true;
+        if (options.control !== undefined) {
+            if (options.parametrization !== undefined)
+                return Result.err("Control B-splines do not use fit parametrization");
+            const curve = controlBSplineCurve(points.flat(), options.control, periodic);
+            if (!curve.isOk) return Result.err(curve.error);
+            const id = this.registerEntity("bspline", this.addEntityParams("bspline", points.flat()));
+            this.attachBSpline(id, undefined, periodic, options.control);
+            return Result.ok(id);
+        }
         const parametrization = options.parametrization ?? "chord";
         const params = bsplineFitParams(points, periodic);
         if (!params.isOk) return Result.err(params.error);
@@ -296,13 +320,68 @@ export class SketchSolver implements ExternalEntityHost {
         return Result.ok(id);
     }
 
+    /** Edits a coherent control layout atomically, preserving entity and constraint identities. */
+    setControlBSpline(
+        id: number,
+        settings: ControlBSplineSettings & { poles?: BSplinePoint[] },
+    ): Result<void> {
+        const entity = this.entity(id);
+        if (entity?.type !== "bspline" || !entity.control) return Result.err("Select a control B-spline");
+        if (settings.periodic !== undefined && typeof settings.periodic !== "boolean")
+            return Result.err("Periodic must be true or false");
+        const poles = settings.poles === undefined ? bsplinePoints(entity.params) : settings.poles;
+        const periodic = settings.periodic ?? entity.periodic === true;
+        const changedLayout = settings.degree !== undefined && settings.degree !== entity.control.degree;
+        const definition = defineControlBSpline(poles, {
+            ...(changedLayout ? { weights: entity.control.weights } : entity.control),
+            ...settings,
+            periodic,
+        });
+        if (!definition.isOk) return Result.err(definition.error);
+        const data = this.toData();
+        const replacement = { ...entity, params: poles.flat(), control: definition.value };
+        if (periodic) replacement.periodic = true;
+        else delete replacement.periodic;
+        data.entities[data.entities.findIndex((item) => item.id === id)] = replacement;
+        let trial: SketchSolver | undefined;
+        try {
+            trial = new SketchSolver(this.plane, data, this._scope);
+            const outcome = trial.solve(true);
+            if (!outcome.result.startsWith("Ok"))
+                return Result.err(`Control B-spline edit failed: ${outcome.result}`);
+            this.reset(trial.toData());
+            return Result.ok(undefined);
+        } catch (error) {
+            return Result.err(error instanceof Error ? error.message : String(error));
+        } finally {
+            trial?.dispose();
+        }
+    }
+
     /** Records a bspline entity's options and creates its solver curve (see `bsplineCurves`). */
     private attachBSpline(
         id: number,
         parametrization: BSplineParametrization | undefined,
         periodic: boolean,
+        control?: ControlBSplineDefinition,
     ): void {
-        this.bsplineOptions.set(id, { parametrization, periodic });
+        this.bsplineOptions.set(id, {
+            parametrization,
+            periodic,
+            ...(control ? { control: structuredClone(control) } : {}),
+        });
+        if (control !== undefined) {
+            if (parametrization !== undefined)
+                throw new Error("Control B-splines do not use fit parametrization");
+            const params = Array.from(this.system.get_params(new Uint32Array(this.entityParams.get(id)!)));
+            const shape = controlBSplineCurve(params, control, periodic);
+            if (!shape.isOk) throw new Error(shape.error);
+            this.bsplineCurves.set(
+                id,
+                this.system.add_control_bspline(this.entityParams.get(id)!, shape.value),
+            );
+            return;
+        }
         try {
             this.bsplineCurves.set(
                 id,
@@ -772,6 +851,7 @@ export class SketchSolver implements ExternalEntityHost {
             ...(this.constructionEntities.has(id) ? { construction: true } : {}),
             ...(options?.parametrization === undefined ? {} : { parametrization: options.parametrization }),
             ...(options?.periodic ? { periodic: true } : {}),
+            ...(options?.control ? { control: structuredClone(options.control) } : {}),
         };
     }
 
@@ -1193,7 +1273,7 @@ export class SketchSolver implements ExternalEntityHost {
         const [point, curveRef] = constraint.refs;
         if (point === undefined || curveRef === undefined)
             throw new Error("Point on B-spline takes two refs");
-        if (point.entityId === curveRef.entityId) {
+        if (point.entityId === curveRef.entityId && !this.bsplineOptions.get(curveRef.entityId)?.control) {
             throw new Error("A B-spline's own point already lies on it");
         }
         const [px, py] = this.pointParamIds(point);
@@ -1642,7 +1722,12 @@ export class SketchSolver implements ExternalEntityHost {
             this.registerEntity(entity.type, this.addEntityParams(entity.type, entity.params), entity.id);
             if (entity.type === "spline") this.entityCache.set(entity.id, [...entity.params]);
             if (entity.type === "bspline") {
-                this.attachBSpline(entity.id, entity.parametrization, entity.periodic === true);
+                this.attachBSpline(
+                    entity.id,
+                    entity.parametrization,
+                    entity.periodic === true,
+                    entity.control,
+                );
             }
             if (entity.construction) this.constructionEntities.add(entity.id);
         }

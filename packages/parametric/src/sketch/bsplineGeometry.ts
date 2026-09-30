@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { Precision, Result } from "@spicy3d/core";
+import { type ControlBSplineDefinition, controlBSplineCurve } from "./controlBSplineGeometry";
 
 /**
  * The interpolating B-spline of the sketch `bspline` entity: ONE smooth curve through every fit
@@ -35,12 +36,14 @@ export const BSPLINE_PARAMETRIZATIONS: readonly BSplineParametrization[] = [
 export type BSplinePoint = [number, number];
 
 export interface BSplineOptions {
+    control?: ControlBSplineDefinition;
     parametrization?: BSplineParametrization;
     periodic?: boolean;
 }
 
 /** A 2D B-spline in knot-vector form (OCCT layout: distinct knots with multiplicities). */
 export interface BSplineCurve2d {
+    weights?: number[];
     degree: number;
     periodic: boolean;
     poles: BSplinePoint[];
@@ -212,7 +215,12 @@ export function interpolateBSplineAt(
  * callers building edges check `interpolateBSpline` themselves.
  */
 export function entityBSpline(params: readonly number[], options: BSplineOptions = {}): BSplineCurve2d {
-    const curve = interpolateBSpline(bsplinePoints(params), options);
+    if (options.control !== undefined && options.parametrization !== undefined)
+        throw new Error("Control B-splines do not use fit parametrization");
+    const curve =
+        options.control === undefined
+            ? interpolateBSpline(bsplinePoints(params), options)
+            : controlBSplineCurve(params, options.control, options.periodic === true);
     if (!curve.isOk) throw new Error(curve.error);
     return curve.value;
 }
@@ -366,15 +374,37 @@ export function evaluateBSpline(curve: BSplineCurve2d, u: number, order = 1): BS
     const t = domainParameter(curve, u);
     const span = findSpan(flat, curve.degree, t);
     const ders = basisDerivatives(flat, curve.degree, span, t, Math.min(order, curve.degree));
+    const weights =
+        curve.weights === undefined
+            ? undefined
+            : curve.periodic
+              ? [...curve.weights, ...curve.weights.slice(0, curve.degree)]
+              : curve.weights;
     const result: BSplinePoint[] = [];
+    const weightDerivatives: number[] = [];
     for (let k = 0; k <= order; k++) {
         const point: BSplinePoint = [0, 0];
+        let weight = 0;
         if (k <= curve.degree) {
             for (let j = 0; j <= curve.degree; j++) {
-                const pole = poles[span - curve.degree + j];
-                point[0] += ders[k][j] * pole[0];
-                point[1] += ders[k][j] * pole[1];
+                const index = span - curve.degree + j;
+                const pole = poles[index];
+                const coefficient = ders[k][j] * (weights?.[index] ?? 1);
+                point[0] += coefficient * pole[0];
+                point[1] += coefficient * pole[1];
+                weight += coefficient;
             }
+        }
+        weightDerivatives.push(weight);
+        if (weights !== undefined) {
+            let binomial = 1;
+            for (let i = 1; i <= k; i++) {
+                binomial = (binomial * (k - i + 1)) / i;
+                point[0] -= binomial * weightDerivatives[i] * result[k - i][0];
+                point[1] -= binomial * weightDerivatives[i] * result[k - i][1];
+            }
+            point[0] /= weightDerivatives[0];
+            point[1] /= weightDerivatives[0];
         }
         result.push(point);
     }
@@ -468,7 +498,9 @@ export function bsplinePolyline(
     subdivisions?: number,
 ): BSplinePoint[] {
     const points = bsplinePoints(params);
-    const curve = interpolateBSpline(points, options);
+    const curve = options.control
+        ? controlBSplineCurve(params, options.control, options.periodic)
+        : interpolateBSpline(points, options);
     if (curve.isOk) return sampleBSpline(curve.value, subdivisions);
     return options.periodic && points.length > 0 ? [...points, points[0]] : points;
 }

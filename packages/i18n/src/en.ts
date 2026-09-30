@@ -440,6 +440,14 @@ export default {
         "prompt.pickSplinePoint":
             "Pick next spline point; Enter to finish, Esc to cancel (interior points stay fixed)",
         "command.sketch.bspline": "B-spline",
+        "command.sketch.controlBSpline": "Control B-spline",
+        "dialog.title.controlBSpline": "Control B-spline settings",
+        "sketch.controlBSpline.degree": "Degree",
+        "sketch.controlBSpline.knots": "Distinct knots",
+        "sketch.controlBSpline.multiplicities": "Multiplicities",
+        "sketch.controlBSpline.weights": "Pole weights",
+        "sketch.controlBSpline.help":
+            "Enter comma-separated values. Open ends must be clamped (degree + 1); periodic curves require uniform knots and multiplicity one. Drag the control poles to edit the shape.",
         "prompt.pickBSplinePoint":
             "Pick next B-spline point; Enter or click the last point again to finish, click the first point to close, Esc to cancel",
         "command.sketch.point": "Point",

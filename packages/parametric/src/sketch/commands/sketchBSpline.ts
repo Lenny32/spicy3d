@@ -11,6 +11,7 @@ import {
     type XYZ,
 } from "@spicy3d/core";
 import { bsplinePolyline } from "../bsplineGeometry";
+import { defineControlBSpline } from "../controlBSplineGeometry";
 import { toUV, toWorld } from "../sketchModel";
 import { SketchMultistepCommand } from "./sketchMultistepCommand";
 import { SketchPointStep } from "./sketchPointStep";
@@ -23,6 +24,9 @@ import { SketchPointStep } from "./sketchPointStep";
  */
 @command({ key: "sketch.bspline", icon: "icon-bspline" })
 export class SketchBSplineCommand extends SketchMultistepCommand {
+    protected get controlMode(): boolean {
+        return false;
+    }
     private finishRequested = false;
     private periodic = false;
 
@@ -79,7 +83,17 @@ export class SketchBSplineCommand extends SketchMultistepCommand {
 
     protected executeMainTask(): void {
         const points = this.stepDatas.map((_, i) => this.uvOf(i));
-        const result = this.editor.solver.addBSpline(points, { periodic: this.periodic });
+        const definition = this.controlMode
+            ? defineControlBSpline(points, { periodic: this.periodic })
+            : undefined;
+        if (definition && !definition.isOk) {
+            PubSub.default.pub("displayError", definition.error);
+            return;
+        }
+        const result = this.editor.solver.addBSpline(points, {
+            periodic: this.periodic,
+            ...(definition?.isOk ? { control: definition.value } : {}),
+        });
         if (!result.isOk) {
             PubSub.default.pub("displayError", result.error);
             return;
@@ -95,10 +109,24 @@ export class SketchBSplineCommand extends SketchMultistepCommand {
         const points = pick === "add" && point !== undefined ? [...picked, point] : picked;
         if (points.length < 2) return meshes;
         const params = points.flatMap((p) => toUV(plane, p));
-        const world = bsplinePolyline(params, { periodic: pick === "close" }).map((p) =>
-            toWorld(plane, ...p),
-        );
+        const definition = this.controlMode
+            ? defineControlBSpline(
+                  points.map((p) => toUV(plane, p)),
+                  { periodic: pick === "close" },
+              )
+            : undefined;
+        const world = bsplinePolyline(params, {
+            periodic: pick === "close",
+            ...(definition?.isOk ? { control: definition.value } : {}),
+        }).map((p) => toWorld(plane, ...p));
         for (let i = 1; i < world.length; i++) meshes.push(this.meshLine(world[i - 1], world[i]));
         return meshes;
     };
+}
+
+@command({ key: "sketch.controlBSpline", icon: "icon-bspline" })
+export class SketchControlBSplineCommand extends SketchBSplineCommand {
+    protected override get controlMode(): boolean {
+        return true;
+    }
 }

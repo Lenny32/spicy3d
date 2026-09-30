@@ -18,6 +18,7 @@ import {
 import type { EdgeRef } from "../features/edgeRef";
 import { bsplineEdgeCount } from "./bsplineEdges";
 import type { BSplineParametrization } from "./bsplineGeometry";
+import type { ControlBSplineDefinition } from "./controlBSplineGeometry";
 import { ConstraintKind } from "./planegcs";
 
 export { ConstraintKind };
@@ -40,6 +41,7 @@ export type SketchEntityType = "line" | "circle" | "arc" | "point" | "ellipse" |
  * points; always open. Kept exactly as it is: saved fillets on its edges must keep resolving.
  * bspline: [x0, y0, x1, y1, ...] — the fit points in curve order, ONE interpolating B-spline edge
  * through all of them (`bsplineGeometry.ts`), with `parametrization` and `periodic` below.
+ * With `control`, the same params are poles of a polynomial/rational curve, not fit points.
  */
 export interface SketchEntityData {
     id: number;
@@ -49,6 +51,8 @@ export interface SketchEntityData {
     construction?: boolean;
     /** bspline only: where the fit points sit on the curve parameter (the tools always write it; absent reads `chord`). */
     parametrization?: BSplineParametrization;
+    /** Control mode: params are editable poles; absent preserves interpolating fit points. */
+    control?: ControlBSplineDefinition;
     /** bspline only: a closed, C2 curve — the first fit point is not repeated as the last. */
     periodic?: boolean;
 }
@@ -57,7 +61,7 @@ export interface SketchEntityData {
  * line: pointIndex 0 = start, 1 = end; circle: pointIndex 0 = center;
  * arc: pointIndex 0 = center, 1 = start, 2 = end.
  * spline: pointIndex 0 = start, 1 = end; interior points are not solver parameters.
- * bspline: pointIndex i = fit point i (every one a solver point).
+ * bspline: pointIndex i = fit point i, or control pole i when control is present.
  * point: pointIndex 0 = location; ellipse: 0 = center, 1/2 = axis endpoints.
  */
 export interface SketchPointRef {
@@ -346,7 +350,8 @@ export function shapeEntityIds(data: SketchData): number[] {
 /** Edges a profile entity contributes to the sketch shape. */
 function entityEdgeCount(entity: SketchEntityData): number {
     if (entity.type === "spline") return entity.params.length / 2 - 1;
-    if (entity.type === "bspline") return bsplineEdgeCount(entity.params, entity.periodic === true);
+    if (entity.type === "bspline")
+        return bsplineEdgeCount(entity.params, entity.periodic === true, entity.control);
     return 1;
 }
 

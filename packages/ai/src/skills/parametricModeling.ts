@@ -52,7 +52,14 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
                                                     Tangent [line, bspline] = the line along its end tangent
   Any entity may carry construction: true (constrainable helper geometry, never part of a profile) and
   name: "..." (a name later refs in this call can use instead of the id).
-  A closed profile of lines/arcs needs its segments in perimeter order, each starting where the previous
+  Control-mode bspline uses poles:[[u,v],...] instead of points/params/parametrization. Optional
+  degree defaults to min(3,poleCount-1); distinct strictly increasing knots and multiplicities must
+  be supplied together (or use generated defaults). Open ends are clamped (degree+1); initial
+  periodic support uses uniform knots and multiplicity one. Optional weights are one positive
+  finite value per pole. The curve generally does not pass through interior poles. movePoint point
+  indices address poles in this mode. Weighted curves require the native B-spline kernel binding;
+  older kernels report an explicit error. Fit-point bsplines are unchanged.
+  A closed profile of lines/arcs needs segments in perimeter order, each starting where the previous
   one ends (the last one ending on the first one's start); a periodic bspline closes on its own.
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
@@ -144,6 +151,9 @@ sketch re-solves after each action and a failing one rolls everything back):
     external (projected) entities are removed the same way
 - { action: "setDatum", constraint, value, index? }        change a dimension (display units or expression)
 - { action: "setConstruction", entities, value? = true }   toggle construction geometry
+- { action: "setBSpline", entity, poles?, degree?, knots?, multiplicities?, weights?, periodic? }
+  edits a control-mode B-spline atomically, preserving entity id and pole-index references. Degree
+  changes generate default knots unless knots/multiplicities are explicitly supplied together.
 - { action: "movePoint", entity, point, to: [u, v] }       drag a point; constraints stay satisfied
 - { action: "trim", entity, at: [u, v] }                   removes the piece of the line/arc/circle around
     "at" between its neighbouring intersections (a circle needs two)

@@ -48,6 +48,28 @@ const ENTITY_SCHEMA = {
             description:
                 "spline / bspline, instead of params: the points [[u,v], ...] in curve order (a bspline's fit points)",
         },
+        poles: {
+            type: "array",
+            items: { type: "array", items: { type: "number" } },
+            description:
+                "Control B-spline poles [[u,v], ...]; replaces fit points. Point indices address poles.",
+        },
+        degree: { type: "integer", description: "Control B-spline degree, default min(3, poles.length-1)" },
+        knots: {
+            type: "array",
+            items: { type: "number" },
+            description: "Strictly increasing distinct knots; specify multiplicities together",
+        },
+        multiplicities: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Clamped open ends degree+1; periodic uniform knots/multiplicity1",
+        },
+        weights: {
+            type: "array",
+            items: { type: "number" },
+            description: "One positive finite rational weight per pole, default one",
+        },
         parametrization: {
             type: "string",
             enum: ["chord", "centripetal", "uniform"],
@@ -117,6 +139,7 @@ const ACTION_SCHEMA = {
                 "setDatum",
                 "setConstruction",
                 "movePoint",
+                "setBSpline",
                 "trim",
                 "split",
                 "extend",
@@ -137,6 +160,29 @@ const ACTION_SCHEMA = {
         },
         constraints: { type: "array", description: "add: constraint specs; remove: constraint ids/names" },
         entity: { description: "Entity id or name (movePoint/trim/split/extend/offset)" },
+        poles: {
+            type: "array",
+            items: { type: "array", items: { type: "number" } },
+            description:
+                "Control B-spline poles [[u,v], ...]; replaces fit points. Point indices address poles.",
+        },
+        degree: { type: "integer", description: "Control B-spline degree, default min(3, poles.length-1)" },
+        knots: {
+            type: "array",
+            items: { type: "number" },
+            description: "Strictly increasing distinct knots; specify multiplicities together",
+        },
+        multiplicities: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Clamped open ends degree+1; periodic uniform knots/multiplicity1",
+        },
+        weights: {
+            type: "array",
+            items: { type: "number" },
+            description: "One positive finite rational weight per pole, default one",
+        },
+        periodic: { type: "boolean", description: "setBSpline: periodic closure" },
         point: { type: "number", description: "movePoint: point index" },
         to: { description: "movePoint: target [u, v]; extend: the boundary entity" },
         at: {

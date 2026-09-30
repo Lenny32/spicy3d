@@ -1,0 +1,126 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 5,
+        "sketch": 3
+    },
+    "id": "fixture-sketch3-control-nurbs",
+    "name": "Fixture sketch v3: rational quarter circle and periodic control-pole B-spline, each extruded",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"bspline\",\"params\":[20,0,20,20,0,20],\"control\":{\"degree\":2,\"knots\":[0,1],\"multiplicities\":[3,3],\"weights\":[1,0.7071067811865476,1]}},{\"id\":2,\"type\":\"line\",\"params\":[0,20,0,0]},{\"id\":3,\"type\":\"line\",\"params\":[0,0,20,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-open",
+                "name": "body.sketch1",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"bspline\",\"params\":[60,0,80,0,80,20,60,20],\"periodic\":true,\"control\":{\"degree\":3,\"knots\":[0,1,2,3,4],\"multiplicities\":[1,1,1,1,1],\"weights\":[1,2,1,2]}}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-periodic",
+                "name": "body.sketch2",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-open\",\"type\":\"extrude\",\"sketchId\":\"sketch-open\",\"depth\":10}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-open",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-periodic\",\"type\":\"extrude\",\"sketchId\":\"sketch-periodic\",\"depth\":5}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-periodic",
+                "name": "body.parametricBody2",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

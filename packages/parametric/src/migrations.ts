@@ -21,8 +21,9 @@ export const PARAMETRIC_FORMAT_VERSION = 5;
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
  * and `periodic`) and the `PointOnBSpline` / `TangentLineBSpline` constraint kinds — a build reading
  * only v1 knows neither and could not solve or build those sketches.
+ * 3: optional control definition; params are control poles when present, fit points otherwise.
  */
-export const SKETCH_FORMAT_VERSION = 2;
+export const SKETCH_FORMAT_VERSION = 3;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -47,3 +48,6 @@ registerMigration("parametric", 4, (document) => document);
 // sketch 1 → 2: the `bspline` entity type and its two constraint kinds are new; every v1 sketch is a
 // valid v2 one (the `spline` entity is unchanged) — no data to rewrite.
 registerMigration("sketch", 1, (document) => document);
+
+// sketch 2 → 3: absent control metadata retains fit-point semantics verbatim.
+registerMigration("sketch", 2, (document) => document);

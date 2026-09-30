@@ -806,6 +806,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
   - `type`: scalar
   - `params`: atomic
   - `construction`: scalar
+  - `control`: atomic
   - `parametrization`: scalar
   - `periodic`: scalar
 - `constraints`: list of `constraint` by `id` (stable order)

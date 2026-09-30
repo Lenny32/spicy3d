@@ -36,6 +36,7 @@ export const SketchRibbonProfiles: RibbonProfileExtra[] = [
                     "sketch.ellipse",
                     "sketch.spline",
                     "sketch.bspline",
+                    "sketch.controlBSpline",
                     "sketch.point",
                     "sketch.projectEdges",
                 ],

@@ -14,6 +14,8 @@ import wasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm";
 import {
     type BSplineCurve2d,
     type BSplineParametrization,
+    bsplineDomain,
+    bsplinePointAt,
     bsplinePoints,
     closestBSplineParameter,
     interpolateBSpline,
@@ -200,6 +202,7 @@ interface ConstraintRecord {
  * determined by the fit points (as many poles as fit points): the curve adds no degree of freedom.
  */
 interface CurveRecord {
+    readonly control?: boolean;
     /** Fit point param ids, (x, y) pairs in curve order. */
     readonly fit: readonly number[];
     /** Pole param ids, (x, y) pairs; owned by the curve. */
@@ -437,6 +440,22 @@ export class SolverSystem {
         return this.curves.length - 1;
     }
 
+    /** Control poles are the entity's own parameters, never hidden interpolation parameters. */
+    add_control_bspline(poles: readonly number[], shape: BSplineCurve2d): number {
+        for (const id of poles) this.assertParam(id);
+        this.curves.push({
+            control: true,
+            fit: [],
+            poles: [...poles],
+            periodic: shape.periodic,
+            parametrization: "uniform",
+            shape,
+            knotFit: [],
+        });
+        this.invalidate();
+        return this.curves.length - 1;
+    }
+
     /** Removes a curve and its poles. A curve still referenced by a live constraint cannot be removed. */
     remove_bspline(id: number): void {
         const curve = this.curves[id];
@@ -447,7 +466,7 @@ export class SolverSystem {
                 throw new Error(`CurveInUse: curve ${id} is referenced by a constraint`);
             }
         }
-        for (const pole of curve.poles) {
+        for (const pole of curve.control ? [] : curve.poles) {
             this.alive[pole] = false;
             this.dragged.delete(pole);
         }
@@ -507,7 +526,7 @@ export class SolverSystem {
      */
     private updateCurveKnots(): void {
         for (const curve of this.curves) {
-            if (curve === undefined) continue;
+            if (curve === undefined || curve.control) continue;
             const values = curve.fit.map((id) => this.values[id]);
             const shape = interpolateBSpline(bsplinePoints(values), {
                 periodic: curve.periodic,
@@ -538,7 +557,7 @@ export class SolverSystem {
      */
     private refreshCurvePoles(native: GcsSystem): void {
         for (const curve of this.curves) {
-            if (curve === undefined) continue;
+            if (curve === undefined || curve.control) continue;
             const values = curve.fit.map((id) => this.values[id]);
             const shape = interpolateBSplineAt(bsplinePoints(values), curve.shape);
             if (!shape.isOk) continue;
@@ -826,7 +845,7 @@ export class SolverSystem {
         /** Free fit params with their distance (in fit points) from the nearest anchor. */
         const rings: { id: number; distance: number }[] = [];
         for (const curve of this.curves) {
-            if (curve === undefined) continue;
+            if (curve === undefined || curve.control) continue;
             const count = curve.fit.length / 2;
             const anchors: number[] = [];
             for (let i = 0; i < count; i++) {
@@ -1078,7 +1097,7 @@ export class SolverSystem {
         };
         const shape = curve.shape;
         const knots = shape.knots.map((knot) => native.push_p_param(knot, true));
-        const weights = shape.poles.map(() => native.push_p_param(1, true));
+        const weights = shape.poles.map((_, i) => native.push_p_param(shape.weights?.[i] ?? 1, true));
         const [sx, sy, ex, ey] = curve.periodic
             ? [curve.fit[0], curve.fit[1], curve.fit[0], curve.fit[1]]
             : [
@@ -1087,6 +1106,13 @@ export class SolverSystem {
                   curve.poles[curve.poles.length - 2],
                   curve.poles[curve.poles.length - 1],
               ];
+        let ends = [sx, sy, ex, ey].map(index);
+        if (curve.control && curve.periodic) {
+            const seam = bsplinePointAt(this.shapeOf(curve), bsplineDomain(shape)[0]);
+            const x = native.push_p_param(seam[0], false);
+            const y = native.push_p_param(seam[1], false);
+            ends = [x, y, x, y];
+        }
         const vectors = [
             vector(curve.poles.map(index)),
             vector(weights),
@@ -1095,10 +1121,10 @@ export class SolverSystem {
         ];
         try {
             const bspline = native.make_bspline(
-                index(sx),
-                index(sy),
-                index(ex),
-                index(ey),
+                ends[0],
+                ends[1],
+                ends[2],
+                ends[3],
                 vectors[0],
                 vectors[1],
                 vectors[2],
@@ -1108,6 +1134,12 @@ export class SolverSystem {
             );
             this.nativeCurves.set(id, bspline);
             const tag = CURVE_TAG_BASE + id;
+            if (curve.control && curve.periodic) {
+                const u = native.push_p_param(bsplineDomain(shape)[0], true);
+                const point = native.make_point(ends[0], ends[1]);
+                native.add_constraint_point_on_bspline(point, bspline, u, tag, true, 1);
+                point.delete();
+            }
             shape.parameters.forEach((parameter, i) => {
                 const u = native.push_p_param(parameter, true);
                 const point = native.make_point(index(curve.fit[2 * i]), index(curve.fit[2 * i + 1]));
