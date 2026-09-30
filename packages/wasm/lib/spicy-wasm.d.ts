@@ -709,6 +709,7 @@ interface EmbindModule {
   TrackedShapeResult: {};
   ShapeFactory: {
     makeThickSolidBySimple(_0: TopoDS_Shape, _1: number): ShapeResult;
+    copyTracked(_0: TopoDS_Shape): TrackedShapeResult;
     fixShape(_0: TopoDS_Shape, _1: number): ShapeResult;
     fixSmallFace(_0: TopoDS_Shape, _1: number): ShapeResult;
     fixSolid(_0: TopoDS_Shape, _1: number): ShapeResult;
@@ -716,6 +717,7 @@ interface EmbindModule {
     filletEdge2d(_0: TopoDS_Edge, _1: TopoDS_Edge, _2: number): ShapesResult;
     chamferEdge2d(_0: TopoDS_Edge, _1: TopoDS_Edge, _2: number): ShapesResult;
     sweepTracked(_0: TopoDS_Wire, _1: TopoDS_Wire, _2: boolean, _3: boolean): TrackedShapeResult;
+    faceSweepTracked(_0: TopoDS_Wire, _1: TopoDS_Wire, _2: TopoDS_Face, _3: boolean): TrackedShapeResult;
     fillet2d(_0: TopoDS_Face, _1: TopoDS_Edge, _2: TopoDS_Edge, _3: number): ShapeResult;
     chamfer2d(_0: TopoDS_Face, _1: TopoDS_Edge, _2: TopoDS_Edge, _3: number): ShapeResult;
     polygon(_0: Array<Vector3>): ShapeResult;
@@ -729,6 +731,7 @@ interface EmbindModule {
     filletVariableRadiusTracked(_0: TopoDS_Shape, _1: Array<number>, _2: Array<number>): TrackedShapeResult;
     chamferTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number): TrackedShapeResult;
     sweep(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: boolean, _3: boolean): ShapeResult;
+    loftGuidedTracked(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: TopoDS_Wire, _3: boolean): TrackedShapeResult;
     makeThickSolidByJoin(_0: TopoDS_Shape, _1: Array<TopoDS_Shape>, _2: number, _3: GeomAbs_JoinType, _4: BRepOffset_Mode, _5: boolean): ShapeResult;
     simplifyShape(_0: TopoDS_Shape, _1: boolean, _2: boolean, _3: Array<TopoDS_Shape>, _4: number, _5: number): ShapeResult;
     booleanCommon(_0: Array<TopoDS_Shape>, _1: Array<TopoDS_Shape>): ShapeResult;

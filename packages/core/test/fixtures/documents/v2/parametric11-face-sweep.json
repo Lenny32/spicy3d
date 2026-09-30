@@ -1,0 +1,154 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 11,
+        "sketch": 3
+    },
+    "id": "fixture-parametric11-face-sweep",
+    "name": "Fixture parametric v11: associative rib on cylindrical support",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":7,\"type\":\"circle\",\"params\":[0,0,10]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-cylinder",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 10,
+                        "y": 0,
+                        "z": 5,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":31,\"type\":\"line\",\"params\":[-1,-1,1,-1]},{\"id\":32,\"type\":\"line\",\"params\":[1,-1,1,1]},{\"id\":33,\"type\":\"line\",\"params\":[1,1,-1,1]},{\"id\":34,\"type\":\"line\",\"params\":[-1,1,-1,-1]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-section",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 5,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":11,\"type\":\"arc\",\"params\":[0,0,10,0,0,10]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-path",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"cylinder\",\"type\":\"extrude\",\"sketchId\":\"sketch-cylinder\",\"depth\":20},{\"id\":\"rib\",\"type\":\"faceSweep\",\"operation\":\"join\",\"section\":{\"sketchId\":\"sketch-section\"},\"path\":{\"nodeId\":\"sketch-path\",\"edges\":[{\"kind\":\"circle\",\"center\":{\"x\":0,\"y\":0,\"z\":5},\"radius\":10,\"axis\":{\"x\":0,\"y\":0,\"z\":1},\"edgeId\":\"sketch:sketch-path:path:ent11\"}]},\"support\":{\"nodeId\":\"body-face-sweep\",\"face\":{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":0,\"z\":20},\"end\":{\"x\":10,\"y\":0,\"z\":0}},{\"kind\":\"circle\",\"center\":{\"x\":0,\"y\":0,\"z\":0},\"radius\":10,\"axis\":{\"x\":0,\"y\":0,\"z\":1}},{\"kind\":\"circle\",\"center\":{\"x\":0,\"y\":0,\"z\":20},\"radius\":10,\"axis\":{\"x\":0,\"y\":0,\"z\":1}}],\"splitPiece\":false,\"id\":\"sketch:sketch-cylinder:e7:ent7\",\"center\":{\"x\":0,\"y\":0,\"z\":10},\"area\":1256.6370614359173}}}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-face-sweep",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "variable-gap",
+            "name": "gap",
+            "expression": "2 mm",
+            "type": "length"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

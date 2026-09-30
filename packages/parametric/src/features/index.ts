@@ -8,6 +8,7 @@ export * from "./edgeMatcher";
 export * from "./edgeRef";
 export * from "./extrude";
 export * from "./extrudeTarget";
+export * from "./faceSweep";
 export * from "./feature";
 export * from "./historyCompletion";
 export * from "./loft";

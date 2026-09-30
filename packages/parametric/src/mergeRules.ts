@@ -204,6 +204,25 @@ registerMergePayload("parametric.features", {
                         roundCorner: scalar,
                     },
                 },
+                faceSweep: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        section: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
+                        },
+                        path: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                        support: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, face: { kind: "ref", target: "profile" } },
+                        },
+                        operation: scalar,
+                        roundCorner: scalar,
+                    },
+                },
                 projection: {
                     kind: "object",
                     fields: {

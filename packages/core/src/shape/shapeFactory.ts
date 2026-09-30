@@ -159,6 +159,13 @@ export interface IShapeFactory {
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
     /** A single section swept along a path, retaining both profile and path ancestry. */
     sweepTracked?(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape>;
+    /** A solid swept with a real support-normal frame; every path edge must lie on the trimmed face. */
+    faceSweepTracked?(
+        section: IWire,
+        path: IWire,
+        support: IFace,
+        roundCorner: boolean,
+    ): Result<TrackedShape>;
     /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;
@@ -166,6 +173,8 @@ export interface IShapeFactory {
     booleanFuse(shape1: IShape[], shape2: IShape[], simplifyShape: boolean): Result<IShape>;
     sewing(shapes: IShape[]): Result<IShape>;
     combine(shapes: IShape[]): Result<ICompound>;
+    /** Deep copy with explicit native ModifiedShape face/edge ancestry. */
+    copyTracked?(shape: IShape): Result<TrackedShape>;
     /** @unit length thickness */
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape>;
     /**
@@ -289,6 +298,16 @@ export interface IShapeFactory {
      * chains are an error naming the section. Open chains are valid sections.
      */
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
+    /**
+     * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
+     * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
+     */
+    loftGuidedTracked?(
+        sections: IWire[],
+        spine: IWire,
+        boundary: IWire,
+        solid: boolean,
+    ): Result<TrackedShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(
         shape: IShape,

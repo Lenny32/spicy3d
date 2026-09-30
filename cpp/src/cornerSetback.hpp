@@ -416,12 +416,15 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
         return failure("requires a valid solid");
     const History copiedHistory = derivedHistory(copy, inputHistory(input), shape);
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-    TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    TopExp::MapShapes(input, TopAbs_EDGE, edgeMap);
     std::array<TopoDS_Edge, 3> selected;
     for (int i = 0; i < 3; ++i) {
         if (indexes[i] < 0 || indexes[i] >= edgeMap.Extent())
             return failure("edge index is out of range");
-        selected[i] = TopoDS::Edge(edgeMap.FindKey(indexes[i] + 1));
+        const TopoDS_Shape copiedEdge = copy.ModifiedShape(edgeMap.FindKey(indexes[i] + 1));
+        if (copiedEdge.IsNull() || copiedEdge.ShapeType() != TopAbs_EDGE)
+            return failure("selected edge has no unique copy ancestry");
+        selected[i] = TopoDS::Edge(copiedEdge);
         for (int j = 0; j < i; ++j)
             if (selected[i].IsSame(selected[j]))
                 return failure("three distinct incident edges are required");

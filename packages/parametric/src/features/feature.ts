@@ -44,6 +44,7 @@ export type FeatureData =
     | LoftFeatureData
     | ProjectionFeatureData
     | SweepFeatureData
+    | FaceSweepFeatureData
     | ThickenFeatureData;
 
 /** Associative whole-curve projection along positive rays of a fixed world-space vector. */
@@ -52,6 +53,16 @@ export interface ProjectionFeatureData extends FeatureBase {
     readonly source: { readonly nodeId: string; readonly edges: EdgeRef[] };
     readonly target: { readonly nodeId: string; readonly face: ProfileRef };
     readonly direction: XYZLike;
+}
+
+/** A solid section swept in a support-normal frame and joined to or cut from the entering body. */
+export interface FaceSweepFeatureData extends FeatureBase {
+    readonly type: "faceSweep";
+    readonly section: LoftSection;
+    readonly path: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    readonly support: { readonly nodeId: string; readonly face: ProfileRef };
+    readonly operation: "join" | "cut";
+    readonly roundCorner?: boolean;
 }
 
 export interface ExtrudeFeatureData extends FeatureBase {

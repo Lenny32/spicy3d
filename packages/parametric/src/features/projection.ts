@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDocument, type IShape, Result } from "@spicy3d/core";
+import { type IDocument, type IShape, Result, VisualNode } from "@spicy3d/core";
 import {
     type FeatureData,
     type FeatureHandler,
@@ -18,13 +18,14 @@ function dependencies(feature: ProjectionFeatureData, document: IDocument) {
         return (
             Array.isArray(features) && features.some((candidate: FeatureData) => candidate.id === feature.id)
         );
-    })?.id;
-    if (!host) return { refIds: [feature.source.nodeId, feature.target.nodeId], key: undefined };
-    const source = projectionTargetDependencies(feature.source, document, host);
-    const target = projectionTargetDependencies(feature.target, document, host);
+    });
+    if (!(host instanceof VisualNode))
+        return { refIds: [feature.source.nodeId, feature.target.nodeId], key: undefined };
+    const source = projectionTargetDependencies(feature.source, document, host.id);
+    const target = projectionTargetDependencies(feature.target, document, host.id);
     return {
         refIds: [...new Set([...source.refIds, ...target.refIds])],
-        key: JSON.stringify([source.key, target.key]),
+        key: JSON.stringify([host.worldTransform().toArray(), source.key, target.key]),
     };
 }
 
