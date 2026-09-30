@@ -3,5 +3,7 @@
 
 export * from "./componentColor";
 export * from "./manager";
+export * from "./meshDeviation";
 export * from "./node";
+export * from "./nodeDeviation";
 export * from "./types";

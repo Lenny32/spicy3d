@@ -11,6 +11,7 @@ import { buildNodeTools } from "./nodeTools";
 import { buildParametricTools } from "./parametricTools";
 import { buildPropertyTools } from "./propertyTools";
 import { buildReadTools } from "./readTools";
+import { buildReferenceDeviationTool } from "./referenceDeviation";
 import { buildRibbonTools } from "./ribbonTools";
 import { buildSelectionTools } from "./selectionTools";
 import { buildVariableTools } from "./variableTools";
@@ -35,6 +36,7 @@ export function buildTools(): Tool[] {
         ...buildVariableTools(),
         buildAskUserTool(),
         buildReferenceMeshImportTool(),
+        buildReferenceDeviationTool(),
     ];
     return tools.map(guardKernelTool);
 }
