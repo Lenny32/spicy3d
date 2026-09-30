@@ -29,7 +29,7 @@ separately. Full-suite checks and compatibility fixtures are required before fin
 ## Shared schema/version coordination
 
 The task-specific approval in `mouse-plan.md` permits necessary backward-compatible format changes
-for #81–#106. Current versions: document **2**, parametric **5**, sketch **2**. No payload changes or
+for #81–#106. Initial versions: document **2**, parametric **5**, sketch **2**. No payload changes or
 version bumps are scheduled for the first wave.
 
 Potential payload owners: #83/#84 fillet, #85 loft, #88 sweep, #89 projection, #90 groove/rib,
@@ -60,7 +60,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #87 Add rule-based edge selection through MCP | #86 | Done (pushed) | mouse_86 | mouse/87-edge-selectors | 138 worker tests; 65 integrated tests; tsc/check | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 | — |
 | #88 Add a parametric sweep along a 3D path | Parametric 9 | Done (pushed) | mouse_81 | mouse/88-associative-path-sweep | 293 worker tests; 144 focused and 314 native/fixture checks; tsc/check | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 | — |
 | #89 Add associative curve projection onto surfaces | Parametric 10 | Done (pushed) | mouse_86 | mouse/89-associative-projection | 171 worker tests; 103 combined integration tests; tsc/check | 279b538db3f00c5b26b55ce37f45c791b3afb54b | — |
-| #90 Add a parametric groove or rib along a curve on a face | #88, #89; reserved parametric 11 | Implementation | mouse_81 | mouse/90-face-sweep | Approved Darboux support-normal design and payload | — | Native, UI/MCP and compatibility implementation |
+| #90 Add a parametric groove or rib along a curve on a face | #88, #89; parametric 11 | Done (pushed) | mouse_81 | mouse/90-face-sweep | 247 affected integration tests; native/ancestry/UI/MCP/undo/fixtures/merge; tsc/check | 76245a90b2935df7ea0d207a82ebbcb67e585103 | — |
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96, #97 | Done (pushed) | root | mouse/92-async-progress | 462 worker regressions; full9423pass1skip; tsc/check/build | 55abf61354b2c0e6750655a35de7dfafac71932a | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Done (pushed) | mouse_86 | mouse/93-control-nurbs | 1186 worker/182 focused integrated tests; full suite/tsc/check/build | 9d2acd98b606c739832e6fbd87e018a803202f06 | — |
@@ -268,3 +268,21 @@ Their product integrations and compatibility checks are still in progress. PR #1
 The combined 23-ticket integration passes **9,650 tests across 583 files, one skip**,
 TypeScript and the production app plus all three plugins. Full-suite guards exposed a missing
 projection sprite name and stale exhaustive MCP/ribbon expectations; these are corrected.
+
+## Face-sweep delivery
+
+#90 is reviewed, integrated, validated and pushed. Groove/rib follows a complete trimmed support
+face with native Darboux framing and tracked join/cut. Deep copies retain actual native ancestry;
+projected paths use the entering host timeline and still react to their own source and variable
+edits. Creation/editing supports repicks, preview, validity gating, cancel and one-step undo. Actual
+MCP create/edit calls preserve references and roll back failed multi-operation calls exactly.
+
+The complete integration passes **247 affected tests across 18 files**, TypeScript and scoped
+checks. Pure parametric 10→11 migration, atomic section/path/support picks and the new immutable
+fixture pass all historical native rebuilds and cloud/device roundtrips. Current versions are
+document **2**, parametric **11**, sketch **3**.
+
+**24 of 26 tickets delivered.** Remaining #84 and #85 have accepted native foundations; their
+product/compatibility integrations continue in parallel. The completed #90 agent now reviews the
+setback background-job workflow. The final all-three native build has linked successfully and
+is being validated before integration. PR #107 remains draft until all 26 and final checks pass.

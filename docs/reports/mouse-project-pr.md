@@ -1,7 +1,9 @@
 Mouse modeling project: parametric geometry, kernel recovery and MCP workflows
 
 This integration adds associative 3D path sweeps and directional surface projection, with editable
-profiles, paths and targets. It also adds weighted sketch NURBS, variable-radius fillets, exact curved-face
+profiles, paths and targets. A support-normal groove/rib joins or cuts a profile along a referenced
+curve on a curved wall, with editable picks and options. It also adds weighted sketch NURBS,
+variable-radius fillets, exact curved-face
 extrusion starts and automatic next-face extents. Corner operations reject invalid geometry with
 actionable diagnostics. Persistent edge references and selectors survive compatible upstream edits;
 feature caches track actual variable dependencies, and appended extrusions retain caller names.
@@ -41,10 +43,11 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #98 | Reconstruct open documents in a fresh kernel without reloading | 9f3b108a36f3b889197f286d47cfafa7b617b317 |
 | #88 | Associative path sweep with real section/path history and editable UI/MCP | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 |
 | #89 | Associative directional projection with complete trimmed-face coverage | 279b538db3f00c5b26b55ce37f45c791b3afb54b |
+| #90 | Support-normal groove/rib with tracked join/cut and editable UI/MCP | 76245a90b2935df7ea0d207a82ebbcb67e585103 |
 
-Validation: 9,650 passing tests across 583 files on the latest combined integration, one skip; production build, TypeScript and required
+Validation: the 23-ticket full baseline passed 9,650 tests across 583 files, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. All 23 listed integrations are validated
+concurrency. Existing lint and bundle-size warnings remain. All 24 listed integrations are validated
 and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain
 unconfirmed without original data.
 
@@ -105,11 +108,18 @@ TypeScript, required lint, exact curved coverage, ancestry, UI undo and MCP refe
 Approved parametric versions 9 and 10 add pure migrations, atomic merge rules and immutable
 fixtures. Existing fixtures remain unchanged; document envelope 2 and sketch 3 remain.
 
-Remaining project work: #84, #85 and #90 (3 tickets). Three implementation agents are continuing
-concurrently. Strict asymmetric setback geometry and two/three-section guided-loft proofs pass;
-product integration and compatibility work continues. Face sweep is implementing actual support
-normal framing and tracked join/cut. 23 tickets are delivered. Keep this PR draft until all 26
+Additional #90 validation: 247 affected tests across 18 files pass on the integration branch,
+including native Darboux framing, deep-copy/boolean ancestry, projected-source and variable edits,
+UI creation/edit/repick/cancel/undo, actual MCP JSON-reference calls and exact rollback. Approved
+parametric 11 migration, atomic picks and the new immutable fixture pass historical native rebuilds
+and cloud/device roundtrips. TypeScript and scoped checks pass.
+
+Remaining project work: #84 and #85 (2 tickets). Two implementation agents are continuing
+concurrently, with the completed face-sweep agent reviewing the setback job workflow. Strict
+asymmetric setback geometry, actual Chromium/Firefox cancellation, and two/three-section guided
+loft proofs pass; product integration and compatibility work continues. 24 tickets are delivered.
+Keep this PR draft until all 26
 are complete and reviewed.
 
-Refs #88, #89, #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
+Refs #90, #88, #89, #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
 Keep issues open and never merge this PR automatically.

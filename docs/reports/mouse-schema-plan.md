@@ -235,7 +235,7 @@ coherent payload, with declared expression dependencies. Add a NEW immutable fix
 and cloud roundtrip/merge tests, independent-distance geometry and actual history proofs,
 scalar/expression UI/MCP editing, rollback, cancel and one-step undo. Version/migration/rule/fixture
 registration waits for #90's committed version-11 step. Runtime/native implementation may proceed
-under the serialized native build slot. #85's owning version remains unassigned.
+under the serialized native build slot. #85's owning version is reserved as parametric 13.
 
 ## #85: associative guided loft with a controlling boundary
 
