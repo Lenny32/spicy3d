@@ -119,7 +119,15 @@ export function matchEdgesAnchored(
     refs: EdgeRef[],
     inputEdgeIds: readonly string[],
 ): Result<AnchoredEdgeMatch> {
-    const edges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];
+    return matchEdgesAnchoredInEdges(shape.findSubShapes(ShapeTypes.edge) as IEdge[], refs, inputEdgeIds);
+}
+
+/** The anchored matcher against an already captured edge array; preserves whole-span semantics. */
+export function matchEdgesAnchoredInEdges(
+    edges: readonly IEdge[],
+    refs: EdgeRef[],
+    inputEdgeIds: readonly string[],
+): Result<AnchoredEdgeMatch> {
     const byId = resolveById(edges, refs, inputEdgeIds);
     if (!byId.isOk) return Result.err(byId.error);
 
@@ -139,7 +147,7 @@ export function matchEdgesAnchored(
 
 /** Fingerprint pass over the refs whose id missed; claims each matched index in `resolved`. */
 function recoverByFingerprint(
-    edges: IEdge[],
+    edges: readonly IEdge[],
     refs: EdgeRef[],
     remaining: number[],
     inputEdgeIds: readonly string[],
@@ -203,7 +211,7 @@ function reanchorRecoveredRef(
  * indexes plus the INDEXES of refs that missed and demote to fingerprint matching.
  */
 function resolveById(
-    edges: IEdge[],
+    edges: readonly IEdge[],
     refs: EdgeRef[],
     inputEdgeIds: readonly string[],
 ): Result<{ resolved: Set<number>; remaining: number[] }> {
@@ -240,7 +248,7 @@ function resolveById(
  * one edge carrying a sketch entity's seed (see `uniqueEntityHit`).
  */
 function idHits(
-    edges: IEdge[],
+    edges: readonly IEdge[],
     ref: EdgeRef,
     inputEdgeIds: readonly string[],
     componentIndex: () => Map<string, number[]>,
@@ -270,7 +278,7 @@ function idHits(
  * the same compound id comes back; a degenerate edge is never adopted.
  */
 function uniqueEntityHit(
-    edges: IEdge[],
+    edges: readonly IEdge[],
     inputEdgeIds: readonly string[],
     ref: EdgeRef,
     overlapping: readonly number[],
@@ -288,7 +296,12 @@ function uniqueEntityHit(
 }
 
 /** Narrows the id hits to the piece actually picked, refusing one another ref already holds. */
-function adoptHits(hits: number[], edges: IEdge[], ref: EdgeRef, resolved: Set<number>): Result<number[]> {
+function adoptHits(
+    hits: number[],
+    edges: readonly IEdge[],
+    ref: EdgeRef,
+    resolved: Set<number>,
+): Result<number[]> {
     const adopted = singleExactHit(hits, edges, ref);
     if (!adopted.isOk) return Result.err(adopted.error);
     if (adopted.value.some((index) => resolved.has(index))) {
@@ -345,7 +358,7 @@ function keepsInvariant(edge: IEdge, ref: EdgeRef): boolean {
  * above). A ref flagged `splitPiece` never widens: zero exact matches adopts the
  * clearly closest piece; a tie or several exact pieces is genuinely ambiguous.
  */
-function singleExactHit(hits: number[], edges: IEdge[], ref: EdgeRef): Result<number[]> {
+function singleExactHit(hits: number[], edges: readonly IEdge[], ref: EdgeRef): Result<number[]> {
     if (hits.length === 1) return Result.ok(hits);
     const exact = hits.filter((index) => refScore(ref, edges[index]) <= MATCH_TOLERANCE);
     if (exact.length === 1) return Result.ok(exact);
