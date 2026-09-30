@@ -36,8 +36,12 @@ import type {
     FeatureData,
     LoftFeatureData,
     RevolveFeatureData,
+    SweepFeatureData,
     ThickenFeatureData,
 } from "../features/feature";
+import { capturePathReference } from "../features/pathReferences";
+import { resolveProfiles } from "../features/profileBuilder";
+import { captureProfileRef } from "../features/profileRef";
 import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
@@ -92,6 +96,8 @@ export type ParametricOp =
     | ExtrudeOp
     | RevolveOp
     | LoftOp
+    | SweepOp
+    | EditSweepOp
     | FilletChamferOp
     | ThickenOp
     | BooleanOp
@@ -220,6 +226,37 @@ export interface LoftOp {
     ruled?: boolean;
     /** A smooth loft's surface continuity (default "c2"). */
     continuity?: Continuity;
+}
+
+export interface SweepSectionInput {
+    /** Earlier sketch op id or existing sketch node id. */
+    sketchId: string;
+    /** Omitted means the sketch's only profile; an index chooses one of several profiles. */
+    profileIndex?: number;
+}
+export interface SweepPathInput {
+    /** Earlier op id or existing shape node id. */
+    nodeId: string;
+    /** Whole edges, in authored traversal order, in findSubShapes(edge) topology positions. */
+    edgeIndexes: number[];
+}
+export interface SweepOp {
+    op: "sweep";
+    id: string;
+    name?: string;
+    section: SweepSectionInput;
+    path: SweepPathInput;
+    solid?: boolean;
+    roundCorner?: boolean;
+}
+export interface EditSweepOp {
+    op: "editSweep";
+    body: string;
+    featureId: string;
+    section?: SweepSectionInput;
+    path?: SweepPathInput;
+    solid?: boolean;
+    roundCorner?: boolean;
 }
 
 export interface FilletChamferOp {
@@ -468,6 +505,12 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "loft":
             runLoftOp(state, op);
+            break;
+        case "sweep":
+            runSweepOp(state, op);
+            break;
+        case "editSweep":
+            runEditSweepOp(state, op);
             break;
         case "fillet":
         case "chamfer":
@@ -876,6 +919,92 @@ function runLoftOp(state: State, op: LoftOp): void {
     createBody(state, op.id, op.name, [feature], () => {
         for (const sketch of sketches) sketch.visible = false;
     });
+}
+
+function sweepSectionInput(state: State, input: SweepSectionInput): SweepFeatureData["section"] {
+    if (!input || typeof input.sketchId !== "string") throw new Error("Sweep section requires sketchId");
+    const sketch = resolveSketch(state, input.sketchId);
+    if (input.profileIndex === undefined) return { sketchId: sketch.id };
+    const profiles = resolveProfiles(sketch);
+    if (!profiles.isOk) throw new Error(profiles.error);
+    const index = input.profileIndex;
+    if (!Number.isInteger(index) || index < 0 || index >= profiles.value.length)
+        throw new Error("Sweep profileIndex is outside the sketch's profile list");
+    return { sketchId: sketch.id, profile: captureProfileRef(profiles.value[index].face) };
+}
+
+function sweepPathInput(state: State, input: SweepPathInput): SweepFeatureData["path"] {
+    if (
+        !input ||
+        typeof input.nodeId !== "string" ||
+        !Array.isArray(input.edgeIndexes) ||
+        !input.edgeIndexes.length ||
+        input.edgeIndexes.length > 256
+    ) {
+        throw new Error("Sweep path requires nodeId and 1–256 ordered edgeIndexes");
+    }
+    const node = resolveNode(state, input.nodeId, "path source");
+    if (!(node instanceof ShapeNode) || !node.shape.isOk)
+        throw new Error("Sweep path source has no valid shape");
+    const count = node.shape.value.findSubShapes(ShapeTypes.edge).length;
+    const used = new Set<number>();
+    const edges = input.edgeIndexes.map((index) => {
+        if (!Number.isInteger(index) || index < 0 || index >= count || used.has(index))
+            throw new Error("Sweep path edge index is invalid or repeated");
+        used.add(index);
+        const ref = capturePathReference(node, index);
+        if (!ref.isOk) throw new Error(ref.error);
+        return ref.value;
+    });
+    return { nodeId: node.id, edges };
+}
+
+function sweepOptions(op: { solid?: boolean; roundCorner?: boolean }): void {
+    for (const key of ["solid", "roundCorner"] as const) {
+        if (op[key] !== undefined && typeof op[key] !== "boolean")
+            throw new Error(`Sweep ${key} must be boolean`);
+    }
+}
+function runSweepOp(state: State, op: SweepOp): void {
+    sweepOptions(op);
+    const section = sweepSectionInput(state, op.section);
+    const path = sweepPathInput(state, op.path);
+    const feature: SweepFeatureData = {
+        id: Id.generate(),
+        type: "sweep",
+        section,
+        path,
+        ...(op.solid === false ? { solid: false } : {}),
+        ...(op.roundCorner === true ? { roundCorner: true } : {}),
+    };
+    createBody(state, op.id, op.name, [feature], () => {
+        resolveSketch(state, section.sketchId).visible = false;
+    });
+}
+function runEditSweepOp(state: State, op: EditSweepOp): void {
+    sweepOptions(op);
+    if (
+        op.section === undefined &&
+        op.path === undefined &&
+        op.solid === undefined &&
+        op.roundCorner === undefined
+    )
+        throw new Error("editSweep requires a section, path or option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "sweep") throw new Error("editSweep requires a sweep feature");
+    const before = erroredFeatureIds(body);
+    const { solid: _solid, roundCorner: _round, ...rest } = feature;
+    const edited: SweepFeatureData = {
+        ...rest,
+        section: op.section !== undefined ? sweepSectionInput(state, op.section) : feature.section,
+        path: op.path !== undefined ? sweepPathInput(state, op.path) : feature.path,
+        ...((op.solid ?? feature.solid) === false ? { solid: false } : {}),
+        ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
+    };
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
 }
 
 function runEdgeCornerOp(state: State, op: FilletChamferOp): void {

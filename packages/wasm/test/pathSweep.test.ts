@@ -19,6 +19,58 @@ function squareWire(): IWire {
 }
 
 describe("tracked pipe-shell sweep", () => {
+    test("each embind history vector is read and released exactly once", () => {
+        const f = factory();
+        const section = squareWire();
+        const path = unwrapOk(f.wire([unwrapOk(f.line(XYZ.zero, p(0, 0, 10)))]));
+        const keys = [
+            "pipeFaceEdges",
+            "pipeFaceVertices",
+            "pipeEdgeVertices",
+            "pipeStartEdges",
+            "pipeEndEdges",
+            "pipeStartFaces",
+        ];
+        const reads = new Map<string, number>();
+        const releases = new Map<string, number>();
+        const native = wasm.ShapeFactory.sweepTracked;
+        const spy = rs.spyOn(wasm.ShapeFactory, "sweepTracked").mockImplementation((...args) => {
+            const result = native(...args);
+            return new Proxy(result, {
+                get(target, key) {
+                    const value = Reflect.get(target, key);
+                    if (typeof key === "string" && keys.includes(key)) {
+                        reads.set(key, (reads.get(key) ?? 0) + 1);
+                        return new Proxy(value, {
+                            get(vector, property) {
+                                if (property === "delete")
+                                    return () => {
+                                        releases.set(key, (releases.get(key) ?? 0) + 1);
+                                        vector.delete();
+                                    };
+                                const member = Reflect.get(vector, property);
+                                return typeof member === "function" ? member.bind(vector) : member;
+                            },
+                        });
+                    }
+                    return typeof value === "function" ? value.bind(target) : value;
+                },
+            });
+        });
+        try {
+            const result = unwrapOk(f.sweepTracked(section, path, true, false));
+            expect(result.shape.volume()).toBeCloseTo(40, 6);
+            for (const key of keys) {
+                expect(reads.get(key)).toBe(1);
+                expect(releases.get(key)).toBe(1);
+            }
+            result.shape.dispose();
+        } finally {
+            spy.mockRestore();
+            section.dispose();
+            path.dispose();
+        }
+    });
     test("a straight solid reports both section and spine face origins plus exact caps", () => {
         const f = factory();
         const section = squareWire();

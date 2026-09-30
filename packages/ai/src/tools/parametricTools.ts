@@ -310,6 +310,8 @@ const OPS_SCHEMA = {
                 "extrude",
                 "revolve",
                 "loft",
+                "sweep",
+                "editSweep",
                 "fillet",
                 "chamfer",
                 "thicken",
@@ -328,7 +330,7 @@ const OPS_SCHEMA = {
         id: {
             type: "string",
             description:
-                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/construct.",
+                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/sweep/construct.",
         },
         name: { type: "string", description: "Optional display name for the resulting node" },
         plane: {
@@ -394,7 +396,36 @@ const OPS_SCHEMA = {
         },
         solid: {
             type: "boolean",
-            description: "Loft only: capped ends (default true); false = an open surface",
+            description: "Loft/sweep: capped ends (default true); false = an open surface",
+        },
+        section: {
+            type: "object",
+            properties: {
+                sketchId: { type: "string" },
+                profileIndex: { type: "integer", minimum: 0 },
+            },
+            required: ["sketchId"],
+            description:
+                "Sweep/editSweep: section sketch op id or node id. Omit profileIndex only when it has one profile. Holes are unsupported.",
+        },
+        path: {
+            type: "object",
+            properties: {
+                nodeId: { type: "string" },
+                edgeIndexes: {
+                    type: "array",
+                    items: { type: "integer", minimum: 0 },
+                    minItems: 1,
+                    maxItems: 256,
+                },
+            },
+            required: ["nodeId", "edgeIndexes"],
+            description:
+                "Sweep/editSweep: path source op id or node id and connected whole-edge topology indexes in traversal order. Captures stable source ancestry when available. An untracked source follows only unambiguous geometric re-matches.",
+        },
+        roundCorner: {
+            type: "boolean",
+            description: "Sweep/editSweep: round path junctions (default false).",
         },
         ruled: {
             type: "boolean",
@@ -539,7 +570,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, sweep, editSweep, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },
