@@ -63,7 +63,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96; worker architecture | Queued | — | — | Pending | — | — |
-| #93 Support control-point and weighted NURBS in parametric sketches | Shared sketch schema | Queued | — | — | Pending | — | — |
+| #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Implementing | mouse_86 | mouse/93-control-nurbs | Pending | — | — |
 | #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
 | #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
 | #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Implementing | mouse_81 | mouse/96-bounded-worker | Pending | — | — |
@@ -74,7 +74,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #101 Import scan files as lightweight reference MeshNodes | — | Done (pushed) | mouse_101 | mouse/101-reference-mesh | 109 worker and integrated tests; tsc/check | 73abad86b68290bf386951c62a0df85d82684ffa | — |
 | #102 Measure CAD-to-reference-mesh deviation | #101 | Implementing | mouse_101 | mouse/102-reference-deviation | Pending | — | — |
 | #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
-| #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
+| #104 Return exported model bytes or a resource through MCP | Serialize export API | Done (pushed) | root | mouse/104-export-bytes | 34 worker/integrated tests; isolated/root tsc; check | 93c7fc625535192ee3d4f9b2a5cb15113e4258d2 | — |
 | #105 Batch-export separate model files without repeated downloads | #104 | Queued | — | — | Pending | — | — |
 | #106 Honor extrude names when appending to an existing body | — | Done (pushed) | mouse_106 | mouse/106-extrude-names | 38 real-kernel program tests; npm run check | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 | — |
 
@@ -149,4 +149,14 @@ membership, radius and full-edge elevation. They return persistent refs with emp
 diagnostics and report unselectable degenerate edges. Real-kernel tests exclude holes from outer
 outlines and distinguish cylinder rims from sphere/torus edges. Seven tickets delivered; 19 remain.
 The app and all three plugins build after #86/#101. #104 is active in root's isolated worktree;
-#93 is in read-only schema/solver design with mouse_86, pending root's concrete schema approval.
+#93's concrete sketch-3 schema is approved in [mouse-schema-plan.md](mouse-schema-plan.md), with
+sketch-only migration/rule/fixture ownership assigned to mouse_86 before implementation.
+
+#104 is integrated: `export_nodes` optionally returns exact base64 file bytes with filename, MIME
+and decoded-size metadata. Default browser download remains. The decoded-byte budget defaults to
+1 MiB (caller cap 8 MiB); the escaped relay response is checked too. Paths are rejected explicitly.
+34 integration tests cover byte equality, UTF-8/binary/blob parts, metadata, limits and downloads;
+isolated/root typechecking and scoped check pass. Eight tickets delivered; 18 remain.
+
+Pinned #81 native build completed and all three generated artifacts were copied into its worktree.
+The worker is running the final validity regressions before committing source plus artifacts.
