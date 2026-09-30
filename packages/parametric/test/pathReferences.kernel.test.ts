@@ -239,4 +239,39 @@ describe("ordered whole-edge path references (real kernel)", () => {
         expect(result.value.edges[0].length()).toBeCloseTo(20);
         result.value.dispose();
     });
+
+    test("an untracked authored token survives serialization and an unambiguous geometric reanchor", () => {
+        const { source, context } = fixture(line(XYZ.zero, point(0, 0, 10)));
+        const captured = capturePathReference(source, 0);
+        expect(captured.isOk).toBe(true);
+        expect(captured.value.edgeId).toMatch(/^path-ref:[a-f0-9-]+$/);
+        const stored = JSON.parse(JSON.stringify(captured.value));
+        source.shape = shapeFactory.line(point(0.1, 0, 0), point(0.1, 0, 10));
+        const result = resolvePathReferences({ nodeId: source.id, edges: [stored] }, context);
+        expect(result.isOk).toBe(true);
+        expect(result.value.references[0].anchor.edgeId).toBe(captured.value.edgeId);
+        expect(result.value.references[0].anchor).not.toEqual(captured.value);
+        expect(result.value.references[0].provenance).toBe("authored");
+        expect(result.value.references[0].stable).toBe(false);
+        expect(result.value.edgeSeeds).toEqual([captured.value.edgeId]);
+        result.value.dispose();
+    });
+
+    test("authored tokens do not masquerade as native history or break a geometric ambiguity", () => {
+        const { source, context } = fixture(line(XYZ.zero, point(0, 0, 10)));
+        const captured = capturePathReference(source, 0);
+        expect(captured.isOk).toBe(true);
+        const duplicated = shapeFactory.combine([
+            line(point(-1, 0, 0), point(-1, 0, 10)),
+            line(point(1, 0, 0), point(1, 0, 10)),
+        ]).value;
+        source.shape = shapeFactory.combine([duplicated]);
+        tracking(source, [captured.value.edgeId ?? "", "unrelated"]);
+        const result = resolvePathReferences({ nodeId: source.id, edges: [captured.value] }, context);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toMatch(/ambiguous|not found/);
+        const missing = resolvePathReferences({ nodeId: "removed-source", edges: [captured.value] }, context);
+        expect(missing.isOk).toBe(false);
+        expect(missing.error).toMatch(/not found/);
+    });
 });

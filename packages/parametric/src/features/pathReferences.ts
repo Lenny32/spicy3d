@@ -32,7 +32,11 @@ export interface ResolvedPathReference {
     readonly edges: readonly IEdge[];
     readonly seed: string;
     readonly stable: boolean;
+    /** An authored token identifies a user pick; it is never native source history. */
+    readonly provenance: "source" | "authored" | "geometric";
 }
+
+const AUTHORED_PATH_PREFIX = "path-ref:";
 
 export interface ResolvedPath {
     readonly wire: IWire;
@@ -112,13 +116,18 @@ export function capturePathReference(node: ShapeNode, index: number): Result<Edg
         const entity = shapeEntityIds(node.data)[index];
         if (entity !== undefined) id = `sketch:${node.id}:path:ent${entity}`;
     }
-    return Result.ok(
-        captureEdgeRef(
-            edge,
-            id,
-            id !== undefined && isBodyTrackingNode(node) && node.edgeIndexesOfId(id).length > 1,
-        ),
-    );
+    const shared =
+        id !== undefined &&
+        (isBodyTrackingNode(node)
+            ? node.edgeIndexesOfId(id).length > 1
+            : node instanceof SketchNode &&
+              shapeEntityIds(node.data).filter((entity) => `sketch:${node.id}:path:ent${entity}` === id)
+                  .length > 1);
+    try {
+        return Result.ok(captureEdgeRef(edge, id ?? `${AUTHORED_PATH_PREFIX}${crypto.randomUUID()}`, shared));
+    } catch (error) {
+        return Result.err(error instanceof Error ? error.message : String(error));
+    }
 }
 
 /** Resolve each reference independently so split-span provenance is retained instead of flattened. */
@@ -146,16 +155,20 @@ export function resolvePathReferences(
     const anchors: EdgeRef[] = [];
     const groups: Piece[][] = [];
     for (const [referenceIndex, ref] of reference.edges.entries()) {
-        const match = tracked ? matchEdgesAnchoredInEdges(source.edges, [ref], tracked) : undefined;
+        const authored = ref.edgeId?.startsWith(AUTHORED_PATH_PREFIX) ? ref.edgeId : undefined;
+        // Authored tokens cannot accidentally match a kernel ID, even if a source repeats the string.
+        const matchingRef = authored ? { ...ref, edgeId: undefined } : ref;
+        const match = tracked ? matchEdgesAnchoredInEdges(source.edges, [matchingRef], tracked) : undefined;
         if (match && !match.isOk) return Result.err(match.error);
-        const plain = match ? undefined : matchPlain?.([ref]);
+        const plain = match ? undefined : matchPlain?.([matchingRef]);
         if (plain && !plain.isOk) return Result.err(plain.error);
         const indexes = match?.value.indexes ?? plain?.value ?? [];
         if (indexes.length === 0) return Result.err("Path edge not found after rebuild");
         if (indexes.some((index) => taken.has(index)))
             return Result.err("Path references overlap or repeat an edge");
         for (const index of indexes) taken.add(index);
-        const anchor = match?.value.anchors[0] ?? captureEdgeRef(source.edges[indexes[0]]);
+        const matchedAnchor = match?.value.anchors[0] ?? captureEdgeRef(source.edges[indexes[0]]);
+        const anchor = authored ? { ...matchedAnchor, edgeId: authored } : matchedAnchor;
         anchors.push(anchor);
         // Fingerprints are an explicit fallback for sources that expose no persistent topology identity.
         const seed =
@@ -236,6 +249,11 @@ export function resolvePathReferences(
                 edges: pieces.filter((piece) => piece.reference === index).map((piece) => piece.edge),
                 seed: groups[index][0].seed,
                 stable: pieces.filter((piece) => piece.reference === index).every((piece) => piece.stable),
+                provenance: pieces.filter((piece) => piece.reference === index).every((piece) => piece.stable)
+                    ? "source"
+                    : anchor.edgeId?.startsWith(AUTHORED_PATH_PREFIX)
+                      ? "authored"
+                      : "geometric",
             })),
             dispose,
         });
