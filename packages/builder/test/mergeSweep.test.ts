@@ -12,7 +12,7 @@ import {
 } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
-import "@spicy3d/parametric";
+import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric";
 import "@spicy3d/wasm";
 
 // biome-ignore lint/suspicious/noExplicitAny: the merge engine consumes serialized JSON
@@ -79,5 +79,5 @@ test("cloud blobs and device export preserve version 9 path tokens and payload e
     expect(decoded.isOk).toBe(true);
     expect(decoded.value).toEqual(b);
     expect(feature(decoded.value).path).toEqual(feature(b).path);
-    expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: 9 });
+    expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: PARAMETRIC_FORMAT_VERSION });
 });

@@ -10,6 +10,7 @@ import "./loftCommand";
 import "./loftEditCommand";
 import "./sweepCommand";
 import "./sweepEditCommand";
+import "./projectionCommand";
 import "./reselectCommand";
 import "./revolveCommand";
 import "./revolveEditCommand";

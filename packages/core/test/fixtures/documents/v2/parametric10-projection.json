@@ -1,0 +1,133 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 10,
+        "sketch": 3
+    },
+    "id": "fixture-parametric10-projection",
+    "name": "Fixture parametric v10: associative forward cylinder projection",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 10,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":42,\"type\":\"line\",\"params\":[-2,0,2,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-source",
+                "name": "Projected source",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":7,\"type\":\"circle\",\"params\":[0,0,10]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-wall",
+                "name": "Cylinder profile",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-wall\",\"type\":\"extrude\",\"sketchId\":\"sketch-wall\",\"depth\":20}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-wall",
+                "name": "Curved target",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-projection\",\"type\":\"projection\",\"source\":{\"nodeId\":\"sketch-source\",\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":-2,\"z\":10},\"end\":{\"x\":0,\"y\":2,\"z\":10},\"edgeId\":\"sketch:sketch-source:path:ent42\"}]},\"target\":{\"nodeId\":\"body-wall\",\"face\":{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":0,\"z\":20},\"end\":{\"x\":10,\"y\":0,\"z\":0}},{\"kind\":\"circle\",\"center\":{\"x\":0,\"y\":0,\"z\":0},\"radius\":10,\"axis\":{\"x\":0,\"y\":0,\"z\":1}},{\"kind\":\"circle\",\"center\":{\"x\":0,\"y\":0,\"z\":20},\"radius\":10,\"axis\":{\"x\":0,\"y\":0,\"z\":1}}],\"splitPiece\":false,\"id\":\"sketch:sketch-wall:e7:ent7\",\"center\":{\"x\":0,\"y\":0,\"z\":10},\"area\":1256.6370614359173}},\"direction\":{\"x\":1,\"y\":0,\"z\":0}}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-projection",
+                "name": "Associative projected curve",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "variable-gap",
+            "name": "gap",
+            "expression": "2 mm",
+            "type": "length"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}
