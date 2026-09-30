@@ -49,7 +49,7 @@ async function run() {
         const oldHandle = nodes[0].shape.value;
         retireKernelModule(oldModule, "browser proof injected fatal generation");
         KernelState.current.markCrashed("browser proof injected fatal generation");
-        document.documentElement.dataset.recoveryReady = "true";
+        document.documentElement.dataset["recoveryReady"] = "true";
         const deadline = performance.now() + 60_000;
         while (KernelState.current.isCrashed || KernelRecovery.current.status === "recovering") {
             check(performance.now() < deadline, `Recovery did not finish: ${KernelRecovery.current.error}`);
