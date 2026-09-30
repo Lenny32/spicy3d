@@ -284,11 +284,22 @@ export interface FeatureSummary {
 /** What one program produced, in the same envelope shape `run_program` uses. */
 export interface ProgramResult {
     created: { id: string; nodeId: string; name: string }[];
-    /** The feature list of every body the program touched. */
-    bodies: { nodeId: string; name: string; features: FeatureSummary[] }[];
+    /** Full lists by default; compact mode includes only directly created/edited feature rows. */
+    bodies: BodyReport[];
     /** Nodes adopted by a boolean feature — hidden children of the body, not deleted. */
     consumed: { nodeId: string; name: string; ownerId: string }[];
     results: Record<string, unknown>;
+}
+
+/** Additional fields are returned only when responseMode is compact. */
+export interface BodyReport {
+    nodeId: string;
+    name: string;
+    features: FeatureSummary[];
+    featureCount?: number;
+    removedFeatureIds?: string[];
+    status?: "ok" | "error";
+    diagnostics?: { featureId: string; error?: string; warning?: string }[];
 }
 
 interface State {
@@ -296,6 +307,7 @@ interface State {
     readonly refs: Map<string, string>;
     readonly out: ProgramResult;
     readonly touched: Set<ParametricBodyNode>;
+    readonly changed: Map<ParametricBodyNode, Set<string>>;
     /** Entity/constraint names given in this program, per sketch node id. */
     readonly sketchNames: Map<string, SketchNames>;
 }
@@ -318,6 +330,8 @@ function refsFor(document: IDocument): Map<string, string> {
 
 /** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
 export interface ProgramRunOptions {
+    /** Full body feature lists by default; compact reports edits and essential body diagnostics. */
+    responseMode?: "full" | "compact";
     /**
      * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
      * transaction rolls it back. An op already running is never interrupted.
@@ -343,6 +357,9 @@ function evaluateProgram(
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
 ): ProgramResult {
+    if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
+        throw new Error('"responseMode" must be "full" or "compact"');
+    }
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -350,6 +367,7 @@ function evaluateProgram(
         refs,
         out: { created: [], bodies: [], consumed: [], results: {} },
         touched: new Set(),
+        changed: new Map(),
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
@@ -365,11 +383,11 @@ function evaluateProgram(
             options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
-    state.out.bodies = [...state.touched].map((body) => ({
-        nodeId: body.id,
-        name: body.name,
-        features: summarizeFeatures(body),
-    }));
+    state.out.bodies = [...state.touched].map((body) =>
+        options.responseMode === "compact"
+            ? compactBodyReport(body, state.changed.get(body) ?? new Set())
+            : { nodeId: body.id, name: body.name, features: summarizeFeatures(body) },
+    );
     return state.out;
 }
 
@@ -882,6 +900,7 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             break;
         case "rename":
             body.renameFeature(op.featureId, typeof op.value === "string" ? op.value : "");
+            markChanged(state, body, [op.featureId]);
             return;
         case "suppress":
             body.setFeatureSuppressed(op.featureId, op.value === true);
@@ -897,6 +916,7 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             throw new Error(`unknown editFeature action "${(op as { action: string }).action}"`);
     }
     checkBody(state, body, before);
+    markChanged(state, body, [op.featureId]);
 }
 
 function runFeaturesOp(state: State, op: FeaturesOp): void {
@@ -935,6 +955,45 @@ function featureSummary(item: FeatureItem, type: string | undefined): FeatureSum
     return summary;
 }
 
+/** Summarize only requested rows; untouched rows contribute diagnostics without their parameters/refs. */
+function compactBodyReport(body: ParametricBodyNode, changed: Set<string>): BodyReport {
+    const items = body.featureItems();
+    const types = body.features.map((feature) => feature.type);
+    const features: FeatureSummary[] = [];
+    const diagnostics: NonNullable<BodyReport["diagnostics"]> = [];
+    const surviving = new Set<string>();
+    items.forEach((item, index) => {
+        surviving.add(item.id);
+        if (changed.has(item.id)) features.push(featureSummary(item, types[index]));
+        if (item.error !== undefined || item.warning !== undefined) {
+            diagnostics.push({
+                featureId: item.id,
+                ...(item.error === undefined ? {} : { error: item.error }),
+                ...(item.warning === undefined ? {} : { warning: item.warning }),
+            });
+        }
+    });
+    return {
+        nodeId: body.id,
+        name: body.name,
+        features,
+        featureCount: items.length,
+        removedFeatureIds: [...changed].filter((id) => !surviving.has(id)),
+        status: diagnostics.some((item) => item.error !== undefined) ? "error" : "ok",
+        diagnostics,
+    };
+}
+
+function markChanged(state: State, body: ParametricBodyNode, ids: Iterable<string>): void {
+    state.touched.add(body);
+    let changed = state.changed.get(body);
+    if (changed === undefined) {
+        changed = new Set();
+        state.changed.set(body, changed);
+    }
+    for (const id of ids) changed.add(id);
+}
+
 // ------------------------------------------------------------------ Feature plumbing
 
 function createBody(
@@ -949,6 +1008,11 @@ function createBody(
     if (name !== undefined) body.name = name;
     afterAdd?.();
     checkBody(state, body, undefined);
+    markChanged(
+        state,
+        body,
+        features.map((feature) => feature.id),
+    );
     state.refs.set(id, body.id);
     state.out.created.push({ id, nodeId: body.id, name: body.name });
 }
@@ -964,6 +1028,7 @@ function appendFeature(state: State, body: ParametricBodyNode, feature: FeatureD
     const before = erroredFeatureIds(body);
     body.setFeaturesEmitShapeChanged([...body.features, feature]);
     checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
 }
 
 function checkBody(state: State, body: ParametricBodyNode, before: Set<string> | undefined): void {
