@@ -95,7 +95,9 @@
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Trsf.hxx>
+#include <iomanip>
 #include <set>
+#include <sstream>
 #include <string>
 
 using namespace emscripten;
@@ -886,6 +888,102 @@ static RegionsResult boundedAreas(const TopoDS_Face& baseFace, const NCollection
         return RegionsResult { ShapeArray(val::array()), { }, { }, false, "No bounded regions found" };
     }
     return RegionsResult { ShapeArray(faces), sourceCounts, sourceIds, true, "" };
+}
+
+static std::string cornerSize(double amount, const char* dimension)
+{
+    std::ostringstream message;
+    message << dimension << "=" << std::setprecision(12) << amount;
+    return message.str();
+}
+
+static std::string cornerInputFailure(const TopoDS_Shape& shape, const NumberArray& edges,
+    double amount, const char* operation, const char* dimension,
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& edgeMap)
+{
+    const std::string prefix = std::string("Failed to ") + operation + ": ";
+    if (shape.IsNull())
+        return prefix + "input shape is null";
+    if (!std::isfinite(amount) || amount <= 0)
+        return prefix + dimension + " must be positive and finite";
+    const int count = edges["length"].as<int>();
+    if (count == 0)
+        return prefix + "select at least one edge";
+    TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    for (int i = 0; i < count; ++i) {
+        const double index = edges[i].as<double>();
+        if (!std::isfinite(index) || std::floor(index) != index || index < 0 || index >= edgeMap.Extent())
+            return prefix + "edge indexes must be integers in the current shape's edge range";
+        if (BRep_Tool::Degenerated(TopoDS::Edge(edgeMap.FindKey(static_cast<int>(index) + 1))))
+            return prefix + "selected edge " + std::to_string(static_cast<int>(index))
+                + " is degenerate; select a non-degenerate edge";
+    }
+    return "";
+}
+
+static std::string cornerContourFailure(const TopoDS_Shape& shape, const TopoDS_Edge& edge,
+    int index, const char* operation, double amount, const char* dimension)
+{
+    std::string message = std::string("Failed to ") + operation + ": selected edge "
+        + std::to_string(index) + " was not accepted into an OCCT contour (" + cornerSize(amount, dimension) + ")";
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> mapEF;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, mapEF);
+    if (mapEF.Contains(edge)) {
+        const auto& faces = mapEF.FindFromKey(edge);
+        if (faces.Size() == 2 && !faces.First().IsSame(faces.Last())) {
+            const auto first = TopoDS::Face(faces.First());
+            const auto last = TopoDS::Face(faces.Last());
+            if (BRep_Tool::HasContinuity(edge, first, last)
+                && BRep_Tool::Continuity(edge, first, last) >= GeomAbs_G1)
+                return message + "; adjoining faces are marked tangent (G1 or higher). Select a sharp edge instead";
+        } else if (faces.Size() < 2) {
+            return message + "; edge has fewer than two adjoining faces. Select an edge shared by suitable faces";
+        }
+    }
+    return message + "; inspect adjoining faces and tangency, or choose a different edge. No specific cause was reported";
+}
+
+static std::string filletBuildFailure(BRepFilletAPI_MakeFillet& builder, double radius)
+{
+    std::string message = "Failed to fillet: OCCT build failed (" + cornerSize(radius, "radius")
+        + ", contours=" + std::to_string(builder.NbContours()) + ")";
+    const int faulty = builder.NbFaultyContours();
+    for (int i = 1; i <= std::min(faulty, 8); ++i) {
+        const int contour = builder.FaultyContour(i);
+        message += "; contour " + std::to_string(contour) + ": ";
+        switch (builder.StripeStatus(contour)) {
+        case ChFiDS_StartsolFailure:
+            message += "start solution failed; radius may be too large or incompatible with the local geometry";
+            break;
+        case ChFiDS_TwistedSurface:
+            message += "twisted surface; inspect adjoining face geometry and tangency";
+            break;
+        case ChFiDS_WalkingFailure:
+            message += "surface walking failed; inspect the contour, radius and face transitions";
+            break;
+        case ChFiDS_Ok:
+            message += "stripe reports OK; final topology or corner construction failed";
+            break;
+        default:
+            message += "unspecified OCCT stripe error";
+            break;
+        }
+    }
+    if (faulty > 8)
+        message += "; additional faulty contours=" + std::to_string(faulty - 8);
+    const int vertices = builder.NbFaultyVertices();
+    if (vertices > 0)
+        message += "; faulty corner vertices=" + std::to_string(vertices);
+    if (faulty == 0 && vertices == 0)
+        message += "; no detailed failure status was reported. Try a smaller radius or another edge selection";
+    return message;
+}
+
+static std::string chamferBuildFailure(BRepFilletAPI_MakeChamfer& builder, double distance)
+{
+    return "Failed to chamfer: OCCT build failed (" + cornerSize(distance, "distance")
+        + ", contours=" + std::to_string(builder.NbContours())
+        + "). The chamfer builder provides no specific failure status; try a smaller distance or another edge selection";
 }
 
 class ShapeFactory {
@@ -2077,18 +2175,23 @@ public:
 
     static ShapeResult fillet(const TopoDS_Shape& shape, const NumberArray& edges, double radius)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, radius, "fillet", "radius", edgeMap);
+        if (!inputFailure.empty())
+            return ShapeResult { TopoDS_Shape(), false, inputFailure };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeFillet makeFillet(shape);
         for (auto edge : edgeVec) {
-            makeFillet.Add(radius, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeFillet.Add(radius, selected);
+            if (makeFillet.Contour(selected) == 0)
+                return ShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "fillet", radius, "radius") };
         }
         makeFillet.Build();
         if (!makeFillet.IsDone()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to fillet" };
+            return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(makeFillet, radius) };
         }
 
         const TopoDS_Shape& result = makeFillet.Shape();
@@ -2101,18 +2204,23 @@ public:
 
     static TrackedShapeResult filletTracked(const TopoDS_Shape& shape, const NumberArray& edges, double radius)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, radius, "fillet", "radius", edgeMap);
+        if (!inputFailure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, inputFailure, { }, { } };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeFillet makeFillet(shape);
         for (auto edge : edgeVec) {
-            makeFillet.Add(radius, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeFillet.Add(radius, selected);
+            if (makeFillet.Contour(selected) == 0)
+                return TrackedShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "fillet", radius, "radius"), { }, { } };
         }
         makeFillet.Build();
         if (!makeFillet.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to fillet", { }, { } };
+            return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(makeFillet, radius), { }, { } };
         }
 
         const TopoDS_Shape& result = makeFillet.Shape();
@@ -2126,18 +2234,23 @@ public:
 
     static ShapeResult chamfer(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, distance, "chamfer", "distance", edgeMap);
+        if (!inputFailure.empty())
+            return ShapeResult { TopoDS_Shape(), false, inputFailure };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeChamfer makeChamfer(shape);
         for (auto edge : edgeVec) {
-            makeChamfer.Add(distance, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeChamfer.Add(distance, selected);
+            if (makeChamfer.Contour(selected) == 0)
+                return ShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "chamfer", distance, "distance") };
         }
         makeChamfer.Build();
         if (!makeChamfer.IsDone()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to chamfer" };
+            return ShapeResult { TopoDS_Shape(), false, chamferBuildFailure(makeChamfer, distance) };
         }
         const TopoDS_Shape& result = makeChamfer.Shape();
         if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
@@ -2149,18 +2262,23 @@ public:
 
     static TrackedShapeResult chamferTracked(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, distance, "chamfer", "distance", edgeMap);
+        if (!inputFailure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, inputFailure, { }, { } };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeChamfer makeChamfer(shape);
         for (auto edge : edgeVec) {
-            makeChamfer.Add(distance, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeChamfer.Add(distance, selected);
+            if (makeChamfer.Contour(selected) == 0)
+                return TrackedShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "chamfer", distance, "distance"), { }, { } };
         }
         makeChamfer.Build();
         if (!makeChamfer.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to chamfer", { }, { } };
+            return TrackedShapeResult { TopoDS_Shape(), false, chamferBuildFailure(makeChamfer, distance), { }, { } };
         }
 
         const TopoDS_Shape& result = makeChamfer.Shape();

@@ -753,18 +753,22 @@ describe("ShapeFactory — feature operations", () => {
             expect(result.error).toBe("Not OccShape");
         });
 
-        test("should catch WASM error on invalid edge index", () => {
+        test("should reject an invalid edge index before building", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.fillet(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
+            expect(result.error).toBe(
+                "Failed to fillet: edge indexes must be integers in the current shape's edge range",
+            );
         });
 
         test("the module survives that failure: the kernel is not reported crashed", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const failed = factory.fillet(boxValue, [999], 5);
             expect(failed.isOk).toBe(false);
-            expect(failed.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
+            expect(failed.error).toBe(
+                "Failed to fillet: edge indexes must be integers in the current shape's edge range",
+            );
             expect(KernelState.current.status).toBe("ok");
             expect(factory.fillet(boxValue, [0], 1).isOk).toBe(true);
         });
@@ -798,11 +802,13 @@ describe("ShapeFactory — feature operations", () => {
             expect(result.error).toBe("Not OccShape");
         });
 
-        test("should catch WASM error on invalid edge index", () => {
+        test("should reject an invalid edge index before building", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.chamfer(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
+            expect(result.error).toBe(
+                "Failed to chamfer: edge indexes must be integers in the current shape's edge range",
+            );
         });
     });
 
@@ -1175,18 +1181,22 @@ describe("ShapeFactory — advanced operations", () => {
 // ============================================================================
 
 describe("ShapeFactory — convertShapeResult error catching", () => {
-    test("should return error when WASM throws on fillet with invalid edge", () => {
+    test("should return an explicit validation error on fillet with invalid edge", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.fillet(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
+        expect(result.error).toBe(
+            "Failed to fillet: edge indexes must be integers in the current shape's edge range",
+        );
     });
 
-    test("should return error when WASM throws on chamfer with invalid edge", () => {
+    test("should return an explicit validation error on chamfer with invalid edge", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.chamfer(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
+        expect(result.error).toBe(
+            "Failed to chamfer: edge indexes must be integers in the current shape's edge range",
+        );
     });
 
     test("should throw error on removeSubShape with non-OccShape", () => {
