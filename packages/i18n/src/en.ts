@@ -18,6 +18,14 @@ export default {
         "app.insecureContext":
             "This page is served over plain HTTP, so the browser disables secure features: accounts and cloud documents, copy to clipboard, saving back to files. Open it over HTTPS (ask your administrator).",
         "app.kernelCrashed": "The geometry kernel crashed ({0}). Reload the page.",
+        "app.kernelRecoveryAvailable":
+            "The geometry kernel crashed ({0}). Recover to keep current committed edits. Undo/redo history will be cleared.",
+        "app.kernelRecovering":
+            "Recovering geometry… Current committed edits will be preserved; undo/redo history will be cleared.",
+        "app.kernelRecoveryFailed": "Geometry recovery failed ({0}). Retry recovery or reload.",
+        "app.kernelRecoveryRefreshFailed":
+            "Geometry recovered, but the view could not refresh ({0}). Reload to refresh the view.",
+        "app.recoverKernel": "Recover geometry",
         "arc.angle": "Angle",
         "arc.start": "Start",
         "axis.x": "X Axis",
