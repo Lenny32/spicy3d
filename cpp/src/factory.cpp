@@ -2091,7 +2091,12 @@ public:
             return ShapeResult { TopoDS_Shape(), false, "Failed to fillet" };
         }
 
-        return ShapeResult { makeFillet.Shape(), true, "" };
+        const TopoDS_Shape& result = makeFillet.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+            return ShapeResult { TopoDS_Shape(), false,
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" };
+        }
+        return ShapeResult { result, true, "" };
     }
 
     static TrackedShapeResult filletTracked(const TopoDS_Shape& shape, const NumberArray& edges, double radius)
@@ -2110,8 +2115,13 @@ public:
             return TrackedShapeResult { TopoDS_Shape(), false, "Failed to fillet", { }, { } };
         }
 
-        return TrackedShapeResult { makeFillet.Shape(), true, "", faceHistory(makeFillet, shape, makeFillet.Shape()),
-            edgeHistory(makeFillet, shape, makeFillet.Shape()) };
+        const TopoDS_Shape& result = makeFillet.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+            return TrackedShapeResult { TopoDS_Shape(), false,
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+        }
+        return TrackedShapeResult { result, true, "", faceHistory(makeFillet, shape, result),
+            edgeHistory(makeFillet, shape, result) };
     }
 
     static ShapeResult chamfer(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
@@ -2129,7 +2139,12 @@ public:
         if (!makeChamfer.IsDone()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to chamfer" };
         }
-        return ShapeResult { makeChamfer.Shape(), true, "" };
+        const TopoDS_Shape& result = makeChamfer.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+            return ShapeResult { TopoDS_Shape(), false,
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" };
+        }
+        return ShapeResult { result, true, "" };
     }
 
     static TrackedShapeResult chamferTracked(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
@@ -2148,8 +2163,13 @@ public:
             return TrackedShapeResult { TopoDS_Shape(), false, "Failed to chamfer", { }, { } };
         }
 
-        return TrackedShapeResult { makeChamfer.Shape(), true, "", faceHistory(makeChamfer, shape, makeChamfer.Shape()),
-            edgeHistory(makeChamfer, shape, makeChamfer.Shape()) };
+        const TopoDS_Shape& result = makeChamfer.Shape();
+        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+            return TrackedShapeResult { TopoDS_Shape(), false,
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+        }
+        return TrackedShapeResult { result, true, "", faceHistory(makeChamfer, shape, result),
+            edgeHistory(makeChamfer, shape, result) };
     }
 
     static ShapeResult fillet2d(const TopoDS_Face& face, const TopoDS_Edge& edge1, const TopoDS_Edge& edge2, double radius)
