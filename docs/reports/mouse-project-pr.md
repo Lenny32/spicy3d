@@ -23,15 +23,21 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #81 | Reject invalid tracked/untracked native fillet/chamfer results | 0b8655a0701c86211723a4fe4dc1980f4ea95922 |
 | #105 | One ZIP with separate model files and per-output errors | 82189d89ae8f62f39c2bdf06a6055c47cb3ff8d4 |
 | #102 | Sampled model-to-reference mesh deviation in UI and MCP | 9305b007de052d3463c44993185c44dfaceffb0a |
+| #93 | Editable control-pole and weighted sketch NURBS | 9d2acd98b606c739832e6fbd87e018a803202f06 |
+| #96 | Bounded worker operations with transactional rollback and responsive metadata | dadd98ce831e8ef831c3e415c3596979bb0531a8 |
+| #82 | Native corner preflight and actionable OCCT construction diagnostics | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 |
+| #97 | Terminate in-flight native workers and roll back cancelled programs | 5c6728d30a1995f787a75f030b32c57973add2a1 |
+| #103 | Isolated STL linear/angular tessellation controls in UI and MCP | 16a7b3796fb0a46b5f1130993409302bdb932639 |
+| #92 | Runtime background programs, live status/cancellation and retained results | 55abf61354b2c0e6750655a35de7dfafac71932a |
 
-Validation: 9,181 passing tests across 542 files, one skip; production build, TypeScript and required
+Validation: 9,423 passing tests on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
 concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are validated and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain unconfirmed without original data.
 
-No save payloads, schema versions, migrations or merge rules change in this opening implementation.
-The shared schema plan reserves root ownership of versions/migrations before overlapping modeling
-features start. Backward-compatible format changes for the project's remaining tickets were
-approved in mouse-plan.md and require the compatibility evidence described there.
+Control-pole NURBS adds the directly approved optional sketch control layout at sketch version 3,
+with a pure identity migration, atomic merge rule and new fixture. Existing documents remain
+readable. The document envelope stays at version 2. Further payload changes follow the shared
+schema plan and the user-approved backward-compatibility requirements.
 
 Additional #86 validation: 127 worker tests, 57 integrated tests, TypeScript and required check pass.
 Additional #101 validation: 109 worker and integrated tests, TypeScript and required check pass.
@@ -43,8 +49,25 @@ tests, TypeScript and required check pass.
 Additional #105 validation: 43 worker/integrated tests, isolated/root TypeScript and required check.
 Additional #102 validation: 170 worker tests, 49 integrated tests, TypeScript and required check.
 
-Remaining project work: #82–#85, #88–#90, #92–#98, #103 (15 tickets). Next correctness work is #82;
-C++ changes require setting up/rebuilding WASM because no local emsdk/OCCT build tree is present.
-Worker work follows KERNEL-01, with one shared cancellation/recovery protocol before splitting it.
+Additional #93 validation: 1,186 worker tests and 182 focused integration tests, including old fits,
+weighted native parity, UI undo, migrations, merge and cloud history/document paths.
+Additional #96 validation: actual Chromium/Firefox workers, exact program rollback and committed
+metadata reads; combined full suite, TypeScript, lint and production app/plugins pass.
+Additional #82 validation: pinned native rebuild, 163 worker and 183 integrated native/worker tests.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102. Keep issues open and never merge this PR automatically.
+Additional #97 validation: 1159 worker tests, 37 integrated checks, TypeScript and required lint;
+actual native-entry cancellation in Chromium/Firefox, old-handle rejection and fresh geometry.
+
+Additional #103 validation: 247 worker and 111 integration tests, rebuilt native artifacts,
+TypeScript and required lint. Actual curved fidelity/coarsening, physical units and CAD/cache
+immutability checks pass. Custom tessellation remains synchronous and is approximation control.
+
+Additional #92 validation: 462 worker regressions and the full9423-test suite pass (one skip),
+TypeScript, required lint and production app/plugins. Existing parametric background rebuild
+status is observable; run_parametric remains synchronous. Runtime job state is bounded and
+caller/document-scoped, with queue ordering and rollback unchanged.
+
+Remaining project work: #83–#85, #88–#90, #94–#95, #98 (9 tickets).
+
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92.
+Keep issues open and never merge this PR automatically.

@@ -78,3 +78,23 @@ Required proof includes a cylinder-wall boss with nonplanar starting cap, upstre
 downstream references, transformed/linked/external timelines, both directions and offsets,
 invalid/ambiguous targets, expressions, old fixtures, merge and UI undo. Serialize native artifact
 builds with #82 and #103 so each committed binary matches all committed C++ sources.
+
+## #83: editable variable-radius fillet law
+
+Reserved owning module version: **parametric 7**, following #94's parametric 6. Worker: `mouse_101`.
+Add optional `radiusLaw: { position: number; radius: ParameterValue }[]` to the fillet payload.
+Absent law retains the existing constant radius. Positions are strictly increasing normalized
+arc lengths, starting at 0 and ending at 1, in each selected edge's natural curve direction.
+Resolve expressions to positive finite radii, bound the knot count and validate native results.
+OCCT smooth interpolation is explicit; do not describe it as piecewise linear.
+
+Initially reject multiple selected edges sharing one tangent contour and unequal endpoint radii
+on closed contours, preventing OCCT's order-dependent junction overwrite or silent endpoint
+adjustment. Map reversed OCCT contour orientation consistently. Persistent EdgeRefs keep edge
+identity, but reversing an upstream curve's natural parameterization may reverse a nonconstant
+law; this limitation must be documented and tested without claiming a world-space direction anchor.
+
+The pure parametric 6→7 migration is identity. Treat radiusLaw as one atomic merge field and add a
+NEW fixture. Worker may implement native/runtime/feature/UI/MCP code now, but must wait for #94's
+committed version-6 registration before editing version/migration/rule/fixture sections.
+Serialize native artifact builds after #94 and retain all earlier committed C++ sources.

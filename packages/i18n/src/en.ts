@@ -1424,5 +1424,8 @@ export default {
         "home.menu.duplicate": "Duplicate",
         "home.menu.copyName{0}": "{0} (copy)",
         "home.toast.duplicated{0}": "“{0}” was duplicated",
+        "file.stl.customTessellation": "Custom STL tessellation",
+        "file.stl.linearTolerance": "Linear deflection",
+        "file.stl.angularTolerance": "Angular deflection (degrees)",
     },
 } satisfies Locale;

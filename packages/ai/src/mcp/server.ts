@@ -21,6 +21,7 @@ import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
 import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { takeSlowOpWarnings } from "../tools/opBudget";
+import { forgetProgramJobs, isProgramJobTool } from "../tools/programJobs";
 import { documentSnapshot, isMetadataReadTool } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
@@ -210,7 +211,10 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             stopWatching?.();
             stopWatching = undefined;
             // The sessions of this connection are gone: their open questions close.
-            for (const caller of callers) forgetCloudCaller(caller);
+            for (const caller of callers) {
+                forgetCloudCaller(caller);
+                forgetProgramJobs(caller);
+            }
             callers.clear();
             closed?.();
         };
@@ -237,7 +241,12 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
                 const budget = options.imageByteBudget?.();
                 result = toCallToolResult(
                     await withImageByteBudget(budget, () =>
-                        tool.handler(args ?? {}, extra.signal, { caller }),
+                        tool.handler(args ?? {}, extra.signal, {
+                            caller,
+                            ...(isProgramJobTool(tool) && {
+                                scheduleMutation: (task: () => Promise<void>) => queue.run(task),
+                            }),
+                        }),
                     ),
                 );
             } catch (err) {
@@ -249,7 +258,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             return result;
         };
         // These built-ins read only the committed metadata snapshot while mutations stay FIFO.
-        return isMetadataReadTool(tool) ? invoke() : queue.run(invoke);
+        return isMetadataReadTool(tool) || isProgramJobTool(tool) ? invoke() : queue.run(invoke);
     });
 
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({
