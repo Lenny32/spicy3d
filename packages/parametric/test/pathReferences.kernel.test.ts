@@ -148,7 +148,7 @@ describe("ordered whole-edge path references (real kernel)", () => {
         expect(result.isOk).toBe(true);
         expect(result.value.references[0].seed).toBe("ancestor-a|ancestor-b");
         expect(result.value.references[0].edges).toHaveLength(2);
-        expect(result.value.edgeSeeds.sort()).toEqual(["ancestor-a", "ancestor-b"]);
+        expect([...result.value.edgeSeeds].sort()).toEqual(["ancestor-a", "ancestor-b"]);
         expect(result.value.references[0].provenance).toBe("source");
         result.value.dispose();
     });

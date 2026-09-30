@@ -189,6 +189,21 @@ registerMergePayload("parametric.features", {
                         continuity: scalar,
                     },
                 },
+                // Each sweep input is an atomic pick: neither its node nor its anchors can merge separately.
+                sweep: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        section: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
+                        },
+                        path: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                        solid: scalar,
+                        roundCorner: scalar,
+                    },
+                },
                 // a thicken (parametric 5): the thickness is a parameter; the open faces are one pick
                 thicken: {
                     kind: "object",
