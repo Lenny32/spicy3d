@@ -71,7 +71,7 @@ export abstract class Node extends HistoryObservable implements INode {
     }
 
     override disposeInternal(): void {
-        this.document.visual.context.removeNode([this]);
+        if (!this.document.modelManager.isPreparingRecovery) this.document.visual.context.removeNode([this]);
         super.disposeInternal();
     }
 
@@ -338,6 +338,16 @@ export class NodeUtils {
         nodes: Serialized[],
         unknown?: (document: IDocument, data: Serialized) => INode,
     ) {
+        return NodeUtils.deserializeNodeSync(document, nodes, unknown);
+    }
+
+    /** Synchronous reconstruction for a private kernel recovery preparation turn. */
+    public static deserializeNodeSync(
+        document: IDocument,
+        nodes: Serialized[],
+        unknown?: (document: IDocument, data: Serialized) => INode,
+        created?: (node: INode) => void,
+    ) {
         const nodeMap: Map<string, INodeLinkedList> = new Map();
         nodes.forEach((n) => {
             const span = PerformanceTrace.enabled
@@ -355,6 +365,7 @@ export class NodeUtils {
             } finally {
                 if (PerformanceTrace.enabled) PerformanceTrace.end(span);
             }
+            created?.(node);
             if (NodeUtils.isLinkedListNode(node)) {
                 nodeMap.set(n["id"], node);
             }
@@ -366,6 +377,6 @@ export class NodeUtils {
                 console.warn(`parent not found: ${parentId}`);
             }
         });
-        return Promise.resolve(nodeMap.get(nodes[0]["id"]));
+        return nodeMap.get(nodes[0]["id"]);
     }
 }

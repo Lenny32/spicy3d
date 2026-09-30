@@ -27,7 +27,7 @@ Validity checks (offset / thickened results):
 - makeThickSolid* already fail with "Thick solid is invalid" when the result does not pass checkShape; shape.inspectionCommonVolume / shape.inspectionMass refuse an input that does not pass it.
 
 Long kernel ops (the tab freezes while one runs):
-- Every kernel op runs synchronously in the page: while one runs, the viewport, get_document_state and every other tool call wait, and the op cannot be cancelled — only a reload stops it. A cancelled call stops between ops (the program rolls back), never inside one.
+- run_program sends supported expensive factory operations to the bounded geometry worker. Those operations have a finite deadline; cancellation terminates their worker generation and rolls back the program. Other queries and operations can still run synchronously in the page and delay tools until they return. Metadata status tools remain available during bounded work. A main-kernel crash requires recover_kernel (when listed, clearing undo/redo) or Reload.
 - makeThickSolidByJoin with joinType "intersection" on a shell with many faces (a lofted or swept skin, G2 lofts in particular) may NEVER finish: OCCT intersects the offset faces pairwise. It is refused above 40 input faces (error "MakeThickSolidByJoin refused: … N faces (limit 40) …"). Use joinType "arc", or makeThickSolidBySimple for an open skin; build the skin with fewer sections before thickening.
 - An op that took longer than the slow-op budget (30 s by default) is reported as a "Warning: op … took N s" line in the next tool result: do not repeat it as it was; choose a cheaper variant.
 

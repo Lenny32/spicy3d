@@ -7,6 +7,7 @@ import {
     CommandService,
     HotkeyService,
     ShowPropertyEventHandler,
+    startKernelRecovery,
 } from "@spicy3d/app";
 import type { AccountLink } from "@spicy3d/cloud/src/links";
 import {
@@ -120,7 +121,14 @@ export class AppBuilder {
 
             const wasm = await import("@spicy3d/wasm");
             await wasm.initWasm();
-            this._shapeProvider = new wasm.OccShapeProvider();
+            const provider = new wasm.OccShapeProvider();
+            this._shapeProvider = provider;
+            this._started.push(async (app) => {
+                startKernelRecovery(app, {
+                    createContext: () => wasm.createWasmRecoveryContext(),
+                    resetProvider: () => provider.resetKernel(),
+                });
+            });
         });
         return this;
     }
@@ -213,7 +221,7 @@ export class AppBuilder {
         await this._window?.init(app);
         // Plain HTTP on a LAN address: say why accounts, clipboard etc. are missing.
         if (this._window) warnIfInsecureContext();
-        // The geometry kernel can die mid-session (an OCCT abort it does not survive): offer a reload.
+        // Recovery becomes available once its startup observers/checkpoints are installed.
         if (this._window) watchKernelCrash();
         await this.loadDefaultPlugins(app);
         this.started = this.runStarted(app);

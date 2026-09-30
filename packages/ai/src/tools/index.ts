@@ -12,6 +12,7 @@ import { buildParametricTools } from "./parametricTools";
 import { buildProgramJobTools } from "./programJobs";
 import { buildPropertyTools } from "./propertyTools";
 import { buildReadTools } from "./readTools";
+import { buildRecoveryTools } from "./recoveryTools";
 import { buildReferenceDeviationTool } from "./referenceDeviation";
 import { buildRibbonTools } from "./ribbonTools";
 import { buildSelectionTools } from "./selectionTools";
@@ -39,6 +40,7 @@ export function buildTools(): Tool[] {
         buildReferenceMeshImportTool(),
         buildReferenceDeviationTool(),
         ...buildProgramJobTools(),
+        ...buildRecoveryTools(),
     ];
     return tools.map(guardKernelTool);
 }

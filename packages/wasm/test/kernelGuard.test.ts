@@ -3,7 +3,14 @@
 
 import { rs } from "@rstest/core";
 import { KernelCrashedError, KernelState, Result } from "@spicy3d/core";
-import { guardKernelModule, guardKernelResults, onKernelAbort } from "../src/kernelGuard";
+import {
+    guardKernelModule,
+    guardKernelResults,
+    KernelHandleOwnershipError,
+    onKernelAbort,
+    retireKernelModule,
+    runKernelPreparation,
+} from "../src/kernelGuard";
 
 // A stand-in for an embind module: classes whose prototypes carry `ClassHandle`'s `delete` /
 // `isAliasOf`, static functions, accessors. `behaviour` decides what the next native call does.
@@ -29,38 +36,38 @@ function native(name: string): number {
     }
 }
 
-class ClassHandle {
-    delete() {
-        nativeCalls.push("delete");
-    }
-    isAliasOf() {
-        return false;
-    }
-    isDeleted() {
-        return false;
-    }
-}
-
-class FakeShape extends ClassHandle {
-    constructor() {
-        super();
-        native("new FakeShape");
-    }
-    shapeType() {
-        return native("shapeType");
-    }
-    get tolerance() {
-        return native("tolerance");
-    }
-}
-
-class FakeFactory extends ClassHandle {
-    static box() {
-        return native("box");
-    }
-}
-
 function createModule() {
+    class ClassHandle {
+        delete() {
+            nativeCalls.push("delete");
+        }
+        isAliasOf() {
+            return false;
+        }
+        isDeleted() {
+            return false;
+        }
+    }
+
+    class FakeShape extends ClassHandle {
+        constructor() {
+            super();
+            native("new FakeShape");
+        }
+        shapeType() {
+            return native("shapeType");
+        }
+        get tolerance() {
+            return native("tolerance");
+        }
+    }
+
+    class FakeFactory extends ClassHandle {
+        static box() {
+            return native("box");
+        }
+    }
+
     return {
         FakeShape,
         FakeFactory,
@@ -74,7 +81,7 @@ let probeFails = false;
 const probe = rs.fn(() => {
     if (probeFails) throw new WebAssembly.RuntimeError("table index is out of bounds");
 });
-const module = guardKernelModule(createModule(), { probe });
+let module: ReturnType<typeof createModule>;
 
 beforeEach(() => {
     behaviour = "ok";
@@ -83,6 +90,7 @@ beforeEach(() => {
     probeFails = false;
     nativeCalls.length = 0;
     probe.mockClear();
+    module = guardKernelModule(createModule(), { probe });
 });
 
 afterEach(() => KernelState.current.reset());
@@ -92,7 +100,7 @@ const CRASHED = "Kernel crashed (Aborted(undefined)); reload the page";
 describe("guardKernelModule", () => {
     test("passes calls through while the kernel works", () => {
         const shape = new module.FakeShape();
-        expect(shape).toBeInstanceOf(FakeShape);
+        expect(shape).toBeInstanceOf(module.FakeShape);
         expect(shape.shapeType()).toBe(42);
         expect(shape.tolerance).toBe(42);
         expect(module.FakeFactory.box()).toBe(42);
@@ -257,4 +265,64 @@ describe("guardKernelResults", () => {
         expect(guarded.box().error).toBe(CRASHED);
         expect(spy).toHaveBeenCalledTimes(1);
     });
+});
+
+describe("kernel generation ownership", () => {
+    test("resetting public state never revives a crashed module", () => {
+        const oldShape = new module.FakeShape();
+        behaviour = "abort";
+        probeFails = true;
+        expect(() => oldShape.shapeType()).toThrow(KernelCrashedError);
+        KernelState.current.reset();
+        behaviour = "ok";
+        const fresh = guardKernelModule(createModule(), { probe: () => {} });
+        expect(new fresh.FakeShape().shapeType()).toBe(42);
+        nativeCalls.length = 0;
+        expect(() => oldShape.shapeType()).toThrow(KernelCrashedError);
+        oldShape.delete();
+        expect(nativeCalls).toEqual([]);
+        expect(KernelState.current.status).toBe("ok");
+    });
+
+    test("retirement is permanent and cleanup does not enter native code", () => {
+        const shape = new module.FakeShape();
+        retireKernelModule(module);
+        nativeCalls.length = 0;
+        expect(() => shape.tolerance).toThrow(KernelCrashedError);
+        expect(() => new module.FakeShape()).toThrow(KernelCrashedError);
+        shape.delete();
+        shape.delete();
+        expect(nativeCalls).toEqual([]);
+        expect(KernelState.current.status).toBe("ok");
+    });
+
+    test("borrowed receiver methods reject another generation before native entry", () => {
+        const oldShape = new module.FakeShape();
+        const fresh = guardKernelModule(createModule(), { probe: () => {} });
+        const newShape = new fresh.FakeShape();
+        nativeCalls.length = 0;
+        expect(() => newShape.shapeType.call(oldShape)).toThrow(KernelHandleOwnershipError);
+        expect(nativeCalls).toEqual([]);
+        expect(newShape.shapeType()).toBe(42);
+    });
+
+    test("nested native arguments and constructor arguments cannot cross generations", () => {
+        const oldShape = new module.FakeShape();
+        const fresh = guardKernelModule(createModule(), { probe: () => {} });
+        nativeCalls.length = 0;
+        expect(() => Reflect.apply(fresh.FakeFactory.box, undefined, [[oldShape]])).toThrow(
+            KernelHandleOwnershipError,
+        );
+        expect(() => Reflect.construct(fresh.FakeShape, [oldShape])).toThrow(KernelHandleOwnershipError);
+        expect(nativeCalls).toEqual([]);
+        expect(KernelState.current.status).toBe("ok");
+    });
+});
+
+test("native preparation refuses asynchronous scope escape and restores public crash protection", () => {
+    const fresh = guardKernelModule(createModule(), { probe: () => {} });
+    KernelState.current.markCrashed("injected public crash");
+    expect(() => runKernelPreparation(fresh, () => Promise.resolve())).toThrow("must be synchronous");
+    expect(() => new fresh.FakeShape()).toThrow("injected public crash");
+    expect(KernelState.current.status).toBe("crashed");
 });

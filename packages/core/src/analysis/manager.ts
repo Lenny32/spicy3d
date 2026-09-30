@@ -62,6 +62,18 @@ export class AnalysisManager implements IDisposable {
             : [];
     }
 
+    /** Cancel only ephemeral native evaluations/overlays; registered evaluators and saved definitions remain. */
+    quiesceKernelRecovery(): void {
+        const previous = this.disposed;
+        this.disposed = true;
+        try {
+            for (const node of this.runs.keys()) this.cancel(node);
+            this.runs.clear();
+        } finally {
+            this.disposed = previous;
+        }
+    }
+
     registerEvaluator(kind: string, evaluator: AnalysisEvaluator): void {
         this.evaluators.set(kind, evaluator);
         for (const node of this.items) {
