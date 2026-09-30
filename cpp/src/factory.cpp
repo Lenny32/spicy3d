@@ -1489,6 +1489,78 @@ public:
         return ShapeResult { cylinder.Solid(), true, "" };
     }
 
+    // Experimental guide-contact feasibility proof. Not a saved feature or a public TS API.
+    static ShapeResult loftGuideProof(const ShapeArray& sections, const TopoDS_Wire& spine,
+        const TopoDS_Wire& auxiliary, bool solid, int guideMode)
+    {
+        const auto profiles = vecFromJSArray<TopoDS_Shape>(sections);
+        if (profiles.size() < 2)
+            return ShapeResult { TopoDS_Shape(), false, "Guided loft needs at least two sections" };
+        if (guideMode < 0 || guideMode > 2)
+            return ShapeResult { TopoDS_Shape(), false, "Unsupported guided loft diagnostic mode" };
+        BRepOffsetAPI_MakePipeShell builder(spine);
+        builder.SetMode(auxiliary, false, guideMode == 2 ? BRepFill_ContactOnBorder : guideMode == 1 ? BRepFill_Contact
+                                                                                                     : BRepFill_NoContact);
+        builder.SetTolerance(1e-7, 1e-7, 1e-5);
+        builder.SetMaxDegree(12);
+        builder.SetMaxSegments(64);
+        builder.SetForceApproxC1(false);
+        // OCCT's ContactOnBorder automatic law clears previous sections on every Add.
+        // Use one section deliberately; validate every requested section against the resulting sides.
+        builder.SetIsBuildHistory(true);
+        if (guideMode == 2)
+            builder.Add(profiles.front(), false, false);
+        else {
+            for (const auto& profile : profiles)
+                builder.Add(profile, false, false);
+        }
+        if (!builder.IsReady())
+            return ShapeResult { TopoDS_Shape(), false, "Incompatible guided loft sections" };
+        builder.Build();
+        if (!builder.IsDone())
+            return ShapeResult { TopoDS_Shape(), false, "Guided loft contact failed (status " + std::to_string(static_cast<int>(builder.GetStatus())) + ")" };
+        if (solid && !builder.MakeSolid())
+            return ShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
+        if (!BRepCheck_Analyzer(builder.Shape()).IsValid())
+            return ShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
+        BRep_Builder topology;
+        TopoDS_Compound sides;
+        topology.MakeCompound(sides);
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
+        for (TopExp_Explorer input(profiles.front(), TopAbs_EDGE); input.More(); input.Next()) {
+            const auto& generated = builder.Generated(input.Current());
+            for (const auto& item : generated) {
+                for (TopExp_Explorer face(item, TopAbs_FACE); face.More(); face.Next()) {
+                    if (!seen.Contains(face.Current())) {
+                        seen.Add(face.Current());
+                        topology.Add(sides, face.Current());
+                    }
+                }
+            }
+        }
+        if (seen.IsEmpty())
+            return ShapeResult { TopoDS_Shape(), false, "Guided loft side history missing" };
+        for (const auto& profile : profiles) {
+            BRepAlgoAPI_Cut uncovered(profile, sides);
+            uncovered.Build();
+            if (!uncovered.IsDone())
+                return ShapeResult { TopoDS_Shape(), false, "Guided loft section coverage failed" };
+            GProp_GProps remaining;
+            BRepGProp::LinearProperties(uncovered.Shape(), remaining);
+            if (remaining.Mass() > 1e-5)
+                return ShapeResult { TopoDS_Shape(), false, "Guides are incompatible with a requested section" };
+        }
+        BRepAlgoAPI_Cut uncoveredGuide(auxiliary, sides);
+        uncoveredGuide.Build();
+        if (!uncoveredGuide.IsDone())
+            return ShapeResult { TopoDS_Shape(), false, "Guided loft boundary coverage failed" };
+        GProp_GProps guideRemaining;
+        BRepGProp::LinearProperties(uncoveredGuide.Shape(), guideRemaining);
+        if (guideRemaining.Mass() > 1e-5)
+            return ShapeResult { builder.Shape(), false, "Auxiliary guide does not lie completely on the loft sides; residual length " + std::to_string(guideRemaining.Mass()) + "; side faces " + std::to_string(seen.Extent()) };
+        return ShapeResult { builder.Shape(), true, "" };
+    }
+
     static ShapeResult sweep(const ShapeArray& sections, const TopoDS_Wire& path, bool isFrenet, bool isForceC1)
     {
         BRepOffsetAPI_MakePipeShell pipe(path);
@@ -3291,6 +3363,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("cylinder", guardedEntry<&ShapeFactory::cylinder>("ShapeFactory.cylinder"))
         .class_function("pyramid", guardedEntry<&ShapeFactory::pyramid>("ShapeFactory.pyramid"))
         .class_function("sweep", guardedEntry<&ShapeFactory::sweep>("ShapeFactory.sweep"))
+        .class_function("loftGuideProof", guardedEntry<&ShapeFactory::loftGuideProof>("ShapeFactory.loftGuideProof"))
         .class_function("revolve", guardedEntry<&ShapeFactory::revolve>("ShapeFactory.revolve"))
         .class_function("prism", guardedEntry<&ShapeFactory::prism>("ShapeFactory.prism"))
         .class_function("pushPull", guardedEntry<&ShapeFactory::pushPull>("ShapeFactory.pushPull"))
