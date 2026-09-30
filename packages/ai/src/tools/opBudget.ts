@@ -25,12 +25,16 @@ export function throwIfCancelled(signal: AbortSignal | undefined, index: number,
 const pending: string[] = [];
 
 /** Records one op's wall time; over the budget it becomes a warning for the next tool result. */
-export function noteOpDuration(method: string, milliseconds: number): void {
+export function noteOpDuration(method: string, milliseconds: number, worker = false): void {
     const budget = Config.instance.slowOpWarningSeconds;
     if (!(milliseconds > budget * 1000)) return;
     const seconds = Math.round(milliseconds / 1000);
     pending.push(
-        `Warning: op "${method}" took ${seconds} s (slow-op budget ${budget} s). A running kernel op cannot be interrupted: the tab and every other tool call waited for it. Prefer a cheaper variant (load_skill modeling-recipes).`,
+        `Warning: op "${method}" took ${seconds} s (slow-op budget ${budget} s). ${
+            worker
+                ? "Geometry ran in a bounded worker; UI and metadata reads remained available."
+                : "A running kernel op cannot be interrupted: the tab and every other tool call waited for it."
+        } Prefer a cheaper variant (load_skill modeling-recipes).`,
     );
 }
 
@@ -56,4 +60,14 @@ export function takeSlowOpWarnings(): string[] {
     const repeated = delivered.map((w) => `(earlier call) ${w}`);
     delivered = pending.splice(0, pending.length);
     return [...repeated, ...delivered];
+}
+
+/** Includes worker waiting time while the main thread remains responsive. */
+export async function timeOpAsync<T>(method: string, op: () => Promise<T>, worker = false): Promise<T> {
+    const start = performance.now();
+    try {
+        return await op();
+    } finally {
+        noteOpDuration(method, performance.now() - start, worker);
+    }
 }

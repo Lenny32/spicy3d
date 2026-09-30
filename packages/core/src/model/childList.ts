@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "../document";
+import { DocumentMutations } from "../documentMutations";
 import { Logger, type NodeRecord } from "../foundation";
 import type { INode, INodeLinkedList } from "./node";
 
@@ -55,6 +56,7 @@ export class NodeChildList {
     }
 
     add(...items: INode[]): void {
+        DocumentMutations.assertWritable(this.owner.document);
         // newPrevious is computed per item (not once up front) so records match the
         // actual sibling order when several nodes are added in one call.
         const records: NodeRecord[] = [];
@@ -77,6 +79,7 @@ export class NodeChildList {
     }
 
     remove(...items: INode[]): void {
+        DocumentMutations.assertWritable(this.owner.document);
         const records = items
             .filter((item) => this.validateChild(item))
             .map(
@@ -96,6 +99,7 @@ export class NodeChildList {
     }
 
     transfer(...items: INode[]): void {
+        DocumentMutations.assertWritable(this.owner.document);
         const records = items
             .filter((item) => this.validateChild(item))
             .map(
@@ -115,6 +119,7 @@ export class NodeChildList {
     }
 
     insertBefore(target: INode | undefined, node: INode): void {
+        DocumentMutations.assertWritable(this.owner.document);
         if (target && !this.validateChild(target)) return;
 
         const record = {
@@ -138,6 +143,7 @@ export class NodeChildList {
     }
 
     insertAfter(target: INode | undefined, node: INode): void {
+        DocumentMutations.assertWritable(this.owner.document);
         if (target && !this.validateChild(target)) return;
 
         const record = {
@@ -164,8 +170,10 @@ export class NodeChildList {
 
     /** Moves `child` (currently owned by this list) into the list of `newParent`. */
     move(child: INode, newParent: INodeLinkedList, previousSibling?: INode): void {
+        DocumentMutations.assertWritable(this.owner.document);
         const target = this.validateMove(child, newParent, previousSibling);
         if (target === undefined) return;
+        DocumentMutations.assertWritable(target.owner.document);
 
         const record = {
             action: "move",

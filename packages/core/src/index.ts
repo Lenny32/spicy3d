@@ -16,6 +16,7 @@ export * from "./documentDiff";
 export * from "./documentFile";
 export * from "./documentFormat";
 export * from "./documentManifest";
+export * from "./documentMutations";
 export * from "./documentRebuilds";
 export * from "./documentTransfer";
 export * from "./editor";

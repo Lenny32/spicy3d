@@ -4,6 +4,7 @@
 import {
     type CommandKeys,
     CommandStore,
+    DocumentMutations,
     type IApplication,
     type IService,
     type IView,
@@ -84,6 +85,8 @@ export class CommandService implements IService {
     }
 
     private async checking(commandName: CommandKeys) {
+        const document = this.app.activeView?.document;
+        if (document && DocumentMutations.isHeld(document)) return false;
         const commandData = CommandStore.getComandData(commandName);
         if (!commandData?.isApplicationCommand && this.app.activeView === undefined) {
             Logger.error("No active document");

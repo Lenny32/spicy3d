@@ -212,7 +212,7 @@ function containsSolid(shape: IShape): boolean {
  * pairwise; on a shell of many narrow faces it may never finish, and a kernel call on the main
  * thread cannot be interrupted, so the tab hangs. Arc joins and simple offsets do not.
  */
-function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
+export function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
     if (joinType !== "intersection") return undefined;
     const limit = Config.instance.thickSolidIntersectionMaxFaces;
     const faces = shape.findSubShapes(ShapeTypes.face);
@@ -322,7 +322,10 @@ function filletResultEdges(edges: TopoDS_Shape[]): OccEdge[] {
 export class ShapeFactory implements IShapeFactory {
     readonly kernelName = "opencascade";
 
-    constructor(readonly asyncOperations?: import("@spicy3d/core").IAsyncShapeFactory) {
+    constructor(
+        readonly asyncOperations?: import("@spicy3d/core").IAsyncShapeFactory,
+        readonly boundedOperations?: import("@spicy3d/core").IBoundedShapeFactory,
+    ) {
         // Once the kernel crashed, every call answers `Result.err` with the same message; `edge`
         // returns a plain edge, so it throws that message instead.
         // biome-ignore lint/correctness/noConstructorReturn: the guarded facade replaces the instance

@@ -8,29 +8,33 @@ is [KERNEL-01](../tickets/kernel-01-worker-kernel.md).
 
 OCCT 8.0 is compiled to one WebAssembly module (`packages/wasm/lib/spicy-wasm.wasm`,
 `-sENVIRONMENT=web`, no pthreads, 256 MB initial memory growing up to `-sMAXIMUM_MEMORY=4GB`). The
-page loads one instance of it, **on the main thread**. Every `IShapeFactory` / `IShape` call is a
-synchronous embind call that returns a `Result`; parametric rebuilds, previews, meshing, imports and
-exports all chain such calls.
+page retains a main-thread instance for local shape handles and synchronous queries, previews,
+meshing, imports and exports. The existing hybrid worker runs opt-in parametric booleans, and
+MCP `run_program` uses its bounded factory bridge for boolean fuse/cut/common, fillet/chamfer,
+loft, and thick-solid simple/join. Worker inputs and outputs are verified BREP replicas;
+no native handles cross realms. See [bounded worker execution](kernel-bounded-worker.md).
 
-While one call runs, nothing else in the tab runs: no rendering, no input, no autosave or cloud sync,
-and no WebSocket traffic, so the MCP relay gets no answer either. JavaScript cannot interrupt
+While a main-thread native call runs, nothing else in the tab runs: no rendering, no input,
+no autosave or cloud sync, and no WebSocket traffic, so the MCP relay gets no answer either. JavaScript cannot interrupt
 synchronous code, so a call that never returns freezes the tab until it is reloaded. A call whose
 memory keeps growing may take the browser tab (or the browser) down when it reaches the 4 GB cap.
 
 ### MCP tool calls
 
-- Tool calls run one at a time in one `SerialQueue` per page (`packages/ai/src/mcp/server.ts`),
-  because `run_program` refs chain across calls. A long kernel op therefore blocks every later call,
-  read-only ones such as `get_document_state` included. The relay gives up after 120 s ("The Spicy3D
-  tab did not answer within 120 seconds"). That text comes from the server, and the page keeps
-  working on the call.
-- **Cancellation.** A call cancelled while it waits in the queue never starts. `run_program` and
-  `run_parametric` also check the call's signal before every op: once it is aborted, the program
-  throws `cancelled before op N ("<method>")` and its transaction rolls the whole program back. An
-  op that is already running is never interrupted. All ops of one program run in one synchronous
-  stretch, so today a cancellation that arrives over the WebSocket while a program runs is only
-  read once the program has ended. The check between ops only has an effect once ops yield to the
-  event loop, which is what the worker kernel (KERNEL-01) makes possible.
+- Mutation and geometry-reading tools run in one shared FIFO `SerialQueue` per page
+  (`packages/ai/src/mcp/server.ts`), preserving cross-call program refs. Built-in metadata reads
+  `get_document_state`, `get_selection`, and the document resource remain responsive during a
+  pending worker operation and report a captured committed-state snapshot.
+- **Finite worker deadline.** Every worker request has a 90-second deadline. A timeout terminates
+  its generation, fails the program, and rolls back nodes/history and reference registries.
+  A following operation creates a fresh worker. Selected bounded factory methods never retry
+  synchronously when a worker is unavailable or timed out. Other main-thread calls can still hang.
+- **Cancellation.** A call cancelled while queued never starts. Programs check their signal
+  between operations and before commit, rolling back if cancelled. A pending native operation
+  is bounded by its deadline; user-triggered immediate worker termination is separate work (#97).
+- **Document consistency.** A yielding MCP program holds a runtime document ownership scope;
+  new UI commands and direct property/tree edits are blocked until commit or rollback.
+  Its internal mutations and replay run under scoped authority, and other documents remain editable.
 - **Slow-op warning.** Each op's wall time is measured (`packages/ai/src/tools/opBudget.ts`). An op
   that took longer than `Config.slowOpWarningSeconds` (30 s by default, page-level, not saved) adds
   a separate text line to the tool result: `Warning: op "makeThickSolidByJoin" took 48 s (slow-op
@@ -71,7 +75,8 @@ resource report `kernel: "crashed"`, and the error-recovery skill tells agents n
 shows one persistent banner with a Reload action. Reading, viewing, selecting and saving keep
 working.
 
-A hang is not a crash: nothing in the page can detect or end a call that never returns.
+A main-thread hang is not a crash: the page cannot detect or end it. A worker hang is ended by
+its finite deadline without marking the main kernel crashed.
 
 ## Guard rails against known hangs
 
@@ -88,5 +93,6 @@ A hang is not a crash: nothing in the page can detect or end a call that never r
 
 ## Plan
 
-Moving the kernel and the model evaluation to a Web Worker, so that a hung call can be ended with
-`terminate()` and the kernel re-created, is [KERNEL-01](../tickets/kernel-01-worker-kernel.md).
+Phase 1 of [KERNEL-01](../tickets/kernel-01-worker-kernel.md) extends the existing hybrid worker
+with [bounded MCP factory execution](kernel-bounded-worker.md). Full model evaluation and
+main-kernel recovery (#98) remain separate work.

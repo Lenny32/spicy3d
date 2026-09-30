@@ -58,6 +58,8 @@ export interface IShapeFactory {
     readonly kernelName: string;
     /** Optional hybrid backend. Existing synchronous methods always remain available. */
     readonly asyncOperations?: IAsyncShapeFactory;
+    /** Runtime-only strict worker path for potentially long direct modeling operations. */
+    readonly boundedOperations?: IBoundedShapeFactory;
     edge(curve: ICurve): IEdge;
     face(wire: IWire[]): Result<IFace>;
     faceFromSurface(wires: IWire[], sourceFace: IFace): Result<IFace>;
@@ -273,4 +275,29 @@ export interface IAsyncShapeFactory {
         tools: IShape[],
         options?: { mesh?: boolean },
     ): IAsyncShapeOperation<AsyncTrackedBoolean> | undefined;
+}
+
+/** Whitelisted factory operations. Native handles never leave their owning realm. */
+export type BoundedShapeRequest =
+    | {
+          method: "booleanFuse" | "booleanCut" | "booleanCommon";
+          left: IShape[];
+          right: IShape[];
+          simplifyShape?: boolean;
+      }
+    | { method: "fillet" | "chamfer"; shape: IShape; edges: number[]; value: number }
+    | { method: "loft"; sections: IShape[]; isSolid: boolean; isRuled: boolean; continuity: Continuity }
+    | { method: "makeThickSolidBySimple"; shape: IShape; thickness: number }
+    | {
+          method: "makeThickSolidByJoin";
+          shape: IShape;
+          closingFaces: IShape[];
+          thickness: number;
+          joinType: JoinType;
+          mode: OffsetMode;
+          intersection: boolean;
+      };
+
+export interface IBoundedShapeFactory {
+    shapeOperation(request: BoundedShapeRequest): IAsyncShapeOperation<IShape>;
 }

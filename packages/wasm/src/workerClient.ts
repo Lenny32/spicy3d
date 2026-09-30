@@ -27,6 +27,7 @@ export class KernelWorkerClient {
     private nextId = 0;
     private readonly pending = new Map<number, Pending>();
     private readonly native = new Set<number>();
+    private readonly deadlines = new Map<number, ReturnType<typeof setTimeout>>();
     private captures?: Map<number, number>;
     private nativeFailure?: KernelFailure;
     private readonly failureHandlers = new Set<(failure: KernelFailure) => void>();
@@ -57,6 +58,9 @@ export class KernelWorkerClient {
             this.close({ code: "kernel", message: "Unexpected geometry worker response id" });
             return;
         }
+        const deadline = this.deadlines.get(message.id);
+        if (deadline !== undefined) clearTimeout(deadline);
+        this.deadlines.delete(message.id);
         // This precedes resolving promises, including for cancelled callers and profiling barriers.
         const capture = this.captures?.get(message.id);
         this.captures?.delete(message.id);
@@ -88,7 +92,14 @@ export class KernelWorkerClient {
             message: "Geometry worker connection failed",
         });
 
-    constructor(private readonly worker: IKernelWorkerTransport) {
+    constructor(
+        private readonly worker: IKernelWorkerTransport,
+        private readonly deadlineMs = 90_000,
+    ) {
+        if (!Number.isFinite(deadlineMs) || deadlineMs <= 0 || deadlineMs > 90_000) {
+            worker.terminate();
+            throw new Error("Geometry worker deadline must be finite and between 1 and 90000 ms");
+        }
         workerProfile.add(this);
         worker.addEventListener("message", this.onMessage);
         worker.addEventListener("error", this.onError);
@@ -122,6 +133,14 @@ export class KernelWorkerClient {
         const id = ++this.nextId;
         const trace = PerformanceTrace.captureId;
         return new Promise((resolve) => {
+            const deadline = setTimeout(
+                () =>
+                    this.close({
+                        code: "timeout",
+                        message: `Geometry worker operation timed out after ${this.deadlineMs} ms`,
+                    }),
+                this.deadlineMs,
+            );
             const complete = (result: KernelResult<unknown>) => {
                 signal?.removeEventListener("abort", cancel);
                 this.pending.delete(id);
@@ -135,6 +154,7 @@ export class KernelWorkerClient {
                     this.onConnectionError();
                 }
             };
+            this.deadlines.set(id, deadline);
             this.pending.set(id, { complete });
             this.native.add(id);
             if (trace !== undefined) {
@@ -160,6 +180,8 @@ export class KernelWorkerClient {
         workerProfile.remove(this, (this.captures?.size ?? 0) > 0);
         this.captures?.clear();
         this.native.clear();
+        for (const deadline of this.deadlines.values()) clearTimeout(deadline);
+        this.deadlines.clear();
         this.worker.removeEventListener("message", this.onMessage);
         this.worker.removeEventListener("error", this.onError);
         this.worker.removeEventListener("messageerror", this.onConnectionError);
@@ -235,7 +257,7 @@ function isKernelResponse(value: unknown): value is KernelResponse {
         typeof error === "object" &&
         "code" in error &&
         typeof error.code === "string" &&
-        ["cancelled", "closed", "kernel", "invalid", "unavailable"].includes(error.code) &&
+        ["cancelled", "closed", "kernel", "invalid", "unavailable", "timeout"].includes(error.code) &&
         "message" in error &&
         typeof error.message === "string"
     );
