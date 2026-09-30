@@ -51,7 +51,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 
 | Ticket | Dependencies | Status | Agent | Task branch | Validation | Integration commit | Blockers |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| #81 Reject invalid fillet and chamfer results | — | Implementing; native rebuild | mouse_81 | mouse/81-valid-corners | Pending | — | Pinned toolchain setup in progress |
+| #81 Reject invalid fillet and chamfer results | — | Done (pushed) | mouse_81 | mouse/81-valid-corners | Pinned native rebuild; 182 worker/integrated tests; tsc/check | 0b8655a0701c86211723a4fe4dc1980f4ea95922 | — |
 | #82 Report actionable fillet and chamfer failure diagnostics | #81 | Queued | — | — | Pending | — | — |
 | #83 Support variable-radius fillets | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
@@ -159,4 +159,13 @@ and decoded-size metadata. Default browser download remains. The decoded-byte bu
 isolated/root typechecking and scoped check pass. Eight tickets delivered; 18 remain.
 
 Pinned #81 native build completed and all three generated artifacts were copied into its worktree.
-The worker is running the final validity regressions before committing source plus artifacts.
+All 182 native integration tests pass. The four tracked/untracked fillet/chamfer paths reject null
+or invalid B-reps before exposing shape/history; four additional Bezier-perimeter-throughcut cases
+remain valid. Nine tickets delivered; 17 remain. Native JS/declarations were staged with the binary
+but are semantically unchanged because this fix adds no bindings.
+
+The automatic approval reviewer initially rejected #93 because file-based approval was insufficient.
+The user directly answered **"Approve the plan’s backward-compatible format changes"** to the
+explicit question covering necessary #81–106 changes, including concrete sketch-3 control data.
+That direct user-turn authorization resolves the rejection; implementation proceeds under the
+coordinated schema plan and old-document compatibility requirements.

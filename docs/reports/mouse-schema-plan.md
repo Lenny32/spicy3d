@@ -2,6 +2,10 @@
 
 The boss approval in [mouse-plan.md](../../mouse-plan.md) permits necessary backward-compatible
 payload changes for #81–#106. Existing fixtures and unknown-node/userData content remain unchanged.
+After the approval reviewer rejected file-based authorization, the user directly confirmed
+"Approve the plan’s backward-compatible format changes" in response to the explicit approval
+question covering #81–106 and the sketch-3 proposal below. No further approval is needed within
+that scope; unrelated format redesign remains outside the authorization.
 The document envelope stays at version 2. Parametric remains version 5 until a separate feature
 payload design is approved and assigned here.
 
