@@ -59,6 +59,8 @@ export interface TrackedShape {
      * channel — callers then fall back to the history-less-face heuristic.
      */
     capFaces?: number[];
+    /** Runtime-only automatic next-face selection, relative to the supplied candidate shapes. */
+    nextTarget?: { candidateIndex: number; faceIndex: number };
 }
 
 export interface IShapeFactory {
@@ -209,6 +211,14 @@ export interface IShapeFactory {
      * direction, behind the profile, or not bounding it.
      * @unit length offset
      */
+    /** Exact nearest complete candidate cap; never reverses direction or extends a trimmed target. */
+    prismNextTracked?(
+        profile: IShape,
+        direction: XYZ,
+        candidates: IShape[],
+        offset?: number,
+        start?: { face: IFace; offset: number },
+    ): Result<TrackedShape>;
     prismUntilTracked?(
         profile: IShape,
         direction: XYZ,

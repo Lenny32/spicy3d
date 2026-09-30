@@ -52,6 +52,7 @@
 #include <BRepProj_Projection.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ReShape.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -60,6 +61,7 @@
 #include <ChFi2d_FilletAPI.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GeomProjLib.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_ConicalSurface.hxx>
@@ -159,6 +161,8 @@ struct TrackedShapeResult {
     // bottom/start face). Empty for non-sweeps and for a full 360° revolve, where the
     // first and last shapes coincide and there is no distinct cap.
     std::vector<int> capFaces = { };
+    int nextTargetIndex = -1;
+    int nextFaceIndex = -1;
 };
 
 // Error results of a raise caught by guardedEntry (guard.hpp).
@@ -644,7 +648,7 @@ static std::vector<double> rayParameters(const TopoDS_Face& face, const gp_Pnt& 
 // Split a generous planar-profile prism by BOTH limiting surfaces. Its projected footprint
 // stays the sketch's; the cell containing the selected branch witness has exact curved caps.
 static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp_Dir& dir,
-    const TopoDS_Face& from, const TopoDS_Face& until, double exactDepth = 0)
+    const TopoDS_Face& from, const TopoDS_Face& until, double exactDepth = 0, bool strictEnd = false)
 {
     Bnd_Box scene;
     double profileLow, profileHigh, fromLow, fromHigh, untilLow, untilHigh;
@@ -666,11 +670,11 @@ static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp
         return trackedError("Failed to create the from-face prism");
     const TopoDS_Shape swept = prism.Shape();
 
-    for (int pass = 0; pass < 2; pass++) {
+    for (int pass = 0; pass < (strictEnd ? 1 : 2); pass++) {
         // The picked starting patch must cover the profile; extending it could silently
         // create a boss outside the selected face. Only an up-to ending surface may extend.
         TopoDS_Face start = from;
-        TopoDS_Face end = pass == 0 || exactDepth > 0 ? until : extendedFace(until, margin);
+        TopoDS_Face end = pass == 0 || strictEnd || exactDepth > 0 ? until : extendedFace(until, margin);
         if (start.IsNull() || end.IsNull())
             continue;
         auto starts = rayParameters(start, origin, dir, 2 * (high - low));
@@ -774,6 +778,126 @@ static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp
         return result;
     }
     return trackedError("The starting and ending faces do not fully bound the extrusion, or their intersections are ambiguous");
+}
+
+// Project exact cap boundary curves along the extrusion axis onto the profile plane. This
+// proves full footprint coverage even when two curved caps have no common axial section.
+static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& profile, const gp_Dir& dir, std::string& failure)
+{
+    Handle(Geom_Plane) plane = Handle(Geom_Plane)::DownCast(untrimmedSurface(BRep_Tool::Surface(profile)));
+    auto fail = [&](const char* reason) { failure = reason; return false; };
+    if (plane.IsNull())
+        return fail("Profile projection plane is unavailable");
+    ShapeIndexMap faces;
+    TopExp::MapShapes(tool.shape, TopAbs_FACE, faces);
+    TopoDS_Shape shadow;
+    double piecesArea = 0;
+    for (int index : tool.capFaces) {
+        const TopoDS_Face cap = TopoDS::Face(faces.FindKey(index + 1));
+        const TopoDS_Wire outer = BRepTools::OuterWire(cap);
+
+        auto projectWire = [&](const TopoDS_Wire& wire) -> TopoDS_Wire {
+            BRepBuilderAPI_MakeWire makeWire;
+            for (BRepTools_WireExplorer edges(wire, cap); edges.More(); edges.Next()) {
+                const TopoDS_Edge edge = edges.Current();
+                double first, last;
+                Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+                if (curve.IsNull())
+                    continue;
+                // Bound the curve before projection: parameter-preserving tilted lines otherwise
+                // become splines over an infinite domain and lose endpoint precision.
+                Handle(Geom_TrimmedCurve) bounded = new Geom_TrimmedCurve(curve, first, last);
+                Handle(Geom_Curve) projected = GeomProjLib::ProjectOnPlane(bounded, plane, dir, true);
+                if (projected.IsNull()) {
+                    failure = "Cap curve projection failed";
+                    return TopoDS_Wire();
+                }
+                BRepBuilderAPI_MakeEdge makeEdge(projected);
+                if (!makeEdge.IsDone()) {
+                    failure = "Projected cap edge is invalid";
+                    return TopoDS_Wire();
+                }
+                TopoDS_Edge next = makeEdge.Edge();
+                GProp_GProps length;
+                BRepGProp::LinearProperties(next, length);
+                if (length.Mass() <= Precision::Confusion())
+                    continue;
+                next.Orientation(edge.Orientation());
+                makeWire.Add(next);
+                if (!makeWire.IsDone()) {
+                    failure = "Projected cap edges do not connect";
+                    return TopoDS_Wire();
+                }
+            }
+            return makeWire.IsDone() ? makeWire.Wire() : TopoDS_Wire();
+        };
+        TopoDS_Wire projectedOuter = projectWire(outer);
+        if (projectedOuter.IsNull())
+            return fail(failure.empty() ? "Projected cap outer wire is empty" : failure.c_str());
+        BRepBuilderAPI_MakeFace makeFace(plane->Pln(), projectedOuter, true);
+        for (TopExp_Explorer wires(cap, TopAbs_WIRE); wires.More(); wires.Next()) {
+            if (wires.Current().IsSame(outer))
+                continue;
+            TopoDS_Wire inner = projectWire(TopoDS::Wire(wires.Current()));
+            if (inner.IsNull())
+                return fail("Projected cap inner wire is invalid");
+            makeFace.Add(inner);
+        }
+        if (!makeFace.IsDone() || !BRepCheck_Analyzer(makeFace.Face()).IsValid())
+            return fail("Projected cap face is invalid");
+        GProp_GProps area;
+        BRepGProp::SurfaceProperties(makeFace.Face(), area);
+        piecesArea += std::abs(area.Mass());
+        if (shadow.IsNull())
+            shadow = makeFace.Face();
+        else {
+            BRepAlgoAPI_Fuse merge(shadow, makeFace.Face());
+            merge.SetNonDestructive(true);
+            merge.Build();
+            if (!merge.IsDone() || merge.HasErrors())
+                return fail("Projected cap union failed");
+            shadow = merge.Shape();
+        }
+    }
+    if (shadow.IsNull())
+        return fail("The bounded tool has no ending cap history");
+    GProp_GProps footprint, unionArea, commonArea;
+    BRepGProp::SurfaceProperties(profile, footprint);
+    BRepGProp::SurfaceProperties(shadow, unionArea);
+    const double tolerance = 1e-6 * std::max(1.0, std::abs(footprint.Mass()));
+    // Folded caps can project multiple layers onto the same footprint: explicitly unsupported.
+    if (std::abs(piecesArea - std::abs(unionArea.Mass())) > tolerance)
+        return fail("The ending cap folds across its projected footprint");
+    BRepAlgoAPI_Common common(shadow, profile);
+    common.SetNonDestructive(true);
+    common.Build();
+    if (!common.IsDone() || common.HasErrors())
+        return fail("Projected footprint intersection failed");
+    BRepGProp::SurfaceProperties(common.Shape(), commonArea);
+    if (std::abs(std::abs(commonArea.Mass()) - std::abs(footprint.Mass())) > tolerance)
+        return fail("The ending cap does not cover the full profile footprint");
+    return true;
+}
+
+// Conservative bounds pruning in the extrusion's transverse plane, preserving candidate order.
+static bool intersectsProfileRayBounds(const TopoDS_Shape& profile, const TopoDS_Shape& target,
+    const gp_Dir& dir, double startLow)
+{
+    gp_Ax2 axes(gp_Pnt(0, 0, 0), dir);
+    auto range = [](const TopoDS_Shape& shape, const gp_Dir& axis, double& low, double& high) {
+        return projectedRange(shape, axis, low, high);
+    };
+    double low, high;
+    if (!range(target, dir, low, high) || high <= startLow + Precision::Confusion())
+        return false;
+    for (const gp_Dir& axis : { axes.XDirection(), axes.YDirection() }) {
+        double profileLow, profileHigh;
+        if (!range(profile, axis, profileLow, profileHigh) || !range(target, axis, low, high))
+            return false;
+        if (high < profileLow - Precision::Confusion() || low > profileHigh + Precision::Confusion())
+            return false;
+    }
+    return true;
 }
 
 // Compute the plane formed by two edges at their shared vertex from their tangent vectors.
@@ -1570,6 +1694,137 @@ public:
         }
         return trackedError(reached ? "The target face does not bound the extrusion of the profile"
                                     : "The target face is not reached along the extrude direction");
+    }
+
+    // Automatic next face. Only complete trimmed caps participate, with uniform ordering proved
+    // by exact bounded-tool containment. Limits apply after conservative bounds pruning.
+    static TrackedShapeResult prismNextTracked(const TopoDS_Shape& profile, const Vector3& direction,
+        const ShapeArray& candidates, double offset, bool hasStart, const TopoDS_Shape& startFace, double startOffset)
+    {
+        if (!isUsableDirection(direction))
+            return trackedError("The extrude direction is zero");
+        gp_Dir dir = Vector3::toDir(direction);
+        if (profile.IsNull() || profile.ShapeType() != TopAbs_FACE)
+            return trackedError("Next-face extrusion requires one planar profile face");
+        TopoDS_Face profileFace = TopoDS::Face(profile);
+        Handle(Geom_Surface) profileSurface = BRep_Tool::Surface(profileFace);
+        if (profileSurface.IsNull() || Handle(Geom_Plane)::DownCast(untrimmedSurface(profileSurface)).IsNull())
+            return trackedError("Next-face extrusion requires a planar profile face");
+        if (!std::isfinite(offset) || !std::isfinite(startOffset))
+            return trackedError("Next-face extrusion offsets must be finite");
+        std::string error = profileError(profile, dir);
+        if (!error.empty())
+            return trackedError(error);
+        if (hasStart && (startFace.IsNull() || startFace.ShapeType() != TopAbs_FACE))
+            return trackedError("The starting object is not a face");
+        TopoDS_Face start = hasStart ? TopoDS::Face(startFace) : profileFace;
+        Handle(Geom_Surface) startSurface = BRep_Tool::Surface(start);
+        if (startSurface.IsNull() || isParallelTo(untrimmedSurface(startSurface), dir))
+            return trackedError("The starting face is parallel to the extrusion");
+        gp_Trsf shift;
+        shift.SetTranslation(gp_Vec(dir) * startOffset);
+        start = TopoDS::Face(start.Moved(TopLoc_Location(shift)));
+        double startLow, startHigh;
+        if (!projectedRange(start, dir, startLow, startHigh))
+            return trackedError("The starting face has no extent");
+        struct Candidate {
+            int body;
+            int face;
+            TopoDS_Face cap;
+            TrackedShapeResult tool;
+            double volume;
+        };
+        std::vector<Candidate> valid;
+        std::vector<TopoDS_Face> partial;
+        std::string coverageFailure;
+        int bodies = 0, examined = 0, bodyIndex = -1;
+        for (const TopoDS_Shape& body : vecFromJSArray<TopoDS_Shape>(candidates)) {
+            bodyIndex++;
+            if (body.IsNull() || !intersectsProfileRayBounds(profile, body, dir, startLow))
+                continue;
+            if (++bodies > 64)
+                return trackedError("Next-face search exceeds 64 intersecting candidate bodies");
+            ShapeIndexMap faces;
+            TopExp::MapShapes(body, TopAbs_FACE, faces);
+            for (int f = 1; f <= faces.Extent(); f++) {
+                TopoDS_Face face = TopoDS::Face(faces.FindKey(f));
+                if (!intersectsProfileRayBounds(profile, face, dir, startLow))
+                    continue;
+                if (++examined > 512)
+                    return trackedError("Next-face search exceeds 512 intersecting candidate faces");
+                Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+                if (surface.IsNull() || isParallelTo(untrimmedSurface(surface), dir))
+                    continue;
+                TrackedShapeResult tool = prismBetweenFaces(profileFace, dir, start, face, 0, true);
+                if (!tool.isOk || !capCoversProfile(tool, profileFace, dir, coverageFailure)) {
+                    partial.push_back(face);
+                    continue;
+                }
+                GProp_GProps volume;
+                BRepGProp::VolumeProperties(tool.shape, volume);
+                if (std::abs(volume.Mass()) <= Precision::Confusion())
+                    continue;
+                valid.push_back({ bodyIndex, f - 1, face, tool, std::abs(volume.Mass()) });
+                if (valid.size() > 32)
+                    return trackedError("Next-face search exceeds 32 valid bounded tools");
+            }
+        }
+        if (valid.empty())
+            return trackedError("No complete next face is reached along the extrusion direction; partial or piecewise caps are unsupported" + (coverageFailure.empty() ? std::string() : ": " + coverageFailure));
+        std::vector<bool> dominated(valid.size(), false);
+        for (size_t a = 0; a < valid.size(); a++)
+            for (size_t b = a + 1; b < valid.size(); b++) {
+                BRepAlgoAPI_Common common(valid[a].tool.shape, valid[b].tool.shape);
+                common.SetNonDestructive(true);
+                common.Build();
+                if (!common.IsDone() || common.HasErrors())
+                    return trackedError("Cannot compare next-face candidate containment");
+                GProp_GProps volume;
+                BRepGProp::VolumeProperties(common.Shape(), volume);
+                double overlap = std::abs(volume.Mass());
+                double tolerance = 1e-6 * std::max({ 1.0, valid[a].volume, valid[b].volume });
+                bool aInB = std::abs(overlap - valid[a].volume) <= tolerance;
+                bool bInA = std::abs(overlap - valid[b].volume) <= tolerance;
+                if (aInB && !bInA)
+                    dominated[b] = true;
+                if (bInA && !aInB)
+                    dominated[a] = true;
+            }
+        int selected = -1;
+        for (size_t i = 0; i < valid.size(); i++)
+            if (!dominated[i]) {
+                if (selected >= 0)
+                    return trackedError("The next face is ambiguous: candidate caps tie or cross across the profile");
+                selected = static_cast<int>(i);
+            }
+        if (selected < 0)
+            return trackedError("The next face ordering is ambiguous");
+        Candidate& chosen = valid[selected];
+        // A nearer partial cap means the first boundary is piecewise, even if a farther face
+        // can cap the complete profile. Do not silently skip that obstruction.
+        for (const TopoDS_Face& face : partial) {
+            BRepAlgoAPI_Common common(face, chosen.tool.shape);
+            common.SetNonDestructive(true);
+            common.Build();
+            if (!common.IsDone() || common.HasErrors())
+                return trackedError("Cannot validate partial next-face candidates");
+            GProp_GProps area;
+            BRepGProp::SurfaceProperties(common.Shape(), area);
+            if (std::abs(area.Mass()) > 1e-6)
+                return trackedError("The next boundary is partial or piecewise; one uniformly nearest full-coverage face is required");
+        }
+        TrackedShapeResult result = chosen.tool;
+        if (offset != 0) {
+            gp_Trsf move;
+            move.SetTranslation(gp_Vec(dir) * offset);
+            TopoDS_Face end = TopoDS::Face(chosen.cap.Moved(TopLoc_Location(move)));
+            result = prismBetweenFaces(profileFace, dir, start, end, 0, true);
+            if (!result.isOk || !capCoversProfile(result, profileFace, dir, coverageFailure))
+                return trackedError("The next-face offset does not completely bound the extrusion");
+        }
+        result.nextTargetIndex = chosen.body;
+        result.nextFaceIndex = chosen.face;
+        return result;
     }
 
     // Tool prism of `profile` along `direction` through everything in `bounds`: it ends on the
@@ -3023,7 +3278,9 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .property("faceEdgeMap", &TrackedShapeResult::faceEdgeMap)
         .property("faceAncestors", &TrackedShapeResult::faceAncestors)
         .property("edgeAncestors", &TrackedShapeResult::edgeAncestors)
-        .property("capFaces", &TrackedShapeResult::capFaces);
+        .property("capFaces", &TrackedShapeResult::capFaces)
+        .property("nextTargetIndex", &TrackedShapeResult::nextTargetIndex)
+        .property("nextFaceIndex", &TrackedShapeResult::nextFaceIndex);
 
     class_<ShapeFactory>("ShapeFactory")
         .class_function("box", guardedEntry<&ShapeFactory::box>("ShapeFactory.box"))
@@ -3064,6 +3321,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
         .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))
+        .class_function("prismNextTracked", guardedEntry<&ShapeFactory::prismNextTracked>("ShapeFactory.prismNextTracked"))
         .class_function("prismUntilTracked", guardedEntry<&ShapeFactory::prismUntilTracked>("ShapeFactory.prismUntilTracked"))
         .class_function("prismThruAllTracked", guardedEntry<&ShapeFactory::prismThruAllTracked>("ShapeFactory.prismThruAllTracked"))
         .class_function("booleanCommonTracked", guardedEntry<&ShapeFactory::booleanCommonTracked>("ShapeFactory.booleanCommonTracked"))
