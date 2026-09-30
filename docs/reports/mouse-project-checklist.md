@@ -52,7 +52,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | Ticket | Dependencies | Status | Agent | Task branch | Validation | Integration commit | Blockers |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | #81 Reject invalid fillet and chamfer results | — | Done (pushed) | mouse_81 | mouse/81-valid-corners | Pinned native rebuild; 182 worker/integrated tests; tsc/check | 0b8655a0701c86211723a4fe4dc1980f4ea95922 | — |
-| #82 Report actionable fillet and chamfer failure diagnostics | #81 | Implementing | root | mouse/82-corner-diagnostics | Pending native rebuild | — | — |
+| #82 Report actionable fillet and chamfer failure diagnostics | #81 | Done (pushed) | root | mouse/82-corner-diagnostics | Pinned native rebuild; 163 worker/183 integrated tests; tsc/check | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 | — |
 | #83 Support variable-radius fillets | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
@@ -63,11 +63,11 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96; worker architecture | Queued | — | — | Pending | — | — |
-| #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Implementing | mouse_86 | mouse/93-control-nurbs | Pending | — | — |
-| #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
+| #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Done (pushed) | mouse_86 | mouse/93-control-nurbs | 1186 worker/182 focused integrated tests; full suite/tsc/check/build | 9d2acd98b606c739832e6fbd87e018a803202f06 | — |
+| #94 Add an associative from-face extrusion start | Approved parametric 6 schema | Implementing | mouse_86 | mouse/94-from-face | Pending native verification | — | — |
 | #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
-| #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Implementing | mouse_81 | mouse/96-bounded-worker | Pending | — | — |
-| #97 Cancel an in-flight kernel operation | #96 | Queued | — | — | Pending | — | — |
+| #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Done (pushed) | mouse_81 | mouse/96-bounded-worker | Real browser worker; 9356 integrated tests, 1 skip; tsc/check/build | dadd98ce831e8ef831c3e415c3596979bb0531a8 | — |
+| #97 Cancel an in-flight kernel operation | #96 | Implementing | mouse_81 | mouse/97-native-cancel | Real Chromium/Firefox cancellation passes; final checks pending | — | — |
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
 | #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
 | #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
@@ -182,3 +182,9 @@ include actual OCCT/STL placement, cancellation, stale results and a 100,000-tri
 Eleven tickets delivered; 15 remain. #82 diagnostics, #93 NURBS, #96 workers and #103 tolerance
 are active. Recreated native caches use WSL /var/tmp plus a workspace archive backup after the
 earlier /tmp build directory disappeared; the completed #81 binary is unaffected.
+
+#82, #93 and #96 are integrated and published. The combined #93/#96 suite passes 9,356 tests
+with one skip; TypeScript, scoped required checks and production app/plugins pass. #82 adds 12
+real-kernel diagnostics tests; 183 combined native/worker regressions pass on its rebuilt kernel.
+Fourteen tickets delivered; 12 remain. #94 uses the approved parametric-6 schema; #97 cancellation
+and #103 STL tolerance remain active. Existing document version 2 stays; sketch is now version 3.
