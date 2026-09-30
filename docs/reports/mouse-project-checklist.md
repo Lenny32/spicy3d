@@ -53,8 +53,8 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | #81 Reject invalid fillet and chamfer results | — | Done (pushed) | mouse_81 | mouse/81-valid-corners | Pinned native rebuild; 182 worker/integrated tests; tsc/check | 0b8655a0701c86211723a4fe4dc1980f4ea95922 | — |
 | #82 Report actionable fillet and chamfer failure diagnostics | #81 | Done (pushed) | root | mouse/82-corner-diagnostics | Pinned native rebuild; 163 worker/183 integrated tests; tsc/check | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 | — |
-| #83 Support variable-radius fillets | #81, #82; reserved parametric 7 after #94 | Implementing | mouse_101 | mouse/83-variable-fillet | Native source ready; version registration waits for #94 | — | — |
-| #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
+| #83 Support variable-radius fillets | #81, #82; parametric 7 | Done (pushed) | mouse_101 | mouse/83-variable-fillet | 230 worker tests; full9495pass1skip; tsc/check/build/native rebuild | 948b0d5a85576d788e16f6115085817da2c544af | — |
+| #84 Support fillet corner setbacks | #81, #82; shared schema | Native feasibility proof | mouse_101 | mouse/84-corner-setbacks | Independent trimmed corner patch proof; no payload change yet | — | Free-form support feasibility |
 | #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
 | #86 Expose persistent edge references through MCP | #100 | Done (pushed) | mouse_86 | mouse/86-persistent-edges | 127 worker tests; 57 integrated tests; tsc/check | 91f48b5e47ac39c510a31a0dd0546874f226b224 | — |
 | #87 Add rule-based edge selection through MCP | #86 | Done (pushed) | mouse_86 | mouse/87-edge-selectors | 138 worker tests; 65 integrated tests; tsc/check | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 | — |
@@ -64,11 +64,11 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96, #97 | Done (pushed) | root | mouse/92-async-progress | 462 worker regressions; full9423pass1skip; tsc/check/build | 55abf61354b2c0e6750655a35de7dfafac71932a | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Done (pushed) | mouse_86 | mouse/93-control-nurbs | 1186 worker/182 focused integrated tests; full suite/tsc/check/build | 9d2acd98b606c739832e6fbd87e018a803202f06 | — |
-| #94 Add an associative from-face extrusion start | Approved parametric 6 schema | Implementing | mouse_86 | mouse/94-from-face | Pending native verification | — | — |
-| #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
+| #94 Add an associative from-face extrusion start | Parametric 6 | Done (pushed) | mouse_86 | mouse/94-from-face | 490 worker tests; 128+41 focused integration; full9495pass1skip; native/tsc/check/build | 3c5cf59763791d8f3a4314cf9460569b7776bbad | — |
+| #95 Add automatic up-to-next-face or body extrusion extent | #94; reserved parametric 8 | Implementing | mouse_86 | mouse/95-to-next | Native and UI/MCP draft; exact coverage/ranking verification pending | — | — |
 | #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Done (pushed) | mouse_81 | mouse/96-bounded-worker | Real browser worker; 9356 integrated tests, 1 skip; tsc/check/build | dadd98ce831e8ef831c3e415c3596979bb0531a8 | — |
 | #97 Cancel an in-flight kernel operation | #96 | Done (pushed) | mouse_81 | mouse/97-cancel-worker | 1159 worker tests; 37 integrated tests; real Chromium/Firefox cancellation; tsc/check/build | 5c6728d30a1995f787a75f030b32c57973add2a1 | — |
-| #98 Recover a crashed kernel without reloading the tab | #96, #97 | Implementing | mouse_81 | mouse/98-main-kernel-recovery | Independent generation/checkpoint work approved | — | Undo preservation decision pending |
+| #98 Recover a crashed kernel without reloading the tab | #96, #97 | Implementing | mouse_81 + root UI | mouse/98-main-kernel-recovery | Atomic adoption and permanent native-generation retirement; user approved undo reset | — | — |
 | #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
 | #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
 | #101 Import scan files as lightweight reference MeshNodes | — | Done (pushed) | mouse_101 | mouse/101-reference-mesh | 109 worker and integrated tests; tsc/check | 73abad86b68290bf386951c62a0df85d82684ffa | — |
@@ -208,3 +208,11 @@ deadlines and bounded retention are tested. Existing parametric background rebui
 pending jobs/known feature indexes; run_parametric itself remains synchronous. 462 worker
 regressions and the combined 9,423-test suite pass (one skip), plus tsc/check/app+plugin build.
 Seventeen tickets delivered; nine remain.
+
+#94 and #83 are integrated and pushed. Extrusions can begin on an associative curved face with
+exact caps; native planar-profile validation also covers oblique directions. Fillets accept an
+editable expression-based normalized arc-length radius law with explicit OCCT interpolation and
+direction limitations. Parametric versions 6 and 7 have pure migrations, atomic merge rules and
+new immutable fixtures. Combined validation: **9,495 tests pass, one skip**; TypeScript, capability
+generation, scoped check and production app plus all three plugins pass. Nineteen tickets delivered;
+seven remain. #95, #84 and #98 are delegated concurrently, with root reviewing integration and UI.
