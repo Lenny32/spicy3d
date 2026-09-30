@@ -525,7 +525,8 @@ export class ParametricBodyNode
      * re-enabling the history) always completes before the new command runs.
      */
     async reselectShapes(featureId: string): Promise<void> {
-        if (this.features.find((feature) => feature.id === featureId)?.type === "sweep") {
+        const type = this.features.find((feature) => feature.id === featureId)?.type;
+        if (type === "sweep" || type === "faceSweep") {
             await this.editFeature(featureId);
             return;
         }

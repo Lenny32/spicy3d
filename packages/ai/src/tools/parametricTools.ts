@@ -312,6 +312,8 @@ const OPS_SCHEMA = {
                 "loft",
                 "sweep",
                 "editSweep",
+                "faceSweep",
+                "editFaceSweep",
                 "projection",
                 "fillet",
                 "chamfer",
@@ -425,7 +427,7 @@ const OPS_SCHEMA = {
             },
             required: ["sketchId"],
             description:
-                "Sweep/editSweep: section sketch op id or node id. Omit profileIndex only when it has one profile. Holes are unsupported.",
+                "Sweep/editSweep/faceSweep/editFaceSweep: section sketch op id or node id. Omit profileIndex only when it has one profile. Holes are unsupported.",
         },
         path: {
             type: "object",
@@ -440,11 +442,19 @@ const OPS_SCHEMA = {
             },
             required: ["nodeId", "edgeIndexes"],
             description:
-                "Sweep/editSweep: path source op id or node id and connected whole-edge topology indexes in traversal order. Captures stable source ancestry when available. An untracked source follows only unambiguous geometric re-matches.",
+                "Sweep/editSweep/faceSweep/editFaceSweep: path source op id or node id and connected whole-edge topology indexes in traversal order. Captures stable source ancestry when available. Sweep alone can re-match untracked sources geometrically. FaceSweep requires proven reusable source ancestry.",
         },
         roundCorner: {
             type: "boolean",
-            description: "Sweep/editSweep: round path junctions (default false).",
+            description: "Sweep/editSweep/faceSweep/editFaceSweep: round path junctions (default false).",
+        },
+        support: {
+            type: "object",
+            properties: { nodeId: { type: "string" }, faceIndex: { type: "integer", minimum: 0 } },
+            required: ["nodeId", "faceIndex"],
+            additionalProperties: false,
+            description:
+                "FaceSweep/editFaceSweep: trimmed support face on a parametric body. The entire path must lie on this face; nearby curves are rejected.",
         },
         ruled: {
             type: "boolean",
@@ -458,9 +468,9 @@ const OPS_SCHEMA = {
         body: { type: "string", description: "The body op id (or an existing body's node id)" },
         operation: {
             type: "string",
-            enum: ["fuse", "cut", "common"],
+            enum: ["fuse", "cut", "common", "join"],
             description:
-                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve and loft have no join/cut form.)",
+                "Extrude/boolean: fuse, cut or common. FaceSweep/editFaceSweep: join or cut into the named body; requires an authored section at the path start and a proven support reference.",
         },
         selector: EDGE_SELECTOR_SCHEMA,
         expectedCount: {
@@ -589,7 +599,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, sweep, editSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },

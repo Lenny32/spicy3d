@@ -9,6 +9,7 @@ import "./extrudeEditCommand";
 import "./loftCommand";
 import "./loftEditCommand";
 import "./sweepCommand";
+import "./faceSweepCommand";
 import "./sweepEditCommand";
 import "./projectionCommand";
 import "./reselectCommand";

@@ -207,6 +207,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                     "feature.revolve",
                     "feature.loft",
                     "feature.sweep",
+                    "feature.faceSweep",
                     "feature.projection",
                 ],
             },

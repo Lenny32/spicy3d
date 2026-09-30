@@ -33,6 +33,7 @@ import type {
     BooleanOperation,
     ExtrudeExtent,
     ExtrudeFeatureData,
+    FaceSweepFeatureData,
     FeatureData,
     LoftFeatureData,
     ProjectionFeatureData,
@@ -100,6 +101,8 @@ export type ParametricOp =
     | LoftOp
     | SweepOp
     | EditSweepOp
+    | FaceSweepOp
+    | EditFaceSweepOp
     | ProjectionOp
     | FilletChamferOp
     | ThickenOp
@@ -271,6 +274,31 @@ export interface EditSweepOp {
     section?: SweepSectionInput;
     path?: SweepPathInput;
     solid?: boolean;
+    roundCorner?: boolean;
+}
+
+export interface FaceSweepSupportInput {
+    nodeId: string;
+    faceIndex: number;
+}
+export interface FaceSweepOp {
+    op: "faceSweep";
+    id: string;
+    body: string;
+    section: SweepSectionInput;
+    path: SweepPathInput;
+    support: FaceSweepSupportInput;
+    operation: "join" | "cut";
+    roundCorner?: boolean;
+}
+export interface EditFaceSweepOp {
+    op: "editFaceSweep";
+    body: string;
+    featureId: string;
+    section?: SweepSectionInput;
+    path?: SweepPathInput;
+    support?: FaceSweepSupportInput;
+    operation?: "join" | "cut";
     roundCorner?: boolean;
 }
 
@@ -523,6 +551,12 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "sweep":
             runSweepOp(state, op);
+            break;
+        case "faceSweep":
+            runFaceSweepOp(state, op);
+            break;
+        case "editFaceSweep":
+            runEditFaceSweepOp(state, op);
             break;
         case "editSweep":
             runEditSweepOp(state, op);
@@ -1006,7 +1040,9 @@ function sweepPathInput(state: State, input: SweepPathInput): SweepFeatureData["
     const node = resolveNode(state, input.nodeId, "path source");
     if (!(node instanceof ShapeNode) || !node.shape.isOk)
         throw new Error("Sweep path source has no valid shape");
-    const count = node.shape.value.findSubShapes(ShapeTypes.edge).length;
+    const topology = node.shape.value.findSubShapes(ShapeTypes.edge);
+    const count = topology.length;
+    for (const edge of topology) edge.dispose();
     const used = new Set<number>();
     const edges = input.edgeIndexes.map((index) => {
         if (!Number.isInteger(index) || index < 0 || index >= count || used.has(index))
@@ -1060,6 +1096,67 @@ function runEditSweepOp(state: State, op: EditSweepOp): void {
         section: op.section !== undefined ? sweepSectionInput(state, op.section) : feature.section,
         path: op.path !== undefined ? sweepPathInput(state, op.path) : feature.path,
         ...((op.solid ?? feature.solid) === false ? { solid: false } : {}),
+        ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
+    };
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
+}
+
+function faceSweepSupportInput(
+    state: State,
+    support: FaceSweepSupportInput,
+): FaceSweepFeatureData["support"] {
+    if (
+        !support ||
+        typeof support.nodeId !== "string" ||
+        !Number.isInteger(support.faceIndex) ||
+        support.faceIndex < 0
+    )
+        throw new Error("Face sweep support requires nodeId and nonnegative faceIndex");
+    const body = resolveBody(state, support.nodeId);
+    const captured = captureProjectionTarget(body, support.faceIndex);
+    if (!captured.isOk) throw new Error(captured.error);
+    return captured.value;
+}
+function faceSweepOptions(op: { operation?: string; roundCorner?: boolean }): void {
+    if (op.operation !== undefined && op.operation !== "join" && op.operation !== "cut")
+        throw new Error("Face sweep operation must be join or cut");
+    sweepOptions(op);
+}
+function runFaceSweepOp(state: State, op: FaceSweepOp): void {
+    if (typeof op.id !== "string" || !op.id) throw new Error("Face sweep requires a result id");
+    faceSweepOptions(op);
+    if (op.operation === undefined) throw new Error("Face sweep requires join or cut operation");
+    const body = resolveBody(state, op.body);
+    const feature: FaceSweepFeatureData = {
+        id: Id.generate(),
+        type: "faceSweep",
+        section: sweepSectionInput(state, op.section),
+        path: sweepPathInput(state, op.path),
+        support: faceSweepSupportInput(state, op.support),
+        operation: op.operation,
+        ...(op.roundCorner === true ? { roundCorner: true } : {}),
+    };
+    appendFeature(state, body, feature);
+    resolveSketch(state, feature.section.sketchId).visible = false;
+    state.refs.set(op.id, body.id);
+}
+function runEditFaceSweepOp(state: State, op: EditFaceSweepOp): void {
+    faceSweepOptions(op);
+    if ([op.section, op.path, op.support, op.operation, op.roundCorner].every((value) => value === undefined))
+        throw new Error("editFaceSweep requires a pick or option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "faceSweep") throw new Error("editFaceSweep requires a face sweep feature");
+    const before = erroredFeatureIds(body);
+    const { roundCorner: _round, ...rest } = feature;
+    const edited: FaceSweepFeatureData = {
+        ...rest,
+        section: op.section === undefined ? feature.section : sweepSectionInput(state, op.section),
+        path: op.path === undefined ? feature.path : sweepPathInput(state, op.path),
+        support: op.support === undefined ? feature.support : faceSweepSupportInput(state, op.support),
+        operation: op.operation ?? feature.operation,
         ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
     };
     body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));

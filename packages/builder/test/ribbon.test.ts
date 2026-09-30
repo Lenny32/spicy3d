@@ -118,12 +118,13 @@ describe("mergeRibbonProfiles", () => {
     test("with parametric, SOLID/CREATE should lead with sketch.create then the features", () => {
         const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
         const create = findGroup(merged, "ribbon.tab.solid", "ribbon.group.create");
-        expect(flattenItems(create.items).slice(0, 6)).toEqual([
+        expect(flattenItems(create.items).slice(0, 7)).toEqual([
             "sketch.create",
             "feature.extrude",
             "feature.revolve",
             "feature.loft",
             "feature.sweep",
+            "feature.faceSweep",
             "feature.projection",
         ]);
         expect(create.collapsedItems?.[0]).toBe("sketch.enter");

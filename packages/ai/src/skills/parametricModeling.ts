@@ -6,7 +6,7 @@ import type { Skill } from "./types";
 export const parametricModeling: Skill = {
     name: "parametric-modeling",
     description:
-        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
+        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/sweep/projection/faceSweep/editFaceSweep/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
     content: `Parametric modeling. run_parametric builds a feature TREE the user can re-edit; run_program builds throwaway geometry.
 
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
@@ -99,6 +99,20 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
 - { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
+  Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at
+  the path start, perpendicular to its tangent; this operation does not relocate a misplaced profile.
+  Every ordered whole path edge must lie on the full trimmed support face. Uses the true support-normal
+  Darboux frame, not a free-space sweep. Nearby/off-surface paths and paths crossing holes are refused.
+  Section/path/support transforms are resolved into the host's local coordinates at the feature timeline.
+  Requires actual reusable path and support ancestry: untracked/path-ref logical tokens are unsupported.
+  The result must attach/intersect, change material, and form one valid connected solid. Curved walls
+  are supported. Upstream edits follow actual tracked ancestry; moved starts require compatible authored
+  section placement. The source sketches stay separate; the profile is hidden when creation succeeds.
+- { op: "editFaceSweep", body, featureId, section?, path?, support?, operation?, roundCorner? }
+  Re-picks or changes a face-sweep feature. Omitted fields keep their previous value. Invalid picks fail
+  the whole call and leave the previous committed model and undo position intact.
+
 - { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
   Fillets also accept radiusLaw: [{position:0,radius:"noseRadius"}, {position:1,radius:"tailRadius"}].
   Use 2–64 increasing samples with endpoints 0 and 1; radii are positive lengths/expressions.

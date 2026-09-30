@@ -37,6 +37,8 @@ describe("parametricTools", () => {
             "loft",
             "sweep",
             "editSweep",
+            "faceSweep",
+            "editFaceSweep",
             "projection",
             "fillet",
             "chamfer",
