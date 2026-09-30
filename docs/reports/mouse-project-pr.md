@@ -28,8 +28,9 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #82 | Native corner preflight and actionable OCCT construction diagnostics | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 |
 | #97 | Terminate in-flight native workers and roll back cancelled programs | 5c6728d30a1995f787a75f030b32c57973add2a1 |
 | #103 | Isolated STL linear/angular tessellation controls in UI and MCP | 16a7b3796fb0a46b5f1130993409302bdb932639 |
+| #92 | Runtime background programs, live status/cancellation and retained results | 55abf61354b2c0e6750655a35de7dfafac71932a |
 
-Validation: 9,356 passing tests on the combined NURBS/worker integration, one skip; production build, TypeScript and required
+Validation: 9,423 passing tests on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
 concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are validated and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain unconfirmed without original data.
 
@@ -61,7 +62,12 @@ Additional #103 validation: 247 worker and 111 integration tests, rebuilt native
 TypeScript and required lint. Actual curved fidelity/coarsening, physical units and CAD/cache
 immutability checks pass. Custom tessellation remains synchronous and is approximation control.
 
-Remaining project work: #83–#85, #88–#90, #92, #94–#95, #98 (10 tickets).
+Additional #92 validation: 462 worker regressions and the full9423-test suite pass (one skip),
+TypeScript, required lint and production app/plugins. Existing parametric background rebuild
+status is observable; run_parametric remains synchronous. Runtime job state is bounded and
+caller/document-scoped, with queue ordering and rollback unchanged.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103.
+Remaining project work: #83–#85, #88–#90, #94–#95, #98 (9 tickets).
+
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92.
 Keep issues open and never merge this PR automatically.

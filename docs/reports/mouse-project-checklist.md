@@ -62,7 +62,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
 | #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
-| #92 Expose asynchronous rebuild progress through MCP | #96, #97 | Implementing | root | mouse/92-async-progress | MCP job/status/cancellation tests pass; final checks pending | — | — |
+| #92 Expose asynchronous rebuild progress through MCP | #96, #97 | Done (pushed) | root | mouse/92-async-progress | 462 worker regressions; full9423pass1skip; tsc/check/build | 55abf61354b2c0e6750655a35de7dfafac71932a | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Approved sketch 3 schema | Done (pushed) | mouse_86 | mouse/93-control-nurbs | 1186 worker/182 focused integrated tests; full suite/tsc/check/build | 9d2acd98b606c739832e6fbd87e018a803202f06 | — |
 | #94 Add an associative from-face extrusion start | Approved parametric 6 schema | Implementing | mouse_86 | mouse/94-from-face | Pending native verification | — | — |
 | #95 Add automatic up-to-next-face or body extrusion extent | #94; shared schema | Queued | — | — | Pending | — | — |
@@ -200,3 +200,11 @@ independent native copy. Cylinder/sphere fidelity, repeatable coarsening, physic
 and exact CAD/BREP/display-cache/default-STL preservation pass. 247 worker and 111 integrated
 tests, TypeScript and required check pass. Sixteen tickets delivered; 10 remain. #83 is reserved
 for parametric7 after #94; root implements92 while98recovery prepares independent infrastructure.
+
+#92 is integrated and pushed: append-only background program jobs return live operation counts
+and retained completion results; status/cancel bypass the shared mutation FIFO by private
+built-in identity. Caller/document binding, copied input, session-end cancellation, native rollback,
+deadlines and bounded retention are tested. Existing parametric background rebuild status exposes
+pending jobs/known feature indexes; run_parametric itself remains synchronous. 462 worker
+regressions and the combined 9,423-test suite pass (one skip), plus tsc/check/app+plugin build.
+Seventeen tickets delivered; nine remain.
