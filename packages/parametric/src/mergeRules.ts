@@ -219,6 +219,7 @@ registerMergePayload("sketch.data", {
                         type: scalar,
                         params: atomic,
                         construction: scalar,
+                        control: atomic,
                         parametrization: scalar,
                         periodic: scalar,
                     },

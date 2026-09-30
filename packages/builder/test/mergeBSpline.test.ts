@@ -1,7 +1,16 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { mergeDocuments, migrateDocument, type Serialized } from "@spicy3d/core";
+import {
+    assembleManifest,
+    compareDocuments,
+    decodeDocumentFile,
+    encodeDocumentFile,
+    mergeDocuments,
+    migrateDocument,
+    type Serialized,
+    splitManifest,
+} from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
 import "@spicy3d/parametric";
@@ -81,4 +90,66 @@ describe("merging bsplines", () => {
         expect(result.conflicts.map((x) => x.kind)).toEqual(["property"]);
         expect(result.conflicts[0].path).toContain("parametrization");
     });
+});
+
+function controlBase(): Json {
+    const fixture = loadDocumentFixtures().find((x) => x.name === "v2/sketch3-control-nurbs.json");
+    expect(fixture).not.toBeUndefined();
+    return migrateDocument(fixture!.data).value;
+}
+
+test("control layout conflicts atomically rather than combining unrelated weights and knots", () => {
+    const b = controlBase();
+    const ours = editBSpline(b, "sketch-open", (e) => ({
+        ...e,
+        control: { ...e.control, weights: [1, 1, 1] },
+    }));
+    const theirs = editBSpline(b, "sketch-open", (e) => ({ ...e, control: { ...e.control, knots: [0, 2] } }));
+    const result = merge(b, ours, theirs);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].path).toBe("node/sketch-open/entity/1/control");
+    expect(bspline(result.merged, "sketch-open").control).toEqual(bspline(ours, "sketch-open").control);
+});
+test("pole movement and a weight edit merge independently with stable entity paths", () => {
+    const b = controlBase();
+    const ours = editBSpline(b, "sketch-open", (e) => ({ ...e, params: [20, 0, 22, 22, 0, 20] }));
+    const theirs = editBSpline(b, "sketch-open", (e) => ({
+        ...e,
+        control: { ...e.control, weights: [1, 1, 1] },
+    }));
+    const result = merge(b, ours, theirs);
+    expect(result.conflicts).toEqual([]);
+    expect(bspline(result.merged, "sketch-open")).toMatchObject({
+        id: 1,
+        params: [20, 0, 22, 22, 0, 20],
+        control: { weights: [1, 1, 1] },
+    });
+    const compared = compareDocuments(b, theirs);
+    expect(compared.isOk).toBe(true);
+    expect(compared.value).toHaveLength(1);
+    expect(compared.value[0].target).toContain("sketch-open");
+});
+test("cloud manifests and device spicy export round-trip control metadata exactly", async () => {
+    const b = controlBase();
+    const { manifest, blobs } = await splitManifest(b);
+    const assembled = assembleManifest(JSON.parse(JSON.stringify(manifest)), (sha) => blobs.get(sha));
+    expect(assembled.isOk).toBe(true);
+    expect(assembled.value).toEqual(b);
+    const decoded = await decodeDocumentFile(await encodeDocumentFile(assembled.value));
+    expect(decoded.isOk).toBe(true);
+    expect(decoded.value).toEqual(b);
+    expect(bspline(decoded.value, "sketch-periodic").control.weights).toEqual([1, 2, 1, 2]);
+    const encodedBlobs = Object.fromEntries(
+        [...blobs].map(([sha, bytes]) => [sha, Buffer.from(bytes).toString("base64")]),
+    );
+    encodedBlobs["manifest"] = Buffer.from(JSON.stringify(manifest)).toString("base64");
+    const cloudExport = {
+        type: "spicy3d.cloudVersion",
+        exportFormat: 1,
+        manifestSha256: "manifest",
+        blobs: encodedBlobs,
+    };
+    const exported = await decodeDocumentFile(new Blob([JSON.stringify(cloudExport)]));
+    expect(exported.isOk).toBe(true);
+    expect(exported.value).toEqual(b);
 });

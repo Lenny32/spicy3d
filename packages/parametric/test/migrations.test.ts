@@ -109,10 +109,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 2 (bspline)", () => {
+describe("sketch format 3 (control NURBS)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(2);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(2);
+        expect(SKETCH_FORMAT_VERSION).toBe(3);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(3);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -123,7 +123,7 @@ describe("sketch format 2 (bspline)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 2 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 3 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -132,7 +132,7 @@ describe("sketch format 2 (bspline)", () => {
         expect(sketchV1Fixtures().length).toBeGreaterThan(0);
     });
 
-    test("a sketch 2 document with bsplines needs no migration and keeps them as stored", () => {
+    test("a sketch 2 document migrates with fit bsplines unchanged", () => {
         const { data } = fixture("v2/sketch2-bspline.json");
         expect(data["moduleVersions"]).toMatchObject({ sketch: 2 });
 

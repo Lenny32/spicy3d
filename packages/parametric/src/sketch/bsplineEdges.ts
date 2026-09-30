@@ -10,6 +10,7 @@ import {
     bsplineDegree,
     bsplineFitParams,
     bsplinePoints,
+    entityBSpline,
     interpolateBSpline,
 } from "./bsplineGeometry";
 
@@ -53,7 +54,12 @@ export function bsplineSpanCount(count: number, periodic: boolean): number {
 }
 
 /** Edges `bsplineEdges` produces for an entity with `params` (1 with the binding, one per span without). */
-export function bsplineEdgeCount(params: readonly number[], periodic: boolean): number {
+export function bsplineEdgeCount(
+    params: readonly number[],
+    periodic: boolean,
+    control?: BSplineOptions["control"],
+): number {
+    if (control !== undefined) return kernelBuildsBSplineEdges() ? 1 : control.knots.length - 1;
     if (kernelBuildsBSplineEdges()) return 1;
     // counted on the points the curve is built from (a periodic one drops a repeated first point)
     const fit = bsplineFitParams(bsplinePoints(params), periodic);
@@ -71,6 +77,19 @@ export function bsplineEdges(
     plane: Plane,
 ): Result<IEdge[]> {
     const fit = bsplinePoints(params);
+    if (options.control !== undefined) {
+        let curve: BSplineCurve2d;
+        try {
+            curve = entityBSpline(params, options);
+        } catch (error) {
+            return Result.err(error instanceof Error ? error.message : String(error));
+        }
+        if (!kernelBuildsBSplineEdges() && curve.weights !== undefined)
+            return Result.err(
+                "Weighted control B-splines require the native B-spline binding; this kernel is too old",
+            );
+        return kernelBuildsBSplineEdges() ? singleEdge(curve, plane) : bezierEdges(curve, [], plane);
+    }
     const curve = interpolateBSpline(fit, options);
     if (!curve.isOk) return Result.err(curve.error);
     return kernelBuildsBSplineEdges() ? singleEdge(curve.value, plane) : bezierEdges(curve.value, fit, plane);
@@ -83,13 +102,14 @@ function singleEdge(curve: BSplineCurve2d, plane: Plane): Result<IEdge[]> {
         curve.multiplicities,
         curve.degree,
         curve.periodic,
+        curve.weights,
     );
     return edge.isOk ? Result.ok([edge.value]) : Result.err(edge.error);
 }
 
 function bezierEdges(curve: BSplineCurve2d, fit: readonly BSplinePoint[], plane: Plane): Result<IEdge[]> {
     const segments = bsplineBezierSegments(curve);
-    if (!curve.periodic) {
+    if (!curve.periodic && fit.length > 0) {
         // an open curve ends exactly on its first and last fit points (other entities join there)
         segments[0][0] = fit[0];
         segments[segments.length - 1][curve.degree] = fit[fit.length - 1];

@@ -20,6 +20,7 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
+import { promptControlBSpline } from "../../src/sketch/editor/controlBSplinePrompt";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
 import { ConstraintKind, type SketchData } from "../../src/sketch/sketchModel";
@@ -779,4 +780,72 @@ describe("SketchEditor session statics", () => {
             restoreFactory();
         }
     });
+});
+
+test("control settings confirm/cancel and pole dragging are separate undoable editor commits", () => {
+    const { doc, restoreFactory } = setup();
+    const factory = shapeFactory as any;
+    factory.supportsBSplineEdges = true;
+    factory.bspline = () => Result.ok({ isEqual: () => false });
+    const originalPub = PubSub.default.pub;
+    let dialog: { content: HTMLElement; buttons: any[] } | undefined;
+    PubSub.default.pub = ((topic: string, ...args: any[]) => {
+        if (topic === "showDialog") dialog = { content: args[1], buttons: args[2] };
+        else (originalPub as any).call(PubSub.default, topic, ...args);
+    }) as typeof originalPub;
+    try {
+        const data: SketchData = {
+            entities: [
+                {
+                    id: 1,
+                    type: "bspline",
+                    params: [1, 0, 1, 1, 0, 1],
+                    control: {
+                        degree: 2,
+                        knots: [0, 1],
+                        multiplicities: [3, 3],
+                        weights: [1, Math.SQRT1_2, 1],
+                    },
+                },
+            ],
+            constraints: [],
+        };
+        const node = new SketchNode({ document: doc, plane: Plane.XY, data });
+        const editor = SketchEditor.enter(node);
+        const count = doc.history.undoCount();
+        promptControlBSpline(editor, 1);
+        expect(dialog).not.toBeUndefined();
+        const weights = dialog!.content.querySelector<HTMLInputElement>('[name="weights"]');
+        expect(weights).not.toBeNull();
+        weights!.value = "1, 0, 1";
+        expect(dialog!.buttons[0].shouldClose()).toBe(false);
+        expect(node.data).toEqual(data);
+        weights!.value = "1, 1, 1";
+        dialog!.buttons[1].onclick();
+        expect(doc.history.undoCount()).toBe(count);
+        promptControlBSpline(editor, 1);
+        const next = dialog!.content.querySelector<HTMLInputElement>('[name="weights"]');
+        expect(next).not.toBeNull();
+        next!.value = "1, 1, 1";
+        expect(dialog!.buttons[0].shouldClose()).toBe(true);
+        expect(node.data.entities[0].control?.weights).toEqual([1, 1, 1]);
+        expect(doc.history.undoCount()).toBe(count + 1);
+        editor.solver.setPointPosition({ entityId: 1, pointIndex: 1 }, 2, 3);
+        editor.solve(true);
+        editor.commit();
+        expect(node.data.entities[0].params).toEqual([1, 0, 2, 3, 0, 1]);
+        doc.history.undo();
+        expect(editor.solver.entity(1)?.params).toEqual(data.entities[0].params);
+        expect(editor.solver.entity(1)?.control?.weights).toEqual([1, 1, 1]);
+        doc.history.undo();
+        expect(node.data).toEqual(data);
+        expect(editor.solver.entity(1)?.control).toEqual(data.entities[0].control);
+        doc.history.redo();
+        doc.history.redo();
+        expect(editor.solver.entity(1)?.params).toEqual([1, 0, 2, 3, 0, 1]);
+    } finally {
+        PubSub.default.pub = originalPub;
+        SketchEditor.exit();
+        restoreFactory();
+    }
 });

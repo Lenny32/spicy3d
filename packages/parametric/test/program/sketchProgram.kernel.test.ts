@@ -844,3 +844,75 @@ describe("construction geometry", () => {
         expect(doc.modelManager.findNodes(() => true)).toEqual([]);
     });
 });
+
+test("control NURBS authoring and later settings edit preserve pole and entity identity", () => {
+    const doc = newDoc();
+    const created = run(doc, [
+        {
+            op: "sketch",
+            id: "control",
+            entities: [
+                {
+                    type: "bspline",
+                    name: "arc",
+                    poles: [
+                        [1, 0],
+                        [1, 1],
+                        [0, 1],
+                    ],
+                    degree: 2,
+                    knots: [0, 1],
+                    multiplicities: [3, 3],
+                    weights: [1, Math.SQRT1_2, 1],
+                },
+            ],
+        },
+    ]);
+    const sketch = sketchOf(doc, created, "control");
+    const original = sketch.data.entities[0];
+    expect(original.params).toEqual([1, 0, 1, 1, 0, 1]);
+    expect(original.parametrization).toBeUndefined();
+    const next = JSON.parse(
+        JSON.stringify([
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [
+                    {
+                        action: "setBSpline",
+                        entity: original.id,
+                        weights: [1, 1, 1],
+                    },
+                    { action: "movePoint", entity: original.id, point: 1, to: [2, 2] },
+                ],
+            },
+        ]),
+    ) as ParametricOp[];
+    run(doc, next);
+    expect(sketch.data.entities[0]).toMatchObject({
+        id: original.id,
+        params: [1, 0, 2, 2, 0, 1],
+        control: { weights: [1, 1, 1] },
+    });
+    doc.history.undo();
+    expect(sketch.data.entities[0]).toEqual(original);
+    doc.history.redo();
+    expect(sketch.data.entities[0].control?.weights).toEqual([1, 1, 1]);
+    const previous = sketch.data;
+    expect(
+        runExpectingFailure(doc, [
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [
+                    {
+                        action: "setBSpline",
+                        entity: original.id,
+                        weights: [0, 1, 1],
+                    },
+                ],
+            },
+        ]),
+    ).toMatch(/positive finite/);
+    expect(sketch.data).toEqual(previous);
+});
