@@ -149,7 +149,7 @@ export class ModelManager extends Observable {
     }
 
     /** Dispose detached old nodes without removing newly published visuals with the same stable IDs. */
-    disposeRecoveryRoot(root: INodeLinkedList): void {
+    disposeRecoveryRoot(root: INode): void {
         const previous = this.preparingRecovery;
         this.preparingRecovery = true;
         try {

@@ -15,7 +15,7 @@ import {
     ShapeTypes,
 } from "@spicy3d/core";
 import { createMockApplication, createMockDocument, TestDocument } from "@spicy3d/core/test-utils";
-import { buildCapabilityTools, summarizeRefIds } from "../src/tools/capabilityEngine";
+import { buildCapabilityTools, recoverDocumentRefs, summarizeRefIds } from "../src/tools/capabilityEngine";
 import { takeSlowOpWarnings } from "../src/tools/opBudget";
 
 describe("capabilityEngine", () => {
@@ -560,6 +560,36 @@ describe("capabilityEngine", () => {
                 );
                 expect(Object.values(later.results)).toEqual(Array.from({ length: count }, () => 3));
             } finally {
+                rs.unstubAllGlobals();
+            }
+        });
+
+        test("recovery invalidates creation snapshot extras without entering their old native handles", async () => {
+            const length = rs.fn(() => 3);
+            const box = rs.fn(() => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape));
+            const removeFillet = rs.fn(() =>
+                Result.ok({
+                    shape: { shapeType: ShapeTypes.solid } as unknown as IShape,
+                    newEdges: [{ shapeType: ShapeTypes.edge, length }],
+                }),
+            );
+            const { nodes } = setup({ box, removeFillet });
+            try {
+                await run([
+                    { id: "b", method: "box", args: { dx: 10, dy: 20, dz: 5 } },
+                    { id: "rf", method: "removeFillet", args: { shape: "b", faces: [] } },
+                ]);
+                const document = (nodes[1] as EditableShapeNode).document;
+                rs.spyOn(document.modelManager, "findNode").mockImplementation(
+                    (predicate) => nodes.find((node) => predicate(node as EditableShapeNode)) as never,
+                );
+                recoverDocumentRefs(document);
+                await expect(
+                    run([{ id: "length", method: "edge.length", target: "rf#newEdges#0" }]),
+                ).rejects.toThrow("rf#newEdges#0");
+                expect(length).not.toHaveBeenCalled();
+            } finally {
+                rs.restoreAllMocks();
                 rs.unstubAllGlobals();
             }
         });

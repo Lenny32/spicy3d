@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDocument, type INode, Logger } from "@spicy3d/core";
+import { type IDocument, type INode, type IVariableTable, Logger } from "@spicy3d/core";
 
 /**
  * A node whose geometry is derived from the document's parameter table.
@@ -22,11 +22,11 @@ function isVariableConsumer(node: INode): node is INode & IVariableConsumer {
     return typeof candidate?.applyVariables === "function" && typeof candidate.variableSyncOrder === "number";
 }
 
-const synced = new WeakSet<IDocument>();
-const seenRevisions = new WeakMap<IDocument, number>();
+const synced = new WeakSet<IVariableTable>();
+const seenRevisions = new WeakMap<IVariableTable, number>();
 
 /**
- * Subscribes `document` to its parameter table, once per document. Every consumer
+ * Subscribes `document` to its parameter table, once per table instance. Every consumer
  * registers, but only the first registration walks the tree.
  *
  * One dispatcher rather than each node subscribing itself: node registration order
@@ -39,13 +39,14 @@ const seenRevisions = new WeakMap<IDocument, number>();
  * (a rebuild that writes back) cannot start a second pass.
  */
 export function ensureVariableSync(document: IDocument): void {
-    if (synced.has(document)) return;
-    synced.add(document);
-    document.variables.onPropertyChanged((property) => {
-        if (property !== "variablesJson") return;
-        const revision = document.variables.revision;
-        if (seenRevisions.get(document) === revision) return;
-        seenRevisions.set(document, revision);
+    const table = document.variables;
+    if (synced.has(table)) return;
+    synced.add(table);
+    table.onPropertyChanged((property) => {
+        if (property !== "variablesJson" || document.variables !== table) return;
+        const revision = table.revision;
+        if (seenRevisions.get(table) === revision) return;
+        seenRevisions.set(table, revision);
         refreshConsumers(document);
     });
 }

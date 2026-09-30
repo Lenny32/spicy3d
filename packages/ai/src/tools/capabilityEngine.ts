@@ -112,7 +112,7 @@ export function recoverDocumentRefs(document: IDocument): void {
     const anchored = (entry: LocalRef, visited = new Set<LocalRef>()): boolean => {
         if (visited.has(entry)) return false;
         visited.add(entry);
-        if (entry.parent) return anchored(entry.parent, visited);
+        if (entry.parent) return entry.name !== undefined && anchored(entry.parent, visited);
         return (
             entry.nodeId !== undefined &&
             document.modelManager.findNode((node) => node.id === entry.nodeId) instanceof ShapeNode

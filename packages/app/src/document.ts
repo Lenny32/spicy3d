@@ -35,6 +35,7 @@ import {
     type Material,
     ModelManager,
     MultiShapeNode,
+    NodeUtils,
     NullVisual,
     Observable,
     ObservableCollection,
@@ -219,7 +220,8 @@ export class Document extends Observable implements IDocument {
                 metadata.variables.dispose();
                 metadata.settings.dispose();
                 for (const act of metadata.acts) act.dispose();
-                for (const component of components) for (const node of component.nodes) node.dispose();
+                for (const component of components)
+                    for (const node of component.nodes) this.modelManager.disposeRecoveryRoot(node);
                 for (const material of materials ?? []) material.dispose();
             });
             disposed = true;
@@ -239,7 +241,14 @@ export class Document extends Observable implements IDocument {
                 this.modelManager.withRecoveryCollections(components, materials, () =>
                     KernelRecoveryValidation.run(this, () => {
                         graph = this.modelManager.prepareRecoveryNodes(data["models"].nodes, () => {
-                            for (const node of this.modelManager.findNodes()) {
+                            const componentNodes = components.flatMap((component) =>
+                                component.nodes.flatMap((node) =>
+                                    NodeUtils.isLinkedListNode(node)
+                                        ? [node, ...NodeUtils.findNodes(node)]
+                                        : [node],
+                                ),
+                            );
+                            for (const node of [...this.modelManager.findNodes(), ...componentNodes]) {
                                 if (node instanceof ShapeNode) {
                                     if (!node.shape.isOk)
                                         throw new Error(
@@ -255,6 +264,7 @@ export class Document extends Observable implements IDocument {
                                 KernelRecoveryValidation.validateNode(node);
                                 if (node instanceof GeometryNode) void node.mesh;
                             }
+                            for (const component of components) void component.mesh;
                         });
                     }),
                 );
