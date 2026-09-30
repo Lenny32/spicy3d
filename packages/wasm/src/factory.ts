@@ -953,6 +953,22 @@ export class ShapeFactory implements IShapeFactory {
             "Sweep",
         );
     }
+    faceSweepTracked(
+        section: IWire,
+        path: IWire,
+        support: IFace,
+        roundCorner: boolean,
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { faceSweepTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).faceSweepTracked;
+        if (!binding) return Result.err("Support-normal face sweep requires a newer geometry kernel");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(section)[0], ensureOccShape(path)[0], ensureOccShape(support)[0], roundCorner],
+            "Face sweep",
+        );
+    }
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape> {
         return convertShapeResult(
             wasm.ShapeFactory.revolve,
