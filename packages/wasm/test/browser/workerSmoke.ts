@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import MainModuleFactory from "../../lib/spicy-wasm";
+import { replicaTopology } from "../../src/replicaTopology";
 import { createKernelWorker } from "../../src/workerFactory";
 import type { KernelResult } from "../../src/workerProtocol";
 
@@ -51,6 +52,28 @@ async function run() {
                 "Imported bounds differ",
             );
             ok(await client.request("release", { handles: [imported] }));
+            const bounded = ok(
+                await client.request("boundedReplica", {
+                    method: "fillet",
+                    shape: { brep, topology: replicaTopology(main, baseline) },
+                    edges: [0],
+                    value: 1,
+                }),
+            );
+            const rounded = main.Converter.convertFromBrep(bounded.brep);
+            try {
+                check(main.Shape.check(rounded), "Bounded fillet returned invalid geometry");
+                check(
+                    main.Shape.volume(rounded) < main.Shape.volume(baseline),
+                    "Bounded fillet did not remove material",
+                );
+                check(
+                    JSON.stringify(replicaTopology(main, rounded)) === JSON.stringify(bounded.topology),
+                    "Bounded replica changed topology order",
+                );
+            } finally {
+                rounded.delete();
+            }
         } finally {
             baselineResult.delete();
         }

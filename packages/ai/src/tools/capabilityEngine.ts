@@ -3,14 +3,20 @@
 
 import {
     ANGLE_UNITS,
+    AutosaveHolds,
+    type BoundedShapeRequest,
+    DocumentMutations,
+    DocumentRebuilds,
     EditableShapeNode,
     evaluateExpression,
     I18n,
     type IDocument,
+    type IDocumentMutationScope,
     type IEdge,
     type IFace,
     type INode,
     type IShape,
+    type IShapeFactory,
     type IWire,
     LENGTH_UNITS,
     Line,
@@ -35,7 +41,8 @@ import {
     type ShapeParamUnit,
     shapeCapabilities,
 } from "./capabilities.generated";
-import { throwIfCancelled, timeOp } from "./opBudget";
+import { throwIfCancelled, timeOpAsync } from "./opBudget";
+import { holdDocumentReadSnapshot } from "./readTools";
 import { buildTransformMatrix } from "./transformMatrix";
 
 interface Op {
@@ -932,6 +939,14 @@ function recordSubShapeRefs(
 async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const doc = activeDocument();
     const factory = globalThis.app.shapeProvider.factory;
+    const assertIdle = () => {
+        if (globalThis.app.executingCommand || Transaction.isActive(doc))
+            throw new Error("Finish the active command or transaction before running a modeling program");
+    };
+    assertIdle();
+    // An earlier legitimate parametric job must finish before external writes are locked out.
+    await DocumentRebuilds.settled(doc);
+    assertIdle();
     const localRefs = sessionRefs(doc);
     const created: CreatedNode[] = [];
     const removed: RemovedNode[] = [];
@@ -948,20 +963,49 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     // would dangle (pointing at rolled-back nodes), and refs deleted mid-program belong to
     // nodes the rollback restored — so reset the registries to their pre-program state.
     const nullRefs = sessionNullRefs(doc);
-    const refSnapshot = new Map(localRefs);
+    const refSnapshot = snapshotRefs(localRefs);
     const nullSnapshot = new Set(nullRefs);
+    const releaseSnapshot = holdDocumentReadSnapshot(doc);
+    let owner: IDocumentMutationScope;
+    try {
+        owner = DocumentMutations.hold(doc);
+    } catch (error) {
+        releaseSnapshot();
+        throw error;
+    }
+    const releaseAutosave = AutosaveHolds.hold("AI program");
     programRefIds.set(localRefs, new Set());
     try {
-        Transaction.execute(doc, "AI program", () => {
-            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, variables, signal);
-            doc.selection.clearSelection();
-            doc.visual.update();
-        });
+        await Transaction.executeAsync(
+            doc,
+            "AI program",
+            async () => {
+                await runOps(
+                    ops,
+                    doc,
+                    factory,
+                    localRefs,
+                    { created, removed, results, resolved },
+                    variables,
+                    signal,
+                    owner,
+                );
+                throwIfCancelled(signal, ops.length, "commit");
+                owner.run(() => {
+                    doc.selection.clearSelection();
+                    doc.visual.update();
+                });
+            },
+            owner,
+        );
     } catch (e) {
         restoreRefRegistries(localRefs, nullRefs, refSnapshot, nullSnapshot);
         throw e;
     } finally {
         programRefIds.delete(localRefs);
+        releaseSnapshot();
+        owner.release();
+        releaseAutosave();
     }
 
     return JSON.stringify(
@@ -998,7 +1042,7 @@ interface ProgramOutput {
  * call stops before the next op (the caller's transaction rolls everything back); an op that
  * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
  */
-function runOps(
+async function runOps(
     ops: Op[],
     doc: IDocument,
     factory: unknown,
@@ -1006,14 +1050,18 @@ function runOps(
     output: ProgramOutput,
     variables: ProgramVariables,
     signal: AbortSignal | undefined,
-): void {
+    owner: IDocumentMutationScope,
+): Promise<void> {
     const { created, removed, results } = output;
     for (const [index, op] of ops.entries()) {
         throwIfCancelled(signal, index, String(op.method));
         const numeric: NumericArgs = { ...variables, resolved: {} };
         try {
-            timeOp(String(op.method), () =>
-                runOp(op, doc, factory, localRefs, created, removed, results, numeric),
+            await timeOpAsync(
+                String(op.method),
+                () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner),
+                (factory as IShapeFactory).boundedOperations !== undefined &&
+                    boundedRequest(op.method, []) !== undefined,
             );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
@@ -1026,24 +1074,30 @@ function runOps(
     }
 }
 
+/** Preserve entries and their shared derivation graph without retaining mutable registry objects. */
+function snapshotRefs(refs: Map<string, LocalRef>): Map<string, LocalRef> {
+    const copies = new Map<LocalRef, LocalRef>();
+    const copy = (entry: LocalRef): LocalRef => {
+        const previous = copies.get(entry);
+        if (previous) return previous;
+        const value = { ...entry };
+        copies.set(entry, value);
+        if (entry.parent) value.parent = copy(entry.parent);
+        return value;
+    };
+    return new Map([...refs].map(([key, entry]) => [key, copy(entry)]));
+}
+
 function restoreRefRegistries(
     localRefs: Map<string, LocalRef>,
     nullRefs: Set<string>,
     refSnapshot: Map<string, LocalRef>,
     nullSnapshot: Set<string>,
 ): void {
-    for (const key of [...localRefs.keys()]) {
-        if (!refSnapshot.has(key)) localRefs.delete(key);
-    }
-    for (const [key, entry] of refSnapshot) {
-        if (!localRefs.has(key)) localRefs.set(key, entry);
-    }
-    for (const key of [...nullRefs]) {
-        if (!nullSnapshot.has(key)) nullRefs.delete(key);
-    }
-    for (const key of nullSnapshot) {
-        if (!localRefs.has(key)) nullRefs.add(key);
-    }
+    localRefs.clear();
+    for (const [key, entry] of refSnapshot) localRefs.set(key, entry);
+    nullRefs.clear();
+    for (const key of nullSnapshot) nullRefs.add(key);
 }
 
 /**
@@ -1120,7 +1174,7 @@ function runClone(
     results[op.id] = { ref: op.id, kind: "shape", nodeId: node.id };
 }
 
-function runOp(
+async function runOp(
     op: Op,
     doc: IDocument,
     factory: unknown,
@@ -1129,17 +1183,18 @@ function runOp(
     removed: RemovedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
-): void {
+    owner: IDocumentMutationScope,
+): Promise<void> {
     if (op.method === "transformedMul") {
-        runTransformedMul(op, doc, localRefs, created);
+        owner.run(() => runTransformedMul(op, doc, localRefs, created));
         return;
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
     if (!cap) {
-        runQueryOp(op, doc, localRefs, created, results, numeric);
+        owner.run(() => runQueryOp(op, doc, localRefs, created, results, numeric));
         return;
     }
-    runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric);
+    await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner);
 }
 
 function runQueryOp(
@@ -1197,7 +1252,7 @@ function closeProfileParam(cap: ShapeCapability, op: Op, params: unknown[], fact
     if (face.isOk) params[index] = face.value;
 }
 
-function runShapeOp(
+async function runShapeOp(
     cap: ShapeCapability,
     op: Op,
     doc: IDocument,
@@ -1207,23 +1262,87 @@ function runShapeOp(
     removed: RemovedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
-): void {
+    owner: IDocumentMutationScope,
+): Promise<void> {
     const consumed = new Set<string>();
-    const params = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
-    closeProfileParam(cap, op, params, factory);
-    const raw = (factory as unknown as Record<string, (...a: unknown[]) => unknown>)[op.method](...params);
+    const params = owner.run(() => {
+        const values = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
+        closeProfileParam(cap, op, values, factory);
+        return values;
+    });
+    const bounded = (factory as IShapeFactory).boundedOperations;
+    const request = boundedRequest(op.method, params);
+    let raw: unknown;
+    if (bounded && request) {
+        const pending = owner.run(() => bounded.shapeOperation(request));
+        try {
+            await pending.ready;
+            raw = owner.run(() => pending.take());
+        } finally {
+            pending.cancel();
+        }
+    } else {
+        raw = owner.run(() =>
+            (factory as unknown as Record<string, (...a: unknown[]) => unknown>)[op.method](...params),
+        );
+    }
     const result = raw instanceof Result ? raw : Result.ok(raw);
     if (!result.isOk) throw new Error(result.error);
 
-    consumeEditInputs(op.method, doc, localRefs, consumed, removed);
-    if (cap.returnKind === "shapeWithData") {
-        // { shape, ...extras } — node from .shape; array extras (e.g. newEdges) become refs.
-        const { shape, ...extras } = result.value as { shape: IShape } & Record<string, unknown>;
-        addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, Result.ok(shape));
-        recordExtras(op, doc, localRefs, extras, results);
-        return;
+    owner.run(() => {
+        consumeEditInputs(op.method, doc, localRefs, consumed, removed);
+        if (cap.returnKind === "shapeWithData") {
+            // { shape, ...extras } — node from .shape; array extras (e.g. newEdges) become refs.
+            const { shape, ...extras } = result.value as { shape: IShape } & Record<string, unknown>;
+            addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, Result.ok(shape));
+            recordExtras(op, doc, localRefs, extras, results);
+            return;
+        }
+        addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, result);
+    });
+}
+
+function boundedRequest(method: string, args: unknown[]): BoundedShapeRequest | undefined {
+    switch (method) {
+        case "booleanFuse":
+        case "booleanCut":
+        case "booleanCommon":
+            return {
+                method,
+                left: args[0] as IShape[],
+                right: args[1] as IShape[],
+                simplifyShape: method === "booleanFuse" ? (args[2] as boolean) : undefined,
+            };
+        case "fillet":
+        case "chamfer":
+            return { method, shape: args[0] as IShape, edges: args[1] as number[], value: args[2] as number };
+        case "loft":
+            return {
+                method,
+                sections: args[0] as IShape[],
+                isSolid: args[1] as boolean,
+                isRuled: args[2] as boolean,
+                continuity: args[3] as Extract<BoundedShapeRequest, { method: "loft" }>["continuity"],
+            };
+        case "makeThickSolidBySimple":
+            return { method, shape: args[0] as IShape, thickness: args[1] as number };
+        case "makeThickSolidByJoin":
+            return {
+                method,
+                shape: args[0] as IShape,
+                closingFaces: args[1] as IShape[],
+                thickness: args[2] as number,
+                joinType: args[3] as Extract<
+                    BoundedShapeRequest,
+                    { method: "makeThickSolidByJoin" }
+                >["joinType"],
+                mode: (args[4] ?? "skin") as Extract<
+                    BoundedShapeRequest,
+                    { method: "makeThickSolidByJoin" }
+                >["mode"],
+                intersection: (args[5] ?? false) as boolean,
+            };
     }
-    addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, result);
 }
 
 /**

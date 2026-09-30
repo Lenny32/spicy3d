@@ -1,0 +1,340 @@
+// Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
+// See LICENSE file in the project root for full license information.
+
+import { Config, type IDisposable, type IFace, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
+import { ShapeFactory } from "../src/factory";
+import { HybridShapeFactory } from "../src/hybridShapeFactory";
+import { type IKernelWorkerTransport, KernelWorkerClient } from "../src/workerClient";
+import type { KernelMessage } from "../src/workerProtocol";
+import { createBox, unwrapOk } from "./helpers";
+import { NativeWorkerTransport } from "./workerHarness";
+import "./setup";
+
+class HungTransport extends EventTarget implements IKernelWorkerTransport {
+    readonly messages: KernelMessage[] = [];
+    terminated = 0;
+    postMessage(message: KernelMessage) {
+        this.messages.push(message);
+    }
+    terminate() {
+        this.terminated++;
+    }
+}
+let owned: IDisposable[] = [];
+function keep<T extends IDisposable>(value: T): T {
+    owned.push(value);
+    return value;
+}
+afterEach(() => {
+    rs.useRealTimers();
+    const values = owned;
+    owned = [];
+    for (const value of values.reverse()) value.dispose();
+});
+
+test("a hung generation times out all callers, detaches stale replies and clears deadlines", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const client = new KernelWorkerClient(transport, 50);
+    try {
+        const first = client.request("ready", undefined);
+        const second = client.request("stats", undefined);
+        await rs.advanceTimersByTimeAsync(50);
+        expect(await first).toMatchObject({ ok: false, error: { code: "timeout" } });
+        expect(await second).toMatchObject({ ok: false, error: { code: "timeout" } });
+        expect(transport.terminated).toBe(1);
+        expect(client.pendingRequests).toBe(0);
+        expect(client.pendingNative).toBe(0);
+        transport.dispatchEvent(
+            new MessageEvent("message", {
+                data: { type: "result", id: 1, result: { ok: true, value: undefined } },
+            }),
+        );
+        expect(transport.messages).toHaveLength(2);
+        await rs.advanceTimersByTimeAsync(500);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        client.dispose();
+    }
+});
+
+test("cancelled native work keeps its deadline until it returns or its generation is terminated", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const client = new KernelWorkerClient(transport, 50);
+    const abort = new AbortController();
+    try {
+        const first = client.request("ready", undefined, abort.signal);
+        abort.abort();
+        expect(await first).toMatchObject({ ok: false, error: { code: "cancelled" } });
+        expect(client.pendingNative).toBe(1);
+        await rs.advanceTimersByTimeAsync(50);
+        expect(transport.terminated).toBe(1);
+        expect(client.pendingNative).toBe(0);
+    } finally {
+        client.dispose();
+    }
+});
+
+test.each([0, -1, Infinity, Number.NaN, 90_001])("a nonbounded deadline %s is refused", (deadline) => {
+    const transport = new HungTransport();
+    expect(() => new KernelWorkerClient(transport, deadline)).toThrow("deadline must be finite");
+    expect(transport.terminated).toBe(1);
+});
+
+test("the strict bridge recreates a timed-out worker and the following operation succeeds", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const hung = new HungTransport();
+    let native: NativeWorkerTransport | undefined;
+    let generations = 0;
+    const hybrid = new HybridShapeFactory(() => {
+        if (++generations === 1) return new KernelWorkerClient(hung, 10);
+        native = new NativeWorkerTransport();
+        return native.client;
+    });
+    try {
+        rs.useFakeTimers();
+        const failed = hybrid.shapeOperation({ method: "fillet", shape: box, edges: [0], value: 1 });
+        await rs.advanceTimersByTimeAsync(10);
+        await failed.ready;
+        expect(failed.take().error).toContain("timed out");
+        expect(failed.canFallback).toBe(false);
+        expect(hung.terminated).toBe(1);
+        expect(hybrid.failure).toBeUndefined();
+        rs.useRealTimers();
+        const next = hybrid.shapeOperation({ method: "chamfer", shape: box, edges: [0], value: 1 });
+        await next.ready;
+        const shape = keep(unwrapOk(next.take()));
+        expect(shape.checkShape()).toBe(true);
+        expect(shape.volume()).toBeLessThan(box.volume());
+        expect(generations).toBe(2);
+        expect(native?.requests.some((r) => r.type === "request" && r.operation === "boundedReplica")).toBe(
+            true,
+        );
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test.each(["fillet", "chamfer"] as const)("bounded %s matches the main-thread result", async (method) => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const operation = hybrid.shapeOperation({ method, shape: box, edges: [0], value: 1 });
+        await operation.ready;
+        const result = keep(unwrapOk(operation.take()));
+        const baseline = keep(unwrapOk(factory[method](box, [0], 1)));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+        const faces = result.findSubShapes(ShapeTypes.face);
+        owned.push(...faces);
+        const expectedFaces = baseline.findSubShapes(ShapeTypes.face);
+        owned.push(...expectedFaces);
+        expect(faces).toHaveLength(expectedFaces.length);
+        expect(await transport.client.request("stats", undefined)).toEqual({
+            ok: true,
+            value: { shapes: 0 },
+        });
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test.each([
+    "booleanFuse",
+    "booleanCut",
+    "booleanCommon",
+] as const)("bounded %s matches existing boolean behavior", async (method) => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const other = keep(box.transformedMul(Matrix4.fromTranslation(3, 4, 5)));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const operation = hybrid.shapeOperation({ method, left: [box], right: [other] });
+        await operation.ready;
+        const result = keep(unwrapOk(operation.take()));
+        const baseline = keep(unwrapOk(factory[method]([box], [other], false)));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("a thick-solid opening face is mapped onto the verified worker input", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const operation = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: box,
+            closingFaces: [faces[0]],
+            thickness: -1,
+            joinType: "arc",
+            mode: "skin",
+            intersection: false,
+        });
+        await operation.ready;
+        const result = keep(unwrapOk(operation.take()));
+        const baseline = keep(unwrapOk(factory.makeThickSolidByJoin(box, [faces[0]], -1, "arc")));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+        const request = transport.requests.find(
+            (r) => r.type === "request" && r.operation === "boundedReplica",
+        );
+        expect(request).toMatchObject({ args: { closingFaces: [0] } });
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("an opening face from a different shape fails before entering the worker", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const other = keep(createBox(factory));
+    const faces = other.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    const createWorker = rs.fn(() => new NativeWorkerTransport().client);
+    const hybrid = new HybridShapeFactory(createWorker);
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: box,
+            closingFaces: [faces[0]],
+            thickness: -1,
+            joinType: "arc",
+            mode: "skin",
+            intersection: false,
+        });
+        await task.ready;
+        expect(task.take().error).toBe("Opening face is not part of the input shape");
+        expect(createWorker).not.toHaveBeenCalled();
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("bounded loft prepares edge sections through the existing section rules", async () => {
+    const factory = new ShapeFactory();
+    const a = keep(unwrapOk(factory.circle(XYZ.unitZ, XYZ.zero, 5)));
+    const b = keep(unwrapOk(factory.circle(XYZ.unitZ, new XYZ(0, 0, 10), 7)));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeOperation({
+            method: "loft",
+            sections: [a, b],
+            isSolid: true,
+            isRuled: false,
+            continuity: "c2",
+        });
+        await task.ready;
+        const result = keep(unwrapOk(task.take()));
+        const baseline = keep(unwrapOk(factory.loft([a, b], true, false, "c2")));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("bounded fuse applies requested simplification before exporting its replica", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const other = keep(box.transformedMul(Matrix4.fromTranslation(5, 0, 0)));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeOperation({
+            method: "booleanFuse",
+            left: [box],
+            right: [other],
+            simplifyShape: true,
+        });
+        await task.ready;
+        const result = keep(unwrapOk(task.take()));
+        const baseline = keep(unwrapOk(factory.booleanFuse([box], [other], true)));
+        const faces = result.findSubShapes(ShapeTypes.face);
+        owned.push(...faces);
+        const expected = baseline.findSubShapes(ShapeTypes.face);
+        owned.push(...expected);
+        expect(faces).toHaveLength(6);
+        expect(faces).toHaveLength(expected.length);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("bounded simple thickening matches the existing open-shell behavior", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const shell = keep(unwrapOk(factory.shell(faces.slice(0, 5))));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeOperation({ method: "makeThickSolidBySimple", shape: shell, thickness: 1 });
+        await task.ready;
+        const result = keep(unwrapOk(task.take()));
+        const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1)));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("bounded thickening preserves the configured intersection face limit before creating a worker", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const createWorker = rs.fn(() => new NativeWorkerTransport().client);
+    const hybrid = new HybridShapeFactory(createWorker);
+    const previous = Config.instance.thickSolidIntersectionMaxFaces;
+    try {
+        Config.instance.thickSolidIntersectionMaxFaces = 5;
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: box,
+            closingFaces: [],
+            thickness: -1,
+            joinType: "intersection",
+            mode: "skin",
+            intersection: false,
+        });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("6 faces (limit 5)");
+        expect(createWorker).not.toHaveBeenCalled();
+    } finally {
+        Config.instance.thickSolidIntersectionMaxFaces = previous;
+        hybrid.dispose();
+    }
+});
+
+test("an unavailable strict worker returns an error without offering synchronous fallback", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const hybrid = new HybridShapeFactory(() => {
+        throw new Error("Worker unavailable");
+    });
+    try {
+        const task = hybrid.shapeOperation({ method: "fillet", shape: box, edges: [0], value: 1 });
+        await task.ready;
+        expect(task.canFallback).toBe(false);
+        expect(task.take().error).toBe("Worker unavailable");
+        expect(box.volume()).toBeCloseTo(6000, 7);
+    } finally {
+        hybrid.dispose();
+    }
+});

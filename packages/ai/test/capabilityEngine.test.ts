@@ -1686,7 +1686,10 @@ describe("capabilityEngine", () => {
 
         function setup(factory: Record<string, unknown>) {
             const doc = new TestDocument();
-            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            (doc as { selection: unknown }).selection = {
+                clearSelection: () => {},
+                getSelectedNodes: () => [],
+            };
             const folder = new FolderNode({ document: doc, name: "Parts" });
             doc.modelManager.addNode(folder);
             const skin = new EditableShapeNode({
@@ -1801,7 +1804,10 @@ describe("capabilityEngine", () => {
     describe("cancellation and slow ops", () => {
         function setup(factory: Record<string, unknown>) {
             const doc = new TestDocument();
-            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            (doc as { selection: unknown }).selection = {
+                clearSelection: () => {},
+                getSelectedNodes: () => [],
+            };
             const app = createMockApplication({ shapeProvider: { factory } as any });
             (app as any).activeView = { document: doc };
             rs.stubGlobal("app", app);

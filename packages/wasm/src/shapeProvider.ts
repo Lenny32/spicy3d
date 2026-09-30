@@ -23,7 +23,8 @@ export class OccShapeProvider implements IShapeProvider {
             options?.geometryWorker ?? DeploymentConfig.section("performance")?.["geometryWorker"];
         const enabled = typeof Worker === "function" && requested === true;
         workerProfile.install(enabled);
-        this.factory = new ShapeFactory(enabled ? new HybridShapeFactory() : undefined);
+        const hybrid = new HybridShapeFactory(undefined, enabled);
+        this.factory = new ShapeFactory(enabled ? hybrid : undefined, hybrid);
         this.converter = new OccShapeConverter();
     }
 }

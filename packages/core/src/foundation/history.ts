@@ -12,6 +12,23 @@ export interface IHistoryRecord extends IDisposable {
 }
 
 export class History implements IDisposable {
+    private static readonly mutationGuards = new WeakMap<History, Set<() => void>>();
+
+    /** Runtime pre-mutation checks, removed independently of any document serialization. */
+    static addMutationGuard(history: History, guard: () => void): () => void {
+        let guards = History.mutationGuards.get(history);
+        if (!guards) {
+            guards = new Set();
+            History.mutationGuards.set(history, guards);
+        }
+        guards.add(guard);
+        return () => guards.delete(guard);
+    }
+
+    private assertWritable(): void {
+        for (const guard of History.mutationGuards.get(this) ?? []) guard();
+    }
+
     private readonly _undos: IHistoryRecord[] = [];
     private readonly _redos: IHistoryRecord[] = [];
 
@@ -40,6 +57,7 @@ export class History implements IDisposable {
     }
 
     dispose(): void {
+        History.mutationGuards.delete(this);
         this._redos.forEach((record) => record.dispose());
         this._undos.forEach((record) => record.dispose());
         this.clear();
@@ -62,6 +80,7 @@ export class History implements IDisposable {
     }
 
     add(record: IHistoryRecord) {
+        this.assertWritable();
         if (this.disabled) return;
 
         this._redos.length = 0;
@@ -84,6 +103,7 @@ export class History implements IDisposable {
     }
 
     undo() {
+        this.assertWritable();
         this.#isUndoing = true;
         this.tryOperate(
             () => {
@@ -104,6 +124,7 @@ export class History implements IDisposable {
     }
 
     redo() {
+        this.assertWritable();
         this.#isRedoing = true;
         this.tryOperate(
             () => {
@@ -124,6 +145,7 @@ export class History implements IDisposable {
 
     /** Reverts an uncommitted transaction without moving either history stack. */
     rollback(record: IHistoryRecord): void {
+        this.assertWritable();
         const wasUndoing = this.#isUndoing;
         this.#isUndoing = true;
         this.tryOperate(

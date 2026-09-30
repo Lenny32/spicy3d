@@ -3,15 +3,20 @@
 
 import {
     type AsyncTrackedBoolean,
+    type BoundedShapeRequest,
     type IAsyncShapeFactory,
     type IAsyncShapeOperation,
+    type IBoundedShapeFactory,
     type IShape,
     PerformanceTrace,
     Result,
+    ShapeTypes,
     type TrackedShape,
     VisualConfig,
 } from "@spicy3d/core";
 import type { TopoDS_Shape } from "../lib/spicy-wasm";
+import { refuseIntersectionJoin, ShapeFactory } from "./factory";
+import { prepareLoftSection } from "./loftSections";
 import { replicaTopology, sameReplicaTopology } from "./replicaTopology";
 import { OccShape, OccSubEdgeShape, OccSubFaceShape } from "./shape";
 import type { KernelWorkerClient } from "./workerClient";
@@ -19,6 +24,7 @@ import { createKernelWorker } from "./workerFactory";
 import { workerProfile } from "./workerProfile";
 import type {
     BooleanReplica,
+    BoundedReplicaRequest,
     KernelHandle,
     KernelResult,
     ReplicaInput,
@@ -38,7 +44,7 @@ type ResidentReplica = {
 };
 
 /** Worker booleans with ordinary local OCCT replicas. No asynchronous IShape methods. */
-export class HybridShapeFactory implements IAsyncShapeFactory {
+export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFactory {
     private static readonly MAX_RESIDENT = 2;
     private readonly resident = new Map<OccShape, ResidentReplica>();
     private readonly active = new Set<() => void>();
@@ -56,8 +62,145 @@ export class HybridShapeFactory implements IAsyncShapeFactory {
         return this.nativeFailure !== undefined || !this.disabled;
     }
 
-    constructor(private readonly createWorker: () => KernelWorkerClient = createKernelWorker) {
-        workerProfile.install(true);
+    constructor(
+        private readonly createWorker: () => KernelWorkerClient = createKernelWorker,
+        profileEnabled = true,
+    ) {
+        workerProfile.install(profileEnabled);
+    }
+
+    shapeOperation(request: BoundedShapeRequest): IAsyncShapeOperation<IShape> {
+        if (this.nativeFailure) return this.failedShapeOperation(this.nativeFailure);
+        const prepared: IShape[] = [];
+        const capture = (shape: IShape): ShapeReplica => {
+            if (!(shape instanceof OccShape)) throw new Error("The OCC kernel only supports OCC geometries");
+            const frozen = copyReplica(shape.shape);
+            prepared.push(frozen);
+            const expected = inspectTopology(shape.shape);
+            const topology = replicaTopology(wasm, frozen.shape);
+            if (!sameReplicaTopology(expected, topology))
+                throw new Error("Input clone topology order changed");
+            return { brep: exportBrep(frozen.shape, "input"), topology };
+        };
+        let args: BoundedReplicaRequest;
+        let worker: KernelWorkerClient;
+        try {
+            switch (request.method) {
+                case "booleanFuse":
+                case "booleanCut":
+                case "booleanCommon":
+                    args = { ...request, left: request.left.map(capture), right: request.right.map(capture) };
+                    break;
+                case "fillet":
+                case "chamfer":
+                    args = { ...request, shape: capture(request.shape) };
+                    break;
+                case "makeThickSolidBySimple":
+                    args = { ...request, shape: capture(request.shape) };
+                    break;
+                case "makeThickSolidByJoin": {
+                    const refused = refuseIntersectionJoin(request.shape, request.joinType);
+                    if (refused) throw new Error(refused);
+                    const faces = request.shape.findSubShapes(ShapeTypes.face);
+                    prepared.push(...faces);
+                    const closingFaces = request.closingFaces.map((selected) => {
+                        const index = faces.findIndex((face) => face.isSame(selected));
+                        if (index < 0) throw new Error("Opening face is not part of the input shape");
+                        return index;
+                    });
+                    args = { ...request, shape: capture(request.shape), closingFaces };
+                    break;
+                }
+                case "loft": {
+                    const factory = new ShapeFactory();
+                    const sections = request.sections.map((section, index) => {
+                        const result = prepareLoftSection(section, index, (edges) => factory.wire(edges));
+                        if (!result.isOk) throw new Error(result.error);
+                        if (result.value !== section) prepared.push(result.value);
+                        return capture(result.value);
+                    });
+                    args = { ...request, sections };
+                    break;
+                }
+            }
+            if (!this.worker) {
+                this.worker = this.createWorker();
+                this.removeFailureHandler = this.worker.addNativeFailureHandler((error) =>
+                    this.quarantine(error.message),
+                );
+            }
+            worker = this.worker;
+        } catch (error) {
+            if (!(error instanceof WebAssembly.RuntimeError)) for (const shape of prepared) shape.dispose();
+            else this.quarantine("Main geometry runtime failed while capturing a replica");
+            return this.failedShapeOperation(
+                error instanceof Error ? error.message : "Geometry worker unavailable",
+            );
+        }
+        for (const shape of prepared) shape.dispose();
+        let reply: KernelResult<ShapeReplica> | undefined;
+        let consumed = false;
+        const abort = new AbortController();
+        const cancel = () => {
+            if (consumed) return;
+            consumed = true;
+            reply = undefined;
+            this.active.delete(cancel);
+            abort.abort();
+        };
+        this.active.add(cancel);
+        const ready = worker.request("boundedReplica", args, abort.signal).then((result) => {
+            if (!consumed) reply = result;
+            if (!result.ok && result.error.code === "timeout") this.retireWorker(worker);
+        });
+        return {
+            ready,
+            cancel,
+            canFallback: false,
+            take: () => {
+                if (consumed || !reply) return Result.err(this.nativeFailure ?? "Worker result unavailable");
+                consumed = true;
+                this.active.delete(cancel);
+                const answer = reply;
+                reply = undefined;
+                if (!answer.ok) return Result.err(answer.error.message);
+                let shape: OccShape | undefined;
+                try {
+                    shape = importReplica(answer.value);
+                    if (!sameReplicaTopology(answer.value.topology, replicaTopology(wasm, shape.shape))) {
+                        shape.dispose();
+                        return Result.err("Output BREP topology order changed");
+                    }
+                    return Result.ok(shape);
+                } catch (error) {
+                    if (!(error instanceof WebAssembly.RuntimeError)) shape?.dispose();
+                    else this.quarantine("Main geometry runtime failed while installing a replica");
+                    return Result.err(
+                        error instanceof Error ? error.message : "Worker replica installation failed",
+                    );
+                }
+            },
+        };
+    }
+
+    private failedShapeOperation(message: string): IAsyncShapeOperation<IShape> {
+        return {
+            ready: Promise.resolve(),
+            canFallback: false,
+            take: () => Result.err(message),
+            cancel: () => {},
+        };
+    }
+
+    /** A deadline destroys leases, not local shapes or the main module. */
+    private retireWorker(worker: KernelWorkerClient): void {
+        if (this.worker !== worker) return;
+        this.removeFailureHandler?.();
+        this.removeFailureHandler = undefined;
+        for (const entry of this.resident.values()) entry.unsubscribe();
+        this.resident.clear();
+        this.worker = undefined;
+        worker.dispose();
     }
 
     booleanTracked(
@@ -164,7 +307,8 @@ export class HybridShapeFactory implements IAsyncShapeFactory {
             )
             .then((result) => {
                 if (!consumed) reply = result;
-                else releaseReply(result); // Acceptance can precede this microtask's cancellation.
+                else releaseReply(result);
+                if (!result.ok && result.error.code === "timeout") this.retireWorker(worker); // Acceptance can precede this microtask's cancellation.
                 if (span && PerformanceTrace.enabled)
                     PerformanceTrace.end(span, {
                         cancelled: abort.signal.aborted,
@@ -188,7 +332,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory {
                     for (const input of inputs) input.dispose();
                     inputs = [];
                     if (canFallback) this.disable();
-                    else this.quarantine(result.error.message);
+                    else if (result.error.code !== "timeout") this.quarantine(result.error.message);
                     return Result.err(result.error.message);
                 }
                 const owned: IShape[] = [];
