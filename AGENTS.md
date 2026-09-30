@@ -89,3 +89,7 @@ OCCT V8_0_1 → `spicy-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (sha
 ## Git
 
 Commits: `<emoji> <type>(<scope>): <description>` — ✨ `feat` · 🐛 `fix` · ♻️ `refactor` · ✅ `test` · 📝 `docs` · 💄 `style` · 🔧 `chore`. Scope = package name. Active branch: `dev` → PR to `develop`.
+
+## Hard rule: never push to `develop` or `main`
+
+Under no circumstances — absolutely no circumstances — may an agent push to `develop` or `main`. Do not run `git push` targeting `develop` or `main`, do not push from a checkout of `develop` or `main`, and do not create or update a PR branch in a way that writes to `develop` or `main`. If the working branch is `develop` or `main`, commits stay local for the user to review; the user is the only one who may push to `develop` or `main`. Asking permission does not lift this rule.
