@@ -36,6 +36,7 @@ describe("parametricTools", () => {
             "loft",
             "fillet",
             "chamfer",
+            "thicken",
             "boolean",
             "editFeature",
             "features",
@@ -77,6 +78,25 @@ describe("parametricTools", () => {
         try {
             await expect(runParametric().handler({})).rejects.toThrow(/non-empty "ops" array/);
             await expect(runParametric().handler({ ops: [] })).rejects.toThrow(/non-empty "ops" array/);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("passes the call's signal to the program: a cancelled call runs no op", async () => {
+        const add = rs.fn((_record: unknown) => {});
+        const document = createMockDocument({ history: { add } as any });
+        const app = createMockApplication();
+        (app as any).activeView = { document };
+        rs.stubGlobal("app", app);
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            await expect(
+                runParametric().handler({ ops: [{ op: "features", body: "b1" }] }, controller.signal),
+            ).rejects.toThrow('cancelled before op 0 ("features"); the whole program was rolled back');
+            expect(add).not.toHaveBeenCalled();
         } finally {
             rs.unstubAllGlobals();
         }

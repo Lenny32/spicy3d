@@ -5,6 +5,7 @@ import { rs } from "@rstest/core";
 import {
     type BannerOptions,
     type CloseDocumentOptions,
+    DOCUMENT_FORMAT_VERSION,
     type DocumentSource,
     decodeDocumentFile,
     formatDateTime,
@@ -550,7 +551,7 @@ describe("preview", () => {
 
     test("a version of a newer format says “needs a newer Spicy3D” without downloading anything", async () => {
         const { history, docs, server, loaded } = await setup();
-        const newer = docs.addVersion("doc-1", { formatVersion: 2 });
+        const newer = docs.addVersion("doc-1", { formatVersion: DOCUMENT_FORMAT_VERSION + 1 });
         server.requests.length = 0;
 
         const shown = await history.showPreview(newer);

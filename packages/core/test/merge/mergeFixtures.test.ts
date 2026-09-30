@@ -9,6 +9,7 @@ import {
     I18N_KEYS,
     isWithinMergePath,
     mergePath,
+    migrateDocument,
     parseMergePath,
     type Serialized,
 } from "../../src";
@@ -20,6 +21,11 @@ import { buildMergeFixtureCases } from "./fixtureCases";
 
 /** JSON as the files hold it: `undefined` sides dropped. */
 const asStored = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+/** A generated document as `loadMergeFixtures` reads the stored one: in the running build's format. */
+const asLoaded = (doc: Serialized): Serialized => {
+    const migrated = migrateDocument(asStored(doc));
+    return migrated.isOk ? migrated.value : doc;
+};
 
 if (process.env["SPICY3D_UPDATE_MERGE_FIXTURES"] === "1") {
     rmSync(MERGE_FIXTURE_ROOT, { recursive: true, force: true });
@@ -108,7 +114,7 @@ test("the files are what fixtureCases.ts generates (npm run merge:fixtures rewri
     expect(fixtures.map((x) => x.name)).toEqual(generated.map((x) => x.name));
     for (const [index, fixture] of generated.entries()) {
         const stored = fixtures[index];
-        for (const file of MERGE_FIXTURE_DOCUMENTS) expect(stored[file]).toEqual(asStored(fixture[file]));
+        for (const file of MERGE_FIXTURE_DOCUMENTS) expect(stored[file]).toEqual(asLoaded(fixture[file]));
         expect(stored.description).toBe(fixture.description);
         expect(stored.conflicts).toEqual(asStored(fixture.conflicts));
     }

@@ -39,7 +39,8 @@ export type FeatureData =
     | ChamferFeatureData
     | BooleanFeatureData
     | ExtrudeTargetFeatureData
-    | LoftFeatureData;
+    | LoftFeatureData
+    | ThickenFeatureData;
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";
@@ -154,6 +155,31 @@ export interface LoftFeatureData extends FeatureBase {
     readonly ruled?: boolean;
     /** Continuity of a smooth loft's surfaces; absent = C2. Ignored when `ruled`. */
     readonly continuity?: Continuity;
+}
+
+/**
+ * Thickens the body's previous shape into a wall of `thickness` (parametric format 5): a solid is
+ * shelled — hollowed, opened at `openFaces` when there are any, else with a closed inner void — and
+ * an open shell or face (a lofted skin, an extruded open profile) becomes a solid. See `thicken.ts`.
+ */
+export interface ThickenFeatureData extends FeatureBase {
+    readonly type: "thicken";
+    /**
+     * Signed wall thickness, the kernel's convention: positive grows along the face normals
+     * (outward for a solid), negative inward. Never zero.
+     */
+    readonly thickness: ParameterValue;
+    /** How the offset walls meet at a solid's edges; absent = `arc` (rounded). */
+    readonly joinType?: "arc" | "intersection";
+    /** Offset mode of a solid's walls; absent = `skin`. */
+    readonly mode?: "skin" | "pipe";
+    /**
+     * Faces of a solid input removed to open the shell, as press-pull style face refs
+     * (`profileRef.ts`: tracked id + fingerprint) in the body's local coordinates, re-matched on
+     * the feature's input on every rebuild. Absent or empty: a closed hollow (solid) or the whole
+     * shell (open input).
+     */
+    readonly openFaces?: ProfileRef[];
 }
 
 export interface FilletFeatureData extends FeatureBase {

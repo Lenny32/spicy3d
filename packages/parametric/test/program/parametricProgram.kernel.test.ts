@@ -352,6 +352,90 @@ describe("loft", () => {
     });
 });
 
+describe("thicken", () => {
+    /** The index of the body's face whose outward normal is +z. */
+    function topFaceIndex(body: ParametricBodyNode): number {
+        const faces = body.shape.unchecked()!.findSubShapes(ShapeTypes.face) as IFace[];
+        const index = faces.findIndex((face) => face.normal(0, 0)[1].z > 1 - 1e-6);
+        expect(index).toBeGreaterThanOrEqual(0);
+        return index;
+    }
+
+    function setWall(doc: TestDocument, expression: string) {
+        Transaction.execute(doc, "edit variables", () => {
+            doc.variables.setItems([{ id: "v1", name: "wall_t", expression, type: "length" }]);
+        });
+    }
+
+    test("shells a body open at the picked face, following the thickness variable", () => {
+        const doc = newDoc();
+        setWall(doc, "2");
+        const result = run(doc, plate(20));
+        const body = createdBody(doc, result, "b1");
+
+        run(doc, [
+            {
+                op: "thicken",
+                id: "t1",
+                body: body.id,
+                thickness: "-wall_t",
+                openFaceIndexes: [topFaceIndex(body)],
+            },
+        ]);
+
+        expectClean(body);
+        const feature = body.features[1];
+        expect(feature).toMatchObject({ type: "thicken", thickness: "-wall_t" });
+        expect(feature).not.toHaveProperty("joinType");
+        expect(feature).not.toHaveProperty("mode");
+        expect((feature as { openFaces?: unknown[] }).openFaces).toHaveLength(1);
+        expect(body.shape.unchecked()!.volume()).toBeCloseTo(40 * 30 * 20 - 36 * 26 * 18, 3);
+
+        setWall(doc, "3");
+
+        expectClean(body);
+        expect(body.shape.unchecked()!.volume()).toBeCloseTo(40 * 30 * 20 - 34 * 24 * 17, 3);
+    });
+
+    test("thickens an open loft into a solid in the same program", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+            { op: "sketch", id: "s1", plane: "XY", entities: [{ type: "circle", params: [0, 0, 10] }] },
+            {
+                op: "sketch",
+                id: "s2",
+                plane: { construction: "p1" },
+                entities: [{ type: "circle", params: [0, 0, 10] }],
+            },
+            { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false },
+            { op: "thicken", id: "b1", body: "b1", thickness: 2, joinType: "intersection" },
+        ]);
+        const body = createdBody(doc, result, "b1");
+
+        expectClean(body);
+        expect(body.features.map((x) => x.type)).toEqual(["loft", "thicken"]);
+        expect(body.features[1]).toMatchObject({ joinType: "intersection" });
+        expect(body.shape.unchecked()!.findSubShapes(ShapeTypes.solid)).toHaveLength(1);
+        expect(body.shape.unchecked()!.volume()).toBeCloseTo(Math.PI * (144 - 100) * 20, 1);
+    });
+
+    test.each([
+        [{ thickness: undefined }, '"thicken" requires "thickness"'],
+        [{ thickness: "nope_t" }, '"thickness" is not usable'],
+        [{ thickness: 2, joinType: "tangent" }, '"joinType" must be one of arc, intersection'],
+        [{ thickness: 2, mode: "rectoVerso" }, '"mode" must be one of skin, pipe'],
+        [{ thickness: 2, openFaceIndexes: [99] }, "faceIndex 99 is out of range"],
+        [{ thickness: 0 }, "The thickness must not be zero"],
+    ])("refuses %j and leaves nothing behind", (fields, message) => {
+        const doc = newDoc();
+        const before = nodeIds(doc);
+        const thicken = { op: "thicken", id: "t1", body: "b1", ...fields } as unknown as ParametricOp;
+        expect(runExpectingFailure(doc, [...plate(10), thicken])).toContain(message);
+        expect(nodeIds(doc)).toEqual(before);
+    });
+});
+
 describe("feature list editing", () => {
     test("a depth edit carries the geometry and editing back restores it exactly", () => {
         const doc = newDoc();
@@ -480,6 +564,27 @@ describe("fillet and boolean", () => {
         expect(extent(body)).toEqual([0, 0, 0, 40, 30, 20]);
         expect(nodeIds(doc)).toContain(tool.id);
     });
+
+    test("a common with a disjoint tool fails and rolls the whole program back", () => {
+        const doc = newDoc();
+        const result = run(doc, plate(20));
+        const body = createdBody(doc, result, "b1");
+        const before = nodeIds(doc);
+
+        const message = runExpectingFailure(doc, [
+            { op: "sketch", id: "s2", plane: "XY", entities: rect(100, 100, 120, 120) },
+            { op: "extrude", id: "b2", sketch: "s2", depth: 20 },
+            { op: "boolean", id: "c1", body: body.id, operation: "common", tools: ["b2"] },
+        ]);
+
+        expect(message).toContain('op 2 ("boolean") failed');
+        expect(message).toContain("Boolean common produced an empty shape");
+        // Nothing kept: no tool sketch/body, no boolean feature, the plate untouched.
+        expect(nodeIds(doc)).toEqual(before);
+        expect(body.featureItems()).toHaveLength(1);
+        expectClean(body);
+        expect(extent(body)).toEqual([0, 0, 0, 40, 30, 20]);
+    });
 });
 
 describe("constraints", () => {
@@ -556,5 +661,48 @@ describe("undo", () => {
         expectClean(
             doc.modelManager.findNodes((n) => n instanceof ParametricBodyNode)[0] as ParametricBodyNode,
         );
+    });
+});
+
+describe("cancellation and op timing", () => {
+    test("a signal aborted after op 0 stops the program before op 1 and rolls it back", () => {
+        const doc = newDoc();
+        const before = nodeIds(doc);
+        const controller = new AbortController();
+        const finished: string[] = [];
+
+        let message = "";
+        try {
+            Transaction.execute(doc, "test program", () => {
+                runParametricProgram(doc, plate(20), {
+                    signal: controller.signal,
+                    onOpFinished: (op, milliseconds) => {
+                        expect(milliseconds).toBeGreaterThanOrEqual(0);
+                        finished.push(op);
+                        controller.abort();
+                    },
+                });
+            });
+        } catch (err) {
+            message = (err as Error).message;
+        }
+
+        expect(message).toBe('cancelled before op 1 ("extrude"); the whole program was rolled back');
+        expect(finished).toEqual(["sketch"]);
+        // The sketch op 0 created is gone with the rollback.
+        expect(nodeIds(doc)).toEqual(before);
+        expect(doc.modelManager.findNodes((n) => n instanceof SketchNode)).toEqual([]);
+    });
+
+    test("every op, a failing one included, reports its wall time", () => {
+        const doc = newDoc();
+        const finished: string[] = [];
+
+        expect(() =>
+            runParametricProgram(doc, [...plate(20), { op: "features", body: "missing" } as ParametricOp], {
+                onOpFinished: (op) => finished.push(op),
+            }),
+        ).toThrow('op 2 ("features") failed');
+        expect(finished).toEqual(["sketch", "extrude", "features"]);
     });
 });

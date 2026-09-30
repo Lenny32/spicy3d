@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DocumentMigrations, migrateDocument, UnknownNode } from "@spicy3d/core";
+import { ConstructionNode, DocumentMigrations, migrateDocument, UnknownNode } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockVisualWithDocument,
@@ -39,7 +39,7 @@ test("the parametric and sketch modules are registered with whole chains", () =>
 });
 
 describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture %s", (_name, fixture) => {
-    test("rebuilds every body and sketch and saves the models back unchanged", async () => {
+    test("rebuilds every body, sketch and construction and saves the models back unchanged", async () => {
         const data = migrateDocument(fixture.data).value;
         const doc = new TestDocument({ application: createMockApplication() });
         doc.visual = createMockVisualWithDocument(doc) as any;
@@ -51,9 +51,15 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
             (n) => n instanceof ParametricBodyNode,
         ) as ParametricBodyNode[];
         const sketches = doc.modelManager.findNodes((n) => n instanceof SketchNode) as SketchNode[];
-        expect(bodies.length + sketches.length).toBeGreaterThan(0);
+        const constructions = doc.modelManager.findNodes(
+            (n) => n instanceof ConstructionNode,
+        ) as ConstructionNode[];
+        expect(bodies.length + sketches.length + constructions.length).toBeGreaterThan(0);
         for (const body of bodies) expect(body.shape.isOk).toBe(true);
         for (const sketch of sketches) expect(sketch.shape.isOk).toBe(true);
+        for (const construction of constructions) {
+            expect(construction.geometry.isOk, construction.errorMessage).toBe(true);
+        }
         // Only classes from outside this package (app bodies) may stay placeholders.
         const unknown = doc.modelManager.findNodes((n) => n instanceof UnknownNode) as UnknownNode[];
         expect(unknown.map((n) => n.className)).not.toContain("ParametricBodyNode");

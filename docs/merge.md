@@ -299,7 +299,9 @@ changed `kind` makes the whole definition one value (the other fields change mea
 by field, each `ConstructionRef` one value (`CONSTRUCTION_REF_RULE`, `rules.ts`) whose `nodeId`, tracked
 ids (`trackedId`, `incidentEdgeIds`) must resolve and whose `featureIndex` is a
 [timeline position](#timeline-positions) in the body its `nodeId` names — nested refs (a snap's
-`source`, a path's `segments`) likewise. The same rule covers `SketchNode.constructionPlaneRefJson`
+`source`, a path's `segments`) likewise. The lengths and angles (`distance`, `offset`, `angle`; document
+format 2) are parameters like a feature's: a number or an expression whose names must be variables; a
+path `position` is one value (its distance `value` an expression). The same rule covers `SketchNode.constructionPlaneRefJson`
 (payload `construction.ref`, path `node/<id>/constructionPlaneRef`) and a revolve's
 `constructionAxisRef`. Fixture `construction-anchor-remap`: a datum captured after `f2` (featureIndex
 2), the other side inserted a feature before `f2` → 3.
@@ -378,7 +380,7 @@ Every reference in the merged document must resolve:
 | tracked sub-shape id (`EdgeRef.edgeId`, `ProfileRef.id`, `PlaneFaceRef.faceId`, `ConstructionRef.trackedId`/`incidentEdgeIds`) | every `\|`-component names an existing source: `<featureId>:…` a feature of that body *before* the referring feature in the merged timeline (or any feature of it, for a reference from outside the body); `sketch:<sketchId>:…` (sweep seeds of an extrude / revolve / loft) such a feature that swept that sketch (a loft sweeps each of its sections' sketches); `tool:<nodeId>:…` an existing node |
 | sketch entity of a profile (`ProfileRef.entities`) | an entity of the feature's sketch |
 | variable name | unique in the merged table (below) |
-| variable (names in an expression: feature parameters, constraint `datum`/`datums`, variable expressions) | a variable of that name exists — for a variable's own expression, *above* it |
+| variable (names in an expression: feature parameters, construction lengths and angles, constraint `datum`/`datums`, variable expressions) | a variable of that name exists — for a variable's own expression, *above* it |
 | timeline position | the body exists |
 
 Tracked ids are derived from feature ids and kernel history (`trackedId.ts`, `operationIds.ts`:
@@ -664,10 +666,14 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 
 #### Payload `construction.definition`
 
-`ConstructionNode.definitionJson` (`ConstructionDefinition`). A changed `kind` replaces the whole definition (atomic); otherwise field by field, each `ConstructionRef` one value that must resolve (its `nodeId`, tracked `trackedId`/`incidentEdgeIds`), its `featureIndex` a timeline position. Paths below `node/<id>/definition`.
+`ConstructionNode.definitionJson` (`ConstructionDefinition`). A changed `kind` replaces the whole definition (atomic); otherwise field by field, each `ConstructionRef` one value that must resolve (its `nodeId`, tracked `trackedId`/`incidentEdgeIds`), its `featureIndex` a timeline position; `distance`/`offset`/`angle` are parameters (a number or an expression whose names must be variables), a path `position` one value. Paths below `node/<id>/definition`.
 
 - union on `kind` (any other)
   - any other `kind`
+    - `distance`: expression
+    - `offset`: expression
+    - `angle`: expression
+    - `position`: atomic { value: expression; point: atomic { nodeId: ref → node; featureIndex: timeline-position (body = `nodeId`); trackedId: ref → construction-ref; incidentEdgeIds: atomic of ref → construction-ref } }
     - any other field: atomic { nodeId: ref → node; featureIndex: timeline-position (body = `nodeId`); trackedId: ref → construction-ref; incidentEdgeIds: atomic of ref → construction-ref }
 
 #### Payload `construction.ref`
@@ -681,7 +687,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, extrudeTarget, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, thicken, extrudeTarget, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -765,6 +771,15 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `solid`: scalar
       - `ruled`: scalar
       - `continuity`: scalar
+    - `type: "thicken"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `thickness`: expression
+      - `joinType`: scalar
+      - `mode`: scalar
+      - `openFaces`: atomic of ref → profile
     - `type: "extrudeTarget"`
       - `id`: scalar
       - `type`: scalar

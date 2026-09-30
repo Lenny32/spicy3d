@@ -208,12 +208,13 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                 items: [
                     "feature.fillet",
                     "feature.chamfer",
+                    "feature.thicken",
                     { type: "split", items: ["feature.fuse", "feature.cut", "feature.common"] },
                 ],
                 collapsedItems: ["feature.variable"],
             },
         ],
-        supersedes: ["create.loft"],
+        supersedes: ["create.loft", "modify.shell"],
     },
 ];
 

@@ -21,6 +21,7 @@
 #include <gp_Pnt.hxx>
 #include <optional>
 
+#include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 
@@ -47,9 +48,9 @@ public:
     static Handle(Geom_TrimmedCurve) trim(const Geom_Curve* curve, double start, double end)
     {
         // Geom_TrimmedCurve raises Standard_ConstructionError on an empty parameter
-        // window or on a window outside a non-periodic basis curve's range, and a
-        // raise aborts the module with exception catching disabled. Mirror those
-        // checks and return a null handle (the failure sentinel of the
+        // window or on a window outside a non-periodic basis curve's range (caught
+        // by guardedEntry, but binaries built without exception catching aborted).
+        // Mirror those checks and return a null handle (the failure sentinel of the
         // handle-returning bindings, like an empty TopoDS_Edge) instead.
         if (curve == nullptr || std::abs(end - start) <= Precision::PConfusion()) {
             return Handle(Geom_TrimmedCurve)();
@@ -212,15 +213,15 @@ public:
 EMSCRIPTEN_BINDINGS(Geometry)
 {
     class_<Curve>("Curve")
-        .class_function("makeLine", &Curve::makeLine)
-        .class_function("trim", &Curve::trim, allow_raw_pointers())
-        .class_function("projectOrNearest", &Curve::projectOrNearest, allow_raw_pointers())
-        .class_function("uniformAbscissaWithCount", &Curve::uniformAbscissaWithCount, allow_raw_pointers())
-        .class_function("uniformAbscissaWithLength", &Curve::uniformAbscissaWithLength, allow_raw_pointers())
-        .class_function("nearestExtremaCC", &Curve::nearestExtremaCC, allow_raw_pointers())
-        .class_function("parameter", &Curve::parameter, allow_raw_pointers())
-        .class_function("curveLength", &Curve::curveLength, allow_raw_pointers())
-        .class_function("projects", &Curve::projects, allow_raw_pointers());
+        .class_function("makeLine", guardedEntry<&Curve::makeLine>("Curve.makeLine"))
+        .class_function("trim", guardedEntry<&Curve::trim>("Curve.trim"), allow_raw_pointers())
+        .class_function("projectOrNearest", guardedEntry<&Curve::projectOrNearest>("Curve.projectOrNearest"), allow_raw_pointers())
+        .class_function("uniformAbscissaWithCount", guardedEntry<&Curve::uniformAbscissaWithCount>("Curve.uniformAbscissaWithCount"), allow_raw_pointers())
+        .class_function("uniformAbscissaWithLength", guardedEntry<&Curve::uniformAbscissaWithLength>("Curve.uniformAbscissaWithLength"), allow_raw_pointers())
+        .class_function("nearestExtremaCC", guardedEntry<&Curve::nearestExtremaCC>("Curve.nearestExtremaCC"), allow_raw_pointers())
+        .class_function("parameter", guardedEntry<&Curve::parameter>("Curve.parameter"), allow_raw_pointers())
+        .class_function("curveLength", guardedEntry<&Curve::curveLength>("Curve.curveLength"), allow_raw_pointers())
+        .class_function("projects", guardedEntry<&Curve::projects>("Curve.projects"), allow_raw_pointers());
 
     value_object<SurfaceBounds>("SurfaceBounds")
         .field("u1", &SurfaceBounds::u1)
@@ -229,10 +230,10 @@ EMSCRIPTEN_BINDINGS(Geometry)
         .field("v2", &SurfaceBounds::v2);
 
     class_<Surface>("Surface")
-        .class_function("projectCurve", &Surface::projectCurve, allow_raw_pointers())
-        .class_function("projectPoint", &Surface::projectPoint, allow_raw_pointers())
-        .class_function("isPlanar", &Surface::isPlanar, allow_raw_pointers())
-        .class_function("parameters", &Surface::parameters, allow_raw_pointers())
-        .class_function("nearestPoint", &Surface::nearestPoint, allow_raw_pointers())
-        .class_function("bounds", &Surface::bounds, allow_raw_pointers());
+        .class_function("projectCurve", guardedEntry<&Surface::projectCurve>("Surface.projectCurve"), allow_raw_pointers())
+        .class_function("projectPoint", guardedEntry<&Surface::projectPoint>("Surface.projectPoint"), allow_raw_pointers())
+        .class_function("isPlanar", guardedEntry<&Surface::isPlanar>("Surface.isPlanar"), allow_raw_pointers())
+        .class_function("parameters", guardedEntry<&Surface::parameters>("Surface.parameters"), allow_raw_pointers())
+        .class_function("nearestPoint", guardedEntry<&Surface::nearestPoint>("Surface.nearestPoint"), allow_raw_pointers())
+        .class_function("bounds", guardedEntry<&Surface::bounds>("Surface.bounds"), allow_raw_pointers());
 }

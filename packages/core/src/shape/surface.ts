@@ -24,9 +24,12 @@ export interface ISurface extends IGeometry {
     nearestPoint(point: XYZ): [XYZ, number] | undefined;
     project(point: XYZ): XYZ[];
     projectCurve(curve: ICurve): ICurve | undefined;
+    /** @unit length maxDistance */
     parameter(point: XYZ, maxDistance: number): { u: number; v: number } | undefined;
     continuity(): Continuity;
+    /** @unit none u */
     uIso(u: number): ICurve;
+    /** @unit none v */
     vIso(v: number): ICurve;
     isPlanar(): boolean;
     isUClosed(): boolean;
@@ -41,9 +44,13 @@ export interface ISurface extends IGeometry {
         v1: number;
         v2: number;
     };
+    /** @unit none n */
     isCNu(n: number): boolean;
+    /** @unit none n */
     isCNv(n: number): boolean;
+    /** @unit none u v */
     d0(u: number, v: number): XYZ;
+    /** @unit none u v */
     d1(
         u: number,
         v: number,
@@ -52,6 +59,7 @@ export interface ISurface extends IGeometry {
         d1u: XYZ;
         d1v: XYZ;
     };
+    /** @unit none u v */
     d2(
         u: number,
         v: number,
@@ -63,6 +71,7 @@ export interface ISurface extends IGeometry {
         d2v: XYZ;
         d2uv: XYZ;
     };
+    /** @unit none u v */
     d3(
         u: number,
         v: number,
@@ -78,11 +87,14 @@ export interface ISurface extends IGeometry {
         d3uuv: XYZ;
         d3uvv: XYZ;
     };
+    /** @unit none u v nu nv */
     dn(u: number, v: number, nu: number, nv: number): XYZ;
+    /** @unit none u v */
     value(u: number, v: number): XYZ;
 }
 
 export interface IPlateSurface extends ISurface {
+    /** @unit none u1 u2 v1 v2 */
     setBounds(u1: number, u2: number, v1: number, v2: number): void;
 }
 
@@ -112,13 +124,17 @@ export interface IBezierSurface extends IBoundedSurface {}
 
 export interface IRectangularTrimmedSurface extends IBoundedSurface {
     basisSurface(): ISurface;
+    /** @unit none u1 u2 */
     setUTrim(u1: number, u2: number): void;
+    /** @unit none v1 v2 */
     setVTrim(v1: number, v2: number): void;
+    /** @unit none u1 u2 v1 v2 */
     setTrim(u1: number, u2: number, v1: number, v2: number): void;
 }
 
 export interface IConicalSurface extends IElementarySurface {
     semiAngle: number;
+    /** @unit length value */
     setRadius(value: number): void;
     apex(): XYZ;
     refRadius(): number;

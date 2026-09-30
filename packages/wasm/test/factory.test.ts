@@ -4,11 +4,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+    Config,
     type IEdge,
     type IFace,
     type IShape,
     type IVertex,
     type IWire,
+    KernelState,
     Line,
     Matrix4,
     Plane,
@@ -755,7 +757,16 @@ describe("ShapeFactory — feature operations", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.fillet(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("Fillet Error");
+            expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
+        });
+
+        test("the module survives that failure: the kernel is not reported crashed", () => {
+            const boxValue = factory.box(plane, 10, 10, 10).value;
+            const failed = factory.fillet(boxValue, [999], 5);
+            expect(failed.isOk).toBe(false);
+            expect(failed.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
+            expect(KernelState.current.status).toBe("ok");
+            expect(factory.fillet(boxValue, [0], 1).isOk).toBe(true);
         });
     });
 
@@ -791,7 +802,7 @@ describe("ShapeFactory — feature operations", () => {
             const boxValue = factory.box(plane, 10, 10, 10).value;
             const result = factory.chamfer(boxValue, [999], 5);
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("Chamfer Error");
+            expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
         });
     });
 
@@ -988,6 +999,47 @@ describe("ShapeFactory — advanced operations", () => {
             );
             expect(thickJoinResult.isOk).toBe(true);
         });
+
+        describe("intersection join face-count guard", () => {
+            const defaultLimit = Config.instance.thickSolidIntersectionMaxFaces;
+            afterEach(() => {
+                Config.instance.thickSolidIntersectionMaxFaces = defaultLimit;
+            });
+
+            test("defaults to 40 faces", () => {
+                expect(defaultLimit).toBe(40);
+            });
+
+            test("an intersection join within the limit runs", () => {
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+                const result = factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "intersection");
+                expect(result.isOk).toBe(true);
+            });
+
+            test("an intersection join over the limit is refused, naming the count and the alternatives", () => {
+                Config.instance.thickSolidIntersectionMaxFaces = 5;
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+
+                const result = factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "intersection");
+
+                expect(result.isOk).toBe(false);
+                expect(result.error).toContain("6 faces (limit 5)");
+                expect(result.error).toContain('joinType "arc"');
+                expect(result.error).toContain("makeThickSolidBySimple");
+                // The input is untouched and still usable.
+                expect(box.findSubShapes(ShapeTypes.face).length).toBe(6);
+            });
+
+            test("other join types ignore the limit", () => {
+                Config.instance.thickSolidIntersectionMaxFaces = 5;
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+
+                expect(factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "arc").isOk).toBe(true);
+            });
+        });
     });
 
     describe("curveProjection", () => {
@@ -1127,14 +1179,14 @@ describe("ShapeFactory — convertShapeResult error catching", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.fillet(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toContain("Fillet Error");
+        expect(result.error).toMatch(/^(Fillet failed: |ShapeFactory\.fillet: )/);
     });
 
     test("should return error when WASM throws on chamfer with invalid edge", () => {
         const boxValue = factory.box(plane, 10, 10, 10).value;
         const result = factory.chamfer(boxValue, [999], 5);
         expect(result.isOk).toBe(false);
-        expect(result.error).toContain("Chamfer Error");
+        expect(result.error).toMatch(/^(Chamfer failed: |ShapeFactory\.chamfer: )/);
     });
 
     test("should throw error on removeSubShape with non-OccShape", () => {

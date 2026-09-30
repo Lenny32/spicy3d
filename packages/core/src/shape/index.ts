@@ -4,6 +4,7 @@
 export * from "./curve";
 export * from "./geometry";
 export * from "./geometryUtils";
+export * from "./kernelState";
 export * from "./lineType";
 export * from "./meshData";
 export * from "./meshUtils";

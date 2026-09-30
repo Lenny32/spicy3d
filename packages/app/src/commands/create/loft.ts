@@ -9,10 +9,7 @@ import {
     type Continuity,
     command,
     EditableShapeNode,
-    type IEdge,
     type IShape,
-    type IVertex,
-    type IWire,
     PubSub,
     property,
     Result,
@@ -151,12 +148,7 @@ export class LoftCommand extends CancelableCommand {
             return m;
         });
         if (this.shapes.length > 1) {
-            this.shape = shapeFactory.loft(
-                this.shapes as (IVertex | IEdge | IWire)[],
-                this.isSolid,
-                this.isRuled,
-                this.continuity,
-            );
+            this.shape = shapeFactory.loft(this.shapes, this.isSolid, this.isRuled, this.continuity);
             if (!this.shape.isOk) {
                 PubSub.default.pub("showToast", "error.default:{0}", this.shape.error);
             } else {

@@ -16,6 +16,7 @@ import {
 
 @command({
     key: "create.thickSolid",
+    helpText: "tooltip.create.thickSolid",
     icon: "icon-thickSolid",
 })
 export class ThickSolidCommand extends MultistepCommand {

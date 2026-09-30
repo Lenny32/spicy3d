@@ -621,6 +621,110 @@ describe("construction geometry", () => {
         expect(geometryOf(result, "info").point.map((x) => Math.round(x * 1e6) / 1e6)).toEqual([0, 0, 7.5]);
     });
 
+    test("plane distances take expressions of variables and follow them", () => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "12", type: "length" }]);
+        const result = run(doc, [
+            {
+                op: "construct",
+                id: "p1",
+                definition: { kind: "plane-offset", source: "YZ", distance: "sec_x_1" },
+            },
+            {
+                op: "sketch",
+                id: "s1",
+                plane: { construction: "p1" },
+                entities: [{ type: "circle", params: [0, 0, 5] }],
+            },
+        ]);
+        expect(geometryOf(result, "p1").origin).toEqual([12, 0, 0]);
+        const plane = nodeById(doc, result.created.find((c) => c.id === "p1")!.nodeId) as ConstructionNode;
+        expect(plane.definition).toMatchObject({ distance: "sec_x_1" });
+        const sketch = sketchOf(doc, result, "s1");
+
+        doc.variables.setItems([{ id: "v1", name: "sec_x_1", expression: "30", type: "length" }]);
+
+        const geometry = plane.geometry.unchecked()!;
+        expect(geometry.kind === "plane" && geometry.plane.origin.x).toBeCloseTo(30, 6);
+        expect(sketch.shape.unchecked()!.boundingBox().min.x).toBeCloseTo(30, 1);
+
+        const edited = run(doc, [
+            {
+                op: "editConstruction",
+                node: plane.id,
+                definition: { kind: "plane-offset", source: "YZ", distance: "sec_x_1 * 2 + 1 cm" },
+            },
+        ]);
+        expect(geometryOf(edited, plane.id).origin).toEqual([70, 0, 0]);
+    });
+
+    test.each([
+        [
+            "construct",
+            { kind: "plane-offset", source: "YZ", distance: "sec_x_2" },
+            '"distance" must be a length or an expression of length variables, got "sec_x_2"',
+        ],
+        [
+            "construct",
+            { kind: "plane-offset", source: "YZ", distance: "tilt" },
+            '"distance" must be a length or an expression of length variables, got "tilt" (Dimension mismatch',
+        ],
+        [
+            "construct",
+            {
+                kind: "plane-angle",
+                axis: { axis: { direction: [1, 0, 0] } },
+                baseline: "XY",
+                angle: "sec_x_1",
+            },
+            '"angle" must be an angle or an expression of angle variables, got "sec_x_1"',
+        ],
+        [
+            "construct",
+            {
+                kind: "plane-three-points",
+                first: { point: [0, 0, 0] },
+                second: { point: [1, 0, 0] },
+                third: { point: [0, 1, 0] },
+                offset: "",
+            },
+            '"offset" must be a length or an expression of length variables, got ""',
+        ],
+        [
+            "construct",
+            {
+                kind: "point-along-path",
+                path: { axis: { direction: [1, 0, 0] } },
+                position: { kind: "distance", value: "nope" },
+            },
+            '"position.value" must be a length or an expression of length variables, got "nope"',
+        ],
+        [
+            "editConstruction",
+            { kind: "plane-offset", source: "YZ", distance: "sec_x_2" },
+            '"distance" must be a length or an expression of length variables, got "sec_x_2"',
+        ],
+    ])("%s with a bad parameter fails up front: %j", (op, definition, message) => {
+        const doc = newDoc();
+        doc.variables.setItems([
+            { id: "v1", name: "sec_x_1", expression: "12", type: "length" },
+            { id: "v2", name: "tilt", expression: "30", type: "angle" },
+        ]);
+        const base = run(doc, [
+            { op: "construct", id: "p0", definition: { kind: "plane-offset", source: "XY", distance: 1 } },
+        ]);
+        const nodes = doc.modelManager.findNodes(() => true).length;
+        const failure =
+            op === "construct"
+                ? runExpectingFailure(doc, [{ op: "construct", id: "p", definition }])
+                : runExpectingFailure(doc, [
+                      { op: "editConstruction", node: base.created[0].nodeId, definition },
+                  ]);
+        expect(failure).toContain(message);
+        expect(failure).not.toContain("NaN in XYZ");
+        expect(doc.modelManager.findNodes(() => true)).toHaveLength(nodes);
+    });
+
     test("an invalid definition fails the program", () => {
         const doc = newDoc();
         const message = runExpectingFailure(doc, [

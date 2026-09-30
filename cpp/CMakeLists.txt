@@ -61,8 +61,19 @@ source_group ("OCCT" FILES ${OcctSourceFiles})
 
 if (${EMSCRIPTEN})
 
+    # C++ exceptions: OCCT reports every failure by throwing a Standard_Failure, and the bindings
+    # catch them (cpp/src/guard.hpp) to answer an error result instead. Release uses native
+    # WebAssembly exception handling (-fwasm-exceptions): catching costs next to nothing when
+    # nothing is thrown, unlike Emscripten's JS-based handling. It must be given to the OCCT
+    # compile, the target compile and the link alike (with -flto the code is generated at link
+    # time, so the link flag selects the exception model of the whole module), and it replaces
+    # -sDISABLE_EXCEPTION_CATCHING (the two are mutually exclusive). setjmp/longjmp follow the
+    # same model (SUPPORT_LONGJMP resolves to wasm). ASSERTIONS keeps its -Oz default (0).
+    # Debug keeps Emscripten's JS-based handling (-sDISABLE_EXCEPTION_CATCHING=0).
+
     # Local incremental verification only: this archive must come from the same
-    # OCCT source revision and Emscripten release flags as this build. Official
+    # OCCT source revision and Emscripten release flags as this build (-fwasm-exceptions
+    # included: an archive built with -sDISABLE_EXCEPTION_CATCHING=1 does not match). Official
     # builds leave SPICY_PREBUILT_OCCT unset and compile OCCT from source.
     if (SPICY_PREBUILT_OCCT)
         add_library(occt STATIC IMPORTED)
@@ -75,7 +86,8 @@ if (${EMSCRIPTEN})
         target_compile_options (occt PUBLIC
             $<$<CONFIG:Release>:-Oz>
             $<$<CONFIG:Release>:-flto>
-            $<IF:$<CONFIG:Release>,-sDISABLE_EXCEPTION_CATCHING=1,-sDISABLE_EXCEPTION_CATCHING=0>
+            $<IF:$<CONFIG:Release>,-fwasm-exceptions,-sDISABLE_EXCEPTION_CATCHING=0>
+            $<$<CONFIG:Release>:-sWASM_LEGACY_EXCEPTIONS=1>
             -DOCCT_NO_PLUGINS
         )
     endif()
@@ -85,13 +97,16 @@ if (${EMSCRIPTEN})
     target_compile_options (${TARGET} PUBLIC
         $<$<CONFIG:Release>:-Oz>
         $<$<CONFIG:Release>:-flto>
-        $<IF:$<CONFIG:Release>,-sDISABLE_EXCEPTION_CATCHING=1,-sDISABLE_EXCEPTION_CATCHING=0>
+        $<IF:$<CONFIG:Release>,-fwasm-exceptions,-sDISABLE_EXCEPTION_CATCHING=0>
+        $<$<CONFIG:Release>:-sWASM_LEGACY_EXCEPTIONS=1>
     )
     target_link_libraries(${TARGET} PUBLIC occt)
     target_link_options (${TARGET} PUBLIC
         $<IF:$<CONFIG:Release>,-Oz,-O0>
         $<IF:$<CONFIG:Release>,-flto,-fno-lto>
-        $<IF:$<CONFIG:Release>,-sDISABLE_EXCEPTION_CATCHING=1,-sDISABLE_EXCEPTION_CATCHING=0>
+        $<IF:$<CONFIG:Release>,-fwasm-exceptions,-sDISABLE_EXCEPTION_CATCHING=0>
+        # pin the legacy Wasm EH encoding so an emsdk bump does not silently narrow browser support
+        $<$<CONFIG:Release>:-sWASM_LEGACY_EXCEPTIONS=1>
         -sMODULARIZE=1
         -sEXPORT_ES6=1
         -sSTACK_SIZE=16MB

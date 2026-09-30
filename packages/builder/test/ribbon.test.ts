@@ -141,13 +141,22 @@ describe("mergeRibbonProfiles", () => {
         expect(flattenItems(modify.items)).toEqual([
             "feature.fillet",
             "feature.chamfer",
+            "feature.thicken",
             "feature.fuse",
             "feature.cut",
             "feature.common",
-            "modify.shell",
             "modify.move",
         ]);
         expect(modify.collapsedItems?.[0]).toBe("feature.variable");
+    });
+
+    test("with parametric, the direct shell moves to the collapsed items behind the thicken feature", () => {
+        const merged = mergeRibbonProfiles(DefaultRibbon, parametricExtras);
+        const modify = findGroup(merged, "ribbon.tab.solid", "ribbon.group.modify");
+        expect(flattenItems(modify.items)).not.toContain("modify.shell");
+        expect(modify.collapsedItems).toContain("modify.shell");
+        const base = findGroup(DefaultRibbon, "ribbon.tab.solid", "ribbon.group.modify");
+        expect(flattenItems(base.items)).toContain("modify.shell");
     });
 
     test("should append the contextual sketch tab after the base tabs", () => {

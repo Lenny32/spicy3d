@@ -25,6 +25,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
+#include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 
@@ -234,12 +235,15 @@ public:
     Mesher(const TopoDS_Shape& shape, double lineDeflection, bool useBoxRatio)
         : shape(shape)
     {
-        if (useBoxRatio) {
-            this->lineDeflection = boundingBoxRatio(shape, lineDeflection, false);
-        } else {
-            this->lineDeflection = lineDeflection;
-        }
-        BRepMesh_IncrementalMesh mesh(shape, lineDeflection, true, ANGLE_DEFLECTION, true);
+        // Constructed from JS (embind's `constructor<>`), so a raise becomes a JS Error here.
+        guarded<void>("Mesher", [&] {
+            if (useBoxRatio) {
+                this->lineDeflection = boundingBoxRatio(shape, lineDeflection, false);
+            } else {
+                this->lineDeflection = lineDeflection;
+            }
+            BRepMesh_IncrementalMesh mesh(shape, lineDeflection, true, ANGLE_DEFLECTION, true);
+        });
     }
 
     NumberArray edgesMeshPosition()
@@ -318,8 +322,8 @@ EMSCRIPTEN_BINDINGS(Mesher)
 {
     class_<Mesher>("Mesher")
         .constructor<TopoDS_Shape, double, bool>()
-        .function("mesh", &Mesher::mesh)
-        .function("edgesMeshPosition", &Mesher::edgesMeshPosition);
+        .function("mesh", guardedEntry<&Mesher::mesh>("Mesher.mesh"))
+        .function("edgesMeshPosition", guardedEntry<&Mesher::edgesMeshPosition>("Mesher.edgesMeshPosition"));
 
     class_<EdgeMeshData>("EdgeMeshData")
         .property("position", &EdgeMeshData::position)

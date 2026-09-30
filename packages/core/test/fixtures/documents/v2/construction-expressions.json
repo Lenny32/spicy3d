@@ -1,0 +1,104 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 4,
+        "sketch": 1
+    },
+    "id": "fixture-document2-construction-expressions",
+    "name": "Fixture document v2: construction planes driven by variables",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "definitionJson": "{\"kind\":\"plane-offset\",\"source\":{\"kind\":\"origin-plane\",\"plane\":\"YZ\"},\"distance\":\"sec_x_1\"}",
+                "displaySize": 50,
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "plane-station-1",
+                "name": "Station 1",
+                "visible": true,
+                "__cla$$__": "ConstructionNode",
+                "parentId": "folder-root"
+            },
+            {
+                "definitionJson": "{\"kind\":\"plane-offset\",\"source\":{\"kind\":\"origin-plane\",\"plane\":\"YZ\"},\"distance\":\"sec_x_1 * 2 + 5 mm\"}",
+                "displaySize": 50,
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "plane-station-2",
+                "name": "Station 2",
+                "visible": true,
+                "__cla$$__": "ConstructionNode",
+                "parentId": "folder-root"
+            },
+            {
+                "definitionJson": "{\"kind\":\"plane-offset\",\"source\":{\"kind\":\"datum\",\"nodeId\":\"plane-station-2\"},\"distance\":7.5}",
+                "displaySize": 50,
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "plane-station-3",
+                "name": "Station 3",
+                "visible": true,
+                "__cla$$__": "ConstructionNode",
+                "parentId": "folder-root"
+            },
+            {
+                "definitionJson": "{\"kind\":\"plane-angle\",\"axis\":{\"kind\":\"fixed\",\"geometry\":{\"kind\":\"axis\",\"origin\":{\"x\":0,\"y\":0,\"z\":0},\"direction\":{\"x\":1,\"y\":0,\"z\":0}}},\"baseline\":{\"kind\":\"origin-plane\",\"plane\":\"XY\"},\"angle\":\"tilt\",\"offset\":\"sec_x_1 / 4\"}",
+                "displaySize": 50,
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "plane-tilted",
+                "name": "Tilted",
+                "visible": true,
+                "__cla$$__": "ConstructionNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "var-sec",
+            "name": "sec_x_1",
+            "expression": "12 mm",
+            "type": "length",
+            "description": "first section station"
+        },
+        {
+            "id": "var-tilt",
+            "name": "tilt",
+            "expression": "30",
+            "type": "angle"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {
+        "note": "fixture"
+    }
+}

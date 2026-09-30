@@ -5,6 +5,7 @@ import { Transaction } from "@spicy3d/core";
 import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
 import { requireDocument } from "./documentContext";
+import { noteOpDuration } from "./opBudget";
 
 /**
  * Loads the parametric module on first use. It must not be imported at module scope:
@@ -186,6 +187,7 @@ const OPS_SCHEMA = {
                 "loft",
                 "fillet",
                 "chamfer",
+                "thicken",
                 "boolean",
                 "editFeature",
                 "features",
@@ -285,6 +287,26 @@ const OPS_SCHEMA = {
         },
         radius: { description: "Fillet radius in mm" },
         distance: { description: "Chamfer distance in mm" },
+        thickness: {
+            description:
+                'Thicken only: signed wall thickness in mm (a number or an expression, e.g. "wall_t"; it re-evaluates when the variable changes). Positive grows along the face normals (outward for a solid), negative inward; never zero.',
+        },
+        joinType: {
+            type: "string",
+            enum: ["arc", "intersection"],
+            description: "Thicken only, solids: how the offset walls meet at edges (default arc = rounded)",
+        },
+        mode: {
+            type: "string",
+            enum: ["skin", "pipe"],
+            description: "Thicken only, solids: offset mode (default skin)",
+        },
+        openFaceIndexes: {
+            type: "array",
+            items: { type: "number" },
+            description:
+                "Thicken only, solids: indexes into the body's current face list (findSubShapes order) of the faces to remove, opening the shell. Omit for a closed hollow solid, and always for an open shell or surface (e.g. an open loft), which becomes a solid.",
+        },
         tools: {
             type: "array",
             items: { type: "string" },
@@ -304,7 +326,7 @@ const OPS_SCHEMA = {
         definition: {
             type: "object",
             description:
-                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. load_skill parametric-modeling for each kind\'s fields.',
+                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. Lengths (distance, offset, a distance position\'s value) and angles (angle) take a number or an expression of document variables, e.g. distance: "sec_x_1 * 2". load_skill parametric-modeling for each kind\'s fields.',
         },
         node: {
             type: "string",
@@ -328,14 +350,14 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },
     ];
 }
 
-async function runParametric(args: Record<string, unknown>): Promise<string> {
+async function runParametric(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const document = requireDocument();
     if (typeof document === "string") return document;
 
@@ -356,7 +378,11 @@ async function runParametric(args: Record<string, unknown>): Promise<string> {
     // Synchronous by construction: the solver is initialized above, and a throw here
     // rolls the whole program back, so a half-built body never survives.
     Transaction.execute(document, "run_parametric", () => {
-        result = parametric.runParametricProgram(document, ops as ParametricOp[]);
+        // Cancellation is checked between ops; a running op is timed for the slow-op warning.
+        result = parametric.runParametricProgram(document, ops as ParametricOp[], {
+            signal,
+            onOpFinished: noteOpDuration,
+        });
         document.selection.clearSelection();
         document.visual.update();
     });

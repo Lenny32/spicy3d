@@ -6,7 +6,7 @@ import type { Skill } from "./types";
 export const parametricModeling: Skill = {
     name: "parametric-modeling",
     description:
-        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/fillet/chamfer/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
+        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
     content: `Parametric modeling. run_parametric builds a feature TREE the user can re-edit; run_program builds throwaway geometry.
 
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
@@ -63,6 +63,15 @@ nothing is left half-built.
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
 - { op: "fillet", id, body, edgeIndexes, radius }  /  { op: "chamfer", id, body, edgeIndexes, distance }
+- { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
+  A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
+  e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
+  (outward for a solid), negative inward; never zero. A SOLID with openFaceIndexes (face indexes, found
+  like edge indexes) is shelled open at those faces; a solid without them is hollowed with a closed
+  inner void. An OPEN shell or surface (an open loft: solid: false) becomes a solid wall; openFaceIndexes
+  does not apply to it, nor do joinType ("arc" default | "intersection") and mode ("skin" | "pipe"),
+  which shape a solid's walls. Faces the thicken leaves where they were keep their ids, so a fillet
+  after it survives a thickness edit.
 - { op: "boolean", id, body, operation, tools }   // operation: fuse | cut | common
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.
@@ -172,16 +181,22 @@ construction axes and fixed axes; point refs accept vertices, snaps, constructio
                         reverseFirst?, reverseSecond? }
   position (along-path kinds): { kind: "distance", value } (mm) | { kind: "normalized", value } (0..1)
                                | { kind: "to-point", point }
+  Lengths (distance, offset, a "distance" position's value) and angles (angle) take a number or an
+  EXPRESSION STRING of document variables, like feature parameters: distance: "sec_x_1" or
+  "sec_x_1 * 2 + 5 mm" — the construction (and every sketch on it) follows when the variable changes.
+  A bad expression fails the op naming the field.
 The construct result reports the resolved geometry (plane origin/normal/xvec, axis origin/direction, point).
 
 Variables. Every feature parameter (extrude depth/startOffset, revolve angle, fillet radius,
-chamfer distance) and every sketch datum takes either a number or an EXPRESSION STRING, so "width * 2"
-follows the document variable width instead of freezing a number into the feature. Create them with
+chamfer distance, thicken thickness), every construction length/angle and every sketch datum takes either a number or
+an EXPRESSION STRING, so "width * 2" follows the document variable width instead of freezing a number
+into the feature. Create them with
 document_variables first — {"action":"set","variables":[{"name":"width","type":"length","expression":"40"}]}
 — then name them in the ops. A variable may reference only the ones declared ABOVE it. This is
 what makes the model parametric rather than merely feature-based: when the user changes width,
 every feature that names it rebuilds. Reach for a variable when a dimension is one the user is
-likely to come back to, and a plain number when it is incidental.
+likely to come back to, and a plain number when it is incidental. run_program's numeric args accept
+the same expressions, but evaluate them ONCE: its nodes keep the number and do not follow the variable.
 
 Selecting edges for fillet/chamfer: "edgeIndexes" index the body's current edge list (findSubShapes
 order). Get them with a run_program query on the body node first — shape.findSubShapes(target: "b1",
@@ -221,6 +236,12 @@ Example — loft a square base into a circle 30 mm above it:
        { type: "line", params: [10,10,-10,10] }, { type: "line", params: [-10,10,-10,-10] } ] },
    { op: "sketch", id: "s2", plane: { construction: "p1" }, entities: [ { type: "circle", params: [0,0,6] } ] },
    { op: "loft", id: "b1", sections: ["s1", "s2"] } ]
+
+Example — the same skin as an open loft, thickened into a 1.5 mm wall driven by a variable
+(create the variable first with document_variables: name "wall_t", type "length", expression "1.5"):
+ [ ...the construct and the two sketches above...,
+   { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false },
+   { op: "thicken", id: "b1", body: "b1", thickness: "wall_t" } ]
 
 Limits and recovery:
 - Only whole sketches are extruded; individual profiles of a sketch cannot be selected (a hole in a

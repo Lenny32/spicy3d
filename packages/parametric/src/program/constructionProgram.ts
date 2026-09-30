@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    ANGLE_UNITS,
     type ConstructionDefinition,
     type ConstructionGeometry,
     ConstructionNode,
@@ -14,9 +15,13 @@ import {
     type IFace,
     type INode,
     type IShape,
+    LENGTH_UNITS,
     resolveConstructionRef,
+    resolveUnitSpec,
+    type Scope,
     ShapeNode,
     ShapeTypes,
+    type UnitSpec,
     validateConstructionDefinition,
     XYZ,
 } from "@spicy3d/core";
@@ -34,7 +39,14 @@ export interface ConstructionProgramHost {
     resolveNode(ref: unknown, what: string): INode;
 }
 
-/** Definition fields holding a reference; everything else is a number or an option. */
+/** Definition fields holding a length or an angle: a number or an expression of the document's variables. */
+const PARAMETER_FIELDS: ReadonlyArray<readonly [field: string, unit: UnitSpec, name: "length" | "angle"]> = [
+    ["distance", LENGTH_UNITS, "length"],
+    ["offset", LENGTH_UNITS, "length"],
+    ["angle", ANGLE_UNITS, "angle"],
+];
+
+/** Definition fields holding a reference; everything else is a parameter, a number or an option. */
 const REF_FIELDS = [
     "source",
     "toPoint",
@@ -186,17 +198,46 @@ export function toConstructionDefinition(
     if (position?.["kind"] === "to-point") {
         definition["position"] = { ...position, point: toConstructionRef(host, position["point"]) };
     }
+    const scope = host.document.variables.evaluate().scope;
+    for (const [field, unit, name] of PARAMETER_FIELDS) {
+        if (definition[field] !== undefined) ensureParameter(definition[field], scope, unit, name, field);
+    }
+    if (position?.["kind"] === "distance") {
+        ensureParameter(position["value"], scope, LENGTH_UNITS, "length", "position.value");
+    }
     const result = definition as unknown as ConstructionDefinition;
     const valid = validateConstructionDefinition(host.document, nodeId, result);
     if (!valid.isOk) throw new Error(valid.error);
     const resolver = new DocumentConstructionResolver(host.document);
     try {
-        const evaluated = evaluateConstruction(result, resolver);
+        const evaluated = evaluateConstruction(result, resolver, scope);
         if (!evaluated.isOk) throw new Error(`the construction does not evaluate: ${evaluated.error}`);
     } finally {
         resolver.dispose();
     }
     return result;
+}
+
+/**
+ * A length or angle of a definition, checked up front like a feature's parameters: a finite number or
+ * an expression resolving to that unit against the document's variables.
+ */
+function ensureParameter(
+    value: unknown,
+    scope: Scope,
+    unit: UnitSpec,
+    name: "length" | "angle",
+    what: string,
+): void {
+    const article = name === "angle" ? "an" : "a";
+    const expected = `"${what}" must be ${article} ${name} or an expression of ${name} variables, got ${JSON.stringify(value)}`;
+    if (typeof value === "number") {
+        if (!Number.isFinite(value)) throw new Error(expected);
+        return;
+    }
+    if (typeof value !== "string" || value.trim() === "") throw new Error(expected);
+    const resolved = resolveUnitSpec(value, scope, unit);
+    if (!resolved.isOk) throw new Error(`${expected} (${resolved.error})`);
 }
 
 /** A construction's resolved geometry as plain numbers. */

@@ -11,7 +11,7 @@ export const modelingRecipes: Skill = {
 
 General loop:
 1. Plan exact dimensions first (footprint, heights, hole positions as coordinates).
-2. Chain ops with ids in a single run_program; later ops reference earlier ids.
+2. Chain ops with ids in a single run_program; later ops reference earlier ids. A dimension held in a document variable can be passed by name — thickness: "wall_t" (any numeric arg takes an expression string) — but run_program evaluates it once and the node keeps that number; when the part must follow later changes of the variable, build it with run_parametric instead.
 3. Edit-style ops (booleanCut/booleanFuse/booleanCommon, fillet, chamfer, pushPull, makeThickSolid*, removeFeature/removeFillet/removeSubShape/replaceSubShapes, simplifyShape, fillet2d/chamfer2d) CONSUME their input nodes and create a replacement node — afterwards reference the NEW op id, the old node is gone. Creation ops (box, cylinder, prism, revolve, sweep, loft, sewing, combine, transformedMul, ...) keep their inputs in the scene — hide or delete the ones that were only scaffolding (a tool solid cut away by a later boolean), and leave the parts the user asked for in the scene.
 4. Default to separate parts: a model of several parts is several nodes. Do NOT booleanFuse unrelated bodies just to end up with fewer nodes. fuse only when the parts really are one solid (a boss fused onto its plate); to group parts without merging them, use combine([...]).
    Grouping in the MODEL TREE is a different thing from combining geometry: create_folder (pass the part ids as nodeIds) puts nodes under one collapsible folder and changes no shape, and move_nodes re-parents them later or sends them back to the root. Reach for a folder to keep a multi-part result tidy for the user; reach for combine only when the parts must become one compound shape.
@@ -21,6 +21,16 @@ Fillet / chamfer workflow:
 - Identify the edges you want by geometry: query edge.ends (or edge.length, edge.curve) on candidates like e#0, e#1 — e.g. vertical edges have equal x/y at both ends; top edges have max z.
 - { method: "fillet", id: "f1", args: { shape: "body", edges: [<indices>], radius: 2 } } — the number in an edge ref e#3 IS the index for "edges". fillet consumes "body"; the result is the new node f1. Too-large radius fails — keep radius below half the smallest adjacent face dimension.
 
+Validity checks (offset / thickened results):
+- Run shape.checkShape on offset/thickened results (makeThickSolid*, offsets of lofted or swept skins) before booleans or inspections; the kernel cannot recover from a failed boolean on a self-intersecting solid. shape.checkFaces names the faulty faces.
+- checkShape does not test self-intersection (offset faces crossing at steep, narrow ends). shape.checkSelfIntersection does (true = none found); it is expensive on shapes with many faces, and older kernel builds answer an error "not available in this kernel build".
+- makeThickSolid* already fail with "Thick solid is invalid" when the result does not pass checkShape; shape.inspectionCommonVolume / shape.inspectionMass refuse an input that does not pass it.
+
+Long kernel ops (the tab freezes while one runs):
+- Every kernel op runs synchronously in the page: while one runs, the viewport, get_document_state and every other tool call wait, and the op cannot be cancelled — only a reload stops it. A cancelled call stops between ops (the program rolls back), never inside one.
+- makeThickSolidByJoin with joinType "intersection" on a shell with many faces (a lofted or swept skin, G2 lofts in particular) may NEVER finish: OCCT intersects the offset faces pairwise. It is refused above 40 input faces (error "MakeThickSolidByJoin refused: … N faces (limit 40) …"). Use joinType "arc", or makeThickSolidBySimple for an open skin; build the skin with fewer sections before thickening.
+- An op that took longer than the slow-op budget (30 s by default) is reported as a "Warning: op … took N s" line in the next tool result: do not repeat it as it was; choose a cheaper variant.
+
 Flange (base plate + boss + bolt circle):
 1. base: box(plane at corner, dx, dy, dz) id "base".
 2. boss: cylinder(normal +Z, center at plate center on top face, radius r, dz h) id "boss".
@@ -28,6 +38,10 @@ Flange (base plate + boss + bolt circle):
 4. one hole tool: cylinder at first bolt position, radius holeR, dz = plate+boss height + margin, id "h0".
 5. copies: transformedMul rotate around the flange axis (axis {0,0,1} through the center) by 90/180/270 degrees, ids "h1".."h3" — transformedMul does NOT consume h0.
 6. cut: booleanCut(["body"], ["h0","h1","h2","h3"]) id "flange" — one op cuts all holes and consumes the tools.
+
+Loft through sketches:
+- run_program loft takes sketch node ids directly as sections: { method: "loft", id: "skin", args: { sections: ["<sketchA>", "<sketchB>"], isSolid: true, isRuled: false, continuity: "c2" } }. A sketch's loose edges are chained into the section wire for you — no scaffold wire ops. OPEN chains are fine (isSolid: false gives an open skin); a sketch with several separate chains (e.g. an outline plus a hole) is refused with "Section <i> has <n> separate edge chains": pick one with shape.findSubShapes + wire.
+- For CLOSED single-profile sketches the user may want to re-edit, prefer run_parametric's loft op (load_skill parametric-modeling): it follows the sketches when they change.
 
 Patterns / arrays:
 - Linear: transformedMul with translate = i * spacing per copy. Circular: transformedMul with rotate around the pattern axis. Create copies first, then one boolean op with all of them in shape2.

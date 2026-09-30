@@ -23,4 +23,5 @@ export * from "./refGeometry";
 export * from "./revolve";
 export * from "./sourceFaceMatcher";
 export * from "./sweepGeometry";
+export * from "./thicken";
 export * from "./trackedId";

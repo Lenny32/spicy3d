@@ -34,6 +34,7 @@ import type {
     FeatureData,
     LoftFeatureData,
     RevolveFeatureData,
+    ThickenFeatureData,
 } from "../features/feature";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
@@ -82,6 +83,7 @@ export type ParametricOp =
     | RevolveOp
     | LoftOp
     | FilletChamferOp
+    | ThickenOp
     | BooleanOp
     | EditFeatureOp
     | FeaturesOp;
@@ -217,6 +219,23 @@ export interface FilletChamferOp {
     distance?: ParameterValue;
 }
 
+/**
+ * Thickens a body's current shape: a solid is shelled (opened at `openFaceIndexes`, else hollowed
+ * with a closed void), an open shell or face becomes a solid.
+ */
+export interface ThickenOp {
+    op: "thicken";
+    id: string;
+    name?: string;
+    body: string;
+    /** Signed length: positive grows along the face normals (outward for a solid), negative inward. */
+    thickness: ParameterValue;
+    joinType?: "arc" | "intersection";
+    mode?: "skin" | "pipe";
+    /** Indexes into the body's current face list (findSubShapes order) of the faces to open; solids only. */
+    openFaceIndexes?: number[];
+}
+
 export interface BooleanOp {
     op: "boolean";
     id: string;
@@ -297,8 +316,23 @@ function refsFor(document: IDocument): Map<string, string> {
     return refs;
 }
 
+/** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
+export interface ProgramRunOptions {
+    /**
+     * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
+     * transaction rolls it back. An op already running is never interrupted.
+     */
+    signal?: AbortSignal;
+    /** Called after every op, failed ones included, with its wall time. */
+    onOpFinished?: (op: string, milliseconds: number) => void;
+}
+
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
-export function runParametricProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
+export function runParametricProgram(
+    document: IDocument,
+    ops: readonly ParametricOp[],
+    options: ProgramRunOptions = {},
+): ProgramResult {
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -309,10 +343,16 @@ export function runParametricProgram(document: IDocument, ops: readonly Parametr
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
+        if (options.signal?.aborted) {
+            throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
+        }
+        const start = performance.now();
         try {
             runOp(state, op);
         } catch (err) {
             throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
+        } finally {
+            options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
     state.out.bodies = [...state.touched].map((body) => ({
@@ -360,6 +400,9 @@ function runOp(state: State, op: ParametricOp): void {
         case "fillet":
         case "chamfer":
             runEdgeCornerOp(state, op);
+            break;
+        case "thicken":
+            runThickenOp(state, op);
             break;
         case "boolean":
             runBooleanOp(state, op);
@@ -744,6 +787,49 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
         op.op === "fillet"
             ? { id: Id.generate(), type: "fillet", radius: value, edges: refs }
             : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
+    appendFeature(state, body, feature);
+    state.refs.set(op.id, body.id);
+}
+
+/** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */
+const THICKEN_JOIN_TYPE_NAMES = ["arc", "intersection"] as const;
+const THICKEN_MODE_NAMES = ["skin", "pipe"] as const;
+
+function runThickenOp(state: State, op: ThickenOp): void {
+    const body = resolveBody(state, op.body);
+    const shape = body.shape;
+    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
+    ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
+    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
+        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPE_NAMES.join(", ")}`);
+    }
+    if (op.mode !== undefined && !(THICKEN_MODE_NAMES as readonly string[]).includes(op.mode)) {
+        throw new Error(`"mode" must be one of ${THICKEN_MODE_NAMES.join(", ")}`);
+    }
+    if (op.openFaceIndexes !== undefined && !Array.isArray(op.openFaceIndexes)) {
+        throw new Error('"openFaceIndexes" must be an array of face indexes');
+    }
+    const faces = shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const openFaces = (op.openFaceIndexes ?? []).map((index) => {
+        const face = faces[index];
+        if (face === undefined) {
+            throw new Error(
+                `faceIndex ${index} is out of range on body "${op.body}" (0..${faces.length - 1})`,
+            );
+        }
+        // The capture the interactive thicken makes: body-local, with the face's tracked id.
+        const faceId = body.faceIdAt(index);
+        return captureExtentFaceRef(face, faceId, body.faceIdIsShared(faceId));
+    });
+    const feature: ThickenFeatureData = {
+        id: Id.generate(),
+        type: "thicken",
+        thickness: op.thickness,
+        ...(op.joinType === undefined || op.joinType === "arc" ? {} : { joinType: op.joinType }),
+        ...(op.mode === undefined || op.mode === "skin" ? {} : { mode: op.mode }),
+        ...(openFaces.length > 0 ? { openFaces } : {}),
+    };
     appendFeature(state, body, feature);
     state.refs.set(op.id, body.id);
 }

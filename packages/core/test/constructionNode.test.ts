@@ -18,7 +18,7 @@ const fixedAxis = (direction: XYZ): ConstructionRef => ({
     geometry: { kind: "axis", origin: XYZ.zero, direction },
 });
 const datum = (node: ConstructionNode): ConstructionRef => ({ kind: "datum", nodeId: node.id });
-const offset = (distance: number): ConstructionDefinition => ({
+const offset = (distance: number | string): ConstructionDefinition => ({
     kind: "plane-offset",
     source: { kind: "origin-plane", plane: "XY" },
     distance,
@@ -321,5 +321,77 @@ describe("persistent construction objects", () => {
         node.displaySize = 70;
         doc.modelManager.addNode(new GroupNode({ document: doc, name: "Later change" }));
         expect(redrawn).toEqual([]);
+    });
+});
+
+describe("construction parameters driven by variables", () => {
+    const setVariables = (doc: TestDocument, x: string) =>
+        doc.variables.setItems([{ id: "var-x", name: "sec_x_1", expression: x, type: "length" }]);
+
+    test("a distance expression evaluates against the document's variables", () => {
+        const { doc, add } = setup();
+        setVariables(doc, "12");
+        const node = add(offset("sec_x_1 + 3"));
+
+        expect(planeZ(node)).toBeCloseTo(15);
+    });
+
+    test("changing a referenced variable re-evaluates the construction and its dependents", () => {
+        const { doc, add } = setup();
+        setVariables(doc, "12");
+        const node = add(offset("sec_x_1"));
+        const dependent = add({
+            kind: "plane-offset",
+            source: { kind: "datum", nodeId: node.id },
+            distance: 5,
+        });
+        expect(planeZ(node)).toBeCloseTo(12);
+        expect(planeZ(dependent)).toBeCloseTo(17);
+        const changed: string[] = [];
+        dependent.onPropertyChanged((property) => changed.push(String(property)));
+
+        setVariables(doc, "40");
+
+        expect(changed).toContain("geometry");
+        expect(planeZ(node)).toBeCloseTo(40);
+        expect(planeZ(dependent)).toBeCloseTo(45);
+        doc.history.undo();
+        expect(planeZ(node)).toBeCloseTo(12);
+    });
+
+    test("a reader notified before the construction already sees the new values", () => {
+        const { doc, add } = setup();
+        setVariables(doc, "12");
+        const seen: number[] = [];
+        // Registered before the node exists, so it runs before the node's own listener.
+        doc.variables.onPropertyChanged(() => seen.push(planeZ(node)));
+        const node = add(offset("sec_x_1"));
+        expect(planeZ(node)).toBeCloseTo(12);
+
+        setVariables(doc, "20");
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).toBeCloseTo(20);
+    });
+
+    test("an unresolvable expression is the node's error, naming the field and the expression", () => {
+        const { add } = setup();
+        const node = add(offset("missing_var * 2"));
+
+        expect(node.geometry.isOk).toBe(false);
+        expect(node.warningCount).toBe(1);
+        expect(node.errorMessage).toContain('Construction distance "missing_var * 2" does not evaluate');
+    });
+
+    test("a construction without expressions ignores variable changes", () => {
+        const { doc, add } = setup();
+        const node = add(offset(5));
+        expect(planeZ(node)).toBeCloseTo(5);
+        const changed: string[] = [];
+        node.onPropertyChanged((property) => changed.push(String(property)));
+
+        setVariables(doc, "3");
+
+        expect(changed).toEqual([]);
     });
 });
