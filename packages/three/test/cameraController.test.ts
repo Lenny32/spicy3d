@@ -4,14 +4,17 @@
 import type { IDocument } from "@spicy3d/core";
 import { createMockSelection } from "@spicy3d/core/test-utils";
 import {
+    BoxGeometry,
     BufferAttribute,
     BufferGeometry,
+    DoubleSide,
     Mesh,
     MeshBasicMaterial,
     Object3D,
     OrthographicCamera,
     PerspectiveCamera,
     Scene,
+    Vector2,
 } from "three";
 import { CameraController } from "../src/cameraController";
 import { Constants } from "../src/constants";
@@ -50,6 +53,7 @@ function createFakeView(overrides: Partial<ThreeView> = {}): ThreeView {
         },
         content: {
             visualShapes,
+            isAnalysisPointVisible: () => true,
         } as unknown as ThreeVisualContext,
         detectVisual(_x: number, _y: number) {
             return [];
@@ -250,14 +254,87 @@ describe("CameraController — zoom", () => {
         expect(newDist).not.toBeCloseTo(origDist);
     });
 
-    test("zoom with zero delta still applies the negative zoom factor", () => {
+    test("zoom with zero delta keeps the camera unchanged", () => {
         const view = createFakeView();
         const cc = new CameraController(view);
         const origDist = cc.cameraPosition.distanceTo(cc.cameraTarget);
         cc.zoom(400, 300, 0);
-        // delta=0 takes the `delta > 0 ? f : -f` else-branch, so the distance
-        // is scaled by (1 - 0.1) instead of staying unchanged.
-        expect(cc.cameraPosition.distanceTo(cc.cameraTarget)).toBeCloseTo(origDist * 0.9);
+        expect(cc.cameraPosition.distanceTo(cc.cameraTarget)).toBeCloseTo(origDist);
+    });
+
+    function createBoxView() {
+        const view = createFakeView();
+        const parent = new Object3D();
+        const mesh = new Mesh(new BoxGeometry(20, 20, 20), new MeshBasicMaterial({ side: DoubleSide }));
+        mesh.layers.set(Constants.Layers.Solid);
+        parent.add(mesh);
+        view.content.visualShapes.add(parent);
+        view.content.visualShapes.updateMatrixWorld(true);
+        const cc = new CameraController(view);
+        cc.setSize(800, 600);
+        cc.lookAt({ x: 0, y: 0, z: 100 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+        return { view, parent, mesh, cc };
+    }
+
+    test.each([
+        "perspective",
+        "orthographic",
+    ] as const)("%s zoom approaches solid-layer faces without crossing or clipping them", (cameraType) => {
+        const { cc } = createBoxView();
+        cc.cameraType = cameraType;
+        cc.zoom(400, 300, -120);
+        expect(cc.cameraPosition.z).toBeCloseTo(91);
+        for (let i = 0; i < 300; i++) cc.zoom(400, 300, -120);
+        const clearance = cc.cameraPosition.z - 10;
+        expect(clearance).toBeGreaterThan(cc.camera.near);
+        expect(clearance).toBeLessThan(0.1);
+        const closePosition = cc.cameraPosition.z;
+        cc.zoom(400, 300, 120);
+        expect(cc.cameraPosition.z).toBeGreaterThan(closePosition);
+    });
+
+    test("hidden ancestors and section-clipped surfaces do not slow zoom", () => {
+        const { cc, view, parent } = createBoxView();
+        parent.visible = false;
+        cc.zoom(400, 300, -120);
+        expect(cc.cameraPosition.z).toBeCloseTo(90);
+        parent.visible = true;
+        view.content.isAnalysisPointVisible = () => false;
+        cc.zoom(400, 300, -120);
+        expect(cc.cameraPosition.z).toBeCloseTo(81);
+    });
+
+    test("off-centre zoom follows the cursor and stops outside the surface", () => {
+        const { cc, view, parent } = createBoxView();
+        parent.position.x = 40;
+        parent.updateMatrixWorld(true);
+        view.screenToCameraRect = (x, y) => new Vector2((2 * x) / 800 - 1, 1 - (2 * y) / 600);
+        const x = 400 + (400 * (40 / 90)) / (Math.tan((25 * Math.PI) / 180) * (800 / 600));
+        cc.zoom(x, 300, -120);
+        expect(cc.cameraPosition.z).toBeCloseTo(91);
+        expect(cc.cameraPosition.x).toBeCloseTo(4);
+        for (let i = 0; i < 300; i++) cc.zoom(x, 300, -120);
+        expect(cc.cameraPosition.z - 10).toBeGreaterThan(cc.camera.near);
+        expect(cc.cameraPosition.z - 10).toBeLessThan(0.1);
+        expect(cc.cameraPosition.x).toBeCloseTo(40 - ((cc.cameraPosition.z - 10) * 40) / 90);
+    });
+
+    test("zoom respects isolated model layers", () => {
+        const { cc, mesh } = createBoxView();
+        mesh.layers.set(Constants.Layers.Isolation);
+        cc.camera.layers.disableAll();
+        cc.camera.layers.enable(Constants.Layers.Isolation);
+        cc.zoom(400, 300, -120);
+        expect(cc.cameraPosition.z).toBeCloseTo(91);
+    });
+
+    test("empty-space zoom keeps a positive target distance without resetting it to 50 mm", () => {
+        const cc = new CameraController(createFakeView());
+        cc.setSize(800, 600);
+        cc.lookAt({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+        for (let i = 0; i < 100; i++) cc.zoom(400, 300, -120);
+        expect(cc.cameraPosition.distanceTo(cc.cameraTarget)).toBeCloseTo(0.02);
+        expect(cc.target.z).toBeCloseTo(0);
     });
 });
 
