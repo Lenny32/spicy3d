@@ -731,7 +731,9 @@ static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp
             GProp_GProps area, volume;
             BRepGProp::SurfaceProperties(profile, area);
             BRepGProp::VolumeProperties(output, volume);
-            double expected = area.Mass() * exactDepth;
+            Handle(Geom_Plane) profilePlane = Handle(Geom_Plane)::DownCast(
+                untrimmedSurface(BRep_Tool::Surface(profile)));
+            double expected = area.Mass() * std::abs(profilePlane->Pln().Axis().Direction().Dot(dir)) * exactDepth;
             if (std::abs(std::abs(volume.Mass()) - expected) > 1e-6 * std::max(1.0, expected))
                 continue;
         }
@@ -1391,6 +1393,10 @@ public:
             return trackedError(error);
         if (profile.ShapeType() != TopAbs_FACE)
             return trackedError("From-face extrusion requires one planar profile face");
+        Handle(Geom_Surface) profileSurface = BRep_Tool::Surface(TopoDS::Face(profile));
+        if (profileSurface.IsNull()
+            || Handle(Geom_Plane)::DownCast(untrimmedSurface(profileSurface)).IsNull())
+            return trackedError("From-face extrusion requires a planar profile face");
         if (fromFace.IsNull() || fromFace.ShapeType() != TopAbs_FACE)
             return trackedError("The starting object is not a face");
         if (!std::isfinite(startOffset))

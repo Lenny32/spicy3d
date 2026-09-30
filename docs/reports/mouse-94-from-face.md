@@ -15,3 +15,5 @@ Cloud payload evidence: `featuresJson` remains the existing serialized string pa
 Native artifacts were built sequentially in the shared Emscripten 5.0.7 / OCCT V8_0_1 cache after merging root 16a7b379, preserving #82 factory diagnostics and #103 mesher tolerance code. Only the approved #94 native binding was added to that source base.
 
 Final checks: 490 tests across 17 focused files passed; aliased TypeScript typecheck and scoped `npm run check` passed. Biome reports existing advisory warnings/information, with no errors. Temporary alias configs ensured tests used this checkout rather than root workspace symlinks.
+
+Native contract follow-up: `prismFromTracked` now explicitly rejects nonplanar profiles and checks distance volume against projected profile area, including oblique extrusion axes. The rebuilt binary passed the 45-degree planar sweep and curved-profile rejection tests, plus all #94 native/UI regressions (41 tests across 3 files).
