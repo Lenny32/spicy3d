@@ -43,6 +43,9 @@ function materialIdsOf(materialId: string | string[] | undefined): readonly stri
 
 export interface PreparedModelGraph {
     readonly root: INodeLinkedList;
+    /** Adopt the validated root without notifications; caller publishes all documents in one turn. */
+    adopt(): void;
+    rollbackAdoption(): void;
     /** Re-enters candidate lookup without publishing a node or touching the live tree. */
     run<T>(action: () => T): T;
     dispose(): void;
@@ -58,6 +61,9 @@ export class ModelManager extends Observable {
     prepareRecoveryNodes(nodes: Serialized[], validate: () => void): PreparedModelGraph {
         let root: INodeLinkedList | undefined;
         let disposed = false;
+        let adopted = false;
+        const previousPublishedRoot = this._rootNode;
+        const previousCurrentNode = this._currentNode;
         const constructed: INode[] = [];
         const run = <T>(action: () => T): T => {
             if (disposed) throw new Error("Recovery candidate has been disposed");
@@ -70,7 +76,10 @@ export class ModelManager extends Observable {
                 this._deserializing = true;
                 this.document.history.disabled = true;
                 if (root) this._rootNode = root;
-                return action();
+                const result = action();
+                if (result && typeof result === "object" && "then" in result)
+                    throw new Error("Recovery preparation must be synchronous");
+                return result;
             } finally {
                 this._rootNode = previousRoot;
                 this.preparingRecovery = previousPreparing;
@@ -79,7 +88,7 @@ export class ModelManager extends Observable {
             }
         };
         const dispose = () => {
-            if (disposed) return;
+            if (disposed || adopted) return;
             run(() => {
                 for (const node of constructed) node.dispose();
             });
@@ -91,17 +100,63 @@ export class ModelManager extends Observable {
                     this.document,
                     structuredClone(nodes),
                     (doc, data) => new UnknownNode(doc, data),
-                    (node) => constructed.push(node),
+                    (node) => {
+                        constructed.push(node);
+                        if (constructed.length === 1 && NodeUtils.isLinkedListNode(node)) {
+                            root = node;
+                            this._rootNode = root;
+                        }
+                    },
                 );
                 if (!root) throw new Error("Recovery checkpoint has no root node");
                 this._rootNode = root;
-                validate();
+                const validation: unknown = validate();
+                if (validation && typeof validation === "object" && "then" in validation)
+                    throw new Error("Recovery validation must be synchronous");
             });
         } catch (error) {
             dispose();
             throw error;
         }
-        return { root: root!, run, dispose };
+        return {
+            root: root!,
+            run,
+            dispose,
+            rollbackAdoption: () => {
+                if (!adopted) return;
+                this._rootNode = previousPublishedRoot;
+                this._currentNode = previousCurrentNode;
+                adopted = false;
+            },
+            adopt: () => {
+                if (disposed) throw new Error("Recovery candidate has been disposed");
+                if (adopted) return;
+                this._rootNode = root!;
+                this._currentNode = undefined;
+                adopted = true;
+            },
+        };
+    }
+
+    /** Publish replacement after every open document has adopted and the fresh kernel is active. */
+    notifyRecoveryReplacement(previousRoot: INodeLinkedList): void {
+        previousRoot.removePropertyChanged(this.handleRootNodeNameChanged);
+        this.rootNode.onPropertyChanged(this.handleRootNodeNameChanged);
+        this.notifyNodeChanged([
+            { node: previousRoot, action: "remove" },
+            { node: this.rootNode, action: "add" },
+        ]);
+    }
+
+    /** Dispose detached old nodes without removing newly published visuals with the same stable IDs. */
+    disposeRecoveryRoot(root: INodeLinkedList): void {
+        const previous = this.preparingRecovery;
+        this.preparingRecovery = true;
+        try {
+            root.dispose();
+        } finally {
+            this.preparingRecovery = previous;
+        }
     }
 
     private readonly _nodeChangedObservers = new Set<OnNodeChanged>();
@@ -109,8 +164,37 @@ export class ModelManager extends Observable {
     /** Records collected while {@link applyContent} runs, dispatched once when it is done. */
     private _batch: NodeRecord[] | undefined;
 
-    readonly components: ObservableCollection<Component> = new ObservableCollection();
-    readonly materials: ObservableCollection<Material> = new ObservableCollection();
+    private readonly _components = new ObservableCollection<Component>();
+    private readonly _materials = new ObservableCollection<Material>();
+    private recoveryComponents?: ObservableCollection<Component>;
+    private recoveryMaterials?: ObservableCollection<Material>;
+    get components(): ObservableCollection<Component> {
+        return this.recoveryComponents ?? this._components;
+    }
+    get materials(): ObservableCollection<Material> {
+        return this.recoveryMaterials ?? this._materials;
+    }
+
+    withRecoveryCollections<T>(
+        components: readonly Component[],
+        materials: readonly Material[],
+        action: () => T,
+    ): T {
+        const previousComponents = this.recoveryComponents;
+        const previousMaterials = this.recoveryMaterials;
+        const stagedComponents = new ObservableCollection<Component>();
+        const stagedMaterials = new ObservableCollection<Material>();
+        stagedComponents.push(...components);
+        stagedMaterials.push(...materials);
+        try {
+            this.recoveryComponents = stagedComponents;
+            this.recoveryMaterials = stagedMaterials;
+            return action();
+        } finally {
+            this.recoveryComponents = previousComponents;
+            this.recoveryMaterials = previousMaterials;
+        }
+    }
 
     private _rootNode: INodeLinkedList | undefined;
     get rootNode(): INodeLinkedList {

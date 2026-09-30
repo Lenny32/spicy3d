@@ -3,7 +3,8 @@
 
 import type { IDocument } from "./document";
 import { DocumentRebuilds } from "./documentRebuilds";
-import { type IDisposable, Logger, Transaction } from "./foundation";
+import { type IDisposable, Logger, Observable, Result, Transaction } from "./foundation";
+import type { INode } from "./model";
 import type { Serialized } from "./serialize";
 import { KernelState } from "./shape/kernelState";
 
@@ -17,6 +18,8 @@ export interface KernelRecoveryCheckpoint {
 export interface IKernelRecoveryContext extends IDisposable {
     /** A synchronous private turn in the candidate native instance, never a public installation. */
     run<T>(action: () => T): T;
+    /** Install only after all documents have adopted successfully validated candidate graphs. */
+    publish(): void;
 }
 
 export interface PreparedKernelRecovery extends IDisposable {
@@ -31,6 +34,7 @@ export class KernelRecoveryCheckpoints {
     static capture(document: IDocument): boolean {
         if (
             KernelState.current.isCrashed ||
+            document.history.disabled ||
             Transaction.isActive(document) ||
             DocumentRebuilds.pending(document)
         ) {
@@ -64,10 +68,12 @@ export class KernelRecoveryCheckpoints {
             });
         };
         document.history.onChanged.sub(refresh);
+        const releaseCommit = Transaction.onCommitted(document, refresh);
         refresh();
         return () => {
             disposed = true;
             document.history.onChanged.remove(refresh);
+            releaseCommit();
         };
     }
 
@@ -77,7 +83,7 @@ export class KernelRecoveryCheckpoints {
         if (!checkpoint || checkpoint.position !== document.history.position()) {
             throw new Error("No checkpoint for the current committed document state");
         }
-        return { ...checkpoint, data: structuredClone(checkpoint.data) };
+        return { ...checkpoint, dirty: document.isDirty, data: structuredClone(checkpoint.data) };
     }
 
     /** Prepare every open document before a caller may consider publication; this API cannot publish. */
@@ -116,5 +122,109 @@ export class KernelRecoveryCheckpoints {
             dispose();
             throw error;
         }
+    }
+}
+
+export interface KernelRecoverySummary {
+    readonly documentIds: readonly string[];
+    readonly undoReset: true;
+}
+
+/** Public runtime capability; availability means a concrete healthy-checkpoint recovery installer exists. */
+export class KernelRecovery extends Observable {
+    static readonly current = new KernelRecovery();
+    private handler?: () => Promise<Result<KernelRecoverySummary>>;
+    private readonly quiesceHandlers = new Set<() => void>();
+    private readonly recoveredHandlers = new Set<(documents: readonly IDocument[]) => void>();
+    private running?: Promise<Result<KernelRecoverySummary>>;
+
+    get available(): boolean {
+        return this.getPrivateValue("available", false);
+    }
+    get status(): "idle" | "recovering" | "failed" {
+        return this.getPrivateValue("status", "idle");
+    }
+    get error(): string | undefined {
+        return this.getPrivateValue("error", undefined);
+    }
+
+    install(handler: () => Promise<Result<KernelRecoverySummary>>): () => void {
+        this.handler = handler;
+        this.setProperty("available", true);
+        return () => {
+            if (this.handler !== handler) return;
+            this.handler = undefined;
+            this.setProperty("available", false);
+        };
+    }
+
+    addQuiesce(handler: () => void): () => void {
+        this.quiesceHandlers.add(handler);
+        return () => this.quiesceHandlers.delete(handler);
+    }
+    quiesce(): void {
+        for (const handler of this.quiesceHandlers) handler();
+    }
+
+    addRecovered(handler: (documents: readonly IDocument[]) => void): () => void {
+        this.recoveredHandlers.add(handler);
+        return () => this.recoveredHandlers.delete(handler);
+    }
+    notifyRecovered(documents: readonly IDocument[]): void {
+        for (const handler of this.recoveredHandlers) handler(documents);
+    }
+
+    recover(): Promise<Result<KernelRecoverySummary>> {
+        if (this.running) return this.running;
+        if (!this.handler) return Promise.resolve(Result.err("Main kernel recovery is unavailable"));
+        if (!KernelState.current.isCrashed)
+            return Promise.resolve(Result.err("The main kernel has not crashed"));
+        this.setProperty("status", "recovering");
+        this.setProperty("error", undefined);
+        const handler = this.handler;
+        this.running = (async () => {
+            let result: Result<KernelRecoverySummary>;
+            try {
+                result = await handler();
+            } catch (error) {
+                result = Result.err(error instanceof Error ? error.message : String(error));
+            }
+            this.setProperty("status", result.isOk ? "idle" : "failed");
+            this.setProperty("error", result.isOk ? undefined : result.error);
+            return result;
+        })().finally(() => {
+            this.running = undefined;
+        });
+        return this.running;
+    }
+}
+
+/** Module-specific synchronous rebuild policy and cancellation, without core depending on feature packages. */
+export class KernelRecoveryValidation {
+    private static readonly scopes = new Set<(document: IDocument, action: () => void) => void>();
+    private static readonly nodeValidators = new Set<(node: INode) => void>();
+    private static readonly cancellers = new Set<(document: IDocument) => void>();
+    static register(
+        scope: (document: IDocument, action: () => void) => void,
+        cancel: (document: IDocument) => void,
+        validateNode?: (node: INode) => void,
+    ): void {
+        KernelRecoveryValidation.scopes.add(scope);
+        KernelRecoveryValidation.cancellers.add(cancel);
+        if (validateNode) KernelRecoveryValidation.nodeValidators.add(validateNode);
+    }
+    static run(document: IDocument, action: () => void): void {
+        const scopes = [...KernelRecoveryValidation.scopes];
+        const next = (index: number): void => {
+            if (index === scopes.length) action();
+            else scopes[index](document, () => next(index + 1));
+        };
+        next(0);
+    }
+    static validateNode(node: INode): void {
+        for (const validate of KernelRecoveryValidation.nodeValidators) validate(node);
+    }
+    static quiesce(document: IDocument): void {
+        for (const cancel of KernelRecoveryValidation.cancellers) cancel(document);
     }
 }

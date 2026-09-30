@@ -5,14 +5,17 @@ import {
     type Act,
     AnalysisManager,
     type CloseDocumentOptions,
+    type Component,
     combineSaves,
     DOCUMENT_FORMAT_VERSION,
     DOCUMENT_THUMBNAIL_MAX_SIZE,
     type DocumentFormatError,
     DocumentMigrations,
+    DocumentMutations,
     DocumentRebuilds,
     type DocumentRepositoryError,
     type DocumentSource,
+    GeometryNode,
     History,
     type I18nKeys,
     type IApplication,
@@ -24,12 +27,19 @@ import {
     type ISelection,
     type IVariableTable,
     type IVisual,
+    KernelRecovery,
+    type KernelRecoveryCheckpoint,
+    KernelRecoveryCheckpoints,
+    KernelRecoveryValidation,
     Logger,
+    type Material,
     ModelManager,
+    MultiShapeNode,
     NullVisual,
     Observable,
     ObservableCollection,
     PerformanceTrace,
+    type PreparedModelGraph,
     ProjectSettings,
     PubSub,
     Result,
@@ -41,6 +51,7 @@ import {
     type SaveOutcome,
     type Serialized,
     Serializer,
+    ShapeNode,
     VariableTable,
 } from "@spicy3d/core";
 import { registerAdvancedInspectAnalyses } from "./analysis/advanced";
@@ -56,18 +67,50 @@ interface FollowUpSave {
     promise: Promise<Result<SaveOutcome, DocumentRepositoryError>>;
 }
 
+interface RecoveryMetadata {
+    variables: IVariableTable;
+    settings: ProjectSettings;
+    acts: ObservableCollection<Act>;
+    userData: Record<string, unknown>;
+    name: string;
+}
+export interface PreparedRecoveredDocument {
+    adopt(): void;
+    rollbackAdoption(): void;
+    finish(): void;
+    notify(): void;
+    dispose(): void;
+}
+
 export class Document extends Observable implements IDocument {
     readonly analyses: AnalysisManager;
     readonly visual: IVisual;
     readonly history: History;
     readonly selection: ISelection;
     readonly picker: IPicker;
-    readonly acts = new ObservableCollection<Act>();
+    private _acts = new ObservableCollection<Act>();
+    get acts(): ObservableCollection<Act> {
+        return this.recoveryMetadata?.acts ?? this._acts;
+    }
     readonly modelManager: ModelManager;
     /** Document-wide parameters shared by every body and sketch. */
-    readonly variables: IVariableTable;
-    readonly settings: ProjectSettings;
-    userData: Record<string, unknown> = {};
+    private _variables: IVariableTable;
+    private _settings: ProjectSettings;
+    private _userData: Record<string, unknown> = {};
+    private recoveryMetadata?: RecoveryMetadata;
+    get variables(): IVariableTable {
+        return this.recoveryMetadata?.variables ?? this._variables;
+    }
+    get settings(): ProjectSettings {
+        return this.recoveryMetadata?.settings ?? this._settings;
+    }
+    get userData(): Record<string, unknown> {
+        return this.recoveryMetadata?.userData ?? this._userData;
+    }
+    set userData(value: Record<string, unknown>) {
+        if (this.recoveryMetadata) this.recoveryMetadata.userData = value;
+        else this._userData = value;
+    }
     /**
      * Versions the loaded file recorded for modules this build does not register (a plugin that
      * is not loaded), written back unchanged so their payloads keep the version they were saved at.
@@ -80,9 +123,14 @@ export class Document extends Observable implements IDocument {
     private closing = false;
 
     get name(): string {
-        return this.getPrivateValue("name");
+        return this.recoveryMetadata?.name ?? this.getPrivateValue("name");
     }
     set name(name: string) {
+        DocumentMutations.assertWritable(this);
+        if (this.recoveryMetadata) {
+            this.recoveryMetadata.name = name;
+            return;
+        }
         if (this.name === name) return;
         this.setProperty("name", name);
         if (this.modelManager.rootNode) this.modelManager.rootNode.name = name;
@@ -111,8 +159,8 @@ export class Document extends Observable implements IDocument {
         this.history = new History();
         this.savedPosition = this.history.position();
         this.history.onChanged.sub(this.updateDirty);
-        this.variables = new VariableTable(this);
-        this.settings = new ProjectSettings(this);
+        this._variables = new VariableTable(this);
+        this._settings = new ProjectSettings(this);
         this.selection = new SelectionManager(this);
         this.picker = new Picker(this);
         this.headless = options.headless === true;
@@ -125,6 +173,158 @@ export class Document extends Observable implements IDocument {
         if (this.headless) return;
         application.documents.add(this);
         PubSub.default.pub("documentOpened", this);
+    }
+
+    /** Construct a private graph against committed metadata, never old native handles. */
+    prepareKernelRecovery(checkpoint: KernelRecoveryCheckpoint): PreparedRecoveredDocument {
+        const data = checkpoint.data;
+        const original: RecoveryMetadata = {
+            variables: this._variables,
+            settings: this._settings,
+            acts: this._acts,
+            userData: this._userData,
+            name: this.name,
+        };
+        const metadata: RecoveryMetadata = {
+            variables: new VariableTable(this),
+            settings: new ProjectSettings(this, data["settings"]),
+            acts: new ObservableCollection<Act>(),
+            userData: structuredClone(data["userData"] ?? {}),
+            name: String(data["name"]),
+        };
+        let materials: Material[] = [];
+        let components: Component[] = [];
+        const run = <T>(selected: RecoveryMetadata, action: () => T): T => {
+            const previous = this.recoveryMetadata;
+            const disabled = this.history.disabled;
+            try {
+                this.recoveryMetadata = selected;
+                this.history.disabled = true;
+                return selected === metadata
+                    ? this.modelManager.withRecoveryCollections(components, materials, action)
+                    : action();
+            } finally {
+                this.recoveryMetadata = previous;
+                this.history.disabled = disabled;
+            }
+        };
+        let graph: PreparedModelGraph | undefined;
+        let adopted = false;
+        let disposed = false;
+        const previousRoot = this.modelManager.rootNode;
+        const dispose = () => {
+            if (disposed || adopted) return;
+            run(metadata, () => {
+                graph?.dispose();
+                metadata.variables.dispose();
+                metadata.settings.dispose();
+                for (const act of metadata.acts) act.dispose();
+                for (const component of components) for (const node of component.nodes) node.dispose();
+                for (const material of materials ?? []) material.dispose();
+            });
+            disposed = true;
+        };
+        try {
+            run(metadata, () => {
+                metadata.variables.setItems(data["variables"] ?? []);
+                metadata.acts.push(
+                    ...(data["acts"] ?? []).map((act: Serialized) => Serializer.deserializeObject(this, act)),
+                );
+                materials = (data["models"].materials ?? []).map((item: Serialized) =>
+                    Serializer.deserializeObject(this, item),
+                );
+                components = (data["models"].components ?? []).map((item: Serialized) =>
+                    Serializer.deserializeObject(this, item),
+                );
+                this.modelManager.withRecoveryCollections(components, materials, () =>
+                    KernelRecoveryValidation.run(this, () => {
+                        graph = this.modelManager.prepareRecoveryNodes(data["models"].nodes, () => {
+                            for (const node of this.modelManager.findNodes()) {
+                                if (node instanceof ShapeNode) {
+                                    if (!node.shape.isOk)
+                                        throw new Error(
+                                            `Recovery rebuild failed for ${node.id}: ${node.shape.error}`,
+                                        );
+                                    if (!node.shape.value.checkShape())
+                                        throw new Error(`Recovery shape is invalid: ${node.id}`);
+                                } else if (node instanceof MultiShapeNode) {
+                                    for (const shape of node.shapes)
+                                        if (!shape.checkShape())
+                                            throw new Error(`Recovery shape is invalid: ${node.id}`);
+                                }
+                                KernelRecoveryValidation.validateNode(node);
+                                if (node instanceof GeometryNode) void node.mesh;
+                            }
+                        });
+                    }),
+                );
+            });
+        } catch (error) {
+            dispose();
+            throw error;
+        }
+        const readyGraph = graph!;
+        return {
+            adopt: () => {
+                if (disposed) throw new Error("Recovery document candidate has been disposed");
+                readyGraph.adopt();
+                this._variables = metadata.variables;
+                this._settings = metadata.settings;
+                this._acts = metadata.acts;
+                this._userData = metadata.userData;
+                this.setPrivateValue("name", metadata.name);
+                adopted = true;
+            },
+            rollbackAdoption: () => {
+                if (!adopted) return;
+                readyGraph.rollbackAdoption();
+                this._variables = original.variables;
+                this._settings = original.settings;
+                this._acts = original.acts;
+                this._userData = original.userData;
+                this.setPrivateValue("name", original.name);
+                adopted = false;
+            },
+            finish: () => {
+                const disabled = this.history.disabled;
+                this.history.disabled = true;
+                try {
+                    run(original, () => {
+                        this.history.resetForRecovery(false);
+                    });
+                    this.modelManager.materials.clear();
+                    this.modelManager.materials.push(...materials);
+                    this.modelManager.components.clear();
+                    this.modelManager.components.push(...components);
+                    if (!checkpoint.dirty) this.savedPosition = this.history.position();
+                    this.updateDirty();
+                } finally {
+                    this.history.disabled = disabled;
+                }
+            },
+            notify: () => {
+                this.selection.clearSelection();
+                const disabled = this.history.disabled;
+                this.history.disabled = true;
+                try {
+                    try {
+                        this.modelManager.notifyRecoveryReplacement(previousRoot);
+                    } finally {
+                        run(original, () => {
+                            this.modelManager.disposeRecoveryRoot(previousRoot);
+                            original.variables.dispose();
+                            original.settings.dispose();
+                            for (const act of original.acts) act.dispose();
+                        });
+                        this.history.onChanged.emit();
+                    }
+                    this.visual.update();
+                } finally {
+                    this.history.disabled = disabled;
+                }
+            },
+            dispose,
+        };
     }
 
     replaceContent(data: Serialized, name: string): Result<void, DocumentFormatError> {
@@ -160,6 +360,7 @@ export class Document extends Observable implements IDocument {
     markSaved(position: object = this.history.position()) {
         this.savedPosition = position;
         this.updateDirty();
+        if (!this.headless && KernelRecovery.current.available) KernelRecoveryCheckpoints.capture(this);
     }
 
     override disposeInternal(): void {
@@ -267,6 +468,7 @@ export class Document extends Observable implements IDocument {
      * its answer instead of opening a second dialog.
      */
     close(options: CloseDocumentOptions = {}): Promise<boolean> {
+        DocumentMutations.assertWritable(this);
         if (this.closing) return Promise.resolve(true);
         this.pendingClose ??= this.closeOnce(options).finally(() => {
             this.pendingClose = undefined;

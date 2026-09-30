@@ -9,6 +9,7 @@ import {
     KernelHandleOwnershipError,
     onKernelAbort,
     retireKernelModule,
+    runKernelPreparation,
 } from "../src/kernelGuard";
 
 // A stand-in for an embind module: classes whose prototypes carry `ClassHandle`'s `delete` /
@@ -316,4 +317,12 @@ describe("kernel generation ownership", () => {
         expect(nativeCalls).toEqual([]);
         expect(KernelState.current.status).toBe("ok");
     });
+});
+
+test("native preparation refuses asynchronous scope escape and restores public crash protection", () => {
+    const fresh = guardKernelModule(createModule(), { probe: () => {} });
+    KernelState.current.markCrashed("injected public crash");
+    expect(() => runKernelPreparation(fresh, () => Promise.resolve())).toThrow("must be synchronous");
+    expect(() => new fresh.FakeShape()).toThrow("injected public crash");
+    expect(KernelState.current.status).toBe("crashed");
 });

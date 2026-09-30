@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IKernelRecoveryContext } from "@spicy3d/core";
+import { type IKernelRecoveryContext, KernelState } from "@spicy3d/core";
 import MainModuleFactory, { type MainModule } from "../lib/spicy-wasm";
 import {
     guardKernelModule,
@@ -49,8 +49,10 @@ export async function createWasmModule(options?: InitWasmOptions): Promise<MainM
 
 /** Private synchronous module selection for candidate graphs. Disposal permanently retires it. */
 export async function createWasmRecoveryContext(options?: InitWasmOptions): Promise<IKernelRecoveryContext> {
+    retireKernelModule(global.wasm, KernelState.current.reason ?? "replaced main kernel generation");
     const module = await createWasmModule(options);
     let disposed = false;
+    let published = false;
     return {
         run<T>(action: () => T): T {
             if (disposed) throw new Error("Recovery context has been disposed");
@@ -62,10 +64,15 @@ export async function createWasmRecoveryContext(options?: InitWasmOptions): Prom
                 global.wasm = previous;
             }
         },
+        publish() {
+            if (disposed) throw new Error("Recovery context has been disposed");
+            global.wasm = module;
+            published = true;
+        },
         dispose() {
             if (disposed) return;
             disposed = true;
-            retireKernelModule(module);
+            if (!published) retireKernelModule(module);
         },
     };
 }

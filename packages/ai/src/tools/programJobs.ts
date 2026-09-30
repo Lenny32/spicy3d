@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { DocumentRebuilds, type IDocument, KernelState } from "@spicy3d/core";
+import { DocumentRebuilds, type IDocument, KernelRecovery, KernelState } from "@spicy3d/core";
 import type { Tool, ToolCallContext } from "../llm/types";
 import { handleRunProgram, type ProgramProgress, runProgramParameters } from "./capabilityEngine";
 import { getDocument } from "./documentContext";
@@ -129,6 +129,11 @@ export class ProgramJobs {
         return this.snapshot(job);
     }
 
+    /** Recovery must not await queued mutations behind its own FIFO slot. */
+    cancelAll(reason: string): void {
+        for (const job of this.jobs.values()) this.cancelJob(job, reason);
+    }
+
     forget(caller: string): void {
         for (const job of this.jobs.values()) {
             if (job.caller !== caller) continue;
@@ -176,6 +181,8 @@ export class ProgramJobs {
 }
 
 const PAGE_JOBS = new ProgramJobs();
+export const cancelAllProgramJobs = (reason: string): void => PAGE_JOBS.cancelAll(reason);
+KernelRecovery.current.addQuiesce(() => cancelAllProgramJobs("Main kernel recovery cancelled modeling jobs"));
 export const forgetProgramJobs = (caller: string): void => PAGE_JOBS.forget(caller);
 
 export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {

@@ -21,7 +21,7 @@ function document() {
 }
 function context() {
     const dispose = rs.fn();
-    return { run: <T>(action: () => T) => action(), dispose } satisfies IKernelRecoveryContext;
+    return { run: <T>(action: () => T) => action(), dispose, publish() {} } satisfies IKernelRecoveryContext;
 }
 
 afterEach(() => KernelState.current.reset());
@@ -128,4 +128,14 @@ test("module creation failure leaves every document and checkpoint intact", asyn
     expect(prepare).not.toHaveBeenCalled();
     expect(doc.modelManager.rootNode).toBe(root);
     expect(KernelRecoveryCheckpoints.read(doc).data["models"].nodes[1].name).toBe("committed");
+});
+
+test("candidate run refuses an asynchronous turn and restores live lookup immediately", () => {
+    const doc = document();
+    const root = doc.modelManager.rootNode;
+    const graph = doc.modelManager.prepareRecoveryNodes(doc.modelManager.serialize().nodes, () => {});
+    expect(() => graph.run(() => Promise.resolve())).toThrow("must be synchronous");
+    expect(doc.modelManager.rootNode).toBe(root);
+    expect(doc.history.disabled).toBe(false);
+    graph.dispose();
 });

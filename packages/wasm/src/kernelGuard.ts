@@ -59,7 +59,10 @@ export function runKernelPreparation<T>(module: object, action: () => T): T {
     const previous = preparationGeneration;
     try {
         preparationGeneration = generation;
-        return action();
+        const result = action();
+        if (result && typeof result === "object" && "then" in result)
+            throw new Error("Kernel preparation must be synchronous");
+        return result;
     } finally {
         preparationGeneration = previous;
     }

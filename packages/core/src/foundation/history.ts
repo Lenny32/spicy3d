@@ -94,6 +94,22 @@ export class History implements IDisposable {
         this.onChanged.emit();
     }
 
+    /** An explicitly approved runtime undo boundary after successful main-kernel reconstruction. */
+    resetForRecovery(notify = true): void {
+        this.assertWritable();
+        const records = [...this._undos, ...this._redos];
+        this.clear();
+        this.#bottom = {};
+        for (const record of records) {
+            try {
+                record.dispose();
+            } catch {
+                /* A retired resource cannot be replayed or re-entered. */
+            }
+        }
+        if (notify) this.onChanged.emit();
+    }
+
     undoCount() {
         return this._undos.length;
     }

@@ -335,3 +335,44 @@ test.each([0, -1, Infinity, NaN, 600_001])("invalid deadline %s creates no queue
     );
     expect(scheduleMutation).not.toHaveBeenCalled();
 });
+
+test("recovery cancels queued jobs behind its FIFO slot without awaiting them", async () => {
+    setup();
+    const execute = rs.fn(async () => JSON.stringify({ created: [], results: {} }));
+    const jobs = new ProgramJobs(execute);
+    managers.push(jobs);
+    const queue = new SerialQueue();
+    let release!: () => void;
+    const blocked = queue.run(
+        () =>
+            new Promise<void>((resolve) => {
+                release = resolve;
+            }),
+    );
+    await Promise.resolve();
+    const events: string[] = [];
+    const recovery = queue.run(async () => {
+        jobs.cancelAll("main kernel recovery");
+        events.push("recovered");
+    });
+    const context = { caller: "owner", scheduleMutation: (action: () => Promise<void>) => queue.run(action) };
+    const first = jobs.start({ ops: [boxOp] }, context) as { jobId: string };
+    const second = jobs.start({ ops: [boxOp] }, context) as { jobId: string };
+    const next = queue.run(async () => {
+        events.push("next mutation");
+    });
+    release();
+    await blocked;
+    await recovery;
+    await next;
+    expect(events).toEqual(["recovered", "next mutation"]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(jobs.read({ jobId: first.jobId }, context)).toMatchObject({
+        state: "cancelled",
+        error: "main kernel recovery",
+    });
+    expect(jobs.read({ jobId: second.jobId }, context)).toMatchObject({
+        state: "cancelled",
+        error: "main kernel recovery",
+    });
+});

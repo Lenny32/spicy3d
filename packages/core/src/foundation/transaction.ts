@@ -8,6 +8,17 @@ import { ArrayRecord, type IHistoryRecord } from "./history";
 import { Logger } from "./logger";
 
 export class Transaction {
+    private static readonly committed = new WeakMap<IDocument, Set<() => void>>();
+    static onCommitted(document: IDocument, listener: () => void): () => void {
+        let listeners = Transaction.committed.get(document);
+        if (!listeners) {
+            listeners = new Set();
+            Transaction.committed.set(document, listeners);
+        }
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+    }
+
     private static readonly _transactionMap: WeakMap<IDocument, ArrayRecord> = new WeakMap();
 
     constructor(
@@ -102,6 +113,7 @@ export class Transaction {
         }
         if (arrayRecord.records.length > 0) Transaction.addToHistory(this.document, arrayRecord);
         Transaction._transactionMap.delete(this.document);
+        for (const listener of Transaction.committed.get(this.document) ?? []) listener();
     }
 
     rollback() {

@@ -18,6 +18,7 @@ import {
     type IShape,
     type IShapeFactory,
     type IWire,
+    KernelRecovery,
     LENGTH_UNITS,
     Line,
     Matrix4,
@@ -104,6 +105,35 @@ interface LocalRef {
  * against the live scene, so edits to a source node are reflected automatically.
  */
 const refsByDocument = new WeakMap<IDocument, Map<string, LocalRef>>();
+/** Stable scene-backed refs re-derive; standalone native geometry is explicitly invalidated. */
+export function recoverDocumentRefs(document: IDocument): void {
+    const refs = refsByDocument.get(document);
+    if (!refs) return;
+    const anchored = (entry: LocalRef, visited = new Set<LocalRef>()): boolean => {
+        if (visited.has(entry)) return false;
+        visited.add(entry);
+        if (entry.parent) return anchored(entry.parent, visited);
+        return (
+            entry.nodeId !== undefined &&
+            document.modelManager.findNode((node) => node.id === entry.nodeId) instanceof ShapeNode
+        );
+    };
+    for (const [id, entry] of [...refs]) {
+        if (!anchored(entry)) {
+            refs.delete(id);
+            continue;
+        }
+        try {
+            refreshEntry(id, entry, document, refs, new Set(), new Set());
+        } catch {
+            refs.delete(id);
+        }
+    }
+}
+KernelRecovery.current.addRecovered((documents) => {
+    for (const document of documents) recoverDocumentRefs(document);
+});
+
 const MAX_REFS = 256;
 // Creation extras cannot be re-derived, so bound their retained snapshot geometry too.
 const MAX_SNAPSHOT_REFS = 4096;
