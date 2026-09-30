@@ -124,7 +124,7 @@ export const DefaultRibbon: RibbonTabProfile[] = [
             },
             {
                 groupName: "ribbon.group.insert",
-                items: ["file.import"],
+                items: ["file.import", "file.importReferenceMesh"],
                 collapsedItems: ["convert.curveProjection"],
             },
         ],

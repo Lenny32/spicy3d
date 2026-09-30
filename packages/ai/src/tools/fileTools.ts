@@ -1,7 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { download, I18n, type IApplication, type IDocument, type INode, VisualNode } from "@spicy3d/core";
+import {
+    download,
+    I18n,
+    type IApplication,
+    type IDocument,
+    type INode,
+    isLengthUnit,
+    Matrix4,
+    Transaction,
+    VisualNode,
+} from "@spicy3d/core";
 import type { Tool } from "../llm/types";
 
 function getDocument(): IDocument | undefined {
@@ -61,6 +71,38 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     });
 }
 
+export function buildReferenceMeshImportTool(): Tool {
+    return {
+        name: "import_reference_mesh",
+        description:
+            "Import base64-encoded STL as a lightweight ghost MeshNode without kernel conversion. STL defaults to millimetres. Placement uses millimetres. Move/rotate, visibility and material opacity remain editable with existing node tools. This is display geometry, not a parametric solid. Maximum decoded file size: 32 MiB.",
+        parameters: {
+            type: "object",
+            properties: {
+                filename: { type: "string", description: "STL filename" },
+                base64: { type: "string", description: "Raw base64 STL bytes (no data URL)" },
+                lengthUnit: { type: "string", enum: ["mm", "cm", "m", "in"] },
+                translation: {
+                    type: "array",
+                    items: { type: "number" },
+                    minItems: 3,
+                    maxItems: 3,
+                    description: "Placement [x,y,z] in millimetres",
+                },
+                opacity: {
+                    type: "number",
+                    minimum: 0,
+                    maximum: 1,
+                    description: "Ghost opacity, default 0.35",
+                },
+                visible: { type: "boolean" },
+            },
+            required: ["filename", "base64"],
+        },
+        handler: handleImportReferenceMesh,
+    };
+}
+
 export function buildFileTools(): Tool[] {
     return [
         {
@@ -86,4 +128,73 @@ export function buildFileTools(): Tool[] {
             handler: handleExportNodes,
         },
     ];
+}
+
+async function handleImportReferenceMesh(args: Record<string, unknown>): Promise<string> {
+    const app = globalThis.app;
+    const document = getDocument();
+    const fail = (error: string) => JSON.stringify({ error });
+    if (!document) return fail(I18n.translate("ai.error.noDocument"));
+    if (document.repository.isReadOnly?.(document.id)) return fail("Document is read-only");
+    const importer = app.dataExchange.importReferenceMesh;
+    if (!importer) return fail("Reference mesh import is unavailable");
+    if (typeof args["filename"] !== "string" || !args["filename"].toLowerCase().endsWith(".stl"))
+        return fail("filename must end with .stl");
+    const encoded = args["base64"];
+    const maxBytes = 32 * 1024 * 1024;
+    if (
+        typeof encoded !== "string" ||
+        encoded.length === 0 ||
+        encoded.length % 4 !== 0 ||
+        encoded.length > Math.ceil(maxBytes / 3) * 4 ||
+        !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)
+    )
+        return fail("Expected raw base64 STL, up to 32 MiB");
+    if (args["lengthUnit"] !== undefined && !isLengthUnit(args["lengthUnit"]))
+        return fail("Invalid lengthUnit");
+    if (
+        args["opacity"] !== undefined &&
+        (typeof args["opacity"] !== "number" ||
+            !Number.isFinite(args["opacity"]) ||
+            args["opacity"] < 0 ||
+            args["opacity"] > 1)
+    )
+        return fail("Opacity must be 0–1");
+    if (args["visible"] !== undefined && typeof args["visible"] !== "boolean")
+        return fail("visible must be a boolean");
+    const translation = args["translation"] ?? [0, 0, 0];
+    if (
+        !Array.isArray(translation) ||
+        translation.length !== 3 ||
+        !translation.every((v) => typeof v === "number" && Number.isFinite(v))
+    )
+        return fail("translation must be three finite numbers");
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+        const decoded = atob(encoded);
+        if (decoded.length > maxBytes) return fail("STL exceeds 32 MiB");
+        bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+    } catch {
+        return fail("Invalid base64");
+    }
+    const file = new File([bytes], args["filename"], { type: "model/stl" });
+    let response = fail("Reference mesh import failed");
+    await Transaction.executeAsync(document, "import reference mesh", async () => {
+        const result = await importer.call(app.dataExchange, document, file, {
+            lengthUnit: args["lengthUnit"] as "mm" | "cm" | "m" | "in" | undefined,
+            opacity: args["opacity"] as number | undefined,
+            visible: args["visible"] as boolean | undefined,
+            transform: Matrix4.fromTranslation(translation[0], translation[1], translation[2]),
+        });
+        response = result.isOk
+            ? JSON.stringify({
+                  ok: true,
+                  id: result.value.id,
+                  name: result.value.name,
+                  triangles: (result.value.mesh.position?.length ?? 0) / 9,
+                  lengthUnit: args["lengthUnit"] ?? "mm",
+              })
+            : fail(result.error);
+    });
+    return response;
 }

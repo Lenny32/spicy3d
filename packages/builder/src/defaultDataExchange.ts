@@ -13,18 +13,59 @@ import {
     type IDocument,
     type INode,
     type IShape,
+    isLengthUnit,
     type LengthUnit,
+    lengthUnitFactor,
+    Material,
     Matrix4,
+    type Mesh,
+    MeshNode,
     PubSub,
+    type ReferenceMeshImportOptions,
     Result,
     ShapeNode,
     type VisualNode,
 } from "@spicy3d/core";
+import { parseReferenceStl } from "./referenceStl";
 
 /** STEP and IGES record their unit; the mesh formats and BREP are bare coordinates. */
 const EMBEDDED_UNIT_FORMATS = new Set([".step", ".iges"]);
 
 export class DefaultDataExchange implements IDataExchange {
+    referenceMeshFormats(): string[] {
+        return [".stl"];
+    }
+
+    async importReferenceMesh(
+        document: IDocument,
+        file: File,
+        options: ReferenceMeshImportOptions = {},
+    ): Promise<Result<MeshNode>> {
+        if (document.repository.isReadOnly?.(document.id)) return Result.err("Document is read-only");
+        if (!file.name.toLowerCase().endsWith(".stl"))
+            return Result.err("Reference meshes support STL files");
+        const unit = options.lengthUnit ?? "mm";
+        const opacity = options.opacity ?? 0.35;
+        if (!isLengthUnit(unit)) return Result.err("Unsupported STL length unit");
+        if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return Result.err("Opacity must be 0–1");
+        let mesh: Result<Mesh>;
+        try {
+            mesh = parseReferenceStl(await file.arrayBuffer(), lengthUnitFactor(unit));
+        } catch {
+            return Result.err("Unable to read STL file");
+        }
+        if (!mesh.isOk) return Result.err(mesh.error);
+        const material = new Material({ document, name: `${file.name} reference`, color: 0x8098b0 });
+        material.opacity = opacity;
+        const node = new MeshNode({ document, name: file.name, mesh: mesh.value, materialId: material.id });
+        node.transform = options.transform ?? Matrix4.identity();
+        node.visible = options.visible ?? true;
+        document.modelManager.materials.push(material);
+        document.modelManager.addNode(node);
+        document.visual.update();
+        return Result.ok(node);
+    }
+
     importFormats(): string[] {
         return [".step", ".stp", ".iges", ".igs", ".brep", ".stl"];
     }
