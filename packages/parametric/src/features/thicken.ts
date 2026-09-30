@@ -32,7 +32,8 @@ import { matchSourceFaceIndexes } from "./sourceFaceMatcher";
  *   thickness (inward when negative, outward when positive), and the difference of the two.
  * - **An open shell or a face** (a lofted skin, an extruded open profile) becomes a solid through
  *   `makeThickSolidBySimple`, which offsets along the face normals; the join type and mode do not
- *   apply. The kernel's `makeThickSolidByJoin` answers another shell for these inputs.
+ *   apply. The kernel's `makeThickSolidByJoin` answers no solid for these inputs (the factory
+ *   refuses it).
  *
  * The inputs are checked before any kernel call (an input the kernel rejects may raise inside it):
  * a shape to thicken, a valid one, a thickness that resolves to a non-zero length. A thick solid
@@ -44,6 +45,7 @@ import { matchSourceFaceIndexes } from "./sourceFaceMatcher";
 const MIN_THICKNESS = 1e-6;
 /** Tolerance of the orientation fix of an inside-out result. */
 const FIX_TOLERANCE = 1e-6;
+const INVALID_RESULT_ERROR = "Thicken produced an invalid solid";
 
 const thickenHandler: FeatureHandler<ThickenFeatureData> = {
     display: "command.feature.thicken",
@@ -124,12 +126,21 @@ function thickenShape(
     const oriented = rightSideOut(offset.value);
     if (!oriented.isOk) return oriented;
     try {
-        return thickness < 0
-            ? shapeFactory.booleanCut([input], [oriented.value])
-            : shapeFactory.booleanCut([oriented.value], [input]);
+        const hollow =
+            thickness < 0
+                ? shapeFactory.booleanCut([input], [oriented.value])
+                : shapeFactory.booleanCut([oriented.value], [input]);
+        return hollow.isOk ? checked(hollow.value) : hollow;
     } finally {
         oriented.value.dispose();
     }
+}
+
+/** `shape` when it is a valid solid; disposed and refused otherwise. */
+function checked(shape: IShape): Result<IShape> {
+    if (shape.checkShape()) return Result.ok(shape);
+    shape.dispose();
+    return Result.err(INVALID_RESULT_ERROR);
 }
 
 /**
@@ -168,7 +179,7 @@ function rightSideOut(shape: IShape): Result<IShape> {
         if (!fixed.isNull()) fixed.dispose();
         return Result.err("Thicken failed: the thick solid is inside out");
     }
-    return Result.ok(fixed);
+    return checked(fixed);
 }
 
 /**

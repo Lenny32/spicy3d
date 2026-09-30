@@ -18,7 +18,7 @@ To build the current project, please execute
 npm run build:wasm
 ```
 
-After the compilation is completed, the target will be copied to the **packages/spicy-wasm/lib** directory.
+After the compilation is completed, the target will be copied to the **packages/wasm/lib** directory.
 
 ### C++ exceptions
 

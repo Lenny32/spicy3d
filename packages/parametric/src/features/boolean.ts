@@ -118,7 +118,11 @@ const EMPTY_RESULT_ERRORS: Record<BooleanOperation, string> = {
     fuse: "Boolean fuse produced an empty shape",
 };
 
-/** The kernel's own empty-result error (`booleanFailure` in `factory.cpp`, since the V8_0_1 build). */
+/**
+ * The kernel's own empty-result error (`booleanFailure` in `factory.cpp`, since the V8_0_1 build).
+ * Guarded by booleanEmptyResult.kernel.test.ts and parametricProgram.kernel.test.ts ("a common with
+ * a disjoint tool fails …"), which fail when the kernel's wording drifts from this string.
+ */
 const KERNEL_EMPTY_RESULT_ERROR = "Boolean produced an empty shape";
 
 /**

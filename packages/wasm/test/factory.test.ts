@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+    Config,
     type IEdge,
     type IFace,
     type IShape,
@@ -997,6 +998,47 @@ describe("ShapeFactory — advanced operations", () => {
                 intersection,
             );
             expect(thickJoinResult.isOk).toBe(true);
+        });
+
+        describe("intersection join face-count guard", () => {
+            const defaultLimit = Config.instance.thickSolidIntersectionMaxFaces;
+            afterEach(() => {
+                Config.instance.thickSolidIntersectionMaxFaces = defaultLimit;
+            });
+
+            test("defaults to 40 faces", () => {
+                expect(defaultLimit).toBe(40);
+            });
+
+            test("an intersection join within the limit runs", () => {
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+                const result = factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "intersection");
+                expect(result.isOk).toBe(true);
+            });
+
+            test("an intersection join over the limit is refused, naming the count and the alternatives", () => {
+                Config.instance.thickSolidIntersectionMaxFaces = 5;
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+
+                const result = factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "intersection");
+
+                expect(result.isOk).toBe(false);
+                expect(result.error).toContain("6 faces (limit 5)");
+                expect(result.error).toContain('joinType "arc"');
+                expect(result.error).toContain("makeThickSolidBySimple");
+                // The input is untouched and still usable.
+                expect(box.findSubShapes(ShapeTypes.face).length).toBe(6);
+            });
+
+            test("other join types ignore the limit", () => {
+                Config.instance.thickSolidIntersectionMaxFaces = 5;
+                const box = factory.box(plane, 10, 10, 10).value;
+                const faces = box.findSubShapes(ShapeTypes.face);
+
+                expect(factory.makeThickSolidByJoin(box, [faces[0] as IFace], -1, "arc").isOk).toBe(true);
+            });
         });
     });
 

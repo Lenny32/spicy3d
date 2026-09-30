@@ -715,14 +715,16 @@ export function resolveConstructionParameters(
         resolved[field] = number.value;
     }
     if ("position" in definition && definition.position?.kind === "distance") {
-        const value = resolveParameter("position", definition.position.value, LENGTH_UNITS, scope);
+        const value = resolveParameter("position.value", definition.position.value, LENGTH_UNITS, scope);
         if (!value.isOk) return Result.err(value.error);
         resolved["position"] = { ...definition.position, value: value.value };
     }
     if ("position" in definition && definition.position?.kind === "normalized") {
         const ratio: unknown = definition.position.value;
         if (typeof ratio !== "number" || !Number.isFinite(ratio))
-            return Result.err(`Construction position must be a finite ratio, got ${JSON.stringify(ratio)}`);
+            return Result.err(
+                `Construction position.value must be a finite ratio, got ${JSON.stringify(ratio)}`,
+            );
     }
     return Result.ok(resolved as ResolvedConstructionDefinition);
 }

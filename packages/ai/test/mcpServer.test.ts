@@ -9,6 +9,7 @@ import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/serve
 import { SKILLS } from "../src/skills";
 import { buildAskUserTool } from "../src/tools/askUser";
 import { imageByteBudget } from "../src/tools/imageEncoding";
+import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
 
 function tool(name: string, handler: Tool["handler"]): Tool {
     return { name, description: `${name} tool.`, parameters: { type: "object", properties: {} }, handler };
@@ -210,5 +211,48 @@ describe("image budget per server", () => {
         expect(await budgetSeenBy(() => 5000)).toBe(5000);
         expect(await budgetSeenBy()).toBeUndefined();
         expect(imageByteBudget()).toBeUndefined();
+    });
+});
+
+describe("slow-op warnings", () => {
+    afterEach(() => {
+        takeSlowOpWarnings();
+        takeSlowOpWarnings();
+    });
+
+    test("the call that ran a slow op carries the warning, the next one repeats it once", async () => {
+        const slow = tool("slow", async () => {
+            noteOpDuration("makeThickSolidByJoin", 48_000);
+            return '{"ok":true}';
+        });
+        const alpha = tool("alpha", async () => '{"a":1}');
+        const { client } = await connect([slow, alpha]);
+
+        const first = await client.callTool({ name: "slow", arguments: {} });
+        const second = await client.callTool({ name: "alpha", arguments: {} });
+        const third = await client.callTool({ name: "alpha", arguments: {} });
+
+        const texts = (result: typeof first) => (result.content as { text: string }[]).map((c) => c.text);
+        // The payload keeps its own part (still valid JSON); the warning is a separate line.
+        expect(texts(first)[0]).toBe('{"ok":true}');
+        expect(texts(first)[1]).toContain(
+            'Warning: op "makeThickSolidByJoin" took 48 s (slow-op budget 30 s)',
+        );
+        expect(first.isError).toBeUndefined();
+        expect(texts(second)[0]).toBe('{"a":1}');
+        expect(texts(second)[1]).toMatch(/^\(earlier call\) Warning: op "makeThickSolidByJoin" took 48 s/);
+        expect(texts(third)).toEqual(['{"a":1}']);
+    });
+
+    test("ops within the budget add nothing", async () => {
+        const quick = tool("quick", async () => {
+            noteOpDuration("box", 20_000);
+            return "{}";
+        });
+        const { client } = await connect([quick]);
+
+        const result = await client.callTool({ name: "quick", arguments: {} });
+
+        expect((result.content as { text: string }[]).map((c) => c.text)).toEqual(["{}"]);
     });
 });

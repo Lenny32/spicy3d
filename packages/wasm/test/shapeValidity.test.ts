@@ -53,6 +53,36 @@ describe("thick solid results are checked", () => {
         expect(shape.volume()).toBeGreaterThan(0);
     });
 
+    test("a join thick solid of an open lofted shell without closing faces is refused as not a solid", () => {
+        // Three open 4-point polylines (a U) at z = 0 / 10 / 20, lofted into an open skin.
+        const sections = [0, 10, 20].map((z) =>
+            keep(
+                unwrapOk(
+                    factory.polygon([
+                        { x: 0, y: 0, z },
+                        { x: 10, y: 0, z },
+                        { x: 10, y: 10, z },
+                        { x: 0, y: 10, z },
+                    ]),
+                ),
+            ),
+        );
+        const skin = keep(unwrapOk(factory.loft(sections, false, false, "c2")));
+        expect(skin.findSubShapes(ShapeTypes.solid)).toHaveLength(0);
+
+        const joined = factory.makeThickSolidByJoin(skin, [], 1, "arc");
+        expect(joined.isOk).toBe(false);
+        expect(joined.error).toMatch(
+            /^MakeThickSolidByJoin failed: the result is not a solid \(\w+\); for an open shell use makeThickSolidBySimple$/,
+        );
+
+        const simple = factory.makeThickSolidBySimple(skin, 1);
+        expect(simple.isOk).toBe(true);
+        const solid = keep(unwrapOk(simple));
+        expect(solid.findSubShapes(ShapeTypes.solid).length).toBeGreaterThan(0);
+        expect(solid.checkShape()).toBe(true);
+    });
+
     test("a thick solid of an open shell passes", () => {
         const thick = factory.makeThickSolidBySimple(openShellFaces(), 1);
         expect(thick.isOk).toBe(true);

@@ -663,3 +663,46 @@ describe("undo", () => {
         );
     });
 });
+
+describe("cancellation and op timing", () => {
+    test("a signal aborted after op 0 stops the program before op 1 and rolls it back", () => {
+        const doc = newDoc();
+        const before = nodeIds(doc);
+        const controller = new AbortController();
+        const finished: string[] = [];
+
+        let message = "";
+        try {
+            Transaction.execute(doc, "test program", () => {
+                runParametricProgram(doc, plate(20), {
+                    signal: controller.signal,
+                    onOpFinished: (op, milliseconds) => {
+                        expect(milliseconds).toBeGreaterThanOrEqual(0);
+                        finished.push(op);
+                        controller.abort();
+                    },
+                });
+            });
+        } catch (err) {
+            message = (err as Error).message;
+        }
+
+        expect(message).toBe('cancelled before op 1 ("extrude"); the whole program was rolled back');
+        expect(finished).toEqual(["sketch"]);
+        // The sketch op 0 created is gone with the rollback.
+        expect(nodeIds(doc)).toEqual(before);
+        expect(doc.modelManager.findNodes((n) => n instanceof SketchNode)).toEqual([]);
+    });
+
+    test("every op, a failing one included, reports its wall time", () => {
+        const doc = newDoc();
+        const finished: string[] = [];
+
+        expect(() =>
+            runParametricProgram(doc, [...plate(20), { op: "features", body: "missing" } as ParametricOp], {
+                onOpFinished: (op) => finished.push(op),
+            }),
+        ).toThrow('op 2 ("features") failed');
+        expect(finished).toEqual(["sketch", "extrude", "features"]);
+    });
+});

@@ -5,6 +5,7 @@ import { Transaction } from "@spicy3d/core";
 import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
 import { requireDocument } from "./documentContext";
+import { noteOpDuration } from "./opBudget";
 
 /**
  * Loads the parametric module on first use. It must not be imported at module scope:
@@ -367,7 +368,7 @@ export function buildParametricTools(): Tool[] {
     ];
 }
 
-async function runParametric(args: Record<string, unknown>): Promise<string> {
+async function runParametric(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const document = requireDocument();
     if (typeof document === "string") return document;
 
@@ -388,7 +389,11 @@ async function runParametric(args: Record<string, unknown>): Promise<string> {
     // Synchronous by construction: the solver is initialized above, and a throw here
     // rolls the whole program back, so a half-built body never survives.
     Transaction.execute(document, "run_parametric", () => {
-        result = parametric.runParametricProgram(document, ops as ParametricOp[]);
+        // Cancellation is checked between ops; a running op is timed for the slow-op warning.
+        result = parametric.runParametricProgram(document, ops as ParametricOp[], {
+            signal,
+            onOpFinished: noteOpDuration,
+        });
         document.selection.clearSelection();
         document.visual.update();
     });

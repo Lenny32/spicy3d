@@ -316,8 +316,23 @@ function refsFor(document: IDocument): Map<string, string> {
     return refs;
 }
 
+/** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
+export interface ProgramRunOptions {
+    /**
+     * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
+     * transaction rolls it back. An op already running is never interrupted.
+     */
+    signal?: AbortSignal;
+    /** Called after every op, failed ones included, with its wall time. */
+    onOpFinished?: (op: string, milliseconds: number) => void;
+}
+
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
-export function runParametricProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
+export function runParametricProgram(
+    document: IDocument,
+    ops: readonly ParametricOp[],
+    options: ProgramRunOptions = {},
+): ProgramResult {
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -328,10 +343,16 @@ export function runParametricProgram(document: IDocument, ops: readonly Parametr
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
+        if (options.signal?.aborted) {
+            throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
+        }
+        const start = performance.now();
         try {
             runOp(state, op);
         } catch (err) {
             throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
+        } finally {
+            options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
     state.out.bodies = [...state.touched].map((body) => ({
@@ -770,8 +791,9 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     state.refs.set(op.id, body.id);
 }
 
-const THICKEN_JOIN_TYPES = ["arc", "intersection"] as const;
-const THICKEN_MODES = ["skin", "pipe"] as const;
+/** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */
+const THICKEN_JOIN_TYPE_NAMES = ["arc", "intersection"] as const;
+const THICKEN_MODE_NAMES = ["skin", "pipe"] as const;
 
 function runThickenOp(state: State, op: ThickenOp): void {
     const body = resolveBody(state, op.body);
@@ -779,11 +801,11 @@ function runThickenOp(state: State, op: ThickenOp): void {
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
     if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
     ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
-    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPES as readonly string[]).includes(op.joinType)) {
-        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPES.join(", ")}`);
+    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
+        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPE_NAMES.join(", ")}`);
     }
-    if (op.mode !== undefined && !(THICKEN_MODES as readonly string[]).includes(op.mode)) {
-        throw new Error(`"mode" must be one of ${THICKEN_MODES.join(", ")}`);
+    if (op.mode !== undefined && !(THICKEN_MODE_NAMES as readonly string[]).includes(op.mode)) {
+        throw new Error(`"mode" must be one of ${THICKEN_MODE_NAMES.join(", ")}`);
     }
     if (op.openFaceIndexes !== undefined && !Array.isArray(op.openFaceIndexes)) {
         throw new Error('"openFaceIndexes" must be an array of face indexes');

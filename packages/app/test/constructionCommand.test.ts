@@ -288,6 +288,70 @@ describe("construction command forms", () => {
         expect(origin.isEqualTo(new XYZ({ x: 7, y: 0, z: 0 }))).toBe(true);
     });
 
+    test("a length field reads and shows the project unit", async () => {
+        const { app, doc } = setup();
+        doc.settings.lengthUnit = "cm";
+        doc.variables.setItems([{ id: "v1", name: "w", expression: "12", type: "length" }]);
+        const completion = new OffsetPlaneCommand().execute(app);
+        await chooseSource("Plane", "XY");
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=distance]");
+        expect(input).not.toBeNull();
+        expect(input!.parentElement!.firstChild!.textContent).toBe("Distance (cm)");
+        input!.value = "w * 2";
+        input!.dispatchEvent(new Event("input"));
+        expect(panel().querySelector("[data-evaluated=distance]")?.textContent).toBe("= 2.4 cm");
+        input!.value = "10";
+        input!.dispatchEvent(new Event("input"));
+        button("Create").click();
+        await completion;
+        const node = doc.modelManager.findNode((n) => n instanceof ConstructionNode) as ConstructionNode;
+        expect(node.definition).toMatchObject({ distance: 100 });
+    });
+
+    test("switching a path position to normalized resets it, and a ratio refuses an expression", async () => {
+        const { app, doc } = setup();
+        doc.variables.setItems([{ id: "v1", name: "len", expression: "8", type: "length" }]);
+        const path = {
+            kind: "fixed" as const,
+            geometry: { kind: "axis" as const, origin: XYZ.zero, direction: XYZ.unitX },
+        };
+        const node = new ConstructionNode({
+            document: doc,
+            definition: { kind: "point-along-path", path, position: { kind: "distance", value: "len / 2" } },
+        });
+        doc.modelManager.addNode(node);
+        doc.selection.getSelectedNodes = () => [node];
+        const completion = new EditConstructionCommand().execute(app);
+        const input = panel().querySelector<HTMLInputElement>("input[data-parameter=value]");
+        expect(input).not.toBeNull();
+        expect(input!.value).toBe("len / 2");
+        const mode = [...panel().querySelectorAll("select")].find((select) =>
+            [...select.options].some((item) => item.value === "normalized"),
+        );
+        expect(mode).not.toBeUndefined();
+        mode!.value = "normalized";
+        mode!.dispatchEvent(new Event("change"));
+        expect(input!.value).toBe("0");
+        // The ratio reaches core as a number: the fixed axis is refused for being unbounded, not
+        // for a NaN ratio left over from the distance expression.
+        const status = () => panel().querySelector("[role=status]")?.textContent ?? "";
+        expect(status()).toMatch(/unbounded axis needs a distance/);
+        input!.value = "len";
+        input!.dispatchEvent(new Event("input"));
+        expect(status()).toMatch(/^construction\.error\.ratio/);
+        input!.value = "0.25";
+        input!.dispatchEvent(new Event("input"));
+        expect(status()).toMatch(/unbounded axis needs a distance/);
+        mode!.value = "distance";
+        mode!.dispatchEvent(new Event("change"));
+        expect(input!.value).toBe("0");
+        input!.value = "len / 4";
+        input!.dispatchEvent(new Event("input"));
+        button("Apply").click();
+        await completion;
+        expect(node.definition).toMatchObject({ position: { kind: "distance", value: "len / 4" } });
+    });
+
     test("picking a construction source retains its ID", async () => {
         const { app, doc } = setup();
         const source = new ConstructionNode({
