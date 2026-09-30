@@ -51,12 +51,12 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 
 | Ticket | Dependencies | Status | Agent | Task branch | Validation | Integration commit | Blockers |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| #81 Reject invalid fillet and chamfer results | — | Queued | — | — | Pending | — | — |
+| #81 Reject invalid fillet and chamfer results | — | Implementing; native rebuild | mouse_81 | mouse/81-valid-corners | Pending | — | Pinned toolchain setup in progress |
 | #82 Report actionable fillet and chamfer failure diagnostics | #81 | Queued | — | — | Pending | — | — |
 | #83 Support variable-radius fillets | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
-| #86 Expose persistent edge references through MCP | #100 | Queued | — | — | Pending | — | — |
+| #86 Expose persistent edge references through MCP | #100 | Implementing | mouse_86 | mouse/86-persistent-edges | Pending | — | — |
 | #87 Add rule-based edge selection through MCP | #86 | Queued | — | — | Pending | — | — |
 | #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
@@ -71,7 +71,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
 | #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
 | #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
-| #101 Import scan files as lightweight reference MeshNodes | — | Queued | — | — | Pending | — | — |
+| #101 Import scan files as lightweight reference MeshNodes | — | Implementing | mouse_101 | mouse/101-reference-mesh | Pending | — | — |
 | #102 Measure CAD-to-reference-mesh deviation | #101 | Queued | — | — | Pending | — | — |
 | #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
 | #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
@@ -107,3 +107,18 @@ Final checks performed on the root integration checkout:
 
 Worktrees live under `.claude/worktrees/` and are excluded by the existing repository config.
 All merges use separate ticket commits. The integration branch never writes to develop or main.
+## Resumed implementation
+
+After publishing the first four tickets, the user directed continued work on the full plan.
+The active wave is #81, #86 and #101, each in its own worktree from 77e4ac65.
+Root is setting up Emscripten 5.0.7 and OCCT V8_0_1 under #81's cpp/build through WSL;
+CMake is installed locally in that build folder. No system packages or save schemas are changed.
+
+The latest develop baseline already includes opt-in hybrid worker booleans (workerClient,
+workerKernel, hybridShapeFactory). The older kernel docs and audit predate that implementation.
+#96–#98/#92 must extend this infrastructure rather than introduce a duplicate kernel protocol.
+Current gaps remain: no bounded timeout, cancellation does not interrupt executing native work,
+worker native failure is latched, and MCP run_program still uses synchronous native execution.
+
+#86 reuses the existing saved EdgeRef shape through a runtime query/selection API; #101 reuses
+existing MeshNode and Material payloads via a distinct STL mesh import. Neither needs migrations.
