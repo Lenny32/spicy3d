@@ -680,7 +680,11 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         throw new Error('appending an extrude to an existing body requires "operation" (fuse/cut/common)');
     }
     const body = resolveBody(state, op.body);
-    appendFeature(state, body, { ...feature, operation: op.operation });
+    appendFeature(state, body, {
+        ...feature,
+        operation: op.operation,
+        ...(op.name !== undefined ? { name: op.name } : {}),
+    });
     // An op that edits a body is registered as another name for it, so a later op can
     // reference the result of this one the same way it references a freshly built body.
     state.refs.set(op.id, body.id);

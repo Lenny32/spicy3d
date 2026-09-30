@@ -12,7 +12,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DocumentRebuilds, FolderNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
+import {
+    DocumentRebuilds,
+    FolderNode,
+    I18n,
+    type IEdge,
+    type IFace,
+    ShapeTypes,
+    Transaction,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
@@ -258,6 +266,64 @@ describe("sketch and extrude", () => {
         expect(sketch.visible).toBe(false);
     });
 
+    test.each([
+        "fuse",
+        "cut",
+    ] as const)("an appended %s extrusion uses its supplied feature name and keeps the body's name", (operation) => {
+        const doc = newDoc();
+        try {
+            const result = run(doc, [
+                { op: "sketch", id: "s1", plane: "XY", entities: rect(0, 0, 40, 30) },
+                { op: "extrude", id: "b1", sketch: "s1", depth: 20, name: "Plate" },
+            ]);
+            const body = createdBody(doc, result, "b1");
+            const name = operation === "fuse" ? "Raised boss" : "Pocket";
+            const depth = operation === "fuse" ? 30 : 10;
+            const appended = run(doc, [
+                { op: "sketch", id: "s2", plane: "XY", entities: rect(10, 10, 20, 20) },
+                { op: "extrude", id: "e2", sketch: "s2", depth, body: body.id, operation, name },
+                { op: "features", id: "read", body: "e2" },
+            ]);
+
+            expectClean(body);
+            expect(body.name).toBe("Plate");
+            expect(body.features).toHaveLength(2);
+            expect(body.features[0].name).toBeUndefined();
+            expect(body.features[1]).toMatchObject({ type: "extrude", operation, name });
+            expect((appended.results.read as { name?: string }[]).map((item) => item.name)).toEqual([
+                undefined,
+                name,
+            ]);
+            expect(appended.created.map((entry) => entry.id)).toEqual(["s2"]);
+            expect(body.shape.value.volume()).toBeCloseTo(
+                40 * 30 * 20 + (operation === "fuse" ? 100 * 10 : -100 * 10),
+                3,
+            );
+        } finally {
+            doc.dispose();
+        }
+    });
+
+    test("unnamed extrusions preserve the default body and feature names", () => {
+        const doc = newDoc();
+        try {
+            const body = createdBody(doc, run(doc, plate(20)), "b1");
+            const defaultBodyName = body.name;
+            const defaultDisplay = body.featureItems()[0].display;
+            expect(defaultBodyName).toBe(`${I18n.translate(body.display())}1`);
+            run(doc, [
+                { op: "sketch", id: "s2", plane: "XY", entities: rect(10, 10, 20, 20) },
+                { op: "extrude", id: "e2", sketch: "s2", depth: 30, body: body.id, operation: "fuse" },
+            ]);
+
+            expectClean(body);
+            expect(body.name).toBe(defaultBodyName);
+            expect(body.features.map((feature) => feature.name)).toEqual([undefined, undefined]);
+            expect(body.featureItems().map((item) => item.display)).toEqual([defaultDisplay, defaultDisplay]);
+        } finally {
+            doc.dispose();
+        }
+    });
     test("an unclosed profile is rejected and the transaction leaves no node behind", () => {
         const doc = newDoc();
         const message = runExpectingFailure(doc, [
