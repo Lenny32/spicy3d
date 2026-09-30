@@ -4,7 +4,16 @@
 import { execFileSync } from "node:child_process";
 /** Read-only, version-isolated browser benchmark. See docs/saved-model-performance.md. */
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+    closeSync,
+    createReadStream,
+    existsSync,
+    openSync,
+    readdirSync,
+    readFileSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -41,10 +50,9 @@ if (!args.source || !args.model || !args.output) {
 const source = path.resolve(args.source);
 const model = path.resolve(args.model);
 const output = path.resolve(args.output);
-if (output === model || path.extname(output) !== ".json" || existsSync(output)) {
+if (output === model || path.extname(output) !== ".json") {
     throw new Error("Output must be a NEW .json evidence file, never the model or existing evidence");
 }
-if (!existsSync(path.dirname(output))) throw new Error("Output parent must already exist");
 const cycles = Number(args.cycles);
 if (!Number.isInteger(cycles) || cycles < 0) throw new Error("cycles must be a nonnegative integer");
 if (!["auto", "main", "hybrid", "worker"].includes(args["kernel-mode"]))
@@ -103,6 +111,8 @@ const types = {
     ".json": "application/json",
     ".svg": "image/svg+xml",
 };
+// Exclusive creation is the existence check. Keep the descriptor so a replaced path is never written.
+const outputFile = openSync(output, "wx");
 const server = createServer((req, res) => {
     if (req.method !== "GET") return res.writeHead(405).end();
     if (serveProfileDeployment(req, res, deploymentOverride)) {
@@ -118,9 +128,12 @@ const server = createServer((req, res) => {
     res.writeHead(200, { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" });
     createReadStream(file).pipe(res);
 });
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 let browser;
 try {
+    await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+    });
     browser = await { firefox, chromium }[args.browser].launch({ headless: !args.headed });
     evidence.browserVersion = browser.version();
     const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false });
@@ -415,7 +428,9 @@ try {
             const count = (type) => {
                 const items = shape.findSubShapes(type);
                 const result = items.length;
-                items.forEach((item) => item.dispose());
+                items.forEach((item) => {
+                    item.dispose();
+                });
                 return result;
             };
             const brep = app.shapeProvider.converter.convertToBrep(shape);
@@ -453,7 +468,9 @@ try {
                         valid: true,
                     };
                 } finally {
-                    analytic.forEach((item) => item.dispose());
+                    analytic.forEach((item) => {
+                        item.dispose();
+                    });
                 }
             }
             return {
@@ -742,7 +759,9 @@ try {
                 });
                 return { ...run, callerSettled };
             } finally {
-                shapes.forEach((shape) => shape.dispose());
+                shapes.forEach((shape) => {
+                    shape.dispose();
+                });
             }
         });
         evidence.cancellationProbe = {
@@ -803,16 +822,20 @@ try {
     evidence.failure = error.stack;
     process.exitCode = 1;
 } finally {
-    await browser?.close();
-    server.close();
-    evidence.modelSha256After = sha256(readFileSync(model));
-    evidence.sourceDiffSha256After = sha256(git("diff", "HEAD", "--"));
-    evidence.sourceFilesSha256After = sourceFingerprint();
-    if (evidence.modelSha256Before !== evidence.modelSha256After) {
-        evidence.errors.push("BENCHMARK INPUT HASH CHANGED");
-        process.exitCode = 1;
+    try {
+        await browser?.close();
+        server.close();
+        evidence.modelSha256After = sha256(readFileSync(model));
+        evidence.sourceDiffSha256After = sha256(git("diff", "HEAD", "--"));
+        evidence.sourceFilesSha256After = sourceFingerprint();
+        if (evidence.modelSha256Before !== evidence.modelSha256After) {
+            evidence.errors.push("BENCHMARK INPUT HASH CHANGED");
+            process.exitCode = 1;
+        }
+        writeFileSync(outputFile, JSON.stringify(evidence, null, 2));
+        console.log(`Evidence: ${output}`);
+        if (evidence.failure) console.error(evidence.failure);
+    } finally {
+        closeSync(outputFile);
     }
-    writeFileSync(output, JSON.stringify(evidence, null, 2), { flag: "wx" });
-    console.log(`Evidence: ${output}`);
-    if (evidence.failure) console.error(evidence.failure);
 }

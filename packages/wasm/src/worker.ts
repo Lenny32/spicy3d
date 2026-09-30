@@ -15,6 +15,8 @@ const scope = globalThis as unknown as {
 let host: KernelWorkerHost | undefined;
 const pending: KernelMessage[] = [];
 scope.onmessage = (event) => {
+    // Dedicated-worker messages use a private port and an empty origin, unlike window messages.
+    if (event.origin !== "" || !event.isTrusted) return;
     if (host) host.receive(event.data);
     else pending.push(event.data);
 };

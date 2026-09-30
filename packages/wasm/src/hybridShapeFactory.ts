@@ -70,7 +70,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory {
         if (this.disabled || ![...args, ...tools].every((shape) => shape instanceof OccShape))
             return undefined;
         let inputs: OccShape[] = [];
-        let requestInputs: ReplicaInput[] = [];
+        const requestInputs: ReplicaInput[] = [];
         let hits = 0;
         const capture = PerformanceTrace.enabled ? PerformanceTrace.begin("replica.capture") : undefined;
         try {
@@ -171,7 +171,6 @@ export class HybridShapeFactory implements IAsyncShapeFactory {
                         nativeMs: result.ok ? result.value.nativeMs : undefined,
                     });
             });
-        requestInputs = [];
         return {
             ready,
             get canFallback() {
