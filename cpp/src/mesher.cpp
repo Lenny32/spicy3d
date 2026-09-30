@@ -6,6 +6,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
@@ -21,9 +22,11 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <UnitsMethods.hxx>
+#include <cmath>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
+#include <stdexcept>
 
 #include "guard.hpp"
 #include "shared.hpp"
@@ -227,11 +230,48 @@ public:
     }
 };
 
+struct ExportMeshData {
+    NumberArray position = NumberArray(val::array());
+    NumberArray index = NumberArray(val::array());
+};
+
 class Mesher {
     TopoDS_Shape shape;
     double lineDeflection;
 
 public:
+    static ExportMeshData meshForExport(const TopoDS_Shape& source, double linear, double angular, bool relative)
+    {
+        if (!std::isfinite(linear) || linear <= 0 || !std::isfinite(angular) || angular <= 0 || angular > std::acos(-1.0)) {
+            throw std::invalid_argument("Invalid STL tessellation tolerance");
+        }
+        if (source.IsNull()) {
+            throw std::invalid_argument("Cannot tessellate a null shape");
+        }
+        // New topology and geometry, without shared triangulations: export must never alter display caches.
+        BRepBuilderAPI_Copy copier(source, true, false);
+        if (!copier.IsDone()) {
+            throw std::runtime_error("STL shape copy failed");
+        }
+        auto copy = copier.Shape();
+        BRepTools::Clean(copy);
+        BRepMesh_IncrementalMesh mesh(copy, linear, relative, angular, true);
+        if (!mesh.IsDone()) {
+            throw std::runtime_error("STL tessellation failed");
+        }
+        FaceMesher result;
+        for (TopExp_Explorer it(copy, TopAbs_FACE); it.More(); it.Next()) {
+            auto face = TopoDS::Face(it.Current());
+            TopLoc_Location location;
+            auto triangulation = BRep_Tool::Triangulation(face, location);
+            if (triangulation.IsNull()) {
+                throw std::runtime_error("STL face has no triangulation");
+            }
+            result.generateFaceMesh(face, triangulation, location.Transformation());
+        }
+        return { NumberArray(val::array(result.position)), NumberArray(val::array(result.index)) };
+    }
+
     Mesher(const TopoDS_Shape& shape, double lineDeflection, bool useBoxRatio)
         : shape(shape)
     {
@@ -322,8 +362,13 @@ EMSCRIPTEN_BINDINGS(Mesher)
 {
     class_<Mesher>("Mesher")
         .constructor<TopoDS_Shape, double, bool>()
+        .class_function("meshForExport", guardedEntry<&Mesher::meshForExport>("Mesher.meshForExport"))
         .function("mesh", guardedEntry<&Mesher::mesh>("Mesher.mesh"))
         .function("edgesMeshPosition", guardedEntry<&Mesher::edgesMeshPosition>("Mesher.edgesMeshPosition"));
+
+    value_object<ExportMeshData>("ExportMeshData")
+        .field("position", &ExportMeshData::position)
+        .field("index", &ExportMeshData::index);
 
     class_<EdgeMeshData>("EdgeMeshData")
         .property("position", &EdgeMeshData::position)

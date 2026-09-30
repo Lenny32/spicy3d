@@ -5,6 +5,7 @@ import type { IDocument } from "./document";
 import type { Result } from "./foundation/result";
 import type { Matrix4 } from "./math";
 import type { MeshNode, VisualNode } from "./model";
+import type { StlTessellationOptions } from "./shape/shapeConverter";
 import type { LengthUnit } from "./units/lengthUnit";
 
 /**
@@ -27,6 +28,8 @@ export interface DataExportOptions {
      * `fixed` format. Models are millimetres internally, so any other unit is a conversion.
      */
     readonly lengthUnit?: LengthUnit;
+    /** STL only. Linear tolerance is in millimetres, independent of the file's output unit. */
+    readonly stl?: StlTessellationOptions;
 }
 
 /** Runtime options only; reference scans use the existing MeshNode payload. */

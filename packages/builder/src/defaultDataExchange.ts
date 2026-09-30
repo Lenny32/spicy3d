@@ -25,6 +25,7 @@ import {
     Result,
     ShapeNode,
     type VisualNode,
+    validateStlTessellation,
 } from "@spicy3d/core";
 import { parseReferenceStl } from "./referenceStl";
 
@@ -146,6 +147,11 @@ export class DefaultDataExchange implements IDataExchange {
         options?: DataExportOptions,
     ): Promise<BlobPart[] | undefined> {
         if (nodes.length === 0) return undefined;
+        if (options?.stl && type !== ".stl" && type !== ".stl binary") {
+            return this.handleExportResult(Result.err("Tessellation tolerances apply only to STL exports"));
+        }
+        const toleranceError = validateStlTessellation(options?.stl);
+        if (toleranceError) return this.handleExportResult(Result.err(toleranceError));
 
         const document = nodes[0].document;
         const unit = exportLengthUnit(this.exportUnitHandling(type), options?.lengthUnit);
@@ -164,8 +170,8 @@ export class DefaultDataExchange implements IDataExchange {
             if (!shapes.length) return undefined;
             // STL goes through the headless OCCT-mesh converter (not the Three.js
             // visual exporter), so the same path works in the browser and the MCP server.
-            if (type === ".stl") shapeResult = this.exportStl(document, shapes, false);
-            if (type === ".stl binary") shapeResult = this.exportStl(document, shapes, true);
+            if (type === ".stl") shapeResult = this.exportStl(document, shapes, false, options, scale);
+            if (type === ".stl binary") shapeResult = this.exportStl(document, shapes, true, options, scale);
             if (type === ".step") shapeResult = this.exportStep(document, shapes, unit);
             if (type === ".iges") shapeResult = this.exportIges(document, shapes, unit);
             if (type === ".brep") shapeResult = this.exportBrep(document, shapes);
@@ -204,8 +210,22 @@ export class DefaultDataExchange implements IDataExchange {
         return result;
     }
 
-    private exportStl(doc: IDocument, shapes: IShape[], binary: boolean): Result<BlobPart> {
-        return shapeConverter.convertToSTL(shapes, { binary }) as Result<BlobPart>;
+    private exportStl(
+        doc: IDocument,
+        shapes: IShape[],
+        binary: boolean,
+        options?: DataExportOptions,
+        scale = 1,
+    ): Result<BlobPart> {
+        const tolerance = options?.stl;
+        return shapeConverter.convertToSTL(shapes, {
+            binary,
+            ...(tolerance && {
+                linearTolerance:
+                    tolerance.linearTolerance === undefined ? undefined : tolerance.linearTolerance * scale,
+                angularTolerance: tolerance.angularTolerance,
+            }),
+        }) as Result<BlobPart>;
     }
 
     private exportStep(doc: IDocument, shapes: IShape[], lengthUnit: LengthUnit) {

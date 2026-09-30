@@ -1,7 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { IShape, StlExportOptions } from "@spicy3d/core";
+import { type IShape, type StlExportOptions, validateStlTessellation } from "@spicy3d/core";
+import { OccShape } from "./shape";
 
 /**
  * Minimal triangle-soup input for the STL writer: a flat `position` buffer
@@ -143,15 +144,30 @@ export function meshesToStl(meshes: StlMesh[], options?: StlExportOptions): Uint
 }
 
 /**
- * Headless STL export for shapes. Reads each shape's lazily-tessellated OCCT face
- * mesh (`shape.mesh.faces`) — which needs no visual layer — and writes STL bytes.
+ * Headless STL export for shapes. Default exports read the existing face mesh;
+ * explicit tolerances remesh an independent native copy without touching display caches.
  * This is the UI-independent core export used by both the browser app and the MCP
  * server.
  */
 export function shapesToStl(shapes: IShape[], options?: StlExportOptions): Uint8Array {
+    const error = validateStlTessellation(options);
+    if (error) throw new Error(error);
+    const custom = options?.linearTolerance !== undefined || options?.angularTolerance !== undefined;
+    const meshForExport = custom ? wasm.Mesher.meshForExport : undefined;
+    if (custom && !meshForExport)
+        throw new Error("Custom STL tolerances are not available in this kernel build");
     const meshes: StlMesh[] = [];
     for (const shape of shapes) {
-        const faces = shape.mesh.faces;
+        if (custom && !(shape instanceof OccShape))
+            throw new Error("Custom STL tolerances require an OCCT shape");
+        const faces = meshForExport
+            ? meshForExport(
+                  (shape as OccShape).shape,
+                  options?.linearTolerance ?? 0.005,
+                  options?.angularTolerance === undefined ? 0.2 : (options.angularTolerance * Math.PI) / 180,
+                  options?.linearTolerance === undefined,
+              )
+            : shape.mesh.faces;
         if (faces && faces.index.length > 0) {
             meshes.push({ position: faces.position, index: faces.index });
         }

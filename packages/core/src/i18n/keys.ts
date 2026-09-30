@@ -1331,6 +1331,9 @@ export const I18N_KEYS = [
     "home.menu.duplicate",
     "home.menu.copyName{0}",
     "home.toast.duplicated{0}",
+    "file.stl.customTessellation",
+    "file.stl.linearTolerance",
+    "file.stl.angularTolerance",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

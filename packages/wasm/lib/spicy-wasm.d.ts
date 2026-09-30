@@ -557,6 +557,11 @@ export interface IntVector extends ClassHandle, Iterable<number> {
   set(_0: number, _1: number): boolean;
 }
 
+export type ExportMeshData = {
+  position: Array<number>,
+  index: Array<number>
+};
+
 export type Domain = {
   start: number,
   end: number
@@ -763,6 +768,7 @@ interface EmbindModule {
   };
   Mesher: {
     new(_0: TopoDS_Shape, _1: number, _2: boolean): Mesher;
+    meshForExport(_0: TopoDS_Shape, _1: number, _2: number, _3: boolean): ExportMeshData;
   };
   EdgeMeshData: {};
   FaceMeshData: {};
