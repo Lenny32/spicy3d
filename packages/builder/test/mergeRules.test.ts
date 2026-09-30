@@ -107,6 +107,7 @@ describe("merge rules", () => {
             writeFileSync(DOC, doc.slice(0, begin) + generated + doc.slice(end + MERGE_RULES_END.length));
             return;
         }
-        expect(current).toBe(generated);
+        // Git may check this Markdown out with CRLF on Windows; compare the generated content.
+        expect(current.replace(/\r\n/g, "\n")).toBe(generated);
     });
 });

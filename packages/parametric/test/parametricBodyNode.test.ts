@@ -74,7 +74,7 @@ function edge(start: XYZ, end: XYZ) {
         lastParameter: () => 1,
         pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
         intersect: () => [],
-        boundingBox: () =>
+        geometryBoundingBox: () =>
             new BoundingBox(
                 { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), z: Math.min(start.z, end.z) },
                 { x: Math.max(start.x, end.x), y: Math.max(start.y, end.y), z: Math.max(start.z, end.z) },
@@ -88,7 +88,7 @@ const EDGE_REF: EdgeRef = { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x:
 function subEdge() {
     return {
         shapeType: ShapeTypes.edge,
-        index: 3,
+        index: 0,
         curve: { basisCurve: { direction: { x: 1, y: 0, z: 0 } } },
         startPoint: () => ({ x: 0, y: 0, z: 0 }) as XYZ,
         endPoint: () => ({ x: 1, y: 0, z: 0 }) as XYZ,

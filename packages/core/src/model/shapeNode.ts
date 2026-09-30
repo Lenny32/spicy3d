@@ -23,6 +23,11 @@ const SHAPE_UNDEFINED = "Shape not initialized";
 
 export abstract class ShapeNode extends GeometryNode {
     protected _shape: Result<IShape> = Result.err(SHAPE_UNDEFINED);
+    /** Last published result only; never starts or flushes a lazy/scheduled evaluation. */
+    get resolvedShape(): IShape | undefined {
+        return this._shape.isOk ? this._shape.value : undefined;
+    }
+
     get shape(): Result<IShape> {
         return this._shape;
     }

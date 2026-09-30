@@ -48,6 +48,8 @@ export interface IShape extends IDisposable {
     clone(): IShape;
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape;
     boundingBox(): BoundingBox;
+    /** Conservative world-space bounds from geometry, without creating a render mesh. */
+    geometryBoundingBox(): BoundingBox;
     orientedBoundingBox(): OrientedBoundingBox;
     extremaDistance(other: IShape): number;
     /** Exact closest points in world coordinates, or an error for missing geometry. */
@@ -85,6 +87,7 @@ export interface IShape extends IDisposable {
 }
 
 export interface ISubShape extends IShape {
+    /** Position in parent.findSubShapes(shapeType), independent of mesh-range order or omissions. */
     index: number;
     parent: IShape;
 }

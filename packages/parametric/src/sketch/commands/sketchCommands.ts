@@ -17,6 +17,7 @@ import {
     type Matrix4,
     type Plane,
     PubSub,
+    pickedTopologyIndex,
     resolveConstructionRef,
     ShapeTypes,
     Transaction,
@@ -143,7 +144,8 @@ function capturePlaneOwner(
     // Faces of a parametric body carry a stable id across rebuilds — store it so
     // the sketch tracks the face exactly instead of re-matching geometrically.
     if (owner instanceof ParametricBodyNode) {
-        const faceId = owner.faceIdAt(result.data.indexes[0]);
+        const index = pickedTopologyIndex(result.data);
+        const faceId = index === undefined ? undefined : owner.faceIdAt(index);
         if (faceId !== undefined) {
             planeRef.faceId = faceId;
         } else {
@@ -233,7 +235,7 @@ export class CreateSketch extends CancelableCommand {
         }
         this.controller = new AsyncController();
         const picked = await pickPlane(document, this.controller, this.ucsMember);
-        if (picked === undefined) return;
+        if (picked === undefined || this.checkCanceled()) return;
         const node = new SketchNode({
             document,
             plane: picked.plane,
@@ -244,7 +246,9 @@ export class CreateSketch extends CancelableCommand {
         Transaction.execute(document, "create sketch", () => {
             document.modelManager.addNode(node);
         });
-        SketchEditor.enter(node);
+        // The pick controller may already be completed; entry is a new cancellable phase.
+        this.controller = new AsyncController();
+        await enterSketch(node, this.controller);
     }
 }
 
@@ -273,7 +277,20 @@ export class EnterSketch extends CancelableCommand {
         }
         this.controller = new AsyncController();
         const node = await pickSketch(document, this.controller);
-        if (node !== undefined) SketchEditor.enter(node);
+        if (node === undefined || this.checkCanceled()) return;
+        this.controller = new AsyncController();
+        await enterSketch(node, this.controller);
+    }
+}
+
+/** Cancellation belongs to this entry task, never to whichever editor happens to be active later. */
+async function enterSketch(node: SketchNode, controller: AsyncController): Promise<void> {
+    const abort = new AbortController();
+    controller.onCancelled(() => abort.abort());
+    try {
+        await SketchEditor.enterAsync(node, abort.signal);
+    } finally {
+        controller.dispose();
     }
 }
 

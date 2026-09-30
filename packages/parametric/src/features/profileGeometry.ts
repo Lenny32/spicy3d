@@ -130,12 +130,15 @@ export function collectEdges(shape: IShape): IEdge[] {
  * kernel's fuzzy splitter absorbs gaps of `Precision.Distance` scale.
  */
 export function needsKernelSplit(edges: IEdge[]): boolean {
-    // Endpoint getters are kernel queries — cache them for the whole O(n²) pass.
+    if (edges.length < 2) return false;
+    // Cache kernel queries once per edge for the whole O(n²) pass. Broad-phase
+    // bounds must not generate render meshes for these intermediate sketch edges.
     const points = edges.map((edge) => endpoints(edge));
+    const bounds = edges.map((edge) => edge.geometryBoundingBox());
     for (let i = 0; i < edges.length; i++) {
         for (let j = i + 1; j < edges.length; j++) {
             // Bounding boxes that do not touch cannot intersect; skip the kernel call.
-            if (!BoundingBox.isIntersect(edges[i].boundingBox(), edges[j].boundingBox())) continue;
+            if (!BoundingBox.isIntersect(bounds[i], bounds[j])) continue;
             if (
                 edges[i]
                     .intersect(edges[j])

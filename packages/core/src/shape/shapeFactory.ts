@@ -56,6 +56,8 @@ export interface TrackedShape {
 
 export interface IShapeFactory {
     readonly kernelName: string;
+    /** Optional hybrid backend. Existing synchronous methods always remain available. */
+    readonly asyncOperations?: IAsyncShapeFactory;
     edge(curve: ICurve): IEdge;
     face(wire: IWire[]): Result<IFace>;
     faceFromSurface(wires: IWire[], sourceFace: IFace): Result<IFace>;
@@ -242,4 +244,33 @@ export interface IShapeFactory {
         linearTolerance?: number,
         angleTolerance?: number,
     ): Result<IShape>;
+}
+
+/** Preparation snapshots inputs synchronously. take() alone creates local results, exactly once. */
+export interface IAsyncShapeOperation<T> {
+    readonly ready: Promise<void>;
+    /** After failed take(): only compatibility failures may be retried by the synchronous kernel. */
+    readonly canFallback?: boolean;
+    take(): Result<T>;
+    /** Idempotent, also discards a completed but untaken result. */
+    cancel(): void;
+}
+
+export interface AsyncTrackedBoolean {
+    readonly result: TrackedShape;
+    /** Owned immutable replicas in args-then-tools order, for geometry history completion. */
+    readonly inputs: IShape[];
+}
+
+export interface IAsyncShapeFactory {
+    readonly available?: boolean;
+    /** Persistent native failure. Synchronous compatibility paths must not bypass this quarantine. */
+    readonly failure?: string;
+    /** Undefined means use the synchronous path (unsupported/unavailable backend). */
+    booleanTracked(
+        operation: "fuse" | "cut" | "common",
+        args: IShape[],
+        tools: IShape[],
+        options?: { mesh?: boolean },
+    ): IAsyncShapeOperation<AsyncTrackedBoolean> | undefined;
 }

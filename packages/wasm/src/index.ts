@@ -3,6 +3,10 @@
 
 export * from "./converter";
 export * from "./factory";
+export * from "./hybridShapeFactory";
 export * from "./shapeProvider";
 export * from "./wasm";
+export * from "./workerClient";
+export * from "./workerFactory";
+export type * from "./workerProtocol";
 import "./mergeRules";

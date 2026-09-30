@@ -384,7 +384,7 @@ describe("SketchNode", () => {
                     lastParameter: () => 1,
                     pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
                     intersect: () => [],
-                    boundingBox: () =>
+                    geometryBoundingBox: () =>
                         new BoundingBox(
                             {
                                 x: Math.min(start.x, end.x),

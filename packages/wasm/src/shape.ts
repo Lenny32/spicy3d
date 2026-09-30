@@ -34,6 +34,7 @@ import {
     MeshUtils,
     type Orientation,
     type OrientedBoundingBox,
+    PerformanceTrace,
     Plane,
     Result,
     type Serialized,
@@ -116,13 +117,43 @@ function occShapeDeserialize(properties: Serialized) {
 })
 export class OccShape implements IShape {
     private _boundingBox: BoundingBox | undefined;
+    protected _geometryBoundingBox: BoundingBox | undefined;
     private _orientedBoundingBox: OrientedBoundingBox | undefined;
 
     readonly shapeType: ShapeType;
     protected _mesh: IShapeMeshData | undefined;
+    private transientTriangulation = false;
+    private replicaInvalidations?: Set<() => void>;
     get mesh(): IShapeMeshData {
-        this._mesh ??= new Mesher(this);
+        this._mesh ??= new Mesher(this, this.transientTriangulation);
         return this._mesh;
+    }
+
+    /** Hybrid prefix replicas retain analytic geometry, not a second native copy of render buffers. */
+    useTransientTriangulation(): void {
+        this.transientTriangulation = true;
+    }
+
+    /** Explicit native-cache lifetime, independent of GC or FinalizationRegistry. */
+    addReplicaInvalidation(handler: () => void): () => void {
+        if (this.#isDisposed) {
+            handler();
+            return () => {};
+        }
+        this.replicaInvalidations ??= new Set();
+        this.replicaInvalidations.add(handler);
+        return () => this.replicaInvalidations?.delete(handler);
+    }
+
+    protected invalidateReplicas(): void {
+        if (this.replicaInvalidations) for (const handler of this.replicaInvalidations) handler();
+    }
+
+    /** A verified worker mesh, with pick ranges bound to this local replica's topology. */
+    installMesh(mesh: IShapeMeshData & IDisposable): void {
+        if (isDisposable(this._mesh)) this._mesh.dispose();
+        this._mesh = mesh;
+        this._boundingBox = undefined;
     }
 
     protected _shape: TopoDS_Shape;
@@ -139,9 +170,13 @@ export class OccShape implements IShape {
     }
 
     set matrix(matrix: Matrix4) {
+        this.invalidateReplicas();
         gc((c) => {
             const location = c(new wasm.TopLoc_Location(c(convertFromMatrix(matrix))));
             this._shape.setLocation(location, false);
+            // Location replaces the previous transform; recompute from geometry rather
+            // than transforming an already world-space box (which also loosens rotations).
+            this._geometryBoundingBox = undefined;
 
             if (this._boundingBox) {
                 this._boundingBox = BoundingBox.transformed(this._boundingBox, matrix);
@@ -205,6 +240,11 @@ export class OccShape implements IShape {
         return this._orientedBoundingBox;
     }
 
+    geometryBoundingBox(): BoundingBox {
+        this._geometryBoundingBox ??= wasm.Shape.boundingBox(this.shape, false);
+        return this._geometryBoundingBox;
+    }
+
     transformed(matrix: Matrix4): IShape {
         return gc((c) => {
             const location = c(new wasm.TopLoc_Location(c(convertFromMatrix(matrix))));
@@ -222,6 +262,7 @@ export class OccShape implements IShape {
     protected onTransformChanged(): void {
         if (this._mesh) {
             Logger.warn("Shape matrix changed, mesh will be recreated");
+            if (isDisposable(this._mesh)) this._mesh.dispose();
             this._mesh = undefined;
         }
     }
@@ -432,11 +473,14 @@ export class OccShape implements IShape {
     }
 
     reserve(): void {
+        this.invalidateReplicas();
         this.shape.reverse();
     }
 
     setTolerance(tolerance: number): void {
+        this.invalidateReplicas();
         wasm.Shape.setTolerance(this.shape, tolerance);
+        this._geometryBoundingBox = undefined;
     }
 
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape {
@@ -486,7 +530,12 @@ export class OccShape implements IShape {
     readonly dispose = () => {
         if (!this.#isDisposed) {
             this.#isDisposed = true;
-            this.disposeInternal();
+            try {
+                this.invalidateReplicas();
+            } finally {
+                this.replicaInvalidations?.clear();
+                this.disposeInternal();
+            }
         }
     };
 
@@ -548,7 +597,9 @@ export class OccEdge extends OccShape implements IEdge {
         if (!(curve instanceof OccCurve)) {
             throw new Error("Invalid curve");
         }
+        this.invalidateReplicas();
         this._shape = wasm.Edge.fromCurve(curve.curve);
+        this._geometryBoundingBox = undefined;
         this._mesh = undefined;
         this._ends = undefined;
     }
@@ -930,16 +981,18 @@ export interface OccSubEdgeShapeOptions {
     parent: IShape;
     shape: TopoDS_Edge;
     index: number;
+    meshIndex?: number;
     id?: string;
 }
 
 export class OccSubEdgeShape extends OccEdge implements ISubEdgeShape {
+    private readonly meshIndex: number;
     override get mesh(): IShapeMeshData {
         this._mesh ??= {
             faces: undefined,
             vertexs: undefined,
             edges: {
-                position: MeshUtils.subEdge(this.parent.mesh.edges!, this.index)!,
+                position: MeshUtils.subEdge(this.parent.mesh.edges!, this.meshIndex)!,
                 lineType: this.parent.mesh.edges!.lineType,
                 range: [],
             },
@@ -954,6 +1007,7 @@ export class OccSubEdgeShape extends OccEdge implements ISubEdgeShape {
         super(options);
         this.parent = options.parent;
         this.index = options.index;
+        this.meshIndex = options.meshIndex ?? options.index;
     }
 }
 
@@ -961,13 +1015,15 @@ export interface OccSubFaceShapeOptions {
     parent: IShape;
     shape: TopoDS_Face;
     index: number;
+    meshIndex?: number;
     id?: string;
 }
 
 export class OccSubFaceShape extends OccFace implements ISubFaceShape {
+    private readonly meshIndex: number;
     override get mesh(): IShapeMeshData {
         this._mesh ??= {
-            faces: MeshUtils.subFace(this.parent.mesh.faces!, this.index),
+            faces: MeshUtils.subFace(this.parent.mesh.faces!, this.meshIndex),
             vertexs: undefined,
             edges: undefined,
         };
@@ -981,6 +1037,7 @@ export class OccSubFaceShape extends OccFace implements ISubFaceShape {
         super(options);
         this.parent = options.parent;
         this.index = options.index;
+        this.meshIndex = options.meshIndex ?? options.index;
     }
 }
 
@@ -1036,7 +1093,10 @@ export class Mesher implements IShapeMeshData, IDisposable {
         this._points = value;
     }
 
-    constructor(private shape: OccShape) {}
+    constructor(
+        private shape: OccShape,
+        private readonly transientTriangulation = false,
+    ) {}
 
     private mesh() {
         if (this._isMeshed) {
@@ -1045,13 +1105,31 @@ export class Mesher implements IShapeMeshData, IDisposable {
         this._isMeshed = true;
 
         gc((c) => {
+            const span = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("mesh.kernel", {
+                      shapeId: this.shape.id,
+                      meshKind: "unclassified",
+                      ...PerformanceTrace.shapeDetails(this.shape),
+                  })
+                : undefined;
             const occMesher = c(new wasm.Mesher(this.shape.shape, 0.005, true));
             const meshData = c(occMesher.mesh());
+            if (PerformanceTrace.enabled) PerformanceTrace.end(span);
+            const conversion = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("mesh.buffers", {
+                      shapeId: this.shape.id,
+                  })
+                : undefined;
             const faceMeshData = c(meshData.faceMeshData);
             const edgeMeshData = c(meshData.edgeMeshData);
 
             this._faces = this.parseFaceMeshData(faceMeshData);
             this._lines = this.parseEdgeMeshData(edgeMeshData);
+            // JS arrays and local pick ranges are complete. A retained hybrid prefix must not keep
+            // all native tessellations too: visiting many rollback positions otherwise grows a
+            // second mesh cache per complete BREP replica. Cleaning changes no analytic topology.
+            if (this.transientTriangulation) wasm.Shape.clean(this.shape.shape);
+            if (PerformanceTrace.enabled) PerformanceTrace.end(conversion);
         });
     }
 

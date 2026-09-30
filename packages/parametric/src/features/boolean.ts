@@ -4,9 +4,12 @@
 import {
     type I18nKeys,
     type IDocument,
+    type IEdge,
+    type IFace,
     type IShape,
     type IShapeFactory,
     Matrix4,
+    PerformanceTrace,
     Result,
     ShapeNode,
     type ShapeType,
@@ -22,7 +25,7 @@ import {
     type IShapeHost,
     registerFeature,
 } from "./feature";
-import { mapBooleanIds } from "./operationIds";
+import { captureBooleanIds, mapBooleanIds } from "./operationIds";
 
 const DISPLAYS: Record<BooleanOperation, I18nKeys> = {
     fuse: "command.feature.fuse",
@@ -48,6 +51,82 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
 
     setParameter: (feature, key, value) =>
         key === "consumeTools" ? { ...feature, consumeTools: value === true || value === "true" } : feature,
+
+    prepareAsync(feature, context) {
+        const factory = shapeFactory.asyncOperations;
+        const { input, tracking } = context;
+        if (!factory || factory.available === false || !input || !tracking) return undefined;
+        const tools = collectTools(feature, context.document);
+        if (!tools.isOk) return undefined;
+        const faces = captureBooleanIds(
+            feature.id,
+            input,
+            tracking.inputFaceIds,
+            tools.value,
+            ShapeTypes.face,
+        );
+        const edges = captureBooleanIds(
+            feature.id,
+            input,
+            tracking.inputEdgeIds,
+            tools.value,
+            ShapeTypes.edge,
+        );
+        const toolShapes = toolShapesInHostSpace(tools.value, context.host);
+        const owned = toolShapes.filter((shape, index) => shape !== tools.value[index].shape.unchecked());
+        let pending: ReturnType<typeof factory.booleanTracked>;
+        try {
+            pending = factory.booleanTracked(feature.operation, [input], toolShapes, {
+                mesh: context.meshResult,
+            });
+        } finally {
+            // Capability preparation captures immutable snapshots synchronously, so transformed copies
+            // and borrowed sketch/tool geometry never need to survive the await.
+            for (const shape of owned) shape.dispose();
+        }
+        if (!pending) return undefined;
+        return {
+            ready: pending.ready,
+            cancel: () => pending.cancel(),
+            take: () => {
+                const answer = pending.take();
+                if (!answer.isOk) {
+                    if (!pending.canFallback) return Result.err(answer.error);
+                    const span = PerformanceTrace.enabled
+                        ? PerformanceTrace.begin("kernel.workerFallback", {
+                              operation: feature.operation,
+                              reason: answer.error,
+                          })
+                        : undefined;
+                    if (span) PerformanceTrace.end(span);
+                    return booleanHandler.evaluate(feature, context);
+                }
+                const { inputs, result } = answer.value;
+                const subs: IShape[] = [];
+                let accepted = false;
+                try {
+                    const inputEdges = inputs.flatMap((shape) =>
+                        shape.findSubShapes(ShapeTypes.edge),
+                    ) as IEdge[];
+                    subs.push(...inputEdges);
+                    const inputFaces = inputs.flatMap((shape) =>
+                        shape.findSubShapes(ShapeTypes.face),
+                    ) as IFace[];
+                    subs.push(...inputFaces);
+                    const history = completeTrackedHistory(inputs, result, { inputEdges, inputFaces });
+                    subs.push(...history.outputEdges, ...history.outputFaces);
+                    tracking.outputFaceIds = faces(history.faceMap, result.faceAncestors);
+                    tracking.outputEdgeIds = edges(history.edgeMap, result.edgeAncestors);
+                    accepted = true;
+                    return Result.ok(result.shape);
+                } finally {
+                    for (const shape of subs) shape.dispose();
+                    for (const shape of inputs) shape.dispose();
+                    if (!accepted) result.shape.dispose();
+                }
+            },
+        };
+    },
 
     evaluate(feature, context): Result<IShape> {
         if (context.input === undefined) {

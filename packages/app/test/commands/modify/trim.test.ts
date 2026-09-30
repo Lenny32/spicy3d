@@ -15,6 +15,7 @@ import {
     type VisualShapeData,
     XYZ,
 } from "@spicy3d/core";
+import { createMockDocument } from "@spicy3d/core/test-utils";
 import { EdgeFilter, PickTrimEdgeEventHandler, Trim } from "../../../src/commands/modify/trim";
 
 /** Build a mock document matching the slice PickTrimEdgeEventHandler touches. */
@@ -65,18 +66,25 @@ describe("Trim", () => {
         const pickAsync = rs.fn(async () => {
             throw new Error("pick failed");
         });
-        const doc = {
+        const doc = createMockDocument({
             selection,
-            picker: { pickAsync },
-            visual: { highlighter: { addState: rs.fn(), removeState: rs.fn() } },
             history: { disabled: true, add: rs.fn() },
-        } as unknown as IDocument;
+        });
+        Object.assign(doc.picker, { pickAsync });
+        const rollback = rs.spyOn(doc.history, "rollback");
         (cmd as any)._application = { activeView: { document: doc } };
 
-        await expect((cmd as any).executeAsync()).rejects.toThrow("pick failed");
+        try {
+            await expect((cmd as any).executeAsync()).rejects.toThrow("pick failed");
 
-        expect(selection.clearSelection).toHaveBeenCalledTimes(1);
-        expect(pickAsync).toHaveBeenCalledTimes(1);
+            expect(rollback).toHaveBeenCalledTimes(1);
+            expect(doc.history.disabled).toBe(true);
+            expect(selection.clearSelection).toHaveBeenCalledTimes(1);
+            expect(pickAsync).toHaveBeenCalledTimes(1);
+        } finally {
+            rollback.mockRestore();
+            doc.dispose();
+        }
     });
 });
 

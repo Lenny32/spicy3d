@@ -20,6 +20,9 @@ export class History implements IDisposable {
 
     /** Fires after every change of the undo position (a new record, an undo or a redo). */
     readonly onChanged = new Signal<() => void>();
+    /** Cancel derived work before replay can replace or dispose its inputs. */
+    readonly onBeforeReplay = new Signal<() => void>();
+    readonly onAfterReplay = new Signal<() => void>();
 
     /**
      * Stands for the empty undo stack. Replaced whenever the oldest record is dropped, so the
@@ -41,6 +44,8 @@ export class History implements IDisposable {
         this._undos.forEach((record) => record.dispose());
         this.clear();
         this.onChanged.dispose();
+        this.onBeforeReplay.dispose();
+        this.onAfterReplay.dispose();
     }
 
     /**
@@ -117,14 +122,28 @@ export class History implements IDisposable {
         );
     }
 
+    /** Reverts an uncommitted transaction without moving either history stack. */
+    rollback(record: IHistoryRecord): void {
+        const wasUndoing = this.#isUndoing;
+        this.#isUndoing = true;
+        this.tryOperate(
+            () => record.undo(),
+            () => {
+                this.#isUndoing = wasUndoing;
+            },
+        );
+    }
+
     private tryOperate(action: () => void, onFinally: () => void) {
         const previousState = this.disabled;
         this.disabled = true;
         try {
+            this.onBeforeReplay.emit();
             action();
         } finally {
             this.disabled = previousState;
             onFinally();
+            this.onAfterReplay.emit();
         }
     }
 }

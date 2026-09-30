@@ -585,6 +585,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "shape.geometryBoundingBox",
+        name: "geometryBoundingBox",
+        owner: "shape",
+        family: "shape",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "shape.orientedBoundingBox",
         name: "orientedBoundingBox",
         owner: "shape",
@@ -2115,6 +2123,7 @@ shape.* (target must be a shape):
   shape.clone(target) -> independent copy as a NEW scene node "<source name>_copy" next to the source (listed in "created"; shape ref registered under the op id and backed by the new node — edit ops on it consume the copy, never the source)
   shape.hlr(target, position: xyz, direction: xyz, xDir: xyz) -> shape ref (registered under the op id)
   shape.boundingBox(target) -> BoundingBox
+  shape.geometryBoundingBox(target) -> BoundingBox
   shape.orientedBoundingBox(target) -> OrientedBoundingBox
   shape.extremaDistance(target, other: ref) -> number
   shape.inspectionDistance(target, other: ref) -> Result<{ distance: number; first: XYZ; second: XYZ; }, string>

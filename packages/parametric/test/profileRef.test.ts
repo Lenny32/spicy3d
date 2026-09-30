@@ -4,7 +4,7 @@
 import { BoundingBox, type IEdge, type IFace, type ShapeType, ShapeTypes, XYZ } from "@spicy3d/core";
 import { registerProfileEntities } from "../src/features/profileEntities";
 import { matchProfileIndexes } from "../src/features/profileMatcher";
-import { captureProfileRef, type ProfileRef } from "../src/features/profileRef";
+import { captureProfileRef, captureRegionFingerprint, type ProfileRef } from "../src/features/profileRef";
 
 function lineEdge(x1: number, y1: number, x2: number, y2: number): IEdge {
     return {
@@ -61,6 +61,13 @@ function squareAt(x: number, y: number): IEdge[] {
 }
 
 describe("captureProfileRef", () => {
+    test("stored region fingerprints retain rendering bounds even when geometry bounds differ", () => {
+        const face = faceOf(SQUARE_A, [], boxOf(0, 0, 1, 1), 1);
+        face.geometryBoundingBox = () => boxOf(-0.1, -0.1, 1.2, 1.2);
+        expect(captureRegionFingerprint(face)).toEqual({ center: { x: 0.5, y: 0.5, z: 0 }, area: 1 });
+        expect(captureProfileRef(face).center).toEqual({ x: 0.5, y: 0.5, z: 0 });
+    });
+
     test("fingerprints every boundary edge", () => {
         const ref = captureProfileRef(faceOf(SQUARE_A));
 

@@ -44,7 +44,7 @@ function edge(x1: number, y1: number, x2: number, y2: number): IEdge {
         lastParameter: () => 1,
         pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
         intersect: (other: IEdge) => segmentIntersect(start, end, other.startPoint(), other.endPoint()),
-        boundingBox: () =>
+        geometryBoundingBox: () =>
             new BoundingBox(
                 new XYZ({ x: Math.min(x1, x2), y: Math.min(y1, y2), z: 0 }),
                 new XYZ({ x: Math.max(x1, x2), y: Math.max(y1, y2), z: 0 }),
@@ -646,7 +646,7 @@ describe("resolveProfiles", () => {
                 new XYZ({ x: cx + radius * Math.cos(t), y: cy + radius * Math.sin(t), z: 0 }),
             // The test circles never intersect anything; a real kernel would return [] too.
             intersect: () => [],
-            boundingBox: () =>
+            geometryBoundingBox: () =>
                 new BoundingBox(
                     new XYZ({ x: cx - radius, y: cy - radius, z: 0 }),
                     new XYZ({ x: cx + radius, y: cy + radius, z: 0 }),
@@ -767,7 +767,7 @@ describe("profile topology defects", () => {
             pointAt: (t: number) => at(phase + t),
             // Concentric circles never intersect; a real kernel would return [] too.
             intersect: () => [],
-            boundingBox: () =>
+            geometryBoundingBox: () =>
                 new BoundingBox(
                     new XYZ({ x: cx - radius, y: cy - radius, z: 0 }),
                     new XYZ({ x: cx + radius, y: cy + radius, z: 0 }),
@@ -937,7 +937,7 @@ describe("profile topology defects", () => {
                 lastParameter: () => Math.PI * 2,
                 pointAt: (t: number) => at(t),
                 intersect,
-                boundingBox: () =>
+                geometryBoundingBox: () =>
                     new BoundingBox(
                         new XYZ({ x: cx - radius, y: -radius, z: 0 }),
                         new XYZ({ x: cx + radius, y: radius, z: 0 }),

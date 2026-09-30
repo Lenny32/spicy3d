@@ -4,10 +4,12 @@
 import {
     type AsyncController,
     ConstructionNode,
+    DocumentRebuilds,
     type FeatureItem,
     type FeatureReference,
     featureSketchIds,
     type I18nKeys,
+    type IAsyncShapeOperation,
     type IDocument,
     type IEqualityComparer,
     type IFeatureListNode,
@@ -20,6 +22,7 @@ import {
     type NodeRebuildStatus,
     type NodeRecord,
     ParameterShapeNode,
+    PerformanceTrace,
     PubSub,
     Result,
     type Scope,
@@ -49,6 +52,7 @@ import { findSketch } from "./features/extrude";
 import type { BooleanFeatureData, ExtrudeFeatureData } from "./features/feature";
 import type { ProfileRef } from "./features/profileRef";
 import { syncNodeWatches } from "./nodeWatch";
+import { RebuildJob, type RebuildSteps } from "./rebuildJob";
 import { danglingProfileRefs, SketchNode } from "./sketch/sketchNode";
 import { ensureVariableSync } from "./variableSync";
 
@@ -103,6 +107,16 @@ export interface ParametricBodyNodeOptions {
     /** Serialized form produced by the Serializer; takes precedence over `features`. */
     featuresJson?: string;
     id?: string;
+}
+
+interface RebuildRun {
+    readonly trigger: string;
+    synchronous: boolean;
+    readonly current: () => boolean;
+    outcome: "cancelled" | "failed" | "success";
+    cancelReason?: string;
+    failure?: "feature" | "empty-shape" | "exception";
+    failedFeatureId?: string;
 }
 
 /** A body whose shape is replayed from its feature list — see the module header above. */
@@ -175,6 +189,41 @@ export class ParametricBodyNode
     private _evaluating = false;
     /** False until the first evaluation; see the `shape` getter. */
     private _evaluated = false;
+    private _job?: RebuildJob;
+    private _run?: RebuildRun;
+    private _forceSynchronous = false;
+    private _replayCancelled = false;
+    private _lastRebuildSucceeded = true;
+    /** Nested consumers must finish against the caller's in-flight timeline, without yielding. */
+    private static evaluationDepth = 0;
+    private static readonly ASYNC_FEATURE_THRESHOLD = 12;
+    private static readonly synchronousDocuments = new WeakMap<IDocument, number>();
+
+    /**
+     * Ordered programs capture topology between writes and validate each write before continuing.
+     * Their callback must remain synchronous. The scope is document-local and nestable; incoming
+     * scheduled work is drained before the first read, and interactive scheduling resumes on exit.
+     */
+    static withSynchronousEvaluation<T>(document: IDocument, action: () => T): T {
+        const depth = ParametricBodyNode.synchronousDocuments.get(document) ?? 0;
+        ParametricBodyNode.synchronousDocuments.set(document, depth + 1);
+        try {
+            DocumentRebuilds.flush(document);
+            return action();
+        } finally {
+            if (depth === 0) ParametricBodyNode.synchronousDocuments.delete(document);
+            else ParametricBodyNode.synchronousDocuments.set(document, depth);
+        }
+    }
+
+    get isRebuilding(): boolean {
+        return this._job !== undefined;
+    }
+
+    async whenRebuilt(): Promise<boolean> {
+        while (this._job) await this._job.settled;
+        return !this._isDisposed && this._lastRebuildSucceeded;
+    }
     /**
      * Runtime-only session state (never serialized, never transacted): when set,
      * `evaluateChain` replays only the features before this index. The sketch editor
@@ -184,12 +233,15 @@ export class ParametricBodyNode
      * history untouched.
      */
     private _rollbackIndex: number | undefined;
+    private _displayRollbackIndex: number | undefined;
 
     // ------------------------------------------------------------------ Session rollback
 
     /** The active session-rollback position (`IBodyTimelineNode.rollbackIndex`). */
     get rollbackIndex(): number | undefined {
-        return this._rollbackIndex;
+        // Between batches, a restoration still displays the preview. Only the active
+        // feature evaluation may resolve references against the requested full timeline.
+        return this._evaluating ? this._rollbackIndex : (this._rollbackIndex ?? this._displayRollbackIndex);
     }
 
     /**
@@ -199,15 +251,41 @@ export class ParametricBodyNode
      * the requested timeline position — the caller should revert the rollback rather
      * than let plane/external-reference resolution read it as one.
      */
-    setRollbackIndex(index: number | undefined): boolean {
+    setRollbackIndex(index: number | undefined, asynchronous = false): boolean {
+        this._forceSynchronous = !asynchronous;
+        try {
+            const result = this.updateRollbackIndex(index);
+            if (!asynchronous) this._job?.flush();
+            return result && (this._job !== undefined || this._lastRebuildSucceeded);
+        } finally {
+            this._forceSynchronous = false;
+        }
+    }
+
+    /**
+     * Accepts an interactive rollback/restore. If `isRebuilding`, await `whenRebuilt` for
+     * its outcome before reading the requested geometry. Unchanged requests stay synchronous.
+     */
+    requestRollbackIndex(index: number | undefined): boolean {
+        return this.setRollbackIndex(index, true);
+    }
+
+    private updateRollbackIndex(index: number | undefined): boolean {
+        if (this._isDisposed) return false;
         const clamped = index === undefined ? undefined : Math.max(0, Math.min(index, this.features.length));
-        if (this._rollbackIndex === clamped) return true;
+        if (
+            this._rollbackIndex === clamped &&
+            (this._job || (this._lastRebuildSucceeded && this._evaluated))
+        ) {
+            return true;
+        }
         this._rollbackIndex = clamped;
-        const result = this.generateShape();
+        const result = this.generateShape(clamped === undefined ? "restore" : "rollback");
+        if (this._job) return true;
         if (!result.isOk) return false;
         this.shape = result;
         this.document.visual.update();
-        return true;
+        return this._job !== undefined || this._lastRebuildSucceeded;
     }
 
     // ------------------------------------------------------------------ Construction, shape invalidation and consumed tools
@@ -216,6 +294,9 @@ export class ParametricBodyNode
         super({ document: options.document, id: options.id });
         this.setPrivateValue("featuresJson", options.featuresJson ?? JSON.stringify(options.features ?? []));
         this.document.modelManager.addNodeObserver(this.handleReferencedNodeChanged);
+        this.document.history.onBeforeReplay.sub(this.beforeHistoryReplay);
+        this.document.history.onAfterReplay.sub(this.afterHistoryReplay);
+        this.document.history.onChanged.sub(this.historyChanged);
         ensureVariableSync(options.document);
     }
 
@@ -280,6 +361,8 @@ export class ParametricBodyNode
 
     /** The merge's validation pass (`IRebuildStatusSource`): the body's shape and each feature's error. */
     rebuildStatus(): NodeRebuildStatus {
+        void this.shape;
+        this._job?.flush();
         const shape = this.shape;
         return {
             error: shape.isOk ? undefined : String(shape.error),
@@ -502,6 +585,9 @@ export class ParametricBodyNode
      * synchronously — keep it that way.
      */
     protected override setShape(shape: Result<IShape>) {
+        if (this._job && shape === this._shape) return;
+        const previous = this.currentShape();
+        if (shape.isOk && previous === shape.value) return;
         const history = this.document.history;
         const disabled = history.disabled;
         history.disabled = true;
@@ -509,6 +595,12 @@ export class ParametricBodyNode
             super.setShape(shape);
         } finally {
             history.disabled = disabled;
+        }
+        if (previous !== undefined && previous !== this.currentShape() && !this._timeline.owns(previous)) {
+            previous.dispose();
+        }
+        if (shape.isOk && shape.value !== this.currentShape() && !this._timeline.owns(shape.value)) {
+            shape.value.dispose();
         }
     }
 
@@ -523,8 +615,10 @@ export class ParametricBodyNode
         // this node as its source) gets the previous result as-is: recomputing here
         // would re-enter generateShape.
         if (this._evaluating) return this._shape;
+        if (ParametricBodyNode.evaluationDepth > 0) this._job?.flush();
+        if (this._job) return this._shape;
         if (!this._shape.isOk && (!this._evaluated || this.hasNewReferences())) {
-            this._shape = this.generateShape();
+            this._shape = this.generateShape("read");
         }
         return this._shape;
     }
@@ -538,18 +632,146 @@ export class ParametricBodyNode
         return this._watched.size > before;
     }
 
-    protected generateShape(): Result<IShape> {
+    protected generateShape(trigger = "edit"): Result<IShape> {
+        if (this._isDisposed) return Result.err("Body disposed");
+        this.cancelRebuild();
+        this._lastRebuildSucceeded = false;
         this._evaluated = true;
         this.syncWatchedNodes();
         this._featureErrors.clear();
         this._featureWarnings.clear();
-        this._evaluating = true;
+        const asynchronous =
+            !this._forceSynchronous &&
+            !ParametricBodyNode.synchronousDocuments.has(this.document) &&
+            ParametricBodyNode.evaluationDepth === 0 &&
+            this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD;
+        const revision = DocumentRebuilds.revision(this.document);
+        const featuresJson = this.featuresJson;
+        const scopeJson = JSON.stringify([...this.document.variables.evaluate().scope]);
+        const run: RebuildRun = {
+            trigger,
+            synchronous: !asynchronous,
+            outcome: "cancelled",
+            current: () =>
+                !this._isDisposed &&
+                DocumentRebuilds.revision(this.document) === revision &&
+                this.featuresJson === featuresJson &&
+                JSON.stringify([...this.document.variables.evaluate().scope]) === scopeJson,
+        };
+        this._run = run;
+        const steps = this.evaluateChain(asynchronous, run);
+        const advance = () => {
+            const batchTrace = PerformanceTrace.enabled
+                ? PerformanceTrace.begin("body.batch", { nodeId: this.id })
+                : undefined;
+            this._evaluating = true;
+            ParametricBodyNode.evaluationDepth++;
+            try {
+                return steps.next();
+            } finally {
+                this._timeline.endRun();
+                ParametricBodyNode.evaluationDepth--;
+                this._evaluating = false;
+                if (batchTrace) PerformanceTrace.end(batchTrace);
+            }
+        };
         try {
-            return this.evaluateChain();
-        } finally {
-            this._evaluating = false;
+            const first = advance();
+            if (first.done) {
+                if (run.outcome === "cancelled") return this.generateShape("superseded");
+                this._lastRebuildSucceeded = first.value.isOk;
+                return first.value;
+            }
+            const job = new RebuildJob(
+                this.document,
+                steps,
+                advance,
+                (result) => {
+                    if (this._job !== job || this._isDisposed) return;
+                    this._job = undefined;
+                    if (run.outcome === "cancelled") {
+                        const result = this.generateShape("superseded");
+                        if (result.isOk) this.shape = result;
+                        return;
+                    }
+                    this._lastRebuildSucceeded = result.isOk;
+                    this.reportRebuildProgress(undefined);
+                    if (result.isOk) this.shape = result;
+                    else if (!this._shape.isOk) this._shape = result;
+                    this.emitPropertyChanged("featuresJson", this.featuresJson);
+                    this.document.visual.update();
+                },
+                (index) => this.reportRebuildProgress(index),
+                (error) => {
+                    if (this._job !== job) return;
+                    this._job = undefined;
+                    this._lastRebuildSucceeded = false;
+                    this.reportRebuildProgress(undefined);
+                    this._featureErrors.set(this.features[0]?.id ?? "", String(error));
+                    this.emitPropertyChanged("featuresJson", this.featuresJson);
+                },
+                run.current,
+                () => {
+                    if (this._job !== job || this._isDisposed) return;
+                    this._job = undefined;
+                    const result = this.generateShape("superseded");
+                    if (result.isOk) this.shape = result;
+                },
+                () => {
+                    run.synchronous = true;
+                },
+            );
+            this._job = job;
+            job.start(first.value);
+            return this._shape;
+        } catch (error) {
+            this._lastRebuildSucceeded = false;
+            steps.return(undefined as never);
+            throw error;
         }
     }
+
+    private reportRebuildProgress(index: number | undefined): void {
+        PubSub.default.pub(
+            "rebuildProgress",
+            this.document,
+            this.id,
+            index === undefined
+                ? undefined
+                : { completed: index, total: this._rollbackIndex ?? this.featureCount },
+        );
+    }
+
+    private cancelRebuild(reason = "superseded"): void {
+        const job = this._job;
+        this._job = undefined;
+        if (job && this._run) {
+            this._run.cancelReason = reason;
+            this._lastRebuildSucceeded = false;
+        }
+        job?.cancel();
+        if (job) this.reportRebuildProgress(undefined);
+    }
+
+    private readonly beforeHistoryReplay = () => {
+        this._replayCancelled = this._job !== undefined;
+        this.cancelRebuild("history");
+    };
+
+    private readonly afterHistoryReplay = () => {
+        if (this._replayCancelled && !this._job && !this._isDisposed) {
+            const result = this.generateShape("history");
+            if (result.isOk) this.shape = result;
+        }
+        this._replayCancelled = false;
+    };
+
+    private readonly historyChanged = () => {
+        if (!this._job || this._evaluating || this.document.history.disabled) return;
+        // A document edit supersedes a suspended replay, even when it changed an unwatched datum.
+        const result = this.generateShape("document-edit");
+        if (result.isOk) this.shape = result;
+    };
 
     // `IBodyTrackingNode` — pure forwarding; `BodyTimeline` owns the id arrays and
     // documents the contracts (what makes an id shared, what "overlaps" means).
@@ -594,7 +816,7 @@ export class ParametricBodyNode
      * truncated chain, so nothing is traced meanwhile.
      */
     featureFaces(featureId: string): number[] {
-        if (this._rollbackIndex !== undefined) return [];
+        if (this.rollbackIndex !== undefined) return [];
         const index = this.features.findIndex((x) => x.id === featureId);
         if (index < 0 || this.features[index].suppressed) return [];
         return this._timeline.facesCreatedAt(index);
@@ -637,7 +859,15 @@ export class ParametricBodyNode
      * A session rollback (`_rollbackIndex`) stops the replay early; the truncation
      * is by feature-list index, so user-suppressed features still count.
      */
-    private evaluateChain(): Result<IShape> {
+    private *evaluateChain(asynchronous: boolean, run: RebuildRun): RebuildSteps {
+        const trace = PerformanceTrace.enabled
+            ? PerformanceTrace.begin("body.rebuild", {
+                  nodeId: this.id,
+                  asynchronous,
+                  rollbackIndex: this._rollbackIndex,
+                  trigger: run.trigger,
+              })
+            : undefined;
         let input: IShape | undefined;
         let faceIds: string[] | undefined;
         let edgeIds: string[] | undefined;
@@ -659,18 +889,90 @@ export class ParametricBodyNode
         // Chain state entering each feature-list index — the timeline sketch external
         // refs anchor to (see `timelineStateAt`). Handed to the timeline as the in-flight
         // run for its duration, so mid-chain ref resolutions see THIS run's states.
-        const timeline = this._timeline.beginRun();
+        const timeline: FeatureTimelineState[] = [];
+        let committed = false;
+        let invalidSuffix = false;
         try {
             for (let index = 0; index < features.length && index < stop; index++) {
+                this._timeline.beginRun(timeline);
                 timeline.push({ shape: input, faceIds, edgeIds });
                 const feature = features[index];
                 if (feature.suppressed) continue;
-                const step = withConstructionFeaturePosition(this.document, this.id, index, () => {
+                withConstructionFeaturePosition(this.document, this.id, index, () => {
                     this.followReferencedSketches(feature, followedSketches);
                     this.refreshConsumedTools(feature);
-                    return this.evaluateFeatureStep(feature, scope, input, faceIds, edgeIds, nextCache);
                 });
-                if (!step.isOk) return this.abandonChain(feature, step.error, nextCache, features);
+                const key = this.cacheKey(feature, scope);
+                const cached = invalidSuffix ? undefined : this.validCacheEntry(key, input, nextCache.length);
+                let step: Result<FeatureStepOutput>;
+                if (cached) {
+                    const featureTrace = PerformanceTrace.enabled
+                        ? PerformanceTrace.begin("body.feature", {
+                              nodeId: this.id,
+                              index,
+                              type: feature.type,
+                              cacheHit: true,
+                          })
+                        : undefined;
+                    nextCache.push(cached);
+                    step = Result.ok(cached);
+                    if (featureTrace) PerformanceTrace.end(featureTrace);
+                } else {
+                    invalidSuffix = true;
+                    if (asynchronous) yield index;
+                    this._timeline.beginRun(timeline);
+                    const featureTrace = PerformanceTrace.enabled
+                        ? PerformanceTrace.begin("body.feature", {
+                              nodeId: this.id,
+                              index,
+                              type: feature.type,
+                              cacheHit: false,
+                          })
+                        : undefined;
+                    try {
+                        const evaluation = withConstructionFeaturePosition(
+                            this.document,
+                            this.id,
+                            index,
+                            () => {
+                                // The cache probe preceded a yield. Refresh dependencies and capture
+                                // the evaluation key again inside this batch's in-flight timeline.
+                                if (asynchronous) {
+                                    this.followReferencedSketches(feature, followedSketches);
+                                    this.refreshConsumedTools(feature);
+                                }
+                                return this.prepareEvaluation(
+                                    feature,
+                                    this.cacheKey(feature, scope),
+                                    scope,
+                                    input,
+                                    faceIds,
+                                    edgeIds,
+                                    nextCache,
+                                    asynchronous && !run.synchronous,
+                                    features.slice(index + 1, stop).every((feature) => feature.suppressed),
+                                );
+                            },
+                        );
+                        try {
+                            if (evaluation.pending) yield evaluation.pending;
+                            this._timeline.beginRun(timeline);
+                            step = withConstructionFeaturePosition(this.document, this.id, index, () =>
+                                evaluation.finish(run.synchronous),
+                            );
+                        } finally {
+                            evaluation.pending?.cancel();
+                        }
+                    } finally {
+                        if (featureTrace) PerformanceTrace.end(featureTrace);
+                    }
+                }
+                if (!step.isOk) {
+                    run.outcome = "failed";
+                    run.failure = "feature";
+                    run.failedFeatureId = feature.id;
+                    return this.abandonChain(feature, step.error, features);
+                }
                 input = step.value.shape;
                 faceIds = step.value.faceIds;
                 edgeIds = step.value.edgeIds;
@@ -684,16 +986,53 @@ export class ParametricBodyNode
                     resolvedFaces.set(feature.id, step.value.resolvedFaces);
                 }
             }
+            if (!run.current()) {
+                run.cancelReason = "document-edit";
+                return Result.err("Rebuild superseded");
+            }
+            // An empty list/rollback is an owned empty compound, not a retained chain entry.
+            const result = input === undefined ? shapeFactory.combine([]) : Result.ok(input);
+            if (!result.isOk) {
+                run.outcome = "failed";
+                run.failure = "empty-shape";
+                return result;
+            }
+            this._timeline.commit(
+                nextCache,
+                timeline,
+                this.currentShape(),
+                this._rollbackIndex !== undefined,
+            );
+            this._displayRollbackIndex = this._rollbackIndex;
+            committed = true;
+            this.refreshAnchoredRefs(resolvedProfiles, resolvedEdges, resolvedFaces);
+            // Match the anchors just written back, otherwise an unchanged restore misses.
+            let cacheIndex = 0;
+            for (const feature of this.features.slice(0, stop)) {
+                if (feature.suppressed) continue;
+                const entry = nextCache[cacheIndex];
+                nextCache[cacheIndex++] = { ...entry, json: this.cacheKey(feature, scope) };
+            }
+            this.markUnresolvedExternalRefs(features);
+            run.outcome = "success";
+            return result;
+        } catch (error) {
+            run.outcome = "failed";
+            run.failure = "exception";
+            throw error;
         } finally {
             this._timeline.endRun();
+            if (!committed) this._timeline.discard(nextCache, this.currentShape());
+            if (trace)
+                PerformanceTrace.end(trace, {
+                    committed,
+                    outcome: run.outcome,
+                    cancelReason:
+                        run.outcome === "cancelled" ? (run.cancelReason ?? "document-edit") : undefined,
+                    failure: run.failure,
+                    failedFeatureId: run.failedFeatureId,
+                });
         }
-        this._timeline.commit(nextCache, timeline, this.currentShape());
-        this.refreshAnchoredRefs(resolvedProfiles, resolvedEdges, resolvedFaces);
-        this.markUnresolvedExternalRefs(features);
-        // An empty feature list (user removed every feature) is an empty compound, so
-        // the view drops the stale solid instead of keeping a ghost (same as SketchNode).
-        if (input === undefined) return shapeFactory.combine([]);
-        return Result.ok(input);
     }
 
     /**
@@ -703,14 +1042,8 @@ export class ParametricBodyNode
      * sketch state, not the chain run, and one failing feature would otherwise wipe them off
      * the other rows.
      */
-    private abandonChain(
-        feature: FeatureData,
-        error: string,
-        nextCache: FeatureCacheEntry[],
-        features: FeatureData[],
-    ): Result<IShape> {
+    private abandonChain(feature: FeatureData, error: string, features: FeatureData[]): Result<IShape> {
         this._featureErrors.set(feature.id, String(error));
-        this._timeline.discard(nextCache, this.currentShape());
         this.markUnresolvedExternalRefs(features);
         return Result.err(error);
     }
@@ -773,7 +1106,7 @@ export class ParametricBodyNode
         const wanted = this.referencedIds();
         if (!records.some((record) => wanted.has(record.node.id))) return;
 
-        const result = this.generateShape();
+        const result = this.generateShape("references");
         if (result.isOk) this.shape = result;
         this.emitPropertyChanged("featuresJson", this.featuresJson);
     };
@@ -796,7 +1129,9 @@ export class ParametricBodyNode
      */
     private refreshForConsumer(): void {
         if (this._evaluating) return;
-        const result = this.generateShape();
+        // generateShape cancels any suspended tool replay: its prefix may have resolved
+        // against the consumer's previous timeline. This nested run completes synchronously.
+        const result = this.generateShape("consumer");
         if (result.isOk) this.shape = result;
     }
 
@@ -898,26 +1233,8 @@ export class ParametricBodyNode
 
     // ------------------------------------------------------------------ Cache plumbing
 
-    /** Evaluates one feature against the current chain state, returning its output. */
-    private evaluateFeatureStep(
-        feature: FeatureData,
-        scope: Scope,
-        input: IShape | undefined,
-        faceIds: string[] | undefined,
-        edgeIds: string[] | undefined,
-        nextCache: FeatureCacheEntry[],
-    ): Result<FeatureStepOutput> {
-        const key = this.cacheKey(feature, scope);
-        const cached = this.validCacheEntry(key, input, nextCache.length);
-        if (cached !== undefined) {
-            nextCache.push(cached);
-            return Result.ok({ shape: cached.shape, faceIds: cached.faceIds, edgeIds: cached.edgeIds });
-        }
-        return this.evaluateAndCache(feature, key, scope, input, faceIds, edgeIds, nextCache);
-    }
-
     /** Cache-miss path of `evaluateFeatureStep`: evaluates the feature and stores the result. */
-    private evaluateAndCache(
+    private prepareEvaluation(
         feature: FeatureData,
         key: string,
         scope: Scope,
@@ -925,43 +1242,61 @@ export class ParametricBodyNode
         faceIds: string[] | undefined,
         edgeIds: string[] | undefined,
         nextCache: FeatureCacheEntry[],
-    ): Result<FeatureStepOutput> {
+        asynchronous: boolean,
+        meshResult: boolean,
+    ): { pending?: IAsyncShapeOperation<IShape>; finish(synchronous: boolean): Result<FeatureStepOutput> } {
         const tracking: ShapeTracking = {
             inputFaceIds: faceIds ?? [],
             outputFaceIds: [],
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
-        const started = performance.now();
-        const result = evaluateFeature(feature, {
+        const context = {
             document: this.document,
             host: this,
             input,
             scope,
             tracking,
-        });
-        const evaluationMs = performance.now() - started;
-        if (!result.isOk) return Result.err(result.error);
-        // A handler that cannot track (e.g. the kernel lacks history) leaves the
-        // output empty — ids stay undefined from here on rather than guessing.
-        const output: FeatureStepOutput = {
-            shape: result.value,
-            faceIds: tracking.outputFaceIds.length > 0 ? tracking.outputFaceIds : undefined,
-            edgeIds: tracking.outputEdgeIds.length > 0 ? tracking.outputEdgeIds : undefined,
-            resolvedProfiles: tracking.resolvedProfiles,
-            resolvedEdges: tracking.resolvedEdges,
-            resolvedFaces: tracking.resolvedFaces,
+            meshResult,
         };
-        nextCache.push({
-            json: key,
-            input,
-            refs: this.snapshotNodeRefs(feature),
-            shape: output.shape,
-            faceIds: output.faceIds,
-            edgeIds: output.edgeIds,
-            evaluationMs,
-        });
-        return Result.ok(output);
+        const refs = this.snapshotNodeRefs(feature);
+        // An async evaluation's cost is its wall time up to the answer: the worker's kernel
+        // time is what a later rebuild of this step pays too.
+        const started = performance.now();
+        const pending = asynchronous
+            ? featureHandler(feature.type)?.prepareAsync?.(feature, context)
+            : undefined;
+        return {
+            pending,
+            finish: (synchronous) => {
+                if (synchronous) pending?.cancel();
+                const parked = pending !== undefined && !synchronous;
+                const evaluationStart = parked ? started : performance.now();
+                const result = parked ? pending.take() : evaluateFeature(feature, context);
+                const evaluationMs = performance.now() - evaluationStart;
+                if (!result.isOk) return Result.err(result.error);
+                // A handler that cannot track (e.g. the kernel lacks history) leaves the
+                // output empty — ids stay undefined from here on rather than guessing.
+                const output: FeatureStepOutput = {
+                    shape: result.value,
+                    faceIds: tracking.outputFaceIds.length > 0 ? tracking.outputFaceIds : undefined,
+                    edgeIds: tracking.outputEdgeIds.length > 0 ? tracking.outputEdgeIds : undefined,
+                    resolvedProfiles: tracking.resolvedProfiles,
+                    resolvedEdges: tracking.resolvedEdges,
+                    resolvedFaces: tracking.resolvedFaces,
+                };
+                nextCache.push({
+                    json: key,
+                    input,
+                    refs: parked ? refs : this.snapshotNodeRefs(feature),
+                    shape: output.shape,
+                    faceIds: output.faceIds,
+                    edgeIds: output.edgeIds,
+                    evaluationMs,
+                });
+                return Result.ok(output);
+            },
+        };
     }
 
     /** Cache keys include the scope snapshot so a variable change invalidates dependents. */
@@ -983,7 +1318,13 @@ export class ParametricBodyNode
         }
         for (const [id, snapshot] of entry.refs) {
             const current = this.snapshotNode(id);
-            if (current.shape !== snapshot.shape) return undefined;
+            if (
+                current.shape !== snapshot.shape &&
+                !(current.shape?.isOk && snapshot.shape?.isOk && current.shape.value === snapshot.shape.value)
+            ) {
+                return undefined;
+            }
+            if (current.timelineShape !== snapshot.timelineShape) return undefined;
             if (current.datumJson !== snapshot.datumJson) return undefined;
             if (!sameTransform(current.transform, snapshot.transform)) return undefined;
         }
@@ -1006,6 +1347,13 @@ export class ParametricBodyNode
 
     private snapshotNode(id: string): RefSnapshot {
         const node = this.document.modelManager.findNode((n) => n.id === id);
+        if (node instanceof ParametricBodyNode) {
+            const index = node.consumingFeatureIndex(this.id);
+            const state = index === undefined ? undefined : node.timelineStateAt(index);
+            if (state?.shape !== undefined) {
+                return { shape: undefined, timelineShape: state.shape, transform: node.worldTransform() };
+            }
+        }
         if (node instanceof ConstructionNode) {
             const result = node.geometry;
             return {
@@ -1019,8 +1367,8 @@ export class ParametricBodyNode
     }
 
     /**
-     * The shape currently on display, which `BodyTimeline` must never dispose — its
-     * lifecycle belongs to `ShapeNode.disposeInternal`.
+     * The displayed shape. Timeline eviction keeps it alive until setShape replaces it;
+     * ShapeNode.disposeInternal releases the final displayed result on node disposal.
      */
     private currentShape(): IShape | undefined {
         return this._shape.isOk ? this._shape.value : undefined;
@@ -1099,7 +1447,7 @@ export class ParametricBodyNode
      * `variableSync.ts`). A failed rebuild keeps the last good shape silently; the
      * feature panel carries the error.
      */
-    private rebuildFromUpstream(): void {
+    private rebuildFromUpstream(trigger = "upstream"): void {
         // Skip while evaluating: a referenced node (e.g. the sketch) may generate its
         // shape lazily mid-evaluation and notify — the in-flight pass reads it fresh.
         if (this._evaluating) return;
@@ -1109,7 +1457,10 @@ export class ParametricBodyNode
         // persist them. The session exit clears the flag BEFORE restoring the
         // shape, so the restore notification passes this guard and rebuilds.
         for (const node of this._watched.values()) {
-            if (isBodyTimelineNode(node) && node.rollbackIndex !== undefined) return;
+            if (isBodyTimelineNode(node) && node.rollbackIndex !== undefined) {
+                this.cancelRebuild("source-rollback");
+                return;
+            }
         }
         // A watched body that CONSUMES this one owns this rebuild instead: it re-solves us
         // right before its boolean, against the chain state we actually anchor to
@@ -1119,7 +1470,7 @@ export class ParametricBodyNode
         // rebuilds it directly, and so does the consumer once it stops consuming us.
         if (this.isConsumedByWatched()) return;
 
-        const result = this.generateShape();
+        const result = this.generateShape(trigger);
         if (result.isOk) {
             this.shape = result;
             this.document.visual.update();
@@ -1137,13 +1488,18 @@ export class ParametricBodyNode
      * way a watched-node change is.
      */
     applyVariables(): void {
-        this.rebuildFromUpstream();
+        this.rebuildFromUpstream("variables");
     }
 
     override disposeInternal(): void {
+        this.cancelRebuild("disposed");
+        this.document.history.onBeforeReplay.remove(this.beforeHistoryReplay);
+        this.document.history.onAfterReplay.remove(this.afterHistoryReplay);
+        this.document.history.onChanged.remove(this.historyChanged);
         // Drop session rollback state so a stale editor-side reference never triggers
         // a replay that would leak a shape onto this disposed node.
         this._rollbackIndex = undefined;
+        this._displayRollbackIndex = undefined;
         this.document.modelManager.removeNodeObserver(this.handleReferencedNodeChanged);
         for (const node of this._watched.values()) {
             if (isPropertyChanged(node)) node.removePropertyChanged(this.handleWatchedNodeChanged);

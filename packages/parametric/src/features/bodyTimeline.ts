@@ -6,17 +6,17 @@ import type { FeatureTimelineState } from "./bodyTracking";
 import { ID_COMPONENT_SEPARATOR, idIsShared, indexesOfOverlappingId } from "./trackedId";
 
 /**
- * What the last successful chain run produced, kept for reuse and for id lookup:
- * one cache entry per feature plus the chain state entering each index.
- *
- * Why the two live together: a timeline entry holds a reference to the cache entry's
- * shape, so they only ever describe the same run. Splitting them across two fields
- * would let a caller update one and forget the other.
+ * Owns the last full chain and, during rollback, a separate displayed prefix. Each run
+ * pairs cache entries with the timeline states that borrow their shapes. Preview queries
+ * never expose the retained suffix; restoration can still validate and reuse it.
+ * Eviction/disposal deduplicates shapes shared by the two runs.
  */
 
 /** Snapshot of one referenced node, used to decide whether a cached entry is still valid. */
 export interface RefSnapshot {
     readonly shape: Result<IShape> | undefined;
+    /** A consumed body's source is the consumer's pre-boolean shape, not its displayed result. */
+    readonly timelineShape?: IShape;
     readonly datumJson?: string;
     /** World transform at capture time — moving a reference must bust the cache too. */
     readonly transform: Matrix4 | undefined;
@@ -57,8 +57,11 @@ export class BodyTimeline {
     private _cache: FeatureCacheEntry[] = [];
     /** Chain state entering each feature-list index, swapped atomically with `_cache`. */
     private _committed: FeatureTimelineState[] = [];
+    /** A rollback owns only its new prefix; the full chain remains available for restoration. */
+    private _preview: FeatureCacheEntry[] | undefined;
+    private _previewTimeline: FeatureTimelineState[] | undefined;
     /**
-     * Timeline of the run in flight. Exposed to readers for the duration of a run so a
+     * Timeline of the run in flight. Exposed only during synchronous feature evaluation so a
      * mid-chain reference resolution sees the states already rebuilt by THIS run — the
      * committed timeline still describes the previous one.
      */
@@ -68,8 +71,7 @@ export class BodyTimeline {
      * Opens a run and returns the array the caller fills with one state per visited
      * index. Callers must pair this with `endRun` so `_inflight` never outlives the run.
      */
-    beginRun(): FeatureTimelineState[] {
-        const timeline: FeatureTimelineState[] = [];
+    beginRun(timeline: FeatureTimelineState[] = []): FeatureTimelineState[] {
         this._inflight = timeline;
         return timeline;
     }
@@ -84,12 +86,12 @@ export class BodyTimeline {
      * truncated (rolled-back) replay never reached.
      */
     stateAt(index: number): FeatureTimelineState | undefined {
-        const state = (this._inflight ?? this._committed)[index];
+        const state = (this._inflight ?? this._previewTimeline ?? this._committed)[index];
         return state?.shape === undefined ? undefined : state;
     }
 
     entryAt(index: number): FeatureCacheEntry | undefined {
-        return this._cache[index];
+        return this._preview?.[index] ?? this._cache[index];
     }
 
     /**
@@ -106,16 +108,37 @@ export class BodyTimeline {
     }
 
     /**
-     * Installs a completed run, disposing the shapes it evicted. `currentShape` — the
-     * node's own shape — is never disposed here; its lifecycle belongs to the node.
+     * Installs a completed full run or preview, disposing evicted shapes. The node releases
+     * `currentShape` after replacing its display, unless this timeline still owns it.
      */
-    commit(next: FeatureCacheEntry[], timeline: FeatureTimelineState[], currentShape?: IShape): void {
-        const reused = new Set(next.map((entry) => entry.shape));
-        for (const entry of this._cache) {
-            if (!reused.has(entry.shape) && entry.shape !== currentShape) entry.shape.dispose();
+    commit(
+        next: FeatureCacheEntry[],
+        timeline: FeatureTimelineState[],
+        currentShape?: IShape,
+        preview = false,
+    ): void {
+        const previous = this.ownedShapes();
+        if (preview) {
+            this._preview = next;
+            this._previewTimeline = timeline;
+        } else {
+            this._cache = next;
+            this._committed = timeline;
+            this._preview = undefined;
+            this._previewTimeline = undefined;
         }
-        this._cache = next;
-        this._committed = timeline;
+        const kept = this.ownedShapes();
+        for (const shape of previous) {
+            if (!kept.has(shape) && shape !== currentShape) shape.dispose();
+        }
+    }
+
+    owns(shape: IShape): boolean {
+        return this.ownedShapes().has(shape);
+    }
+
+    private ownedShapes(): Set<IShape> {
+        return new Set([...this._cache, ...(this._preview ?? [])].map((entry) => entry.shape));
     }
 
     /**
@@ -123,19 +146,21 @@ export class BodyTimeline {
      * shapes it created, so the previous cache keeps describing the displayed shape.
      */
     discard(next: FeatureCacheEntry[], currentShape?: IShape): void {
-        const kept = new Set(this._cache.map((entry) => entry.shape));
-        for (const entry of next) {
-            if (!kept.has(entry.shape) && entry.shape !== currentShape) entry.shape.dispose();
+        const kept = this.ownedShapes();
+        for (const shape of new Set(next.map((entry) => entry.shape))) {
+            if (!kept.has(shape) && shape !== currentShape) shape.dispose();
         }
     }
 
     /** Drops everything, disposing tracked shapes except `currentShape`. */
     dispose(currentShape?: IShape): void {
-        for (const entry of this._cache) {
-            if (entry.shape !== currentShape) entry.shape.dispose();
+        for (const shape of this.ownedShapes()) {
+            if (shape !== currentShape) shape.dispose();
         }
         this._cache = [];
         this._committed = [];
+        this._preview = undefined;
+        this._previewTimeline = undefined;
         this._inflight = undefined;
     }
 
@@ -169,7 +194,7 @@ export class BodyTimeline {
      * Empty when the index was not visited or any state involved lacks tracked ids.
      */
     facesCreatedAt(index: number): number[] {
-        const states = this._committed;
+        const states = this._previewTimeline ?? this._committed;
         const final = this.idsOf("face");
         if (index < 0 || index >= states.length || final === undefined) return [];
         const entering = states[index];
@@ -189,7 +214,7 @@ export class BodyTimeline {
      * neither.
      */
     private idsOf(kind: TrackedIdKind): string[] | undefined {
-        const entry = this._cache.at(-1);
+        const entry = (this._preview ?? this._cache).at(-1);
         return kind === "face" ? entry?.faceIds : entry?.edgeIds;
     }
 }

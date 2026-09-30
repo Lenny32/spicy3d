@@ -1,0 +1,959 @@
+{
+    "revision": "bf111c777bb2aa4d266146a51372a6d6081f7b4e",
+    "environment": {
+        "platform": "win32",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) i9-10900K CPU @ 3.70GHz",
+        "logicalCpus": 20,
+        "memoryBytes": 68412256256,
+        "node": "v24.12.0"
+    },
+    "browserVersion": "155.0",
+    "hashes": [
+        "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569",
+        "9049df8e40f1c0c98f0fbc70124762e67e48548bb1b10e9c3fee529c4e784569"
+    ],
+    "capabilities": {
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
+        "longTasks": false,
+        "jsMemory": false,
+        "wasmHeap": true
+    },
+    "sourceClean": true,
+    "errors": [],
+    "writeAttempts": [],
+    "geometry": {
+        "faces": 1232,
+        "edges": 3448,
+        "vertices": 2255,
+        "bounds": {
+            "min": {
+                "x": -48.390005,
+                "y": -61.970005,
+                "z": 0.3999949999999998
+            },
+            "max": {
+                "x": 48.800005,
+                "y": 62.030005,
+                "z": 16.500005
+            }
+        },
+        "brepSha256": "b805d49baffe59a613641c31d75afeefcfcb2feba7fe635dfd0f26b46941562c",
+        "brepUnchanged": false,
+        "featuresUnchanged": true,
+        "sketchesUnchanged": true,
+        "visibilityUnchanged": true,
+        "after": {
+            "faces": 1232,
+            "edges": 3448,
+            "vertices": 2255,
+            "bounds": {
+                "min": {
+                    "x": -48.390005,
+                    "y": -61.970005,
+                    "z": 0.3999949999999998
+                },
+                "max": {
+                    "x": 48.800005,
+                    "y": 62.030005,
+                    "z": 16.500005
+                }
+            },
+            "brepSha256": "be3beff1697a32b7398dad3d70731219283f6ddb00fdbcd8c377b66828e5872c"
+        },
+        "featureErrors": []
+    },
+    "scenarios": [
+        {
+            "name": "cold-open",
+            "elapsedMs": 52707,
+            "maxEventLoopGapMs": 52610,
+            "booleanCount": 83,
+            "booleanMs": 42760,
+            "longestBooleanMs": 5719,
+            "meshCount": 3356,
+            "memoryAfter": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "document.decode": {
+                    "count": 1,
+                    "totalMs": 101,
+                    "maxMs": 101
+                },
+                "document.migrate": {
+                    "count": 1,
+                    "totalMs": 5,
+                    "maxMs": 5
+                },
+                "node.deserialize": {
+                    "count": 336,
+                    "totalMs": 305,
+                    "maxMs": 155
+                },
+                "visual.create": {
+                    "count": 336,
+                    "totalMs": 51664,
+                    "maxMs": 50108
+                },
+                "mesh.kernel": {
+                    "count": 3356,
+                    "totalMs": 241,
+                    "maxMs": 38
+                },
+                "kernel.operation": {
+                    "count": 1541,
+                    "totalMs": 43141,
+                    "maxMs": 5719
+                },
+                "profile.kernelRegions": {
+                    "count": 6,
+                    "totalMs": 63,
+                    "maxMs": 27
+                },
+                "feature.step": {
+                    "count": 84,
+                    "totalMs": 49433,
+                    "maxMs": 5765
+                },
+                "feature.chain": {
+                    "count": 1,
+                    "totalMs": 49459,
+                    "maxMs": 49459
+                }
+            },
+            "meshes": {
+                "construction:true": 1362,
+                "construction:false": 2,
+                "body:true": 1992
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 3345,
+                "durationMs": 5719,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 0,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 52093,
+            "maxEventLoopGapMs": 51883,
+            "booleanCount": 83,
+            "booleanMs": 44392,
+            "longestBooleanMs": 5487,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 322174976,
+                "wasmMemoriesBytes": [322174976, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 268435456,
+                "wasmMemoriesBytes": [268435456, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 51194,
+                    "maxMs": 5527
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 51224,
+                    "maxMs": 51203
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 44550,
+                    "maxMs": 5487
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 111,
+                    "maxMs": 25
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 33,
+                    "maxMs": 14
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 56276,
+                "durationMs": 5487,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_RibBox1",
+            "elapsedMs": 34912,
+            "maxEventLoopGapMs": 34675,
+            "booleanCount": 73,
+            "booleanMs": 29087,
+            "longestBooleanMs": 979,
+            "meshCount": 1347,
+            "memoryAfter": {
+                "wasmHeapBytes": 322174976,
+                "wasmMemoriesBytes": [322174976, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 322174976,
+                "wasmMemoriesBytes": [322174976, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 190,
+                    "totalMs": 34080,
+                    "maxMs": 1252
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 34107,
+                    "maxMs": 34090
+                },
+                "mesh.kernel": {
+                    "count": 1347,
+                    "totalMs": 99,
+                    "maxMs": 26
+                },
+                "kernel.operation": {
+                    "count": 302,
+                    "totalMs": 29211,
+                    "maxMs": 979
+                },
+                "profile.kernelRegions": {
+                    "count": 2,
+                    "totalMs": 6,
+                    "maxMs": 4
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 1347
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 130627,
+                "durationMs": 979,
+                "details": {
+                    "operation": "booleanCutTracked",
+                    "boolean": true,
+                    "featureIndex": 58,
+                    "featureType": "extrude"
+                }
+            },
+            "featureHits": 117,
+            "featureMisses": 73
+        },
+        {
+            "name": "unchanged:Sk_RibBox3",
+            "elapsedMs": 37193,
+            "maxEventLoopGapMs": 32268,
+            "booleanCount": 71,
+            "booleanMs": 27070,
+            "longestBooleanMs": 943,
+            "meshCount": 1054,
+            "memoryAfter": {
+                "wasmHeapBytes": 386662400,
+                "wasmMemoriesBytes": [386662400, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 322174976,
+                "wasmMemoriesBytes": [322174976, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 194,
+                    "totalMs": 31760,
+                    "maxMs": 1205
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 31779,
+                    "maxMs": 31763
+                },
+                "mesh.kernel": {
+                    "count": 1054,
+                    "totalMs": 66,
+                    "maxMs": 25
+                },
+                "kernel.operation": {
+                    "count": 290,
+                    "totalMs": 27170,
+                    "maxMs": 943
+                },
+                "profile.kernelRegions": {
+                    "count": 2,
+                    "totalMs": 6,
+                    "maxMs": 3
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 1054
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 162675,
+                "durationMs": 943,
+                "details": {
+                    "operation": "booleanCutTracked",
+                    "boolean": true,
+                    "featureIndex": 58,
+                    "featureType": "extrude"
+                }
+            },
+            "featureHits": 123,
+            "featureMisses": 71
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 45470,
+            "maxEventLoopGapMs": 45325,
+            "booleanCount": 83,
+            "booleanMs": 38900,
+            "longestBooleanMs": 5118,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 463994880,
+                "wasmMemoriesBytes": [463994880, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 386662400,
+                "wasmMemoriesBytes": [386662400, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 44669,
+                    "maxMs": 5160
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 44692,
+                    "maxMs": 44676
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 39048,
+                    "maxMs": 5118
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 106,
+                    "maxMs": 28
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 30,
+                    "maxMs": 12
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 180973,
+                "durationMs": 5118,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 47619,
+            "maxEventLoopGapMs": 47458,
+            "booleanCount": 83,
+            "booleanMs": 40792,
+            "longestBooleanMs": 5756,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 463994880,
+                "wasmMemoriesBytes": [463994880, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 463994880,
+                "wasmMemoriesBytes": [463994880, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 46800,
+                    "maxMs": 5793
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 46831,
+                    "maxMs": 46811
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 40943,
+                    "maxMs": 5756
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 105,
+                    "maxMs": 26
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 35,
+                    "maxMs": 17
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 226814,
+                "durationMs": 5756,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 45515,
+            "maxEventLoopGapMs": 45373,
+            "booleanCount": 83,
+            "booleanMs": 38938,
+            "longestBooleanMs": 4698,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 556793856,
+                "wasmMemoriesBytes": [556793856, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 463994880,
+                "wasmMemoriesBytes": [463994880, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 44737,
+                    "maxMs": 4734
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 44751,
+                    "maxMs": 44740
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 39091,
+                    "maxMs": 4698
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 112,
+                    "maxMs": 31
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 27,
+                    "maxMs": 11
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 274591,
+                "durationMs": 4698,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 43649,
+            "maxEventLoopGapMs": 42751,
+            "booleanCount": 83,
+            "booleanMs": 36656,
+            "longestBooleanMs": 4730,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 556793856,
+                "wasmMemoriesBytes": [556793856, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 556793856,
+                "wasmMemoriesBytes": [556793856, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 42129,
+                    "maxMs": 4762
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 42158,
+                    "maxMs": 42145
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 36791,
+                    "maxMs": 4730
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 98,
+                    "maxMs": 24
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 27,
+                    "maxMs": 11
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 320341,
+                "durationMs": 4730,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 45352,
+            "maxEventLoopGapMs": 45209,
+            "booleanCount": 83,
+            "booleanMs": 38684,
+            "longestBooleanMs": 4620,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 556793856,
+                "wasmMemoriesBytes": [556793856, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 44571,
+                    "maxMs": 4653
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 44595,
+                    "maxMs": 44581
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 38822,
+                    "maxMs": 4620
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 107,
+                    "maxMs": 26
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 26,
+                    "maxMs": 11
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 364276,
+                "durationMs": 4620,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 43895,
+            "maxEventLoopGapMs": 43752,
+            "booleanCount": 83,
+            "booleanMs": 37549,
+            "longestBooleanMs": 4719,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 43122,
+                    "maxMs": 4753
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 43150,
+                    "maxMs": 43138
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 37675,
+                    "maxMs": 4719
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 96,
+                    "maxMs": 23
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 28,
+                    "maxMs": 12
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 409870,
+                "durationMs": 4719,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 44310,
+            "maxEventLoopGapMs": 44159,
+            "booleanCount": 83,
+            "booleanMs": 37858,
+            "longestBooleanMs": 4514,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 43503,
+                    "maxMs": 4550
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 43530,
+                    "maxMs": 43511
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 37990,
+                    "maxMs": 4514
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 105,
+                    "maxMs": 27
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 28,
+                    "maxMs": 10
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 454014,
+                "durationMs": 4514,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 48141,
+            "maxEventLoopGapMs": 47985,
+            "booleanCount": 83,
+            "booleanMs": 41255,
+            "longestBooleanMs": 4869,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 759103488,
+                "wasmMemoriesBytes": [759103488, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 658374656,
+                "wasmMemoriesBytes": [658374656, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 47327,
+                    "maxMs": 4902
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 47346,
+                    "maxMs": 47334
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 41418,
+                    "maxMs": 4869
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 113,
+                    "maxMs": 29
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 28,
+                    "maxMs": 12
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 498606,
+                "durationMs": 4869,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 45706,
+            "maxEventLoopGapMs": 45555,
+            "booleanCount": 83,
+            "booleanMs": 39056,
+            "longestBooleanMs": 4661,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 759103488,
+                "wasmMemoriesBytes": [759103488, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 759103488,
+                "wasmMemoriesBytes": [759103488, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 44889,
+                    "maxMs": 4694
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 44903,
+                    "maxMs": 44892
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 39202,
+                    "maxMs": 4661
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 114,
+                    "maxMs": 26
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 27,
+                    "maxMs": 11
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 546980,
+                "durationMs": 4661,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        },
+        {
+            "name": "unchanged:Sk_Plate",
+            "elapsedMs": 44639,
+            "maxEventLoopGapMs": 44486,
+            "booleanCount": 83,
+            "booleanMs": 38235,
+            "longestBooleanMs": 4858,
+            "meshCount": 2118,
+            "memoryAfter": {
+                "wasmHeapBytes": 861339648,
+                "wasmMemoriesBytes": [861339648, 16777216],
+                "jsHeapBytes": null
+            },
+            "memoryBefore": {
+                "wasmHeapBytes": 759103488,
+                "wasmMemoriesBytes": [759103488, 16777216],
+                "jsHeapBytes": null
+            },
+            "stages": {
+                "feature.step": {
+                    "count": 168,
+                    "totalMs": 43856,
+                    "maxMs": 4909
+                },
+                "feature.chain": {
+                    "count": 4,
+                    "totalMs": 43878,
+                    "maxMs": 43860
+                },
+                "kernel.operation": {
+                    "count": 344,
+                    "totalMs": 38376,
+                    "maxMs": 4858
+                },
+                "mesh.kernel": {
+                    "count": 2118,
+                    "totalMs": 107,
+                    "maxMs": 26
+                },
+                "profile.kernelRegions": {
+                    "count": 4,
+                    "totalMs": 28,
+                    "maxMs": 12
+                }
+            },
+            "meshes": {
+                "computational-or-unclassified:undefined": 2118
+            },
+            "longestBoolean": {
+                "stage": "kernel.operation",
+                "started": 592976,
+                "durationMs": 4858,
+                "details": {
+                    "operation": "booleanFuseTracked",
+                    "boolean": true,
+                    "featureIndex": 1,
+                    "featureType": "boolean"
+                }
+            },
+            "featureHits": 84,
+            "featureMisses": 84
+        }
+    ],
+    "rawSha256": "92fa8557795e111f22403ba5dd309d4c7db421ceeb5114719b3fff2015123ed7"
+}

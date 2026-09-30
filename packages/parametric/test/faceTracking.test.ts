@@ -61,6 +61,7 @@ function mockLine(start: XYZ, end: XYZ) {
         pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
         length: () => start.distanceTo(end),
         isEqual: () => false,
+        dispose: rs.fn(),
     } as unknown as IEdge;
 }
 
@@ -89,7 +90,7 @@ function sketchShapeMocks() {
                 lastParameter: () => 1,
                 pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
                 intersect: () => [],
-                boundingBox: () =>
+                geometryBoundingBox: () =>
                     new BoundingBox(
                         {
                             x: Math.min(start.x, end.x),
@@ -171,7 +172,7 @@ function setupTrackedMocks(
                 lastParameter: () => 1,
                 pointAt: (t: number) => start.add(end.sub(start).multiply(t)),
                 intersect: () => [],
-                boundingBox: () =>
+                geometryBoundingBox: () =>
                     new BoundingBox(
                         {
                             x: Math.min(start.x, end.x),
@@ -496,6 +497,7 @@ describe("ParametricBodyNode face tracking", () => {
         } as any;
         const pickedEdge = {
             shapeType: ShapeTypes.edge,
+            index: 1,
             curve: { basisCurve: { direction: { x: 0, y: 1, z: 0 } } },
             startPoint: () => new XYZ({ x: 5, y: 5, z: 0 }),
             endPoint: () => new XYZ({ x: 5, y: 6, z: 0 }),
@@ -566,8 +568,8 @@ describe("ParametricBodyNode face tracking", () => {
         mocks.restore();
         // Untracked extrude (no prismTracked): input ids are empty, but the input
         // shape has two faces / one edge, so boolean hits 0..1 are the main body's.
-        const face = { shapeType: ShapeTypes.face, isEqual: () => false };
-        const sub = { shapeType: ShapeTypes.edge, isEqual: () => false };
+        const face = { shapeType: ShapeTypes.face, isEqual: () => false, dispose: rs.fn() };
+        const sub = { shapeType: ShapeTypes.edge, isEqual: () => false, dispose: rs.fn() };
         // Both solids list themselves as their solid, as the kernel's sub-shape map
         // does — the boolean's empty-result guard reads it.
         const solid = (subShapes: (type: ShapeType) => unknown[]) => {

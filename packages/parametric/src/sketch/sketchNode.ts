@@ -22,7 +22,12 @@ import {
     serializable,
     serialize,
 } from "@spicy3d/core";
-import { allProfiles, sketchProfiles } from "../features/profileBuilder";
+import {
+    allProfiles,
+    disposeSketchProfiles,
+    invalidateSketchProfiles,
+    sketchProfiles,
+} from "../features/profileBuilder";
 import { syncNodeWatches } from "../nodeWatch";
 import { ensureVariableSync } from "../variableSync";
 import { bsplineEdges } from "./bsplineEdges";
@@ -228,6 +233,22 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         this.setPropertyEmitShapeChanged("dataJson", JSON.stringify(data));
     }
 
+    private _geometryRevision = 0;
+
+    /** Runtime-only profile revision, including derived plane/external-reference writes. */
+    get geometryRevision(): number {
+        return this._geometryRevision;
+    }
+
+    protected override emitPropertyChanged<K extends keyof this>(property: K, oldValue: this[K]): void {
+        if (property === "dataJson" || property === "plane" || property === "shape") {
+            this._geometryRevision++;
+            invalidateSketchProfiles(this);
+            this._mesh = undefined;
+        }
+        super.emitPropertyChanged(property, oldValue);
+    }
+
     private _showProfileFaces = true;
 
     /**
@@ -243,9 +264,11 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     setShowProfileFaces(value: boolean): void {
         if (this._showProfileFaces === value) return;
         this._showProfileFaces = value;
+        const oldMesh = this._mesh;
+        invalidateSketchProfiles(this);
         this._mesh = undefined;
-        // The visual rebuilds its meshes on "shape" changes; the shape itself is untouched.
-        this.emitPropertyChanged("shape", this._shape);
+        // Do not evaluate a lazy mesh just to notify: hidden sketches may never need it.
+        this.emitPropertyChanged("mesh", oldMesh!);
     }
 
     protected override createMesh(): IShapeMeshData {
@@ -764,6 +787,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     };
 
     override disposeInternal(): void {
+        disposeSketchProfiles(this);
         this.document.modelManager.removeNodeObserver(this.handleConstructionTreeChanged);
         if (this._planeRefNode !== undefined && isPropertyChanged(this._planeRefNode)) {
             this._planeRefNode.removePropertyChanged(this.handlePlaneRefNodeChanged);
