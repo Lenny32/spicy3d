@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import { I18n } from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
+import * as parametric from "@spicy3d/parametric";
 import { SKETCH_ACTION_NAMES } from "@spicy3d/parametric";
 import { buildTools } from "../src/tools";
 import { buildParametricTools } from "../src/tools/parametricTools";
@@ -103,6 +104,56 @@ describe("parametricTools", () => {
             await expect(
                 runParametric().handler({ ops: [{ op: "features", body: "b1" }] }, controller.signal),
             ).rejects.toThrow('cancelled before op 0 ("features"); the whole program was rolled back');
+            expect(add).not.toHaveBeenCalled();
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+});
+
+describe("parametric response mode", () => {
+    test("the MCP schema advertises full and compact modes", () => {
+        expect((runParametric().parameters as any).properties.responseMode.enum).toEqual(["full", "compact"]);
+    });
+
+    test.each([
+        undefined,
+        "full",
+        "compact",
+    ])("passes responseMode %s to the program", async (responseMode) => {
+        const document = createMockDocument();
+        const app = createMockApplication();
+        (app as any).activeView = { document };
+        rs.stubGlobal("app", app);
+        const envelope = { created: [], bodies: [], consumed: [], results: { explicit: [] } };
+        const program = rs.spyOn(parametric, "runParametricProgram").mockReturnValue(envelope);
+        try {
+            const result = await runParametric().handler({
+                ops: [{ op: "features", body: "b1" }],
+                responseMode,
+            });
+            expect(JSON.parse(result as string)).toEqual(envelope);
+            expect(program).toHaveBeenCalledWith(
+                document,
+                [{ op: "features", body: "b1" }],
+                expect.objectContaining({ responseMode }),
+            );
+        } finally {
+            program.mockRestore();
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("rejects invalid response modes before a transaction", async () => {
+        const add = rs.fn((_record: unknown) => {});
+        const document = createMockDocument({ history: { add } as any });
+        const app = createMockApplication();
+        (app as any).activeView = { document };
+        rs.stubGlobal("app", app);
+        try {
+            await expect(
+                runParametric().handler({ ops: [{ op: "features", body: "b1" }], responseMode: "quiet" }),
+            ).rejects.toThrow(/responseMode/);
             expect(add).not.toHaveBeenCalled();
         } finally {
             rs.unstubAllGlobals();

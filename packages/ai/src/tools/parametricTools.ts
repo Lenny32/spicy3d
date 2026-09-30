@@ -352,6 +352,12 @@ const RUN_PARAMETRIC_PARAMETERS = {
     type: "object",
     properties: {
         ops: { type: "array", items: OPS_SCHEMA, description: "Operations, run in order" },
+        responseMode: {
+            type: "string",
+            enum: ["full", "compact"],
+            description:
+                "full (default): every touched body's feature list. compact: only created/edited feature rows, removed ids, feature count and error/warning status. Explicit features/sketchInfo reads remain full.",
+        },
     },
     required: ["ops"],
 };
@@ -377,6 +383,11 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
         throw new Error('run_parametric requires a non-empty "ops" array');
     }
 
+    const responseMode = args["responseMode"];
+    if (responseMode !== undefined && responseMode !== "full" && responseMode !== "compact") {
+        throw new Error('"responseMode" must be "full" or "compact"');
+    }
+
     const parametric = await loadParametric();
     // Every sketch op goes through the constraint solver; a program of features alone never loads it.
     const kinds = new Set(ops.map((op) => (op as { op?: unknown }).op));
@@ -392,6 +403,7 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
         // Cancellation is checked between ops; a running op is timed for the slow-op warning.
         result = parametric.runParametricProgram(document, ops as ParametricOp[], {
             signal,
+            responseMode,
             onOpFinished: noteOpDuration,
         });
         document.selection.clearSelection();

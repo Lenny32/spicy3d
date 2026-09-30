@@ -17,6 +17,13 @@ reference afterwards. Anywhere a reference is expected you may also pass the rea
 sketch, body or construction. One call is one undo step, and ANY failure rolls the whole program back —
 nothing is left half-built.
 
+For small edits on large bodies, pass { responseMode: "compact", ops: [...] }. The default "full"
+returns every touched body's feature list. Compact bodies.features includes only feature rows created
+or directly edited in this call (final state, with reusable feature ids); removedFeatureIds reports
+removed rows. featureCount gives the total, status is "ok" or "error", and diagnostics retains ALL
+current feature errors/warnings, including untouched rows. created, consumed and results remain
+available; explicit features, sketchInfo and constructionInfo ops always return their full reads.
+
 - { op: "sketch", id, plane?, entities?, constraints?, actions?, name? }
   plane: "XY" (default) | "YZ" | "ZX"
        | { nodeId, faceIndex }             a planar face of a node; the sketch follows the face, and the

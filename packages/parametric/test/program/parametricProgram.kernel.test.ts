@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { rs } from "@rstest/core";
 import {
     DocumentRebuilds,
     FolderNode,
@@ -21,10 +22,20 @@ import {
     ShapeTypes,
     Transaction,
 } from "@spicy3d/core";
-import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
+import {
+    createMockApplication,
+    createMockSelection,
+    createMockVisualWithDocument,
+    TestDocument,
+} from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
-import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
+import {
+    type ParametricOp,
+    type ProgramRunOptions,
+    runParametricProgram,
+} from "../../src/program/parametricProgram";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -58,10 +69,14 @@ function rect(x0: number, y0: number, x1: number, y1: number) {
 }
 
 /** Runs a program inside a transaction — the way the AI tool drives it. */
-function run(doc: TestDocument, ops: ParametricOp[]): ReturnType<typeof runParametricProgram> {
+function run(
+    doc: TestDocument,
+    ops: ParametricOp[],
+    options: ProgramRunOptions = {},
+): ReturnType<typeof runParametricProgram> {
     let result: ReturnType<typeof runParametricProgram> | undefined;
     Transaction.execute(doc, "test program", () => {
-        result = runParametricProgram(doc, ops);
+        result = runParametricProgram(doc, ops, options);
     });
     return result!;
 }
@@ -290,7 +305,7 @@ describe("sketch and extrude", () => {
             expect(body.features).toHaveLength(2);
             expect(body.features[0].name).toBeUndefined();
             expect(body.features[1]).toMatchObject({ type: "extrude", operation, name });
-            expect((appended.results.read as { name?: string }[]).map((item) => item.name)).toEqual([
+            expect((appended.results["read"] as { name?: string }[]).map((item) => item.name)).toEqual([
                 undefined,
                 name,
             ]);
@@ -662,7 +677,7 @@ describe("feature list editing", () => {
         );
 
         const json = JSON.stringify(result);
-        const items = JSON.parse(json).results.read as { references: { nodeId: string }[] }[];
+        const items = JSON.parse(json).results["read"] as { references: { nodeId: string }[] }[];
         expect(items[0].references[0].nodeId).toBeTruthy();
     });
 
@@ -896,4 +911,205 @@ describe("cancellation and op timing", () => {
         ).toThrow('op 2 ("features") failed');
         expect(finished).toEqual(["sketch", "extrude", "features"]);
     });
+});
+
+describe("compact parametric responses", () => {
+    test("a small edit on a hundred-feature body omits untouched rows and preserves explicit reads", () => {
+        const doc = newDoc();
+        try {
+            const created = run(doc, plate(20), { responseMode: "compact" });
+            const body = createdBody(doc, created, "b1");
+            expect(created.bodies[0].features.map((feature) => feature.id)).toEqual([body.features[0].id]);
+            const base = body.features[0];
+            body.setFeaturesEmitShapeChanged([
+                base,
+                ...Array.from({ length: 99 }, (_, index) => ({
+                    ...base,
+                    id: `quiet-${index}`,
+                    suppressed: true,
+                })),
+            ]);
+            const ops: ParametricOp[] = [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: base.id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+            ];
+            const compact = run(doc, ops, { responseMode: "compact" });
+            expect(compact.bodies[0].features.map((feature) => feature.id)).toEqual([base.id]);
+            expect(compact.bodies[0].featureCount).toBe(100);
+            expect(compact.bodies[0].status).toBe("ok");
+            expect(compact.bodies[0].diagnostics).toEqual([]);
+            expect(compact.bodies[0].removedFeatureIds).toEqual([]);
+            expect(JSON.stringify(compact)).not.toContain("quiet-0");
+            const full = run(doc, ops);
+            expect(full.bodies[0].features).toHaveLength(100);
+            expect(full.bodies[0]).not.toHaveProperty("featureCount");
+            expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length / 10);
+            const read = run(doc, [{ op: "features", body: body.id, id: "all" }], {
+                responseMode: "compact",
+            });
+            expect(read.results["all"]).toHaveLength(100);
+            expect(read.bodies).toEqual([]);
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact edits report renames, suppression, moves, removals and appended feature ids", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const id = body.features[1].id;
+            const compact = { responseMode: "compact" as const };
+            const renamed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "rename", value: "Renamed" }],
+                compact,
+            );
+            expect(renamed.bodies[0].features).toHaveLength(1);
+            expect(renamed.bodies[0].features[0].name).toBe("Renamed");
+            const moved = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "moveTo", index: 3 }],
+                compact,
+            );
+            expect(moved.bodies[0].features.map((feature) => feature.id)).toEqual([id]);
+            const suppressed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "suppress", value: true }],
+                compact,
+            );
+            expect(suppressed.bodies[0].features[0].suppressed).toBe(true);
+            const removed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "remove" }],
+                compact,
+            );
+            expect(removed.bodies[0].features).toEqual([]);
+            expect(removed.bodies[0].removedFeatureIds).toEqual([id]);
+            expect(removed.bodies[0].featureCount).toBe(10);
+            const added = run(
+                doc,
+                [{ op: "extrude", id: "joined", body: body.id, sketch: "s1", depth: 25, operation: "fuse" }],
+                compact,
+            );
+            const latest = body.features.at(-1)!;
+            expect(added.bodies[0].features.map((feature) => feature.id)).toEqual([latest.id]);
+            expect(added.bodies[0].featureCount).toBe(11);
+            expect(
+                added.bodies[0].features[0].parameters.find((parameter) => parameter.key === "depth")?.value,
+            ).toBe(25);
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact responses retain untouched error/warning diagnostics", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const realItems = body.featureItems.bind(body);
+            const staleId = body.features[1].id;
+            body.featureItems = () =>
+                realItems().map((item) =>
+                    item.id === staleId
+                        ? { ...item, error: "Existing rebuild failure", warning: "Reselect reference" }
+                        : item,
+                );
+            try {
+                const result = run(
+                    doc,
+                    [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "rename",
+                            value: "Base",
+                        },
+                    ],
+                    { responseMode: "compact" },
+                );
+                expect(result.bodies[0].features.map((feature) => feature.id)).toEqual([body.features[0].id]);
+                expect(result.bodies[0].status).toBe("error");
+                expect(result.bodies[0].diagnostics).toEqual([
+                    { featureId: staleId, error: "Existing rebuild failure", warning: "Reselect reference" },
+                ]);
+            } finally {
+                body.featureItems = realItems;
+            }
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact mode preserves rollback errors and validates the mode", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const before = body.featuresJson;
+            expect(() =>
+                run(
+                    doc,
+                    [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "setParameter",
+                            key: "depth",
+                            value: 0,
+                        },
+                    ],
+                    { responseMode: "compact" },
+                ),
+            ).toThrow(/op 0.*failed/);
+            expect(body.featuresJson).toBe(before);
+            expect(() => run(doc, plate(10), { responseMode: "quiet" as "compact" })).toThrow(/responseMode/);
+        } finally {
+            doc.close();
+        }
+    });
+});
+
+test("the MCP compact handler returns only the edited feature from a large body", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    (app as any).activeView = { document: doc };
+    doc.selection = createMockSelection();
+    const clearSelection = rs.spyOn(doc.selection, "clearSelection");
+    rs.stubGlobal("app", app);
+    try {
+        const body = elevenFeaturePlate(doc);
+        const tool = buildParametricTools()[0];
+        const response = await tool.handler({
+            responseMode: "compact",
+            ops: [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: body.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+            ],
+        });
+        const result = JSON.parse(response as string);
+        expect(result.bodies[0].features.map((feature: { id: string }) => feature.id)).toEqual([
+            body.features[0].id,
+        ]);
+        expect(result.bodies[0].featureCount).toBe(11);
+        expect(result.bodies[0].status).toBe("ok");
+        expect(clearSelection).toHaveBeenCalledOnce();
+    } finally {
+        clearSelection.mockRestore();
+        rs.unstubAllGlobals();
+        doc.close();
+    }
 });
