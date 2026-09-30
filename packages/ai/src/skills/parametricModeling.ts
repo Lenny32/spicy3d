@@ -80,7 +80,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
-- { op: "edges", body, id?, edgeIndexes? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
 - { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
 - { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
@@ -229,6 +229,32 @@ References are plain JSON and may be reused across calls; query again when inten
 new topology. These differ from run_program's subshape refs (including grouped refs): those identify
 positions in a current shape, not persistent parametric selections. edgeIndexes remain supported
 for immediate picks, but must be queried again after upstream edits.
+
+Rule-based picks: edges accepts selector instead of edgeIndexes; every supplied field intersects.
+- featureIds: [featureId, ...] selects edges first born at those features, including surviving split/
+  merged descendants through boolean ancestry. Use feature ids from features, not feature names.
+- adjoiningFaces: { all?: [face, ...], any?: [face, ...], exact?: [face, ...] } selects incident face
+  sets. A face is a current face index or its tracked face id; all requires every selected face,
+  any requires at least one, exact requires the complete adjacent set. Shared face ids expand to
+  all current pieces. Unknown face ids/indexes fail instead of returning a misleading empty set.
+- outlineOfFaces: [face, ...] selects any given face's outer-wire edges, excluding hole loops.
+- curves: [<persistent reference>, ...] first resolves each saved pick against the current body.
+  Selects edges sharing its supporting infinite line or circle; free-form curves use tracked
+  ancestry. Missing/ambiguous saved curves fail. Already split picks choose the current supporting
+  curve, so several collinear pieces may intentionally be returned.
+- geometry: { kind?: "line"|"circle"|"other", radius?: number, cylinderRadius?: number,
+  elevation?: { axis?: "x"|"y"|"z", value } }. radius is a circular EDGE radius; cylinderRadius
+  requires an adjacent analytic CYLINDER of that radius (a sphere/torus does not qualify). elevation
+  requires the ENTIRE edge at that coordinate, default axis z. Coordinates are body-local mm.
+- tolerance?: positive mm, default 0.000001, governs geometry equality.
+Example: { op: "edges", body: "b1", selector: { geometry: { kind: "circle", cylinderRadius: 3,
+  elevation: { value: 20 } } }, expectedCount: 1 } selects a radius-3 bore's top rim.
+A selector query returns selection { status, count, message } alongside candidate stable refs.
+No matches = empty. expectedCount (positive integer) requires that many matches; a nonzero mismatch
+is ambiguous. Without expectedCount, multiple matches are an intentional set. Inspect/refine an
+ambiguous query before using its references; the query itself applies no feature or selection edit.
+Selector queries skip edges with no capturable curve (e.g. sphere poles) and list their indexes/reasons
+in unselectableEdges. An explicit raw index still fails if its curve cannot be captured.
 
 Example — a 40x30 plate, 20 tall, then round one top edge R3:
  [ { op: "sketch", id: "s1", plane: "XY", name: "Plate outline", entities: [

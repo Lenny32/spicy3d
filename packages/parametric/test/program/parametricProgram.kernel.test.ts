@@ -1292,3 +1292,230 @@ describe("persistent program edge references (real kernel)", () => {
         expect(body.featuresJson).toBe(before);
     });
 });
+
+describe("rule-based edge queries (real kernel)", () => {
+    function plateWithBore() {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "outline", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "plate", sketch: "outline", depth: 20 },
+            { op: "sketch", id: "bore", entities: [{ type: "circle", params: [20, 15, 3] }] },
+            { op: "extrude", id: "cut", body: "plate", sketch: "bore", depth: 20, operation: "cut" },
+        ]);
+        const body = bodyOf(doc, created.created.find((node) => node.id === "plate")!.nodeId);
+        return { doc, body };
+    }
+    const query = (doc: TestDocument, op: Omit<Extract<ParametricOp, { op: "edges" }>, "op" | "body">) =>
+        run(doc, [{ op: "edges", body: "plate", ...op }]).results["edges"] as EdgesReport;
+
+    test("analytic circle/cylinder radius and elevation yield a usable top bore rim", () => {
+        const { doc, body } = plateWithBore();
+        expect(query(doc, { selector: { geometry: { kind: "circle", radius: 3 } } }).edges).toHaveLength(2);
+        expect(query(doc, { selector: { geometry: { cylinderRadius: 3 } } }).edges).toHaveLength(3);
+        const picked = query(doc, {
+            selector: { geometry: { kind: "circle", cylinderRadius: 3, elevation: { value: 20 } } },
+            expectedCount: 1,
+        });
+        expect(picked.selection).toMatchObject({ status: "matched", count: 1 });
+        expect(picked.edges).toHaveLength(1);
+        expect(picked.edges[0].reference.edge).toMatchObject({
+            kind: "circle",
+            center: { z: 20 },
+            radius: 3,
+        });
+        run(doc, [
+            {
+                op: "chamfer",
+                id: "bevel",
+                body: "plate",
+                edgeRefs: [JSON.parse(JSON.stringify(picked.edges[0].reference))],
+                distance: 0.5,
+            },
+        ]);
+        expect(body.featureItems()[2].error).toBeUndefined();
+        expect(body.shape.isOk).toBe(true);
+    });
+
+    test("a toroidal surface's circular edge does not qualify as a cylinder", () => {
+        const doc = newDoc();
+        run(doc, [
+            { op: "sketch", id: "tube", entities: [{ type: "circle", params: [10, 0, 3] }] },
+            {
+                op: "revolve",
+                id: "plate",
+                sketch: "tube",
+                axis: { point: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } },
+            },
+        ]);
+        expect(
+            query(doc, { selector: { geometry: { kind: "circle", radius: 3 } } }).edges.length,
+        ).toBeGreaterThan(0);
+        const selected = query(doc, { selector: { geometry: { cylinderRadius: 3 } } });
+        expect(selected.edges).toHaveLength(0);
+        expect(selected.selection?.status).toBe("empty");
+    });
+
+    test("sphere surfaces are excluded and degenerate pole edges are explained", () => {
+        const doc = newDoc();
+        run(doc, [
+            {
+                op: "sketch",
+                id: "half",
+                entities: [
+                    { type: "arc", params: [0, 0, 0, -5, 0, 5] },
+                    { type: "line", params: [0, 5, 0, -5] },
+                ],
+            },
+            {
+                op: "revolve",
+                id: "plate",
+                sketch: "half",
+                axis: { point: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } },
+            },
+        ]);
+        const selected = query(doc, { selector: { geometry: { cylinderRadius: 5 } } });
+        expect(selected.edges).toHaveLength(0);
+        expect(selected.selection?.status).toBe("empty");
+        expect(selected.unselectableEdges?.length).toBeGreaterThan(0);
+        expect(selected.unselectableEdges?.[0].reason).toMatch(/degenerate/i);
+    });
+
+    test("adjoining face sets accept tracked ids, and outlines exclude the hole", () => {
+        const { doc, body } = plateWithBore();
+        const faces = body.shape.unchecked()!.findSubShapes(ShapeTypes.face) as IFace[];
+        try {
+            const top = faces.findIndex((face) => {
+                const box = face.geometryBoundingBox();
+                return Math.abs(box.min.z - 20) < 1e-5 && Math.abs(box.max.z - 20) < 1e-5;
+            });
+            const cylinder = faces.findIndex((face) => {
+                const s = face.surface();
+                try {
+                    return "radius" in s && s.radius === 3;
+                } finally {
+                    s.dispose();
+                }
+            });
+            expect(top).toBeGreaterThanOrEqual(0);
+            expect(cylinder).toBeGreaterThanOrEqual(0);
+            expect(query(doc, { selector: { adjoiningFaces: { all: [top] } } }).edges).toHaveLength(5);
+            expect(query(doc, { selector: { outlineOfFaces: [top] } }).edges).toHaveLength(4);
+            const topId = body.faceIdAt(top)!;
+            const cylinderId = body.faceIdAt(cylinder)!;
+            expect(topId).toEqual(expect.any(String));
+            expect(cylinderId).toEqual(expect.any(String));
+            const selected = query(doc, { selector: { adjoiningFaces: { exact: [topId, cylinderId] } } });
+            expect(selected.edges).toHaveLength(1);
+            expect(selected.edges[0].reference.edge).toMatchObject({ kind: "circle", center: { z: 20 } });
+            expect(query(doc, { selector: { adjoiningFaces: { any: [top, cylinder] } } }).edges).toHaveLength(
+                7,
+            );
+        } finally {
+            for (const face of faces) face.dispose();
+        }
+    });
+
+    test("origin and supporting-curve picks retain split boolean ancestry", () => {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "outline", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "plate", sketch: "outline", depth: 20 },
+        ]);
+        const body = bodyOf(doc, created.created[1].nodeId);
+        const before = query(doc, {});
+        const topFront = before.edges.find(
+            ({ reference: { edge } }) =>
+                edge.kind === "line" &&
+                edge.start.y === 0 &&
+                edge.end.y === 0 &&
+                edge.start.z === 20 &&
+                edge.end.z === 20,
+        )!;
+        expect(topFront).not.toBeUndefined();
+        const origin = body.features[0].id;
+        run(doc, [
+            { op: "sketch", id: "notch", entities: rect(15, -5, 25, 5) },
+            { op: "extrude", id: "notchCut", body: "plate", sketch: "notch", depth: 20, operation: "cut" },
+        ]);
+        const selected = query(doc, {
+            selector: { featureIds: [origin], curves: [topFront.reference] },
+            expectedCount: 2,
+        });
+        expect(selected.selection).toMatchObject({ status: "matched", count: 2 });
+        expect(selected.edges).toHaveLength(2);
+        for (const row of selected.edges) {
+            expect(row.reference.edge.edgeId).toBe(topFront.reference.edge.edgeId);
+            expect(row.reference.edge.splitPiece).toBe(true);
+        }
+        const cutEdges = query(doc, { selector: { featureIds: [body.features[1].id] } });
+        expect(cutEdges.edges.length).toBeGreaterThan(0);
+        expect(
+            cutEdges.edges.every((row) => row.reference.edge.edgeId !== topFront.reference.edge.edgeId),
+        ).toBe(true);
+    });
+
+    test("empty and ambiguous counts explain candidates without changing the body", () => {
+        const { doc, body } = plateWithBore();
+        const before = body.featuresJson;
+        const empty = query(doc, { selector: { geometry: { radius: 99 } }, expectedCount: 1 });
+        expect(empty.edges).toHaveLength(0);
+        expect(empty.selection).toMatchObject({ status: "empty", count: 0 });
+        expect(empty.selection?.message).toMatch(/No edges match/);
+        const ambiguous = query(doc, { selector: { geometry: { radius: 3 } }, expectedCount: 1 });
+        expect(ambiguous.edges).toHaveLength(2);
+        expect(ambiguous.selection).toMatchObject({ status: "ambiguous", count: 2 });
+        expect(ambiguous.selection?.message).toMatch(/refine the selector/);
+        expect(body.featuresJson).toBe(before);
+    });
+
+    test("malformed predicates and missing curve/face/origin references fail explicitly", () => {
+        const { doc, body } = plateWithBore();
+        const before = body.featuresJson;
+        expect(() => query(doc, { selector: { featureIds: ["missing"] } })).toThrow(/unknown feature origin/);
+        expect(() => query(doc, { selector: { outlineOfFaces: [99] } })).toThrow(/out of range/);
+        expect(() => query(doc, { selector: { adjoiningFaces: { all: ["missing"] } } })).toThrow(
+            /face id.*missing/,
+        );
+        expect(() => query(doc, { selector: { geometry: { radius: -1 } } })).toThrow(/positive and finite/);
+        expect(() => query(doc, { selector: { tolerance: 0 } })).toThrow(/positive finite/);
+        expect(() => query(doc, { selector: { geometry: { elevation: { value: NaN } } } })).toThrow(
+            /finite value/,
+        );
+        expect(() => query(doc, { selector: { geometry: {} }, edgeIndexes: [0] })).toThrow(/not both/);
+        expect(() =>
+            query(doc, {
+                selector: {
+                    curves: [
+                        {
+                            bodyId: body.id,
+                            edge: { kind: "other", mid: { x: 900, y: 900, z: 900 }, length: 1 },
+                        },
+                    ],
+                },
+            }),
+        ).toThrow(/curve selection is missing or ambiguous/);
+        expect(() => query(doc, { expectedCount: 0 })).toThrow(/positive integer/);
+        expect(() => query(doc, { selector: { featureIds: [] } })).toThrow(/non-empty array/);
+        expect(() => query(doc, { selector: JSON.parse('{"geometery":{"radius":3}}') })).toThrow(
+            /unknown selector field/,
+        );
+        expect(() => query(doc, { selector: { adjoiningFaces: {} } })).toThrow(/requires all, any or exact/);
+        expect(() =>
+            query(doc, {
+                selector: {
+                    curves: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "line",
+                                start: { x: 0, y: 15, z: 20 },
+                                end: { x: 40, y: 15, z: 20 },
+                            },
+                        },
+                    ],
+                },
+            }),
+        ).toThrow(/curve selection is missing or ambiguous/);
+        expect(body.featuresJson).toBe(before);
+    });
+});

@@ -52,6 +52,21 @@ describe("parametricTools", () => {
         expect((runParametric().parameters as any).required).toEqual(["ops"]);
     });
 
+    test("edge queries advertise origin, adjacency, outline, curve and analytic selectors", () => {
+        const properties = (opsSchema() as any).properties;
+        expect(Object.keys(properties.selector.properties)).toEqual([
+            "featureIds",
+            "adjoiningFaces",
+            "outlineOfFaces",
+            "curves",
+            "geometry",
+            "tolerance",
+        ]);
+        expect(properties.selector.additionalProperties).toBe(false);
+        expect(properties.expectedCount.minimum).toBe(1);
+        expect(properties.selector.properties.geometry.properties.elevation.required).toEqual(["value"]);
+    });
+
     test("the sketch schema offers every entity type and every engine action", () => {
         const properties = (opsSchema() as any).properties;
         expect(properties.entities.items.properties.type.enum).toEqual([

@@ -51,6 +51,13 @@ import {
     toConstructionDefinition,
 } from "./constructionProgram";
 import {
+    describeEdgeSelection,
+    type EdgeSelectionReport,
+    type EdgeSelector,
+    selectEdgeIndexes,
+    validateEdgeSelector,
+} from "./edgeSelectors";
+import {
     describeSketch,
     type SketchAction,
     type SketchConstraintSpec,
@@ -232,6 +239,8 @@ export interface PersistentEdgeReference {
 export interface EdgesOp {
     op: "edges";
     id?: string;
+    selector?: EdgeSelector;
+    expectedCount?: number;
     body: string;
     /** Omit to query all edges; indexes describe only the current shape. */
     edgeIndexes?: number[];
@@ -239,6 +248,9 @@ export interface EdgesOp {
 
 export interface EdgesReport {
     bodyId: string;
+    selection?: EdgeSelectionReport;
+    /** Selector queries report topology with no capturable curve instead of failing the whole query. */
+    unselectableEdges?: { index: number; reason: string }[];
     edges: { index: number; reference: PersistentEdgeReference }[];
 }
 
@@ -926,12 +938,50 @@ function runEdgesOp(state: State, op: EdgesOp): void {
     const shape = body.shape;
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
     const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
-    const indexes = op.edgeIndexes === undefined ? edges.map((_, index) => index) : op.edgeIndexes;
-    const refs = captureIndexes(body, edges, indexes);
+    if (op.selector !== undefined && op.edgeIndexes !== undefined)
+        throw new Error("use selector or edgeIndexes, not both");
+    if (op.selector !== undefined) validateEdgeSelector(op.selector);
+    const allIndexes = edges.map((_, index) => index);
+    const unselectableEdges: NonNullable<EdgesReport["unselectableEdges"]> = [];
+    const allRefs =
+        op.selector === undefined
+            ? undefined
+            : allIndexes.map((index) => {
+                  try {
+                      return captureIndexes(body, edges, [index])[0];
+                  } catch (error) {
+                      unselectableEdges.push({
+                          index,
+                          reason: error instanceof Error ? error.message : String(error),
+                      });
+                      return undefined;
+                  }
+              });
+    const indexes =
+        op.selector === undefined
+            ? (op.edgeIndexes ?? allIndexes)
+            : selectEdgeIndexes(
+                  body,
+                  edges,
+                  allRefs!,
+                  op.selector,
+                  op.selector.curves === undefined ? undefined : persistentEdges(op.selector.curves, body),
+              );
+    const refs =
+        allRefs === undefined
+            ? captureIndexes(body, edges, indexes)
+            : indexes.map((index) => {
+                  const ref = allRefs[index];
+                  if (ref === undefined) throw new Error(`selected edge ${index} has no capturable curve`);
+                  return ref;
+              });
     const report: EdgesReport = {
         bodyId: body.id,
         edges: refs.map((edge, i) => ({ index: indexes[i], reference: { bodyId: body.id, edge } })),
     };
+    if (op.selector !== undefined || op.expectedCount !== undefined)
+        report.selection = describeEdgeSelection(refs.length, op.expectedCount);
+    if (unselectableEdges.length > 0) report.unselectableEdges = unselectableEdges;
     state.out.results[op.id ?? "edges"] = report;
 }
 
