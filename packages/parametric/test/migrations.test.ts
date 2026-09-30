@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 9 (associative path sweeps)", () => {
+describe("parametric format 10 (associative curve projection)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(9);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(9);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(10);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(10);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -28,6 +28,7 @@ describe("parametric format 9 (associative path sweeps)", () => {
         ["v2/parametric6-from-face.json", 6],
         ["v2/parametric7-variable-fillet.json", 7],
         ["v2/parametric8-next.json", 8],
+        ["v2/parametric9-sweep.json", 9],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -36,7 +37,7 @@ describe("parametric format 9 (associative path sweeps)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 9 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 10 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);

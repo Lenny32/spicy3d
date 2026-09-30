@@ -36,10 +36,21 @@ check and scoped `npm run check` passed. Actual MCP calls query persistent sourc
 round-trip them through JSON, edit upstream geometry and create the projection in a later call.
 UI tests prove create, reverse, invalid direction, cancel, repick and undo behavior.
 
-## Remaining integration
+## Persistence and integration
 
-The source/UI checkpoint intentionally awaits #88's committed parametric 9 foundation before
-registering parametric 10. Add the pure 9→10 identity migration, atomic source/target merge rule,
-NEW immutable document fixture, old-document compatibility and manifest/cloud roundtrip proof.
-Do not publish the feature checkpoint before those owning-version changes are integrated.
-Further regression verification follows that foundation. Existing fixtures remain immutable.
+#88's committed parametric 9 foundation is included. Parametric 10 adds a pure 9→10 identity
+migration, atomic source and target reference rules, an atomic world direction rule, and the new
+immutable `v2/parametric10-projection.json` fixture. Existing fixtures remain unchanged and every
+document fixture rebuilds and serializes without payload changes. Concurrent reference edits
+and source/target deletion retain dangling-reference validation; independent naming edits merge.
+
+`.spicy` encode/decode and cloud's shared `splitManifest`/`assembleManifest` payload path preserve
+the exact `ParametricBodyNode.featuresJson` source edges, target face and world direction, including
+when the serialized feature string is a content-addressed blob. Merge consumes the assembled
+payload unchanged, and arbitrary `userData` stays untouched. No cloud envelope or blob protocol
+changes are needed.
+
+Final foundation validation: 171/171 tests across eleven geometry, feature/UI/MCP, reference,
+program, migration, immutable-document and merge-rule suites; local-alias TypeScript check passes.
+The generated merge-rule inventory includes sweep and projection. Integration still waits for
+root review and #88's remaining UI/MCP work; projection needs no additional native artifacts.
