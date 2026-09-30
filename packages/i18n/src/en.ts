@@ -123,6 +123,13 @@ export default {
         "projection.reverse": "Reverse direction",
         "projection.repick": "Select source and target again",
         "command.feature.sweep": "Sweep along path",
+        "command.feature.faceSweep": "Groove or rib along face",
+        "command.feature.editFaceSweep": "Edit groove or rib",
+        "tooltip.feature.faceSweep": "Join or cut a profile along a curve on a support face",
+        "faceSweep.support": "Support face",
+        "faceSweep.operation": "Operation",
+        "faceSweep.pickSupport": "Re-pick support face",
+        "prompt.select.faceSweepSupport": "Select the support face on the body to join or cut",
         "command.feature.editSweep": "Edit sweep",
         "tooltip.feature.sweep":
             "Sweep one sketch profile along connected path edges picked in traversal order",
