@@ -125,3 +125,31 @@ test.each(["source", "target"])("projection rejects untracked %s provenance expl
         scene.dispose();
     }
 });
+
+test.each([
+    "source",
+    "target",
+])("projection cannot launder an ephemeral %s token through claimed stable flags", (kind) => {
+    const scene = inputs();
+    try {
+        const result = buildProjectionResult(
+            "project",
+            "source",
+            scene.source.map((span) => ({
+                ...span,
+                seed: kind === "source" ? `${span.seed}|untracked:runtime` : span.seed,
+            })),
+            "target",
+            {
+                ...scene.target,
+                seed: kind === "target" ? `${scene.target.seed}|untracked:runtime` : scene.target.seed,
+            },
+            XYZ.unitX,
+            Matrix4.identity(),
+        );
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("tracked source edges and a tracked target face");
+    } finally {
+        scene.dispose();
+    }
+});

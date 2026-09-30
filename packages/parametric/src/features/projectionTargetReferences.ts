@@ -13,6 +13,7 @@ import {
 import { isBodyTimelineNode, isBodyTrackingNode } from "./bodyTracking";
 import type { FeatureContext } from "./feature";
 import { captureProfileRef, type ProfileRef } from "./profileRef";
+import { isReusableTopologyIdentity } from "./reusableTopologyIdentity";
 import { matchSourceFaceIndexes, resolveSourceFaces } from "./sourceFaceMatcher";
 
 /** Runtime reference carrier; the saved feature registration is owned by its approved schema step. */
@@ -71,7 +72,7 @@ export function resolveProjectionTarget(
             face: local,
             anchor,
             seed: id ?? `geometry:${sha256HexSync(new TextEncoder().encode(JSON.stringify(reference.face)))}`,
-            stableIdentity: id !== undefined,
+            stableIdentity: isReusableTopologyIdentity(id),
             dispose: () => {
                 local.dispose();
             },
