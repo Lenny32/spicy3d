@@ -1059,7 +1059,7 @@ async function runOps(
         try {
             await timeOpAsync(
                 String(op.method),
-                () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner),
+                () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner, signal),
                 (factory as IShapeFactory).boundedOperations !== undefined &&
                     boundedRequest(op.method, []) !== undefined,
             );
@@ -1184,6 +1184,7 @@ async function runOp(
     results: Record<string, unknown>,
     numeric: NumericArgs,
     owner: IDocumentMutationScope,
+    signal?: AbortSignal,
 ): Promise<void> {
     if (op.method === "transformedMul") {
         owner.run(() => runTransformedMul(op, doc, localRefs, created));
@@ -1194,7 +1195,7 @@ async function runOp(
         owner.run(() => runQueryOp(op, doc, localRefs, created, results, numeric));
         return;
     }
-    await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner);
+    await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner, signal);
 }
 
 function runQueryOp(
@@ -1263,6 +1264,7 @@ async function runShapeOp(
     results: Record<string, unknown>,
     numeric: NumericArgs,
     owner: IDocumentMutationScope,
+    signal?: AbortSignal,
 ): Promise<void> {
     const consumed = new Set<string>();
     const params = owner.run(() => {
@@ -1274,7 +1276,7 @@ async function runShapeOp(
     const request = boundedRequest(op.method, params);
     let raw: unknown;
     if (bounded && request) {
-        const pending = owner.run(() => bounded.shapeOperation(request));
+        const pending = owner.run(() => bounded.shapeOperation(request, signal));
         try {
             await pending.ready;
             raw = owner.run(() => pending.take());

@@ -338,3 +338,136 @@ test("an unavailable strict worker returns an error without offering synchronous
         hybrid.dispose();
     }
 });
+
+test("strict abort terminates the native generation, cancels all pending calls, and clears its deadline", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const client = new KernelWorkerClient(transport);
+    const signal = new AbortController();
+    try {
+        const active = client.request("ready", undefined, signal.signal, { terminateOnAbort: true });
+        const queued = client.request("stats", undefined);
+        signal.abort();
+        expect(await active).toMatchObject({ ok: false, error: { code: "cancelled" } });
+        expect(await queued).toMatchObject({ ok: false, error: { code: "cancelled" } });
+        expect(transport.terminated).toBe(1);
+        expect(client.pendingNative).toBe(0);
+        expect(client.pendingRequests).toBe(0);
+        const sent = transport.messages.length;
+        transport.dispatchEvent(
+            new MessageEvent("message", {
+                data: { type: "result", id: 1, result: { ok: true, value: undefined } },
+            }),
+        );
+        expect(transport.messages).toHaveLength(sent);
+        await rs.advanceTimersByTimeAsync(90_000);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        client.dispose();
+    }
+});
+
+test("strict signal abort retires its worker and the immediate next operation uses a fresh generation", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new HungTransport();
+    const signal = new AbortController();
+    let generations = 0;
+    const hybrid = new HybridShapeFactory(() =>
+        ++generations === 1 ? new KernelWorkerClient(transport) : new NativeWorkerTransport().client,
+    );
+    try {
+        const operation = hybrid.shapeOperation(
+            { method: "fillet", shape: box, edges: [0], value: 1 },
+            signal.signal,
+        );
+        signal.abort();
+        const next = hybrid.shapeOperation({ method: "chamfer", shape: box, edges: [0], value: 1 });
+        await operation.ready;
+        expect(operation.take().error).toContain("cancelled");
+        expect(operation.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+        expect(hybrid.failure).toBeUndefined();
+        await next.ready;
+        const result = keep(unwrapOk(next.take()));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeLessThan(box.volume());
+        expect(generations).toBe(2);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("pre-aborted strict work never serializes inputs or creates a worker", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const serialize = rs.spyOn(wasm.Converter, "convertToBrep");
+    const createWorker = rs.fn(() => new NativeWorkerTransport().client);
+    const hybrid = new HybridShapeFactory(createWorker);
+    const signal = new AbortController();
+    signal.abort();
+    try {
+        const operation = hybrid.shapeOperation(
+            { method: "fillet", shape: box, edges: [0], value: 1 },
+            signal.signal,
+        );
+        await operation.ready;
+        expect(operation.take().error).toContain("cancelled");
+        expect(createWorker).not.toHaveBeenCalled();
+        expect(serialize).not.toHaveBeenCalled();
+    } finally {
+        serialize.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+test("an already completed strict result wins over a late signal abort and detaches its listener", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new NativeWorkerTransport();
+    const terminate = rs.spyOn(transport, "terminate");
+    const signal = new AbortController();
+    const remove = rs.spyOn(signal.signal, "removeEventListener");
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const operation = hybrid.shapeOperation(
+            { method: "fillet", shape: box, edges: [0], value: 1 },
+            signal.signal,
+        );
+        await operation.ready;
+        expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+        signal.abort();
+        const result = keep(unwrapOk(operation.take()));
+        expect(result.checkShape()).toBe(true);
+        expect(terminate).not.toHaveBeenCalled();
+        expect(transport.client.pendingNative).toBe(0);
+    } finally {
+        remove.mockRestore();
+        terminate.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+test("strict cancellation settles sharing tracked calls without quarantining the main kernel", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const other = keep(createBox(factory));
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const signal = new AbortController();
+    try {
+        const tracked = hybrid.booleanTracked("fuse", [box], [other]);
+        if (!tracked) throw new Error("Expected tracked worker operation");
+        const strict = hybrid.shapeOperation(
+            { method: "fillet", shape: box, edges: [0], value: 1 },
+            signal.signal,
+        );
+        signal.abort();
+        await Promise.all([tracked.ready, strict.ready]);
+        expect(tracked.take().error).toContain("cancelled");
+        expect(tracked.canFallback).toBe(false);
+        expect(strict.take().error).toContain("cancelled");
+        expect(hybrid.failure).toBeUndefined();
+        expect(transport.terminated).toBe(1);
+        expect(box.checkShape()).toBe(true);
+    } finally {
+        hybrid.dispose();
+    }
+});
