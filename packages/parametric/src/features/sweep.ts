@@ -26,7 +26,7 @@ import { captureProfileRef } from "./profileRef";
 import { MATCH_TOLERANCE } from "./refGeometry";
 import { ancestorInputs, combineIds } from "./trackedId";
 
-interface SweepSection {
+export interface SweepSection {
     wire: IWire;
     edges: IEdge[];
     edgeSeeds: string[];
@@ -35,7 +35,10 @@ interface SweepSection {
     dispose(): void;
 }
 
-function resolveSection(feature: SweepFeatureData, context: FeatureContext): Result<SweepSection> {
+export function resolveSweepSection(
+    feature: Pick<SweepFeatureData, "section">,
+    context: FeatureContext,
+): Result<SweepSection> {
     const sketch = feature.section && findSketch(context.document, feature.section.sketchId);
     if (!sketch) return Result.err("Sweep section sketch not found");
     const profiles = resolveProfiles(sketch, feature.section.profile ? [feature.section.profile] : undefined);
@@ -141,8 +144,8 @@ function identity(featureId: string, role: string, sources: readonly string[]): 
 }
 
 /** Every output ID comes from actual derivation, adjacent derived faces or exact boundary roles. */
-function trackSweep(
-    feature: SweepFeatureData,
+export function trackSweep(
+    feature: Pick<SweepFeatureData, "id">,
     section: SweepSection,
     path: ResolvedPath,
     result: TrackedShape,
@@ -267,7 +270,7 @@ const handler: FeatureHandler<SweepFeatureData> = {
     evaluate(feature, context) {
         if (!shapeFactory.sweepTracked)
             return Result.err("Tracked path sweep requires a newer geometry kernel");
-        const section = resolveSection(feature, context);
+        const section = resolveSweepSection(feature, context);
         if (!section.isOk) return Result.err(section.error);
         const path = resolvePathReferences(feature.path, context);
         if (!path.isOk) {

@@ -847,14 +847,15 @@ export class ParametricBodyNode
     }
 
     /**
-     * The first boolean taking `nodeId` as a tool — where this body swallowed that node's
-     * geometry. `consumeTools: false` still counts: it only keeps the tool in the tree, the
-     * fused shape (and so the circularity) is the same.
+     * The first boolean using this tool, or face sweep using this path. Referenced curves
+     * may themselves depend on this body, so they must see the state entering their consumer.
+     * This timeline anchor does not change tree adoption; consumeTools only controls that.
      */
     consumingFeatureIndex(nodeId: string): number | undefined {
         const index = this.features.findIndex(
-            (feature): feature is BooleanFeatureData =>
-                feature.type === "boolean" && feature.toolIds.includes(nodeId),
+            (feature) =>
+                (feature.type === "boolean" && feature.toolIds.includes(nodeId)) ||
+                (feature.type === "faceSweep" && feature.path.nodeId === nodeId),
         );
         return index < 0 ? undefined : index;
     }
@@ -1077,8 +1078,13 @@ export class ParametricBodyNode
      * and hands back a new one, hundreds of rounds of kernel work per edit.
      */
     private refreshConsumedTools(feature: FeatureData): void {
-        if (feature.type !== "boolean") return;
-        for (const toolId of feature.toolIds) {
+        const tools =
+            feature.type === "boolean"
+                ? feature.toolIds
+                : feature.type === "faceSweep"
+                  ? [feature.path.nodeId]
+                  : [];
+        for (const toolId of tools) {
             const node = this.document.modelManager.findNode((n) => n.id === toolId);
             if (node === this || !(node instanceof ParametricBodyNode)) continue;
             if (!node.references(this.id)) continue;
@@ -1126,10 +1132,14 @@ export class ParametricBodyNode
         this.emitPropertyChanged("featuresJson", this.featuresJson);
     };
 
-    /** True when a body this node watches takes it as a boolean tool (see `refreshConsumedTools`). */
-    private isConsumedByWatched(): boolean {
+    /** True when this notification came from a watched body that consumes this producer. */
+    private isConsumedByWatched(source?: INode): boolean {
         for (const node of this._watched.values()) {
-            if (node instanceof ParametricBodyNode && node.consumingFeatureIndex(this.id) !== undefined) {
+            if (
+                node === source &&
+                node instanceof ParametricBodyNode &&
+                node.consumingFeatureIndex(this.id) !== undefined
+            ) {
                 return true;
             }
         }
@@ -1455,9 +1465,9 @@ export class ParametricBodyNode
     // re-evaluate. A failed rebuild (e.g. the sketch is mid-edit with an open profile)
     // keeps the last good shape silently — the feature panel shows the error — instead
     // of toasting per change.
-    private readonly handleWatchedNodeChanged = (property: string) => {
+    private readonly handleWatchedNodeChanged = (property: string, source: INode) => {
         if (property !== "shape" && property !== "transform" && property !== "geometry") return;
-        this.rebuildFromUpstream();
+        this.rebuildFromUpstream("upstream", source);
     };
 
     /**
@@ -1466,7 +1476,7 @@ export class ParametricBodyNode
      * `variableSync.ts`). A failed rebuild keeps the last good shape silently; the
      * feature panel carries the error.
      */
-    private rebuildFromUpstream(trigger = "upstream"): void {
+    private rebuildFromUpstream(trigger = "upstream", source?: INode): void {
         // Skip while evaluating: a referenced node (e.g. the sketch) may generate its
         // shape lazily mid-evaluation and notify — the in-flight pass reads it fresh.
         if (this._evaluating) return;
@@ -1481,13 +1491,13 @@ export class ParametricBodyNode
                 return;
             }
         }
-        // A watched body that CONSUMES this one owns this rebuild instead: it re-solves us
+        // A notification from a watched body that CONSUMES this one is suppressed: it re-solves us
         // right before its boolean, against the chain state we actually anchor to
         // (`refreshConsumedTools`). Reacting here as well would make the two trade revisions
         // forever — its shape is rebuilt from ours, so every round invalidates the other's
         // cached evaluation. The consumed body's placement of its own features still
         // rebuilds it directly, and so does the consumer once it stops consuming us.
-        if (this.isConsumedByWatched()) return;
+        if (this.isConsumedByWatched(source)) return;
 
         const result = this.generateShape(trigger);
         if (result.isOk) {

@@ -188,6 +188,21 @@ describe("a press-pulled body its source later consumes", () => {
         expect(xExtent(host)).toEqual([0, 70]);
     });
 
+    test("a variable edit on the consumed producer still drives its host", () => {
+        const { host, tool } = buildConsumedPressPull("fuse", 20);
+        const document = tool.document;
+        document.variables.setItems([{ id: "depth", name: "pressDepth", type: "length", expression: "20" }]);
+        tool.setFeaturesEmitShapeChanged([
+            { ...tool.features[0], depth: "pressDepth" } as ExtrudeFeatureData,
+        ]);
+        expect(xExtent(host)).toEqual([0, 60]);
+        document.variables.setItems([{ id: "depth", name: "pressDepth", type: "length", expression: "30" }]);
+        expect(errors(tool)).toEqual([undefined]);
+        expect(errors(host)).toEqual([undefined, undefined]);
+        expect(xExtent(tool)).toEqual([40, 70]);
+        expect(xExtent(host)).toEqual([0, 70]);
+    });
+
     test("dropping the boolean releases the pressed body back to its own shape", () => {
         const { host, tool } = buildConsumedPressPull("fuse", 20);
         // Restore the host's pre-fuse feature list: the host is a plain cube again and
