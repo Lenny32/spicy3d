@@ -127,11 +127,11 @@ function normalsAgree(candidate: XYZ | undefined, normal: XYZLike): boolean {
 
 /**
  * The region fingerprint shared by profile matching, profile-seed ordering and
- * face history completion: bbox center + area. Captured once per face — both
- * queries are kernel calls.
+ * face history completion: geometry-bounds center + area. Display mesh bounds vary with
+ * tessellation and can make an unchanged profile miss its cap's history match.
  */
 export function captureRegionFingerprint(face: IFace): { center: XYZLike; area: number } {
-    return { center: plainVec(BoundingBox.center(face.boundingBox())), area: face.area() };
+    return { center: plainVec(BoundingBox.center(face.boundingBox(false))), area: face.area() };
 }
 
 /**

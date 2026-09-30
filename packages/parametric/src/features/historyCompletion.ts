@@ -177,6 +177,8 @@ function faceScoreFingerprints(a: FaceFingerprint, b: FaceFingerprint): number {
         return Infinity;
     }
     const length = Math.sqrt(Math.max(a.area, b.area));
+    // Area drift / sqrt(area) has units of length (mm), matching the center drift and
+    // MATCH_TOLERANCE. Keep the strict identity tolerance rather than admitting nearby faces.
     return distance(a.center, b.center) + Math.abs(a.area - b.area) / Math.max(length, 1e-9);
 }
 

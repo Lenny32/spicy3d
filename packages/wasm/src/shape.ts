@@ -174,7 +174,9 @@ export class OccShape implements IShape {
         }
     }
 
-    boundingBox(): BoundingBox {
+    boundingBox(useTriangulation = true): BoundingBox {
+        // Geometry fingerprints must not depend on whether or how a shape was meshed.
+        if (!useTriangulation) return wasm.Shape.boundingBox(this.shape, false);
         if (!this._boundingBox) {
             const points =
                 this.mesh.faces?.position ?? this.mesh.edges?.position ?? this.mesh.vertexs?.position ?? [];

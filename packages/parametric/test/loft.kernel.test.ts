@@ -8,10 +8,12 @@ import { type IFace, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import type { LoftFeatureData } from "../src/features/feature";
+import { completeFaceHistory } from "../src/features/historyCompletion";
 import { resolveProfiles, sketchProfiles } from "../src/features/profileBuilder";
 import { captureProfileRef } from "../src/features/profileRef";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../src/sketch";
+import { captureFaceRef, resolveFacePlane } from "../src/sketch/planeRef";
 
 const WASM_BINARY = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
@@ -193,6 +195,58 @@ describe("loft feature (real kernel)", () => {
         sketches[0].setDataEmitShapeChanged(circle(12));
 
         expect(checkIds()).toEqual(before);
+    });
+
+    test.each([false, true])("equal-area coplanar end caps keep their own ids (ruled=%s)", (ruled) => {
+        const shiftedCircle = (x: number): SketchData => ({
+            entities: [{ id: 1, type: "circle", params: [x, 0, 3] }],
+            constraints: [],
+        });
+        const { sketches, body } = setup(
+            [
+                { z: 0, data: shiftedCircle(0) },
+                { z: 10, data: shiftedCircle(15) },
+                { z: 0, data: shiftedCircle(30) },
+            ],
+            { ruled },
+        );
+        expect(body.shape.isOk).toBe(true);
+        const faces = facesOf(body);
+        const ids = faces.map((_, index) => body.faceIdAt(index));
+        expect(new Set(ids).size).toBe(faces.length);
+        const caps = faces
+            .map((face, index) => ({ face, id: ids[index] }))
+            .filter(({ face }) => face.surface().isPlanar());
+        expect(caps).toHaveLength(2);
+        caps.sort((a, b) => a.face.boundingBox(false).min.x - b.face.boundingBox(false).min.x);
+        expect(caps.map(({ id }) => id)).toEqual([sectionSeed(sketches[0]), sectionSeed(sketches[2])]);
+    });
+
+    test("a circular cap's shared history match is independent of tessellation", () => {
+        const { sketches, body } = setup([
+            { z: 0, data: circle(10) },
+            { z: 10, data: square(10) },
+        ]);
+        expect(body.shape.isOk).toBe(true);
+        const profile = resolveProfiles(sketches[0]).value[0].face;
+        const cap = facesOf(body).find((face) => face.surface().isPlanar() && face.normal(0, 0)[1].z < 0);
+        expect(cap).not.toBeUndefined();
+        const bottom = cap as IFace;
+        // Populate the display caches; requesting geometry bounds must bypass those caches.
+        profile.boundingBox();
+        bottom.boundingBox();
+        const geometryBounds = profile.boundingBox(false);
+        expect(geometryBounds.min.x).toBeCloseTo(-10, 5);
+        expect(geometryBounds.max.x).toBeCloseTo(10, 5);
+        expect(completeFaceHistory([profile], [bottom], [-1])).toEqual([0]);
+        const ref = { ...captureFaceRef(body.id, bottom), faceId: sectionSeed(sketches[0]) };
+
+        sketches[0].setDataEmitShapeChanged(circle(12));
+
+        const plane = resolveFacePlane(body.document, ref);
+        expect(plane).not.toBeUndefined();
+        expect(plane?.origin.z).toBeCloseTo(0, 6);
+        expect(plane?.normal.z).toBeCloseTo(-1, 6);
     });
 
     test("a picked profile selects one of several in its sketch", () => {

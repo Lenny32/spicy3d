@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { XYZ, XYZLike } from "@spicy3d/core";
+import type { Plane, XYZ, XYZLike } from "@spicy3d/core";
 
 /**
  * The geometry vocabulary and tolerances the package's layers share: the plain-data
@@ -54,6 +54,14 @@ export function distance(a: XYZLike, b: XYZLike): number {
 
 export function sameVec(a: XYZLike, b: XYZLike): boolean {
     return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+/** A planar face lies on this plane, accepting either normal orientation. */
+export function onPlane(point: XYZ, normal: XYZ, plane: Plane): boolean {
+    return (
+        normal.isParallelTo(plane.normal) &&
+        Math.abs(point.sub(plane.origin).dot(plane.normal)) < MATCH_TOLERANCE
+    );
 }
 
 /** Rebuilt axes may flip sign; compare both orientations. */

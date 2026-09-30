@@ -41,7 +41,8 @@ export interface IShape extends IDisposable {
     reserve(): void;
     clone(): IShape;
     hlr(position: XYZLike, direction: XYZLike, xDir: XYZLike): IShape;
-    boundingBox(): BoundingBox;
+    /** Default bounds may use the display mesh; false requests bounds from the underlying geometry. */
+    boundingBox(useTriangulation?: boolean): BoundingBox;
     orientedBoundingBox(): OrientedBoundingBox;
     extremaDistance(other: IShape): number;
     /** Exact closest points in world coordinates, or an error for missing geometry. */

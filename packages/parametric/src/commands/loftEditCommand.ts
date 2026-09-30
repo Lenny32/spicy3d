@@ -9,6 +9,7 @@ import {
     type Continuity,
     command,
     type INode,
+    PubSub,
     property,
 } from "@spicy3d/core";
 import type { LoftFeatureData } from "../features/feature";
@@ -108,7 +109,16 @@ export class LoftEditCommand extends CancelableCommand {
             showPreviewProblem(undefined);
             closeSession();
         }
-        if (confirmed) commitFeatureEdit(body, this.edited(feature));
+        if (confirmed) {
+            const edited = this.edited(feature);
+            const result = this.preview.evaluate(edited, false);
+            result.shape?.dispose();
+            if (result.error !== undefined) {
+                PubSub.default.pub("showToast", "error.default:{0}", result.error);
+                return;
+            }
+            commitFeatureEdit(body, edited);
+        }
     }
 
     /** The feature with the panel's options, absent fields for the defaults (as the creation writes them). */

@@ -10,6 +10,7 @@ import {
     Matrix4,
     Plane,
     PubSub,
+    Result,
     ShapeTypes,
     type VisualShapeData,
     XYZ,
@@ -241,5 +242,36 @@ describe("loft edit session (real kernel)", () => {
         });
 
         expect(JSON.stringify(body.features)).toBe(before);
+    });
+
+    test("rejects an edit whose loft fails without changing the feature or undo history", async () => {
+        const { app, doc, base, top } = setup();
+        const body = loftBody(doc, base, top);
+        const before = JSON.stringify(body.features);
+        const position = doc.history.position();
+        const originalLoft = shapeFactory.loft.bind(shapeFactory);
+        const loft = rs
+            .spyOn(shapeFactory, "loft")
+            .mockImplementation((sections, solid, ruled, continuity) =>
+                ruled ? Result.err("Loft edit failed") : originalLoft(sections, solid, ruled, continuity),
+            );
+        const errors: string[] = [];
+        const onToast = (_message: unknown, error?: unknown) => errors.push(String(error));
+        PubSub.default.sub("showToast", onToast);
+        try {
+            await editWith(app, body, (session) => {
+                session.ruled = true;
+                session.confirm();
+            });
+
+            expect(JSON.stringify(body.features)).toBe(before);
+            expect(body.shape.isOk).toBe(true);
+            expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
+            expect(doc.history.position()).toEqual(position);
+            expect(errors).toEqual(["Loft edit failed"]);
+        } finally {
+            loft.mockRestore();
+            PubSub.default.remove("showToast", onToast);
+        }
     });
 });

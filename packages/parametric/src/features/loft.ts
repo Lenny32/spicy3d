@@ -15,9 +15,9 @@ import {
 } from "./feature";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import { resolveProfiles } from "./profileBuilder";
-import { captureProfileRef } from "./profileRef";
+import { captureProfileRef, captureRegionFingerprint } from "./profileRef";
 import { profileEdgeSeeds } from "./profileSeeds";
-import { MATCH_TOLERANCE } from "./refGeometry";
+import { distance, MATCH_TOLERANCE, onPlane } from "./refGeometry";
 
 /** A section resolved for one rebuild: its profile face and the sketch-scoped seed of that face. */
 export interface ResolvedLoftSection {
@@ -121,9 +121,7 @@ export function resolveLoftSections(
 }
 
 function samePlane(a: SketchNode, b: SketchNode): boolean {
-    const normal = a.plane.normal;
-    if (!normal.isParallelTo(b.plane.normal)) return false;
-    return Math.abs(b.plane.origin.sub(a.plane.origin).dot(normal)) < MATCH_TOLERANCE;
+    return onPlane(b.plane.origin, b.plane.normal, a.plane);
 }
 
 /**
@@ -158,12 +156,11 @@ function trackLoft(
     const outputEdges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];
     const faceMap = completeFaceHistory(inputFaces, outputFaces, new Array(outputFaces.length).fill(-1));
     const edgeMap = completeEdgeHistory(inputEdges, outputEdges, new Array(outputEdges.length).fill(-1));
+    const claimedCaps = new Set<number>();
 
     tracking.outputEdgeIds = trackedIds(feature.id, edgeSeeds, edgeMap);
     tracking.outputFaceIds = outputFaces.map((face, index) => {
-        // A curved profile's mesh bounds can differ from its cap's exact bounds.
-        // Recognize end caps by their plane and area before the bbox matcher.
-        const cap = feature.solid === false ? undefined : capSection(face, sections);
+        const cap = feature.solid === false ? undefined : capSection(face, sections, claimedCaps);
         if (cap !== undefined) return cap.seed;
         if (faceMap[index] >= 0) return sections[faceMap[index]].seed;
         const sectionEdge = lowestSectionEdge(face, outputEdges, edgeMap);
@@ -171,18 +168,34 @@ function trackLoft(
     });
 }
 
-/** Only the first and last sections can be caps; side faces must never inherit a cap's id. */
-function capSection(face: IFace, sections: readonly ResolvedLoftSection[]): ResolvedLoftSection | undefined {
+/** Distinguish coplanar end caps by position and claim each section at most once. */
+function capSection(
+    face: IFace,
+    sections: readonly ResolvedLoftSection[],
+    claimed: Set<number>,
+): ResolvedLoftSection | undefined {
     if (!face.surface().isPlanar()) return undefined;
     const [point, normal] = face.normal(0, 0);
-    const area = face.area();
-    return [sections[0], sections[sections.length - 1]].find(({ sketch, face: profile }) => {
-        const plane = sketch.plane;
-        if (!normal.isParallelTo(plane.normal)) return false;
-        if (Math.abs(point.sub(plane.origin).dot(plane.normal)) >= MATCH_TOLERANCE) return false;
-        const profileArea = profile.area();
-        return Math.abs(area - profileArea) / Math.max(Math.sqrt(profileArea), 1e-9) < MATCH_TOLERANCE;
+    const region = captureRegionFingerprint(face);
+    const candidates = [0, sections.length - 1].flatMap((index) => {
+        if (claimed.has(index)) return [];
+        const section = sections[index];
+        if (!onPlane(point, normal, section.sketch.plane)) return [];
+        const profile = captureRegionFingerprint(section.face);
+        const length = Math.sqrt(profile.area);
+        // Area / sqrt(area) is a length in mm; preserve the shared identity tolerance.
+        if (Math.abs(region.area - profile.area) / Math.max(length, 1e-9) >= MATCH_TOLERANCE) return [];
+        const score = distance(region.center, profile.center);
+        // A smooth loft may replace circles with splines whose conservative geometry bounds
+        // shift slightly. Position distinguishes the caps; a distant or ambiguous one is refused.
+        return score <= 2 * length ? [{ index, score }] : [];
     });
+    candidates.sort((a, b) => a.score - b.score);
+    const best = candidates[0];
+    if (best === undefined) return undefined;
+    if (candidates[1] !== undefined && candidates[1].score - best.score < MATCH_TOLERANCE) return undefined;
+    claimed.add(best.index);
+    return sections[best.index];
 }
 
 /** The lowest input edge index among the section edges bounding `face`; undefined when it touches none. */

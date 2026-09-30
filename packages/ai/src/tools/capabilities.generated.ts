@@ -565,7 +565,7 @@ export const queryCapabilities: QueryCapability[] = [
         owner: "shape",
         family: "shape",
         returnKind: "data",
-        params: [],
+        params: [{ name: "useTriangulation", kind: "boolean", required: false }],
     },
     {
         method: "shape.orientedBoundingBox",
@@ -2084,7 +2084,7 @@ shape.* (target must be a shape):
   shape.reserve(target) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
   shape.clone(target) -> shape ref (registered under the op id)
   shape.hlr(target, position: xyz, direction: xyz, xDir: xyz) -> shape ref (registered under the op id)
-  shape.boundingBox(target) -> BoundingBox
+  shape.boundingBox(target, useTriangulation: boolean?) -> BoundingBox
   shape.orientedBoundingBox(target) -> OrientedBoundingBox
   shape.extremaDistance(target, other: ref) -> number
   shape.inspectionDistance(target, other: ref) -> Result<{ distance: number; first: XYZ; second: XYZ; }, string>
