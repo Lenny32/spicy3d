@@ -1,10 +1,15 @@
-Mouse modeling project: correctness fixes and MCP efficiency
+Mouse modeling project: parametric geometry, kernel recovery and MCP workflows
 
-Appended join/cut extrusion operations now retain the caller's feature name, and large subshape
-queries keep every returned reference usable. The integration also adds compact parametric
-responses and reuses feature geometry when unrelated document variables change.
-Persistent MCP edge references also survive upstream topology reordering across separate calls.
-STL scans can be imported directly as lightweight ghost reference meshes through the ribbon or MCP.
+This integration adds editable weighted sketch NURBS, variable-radius fillets, exact curved-face
+extrusion starts and automatic next-face extents. Corner operations reject invalid geometry with
+actionable diagnostics. Persistent edge references and selectors survive compatible upstream edits;
+feature caches track actual variable dependencies, and appended extrusions retain caller names.
+
+Expensive program operations run in bounded cancellable workers with transactional rollback and
+live background status. A fresh main kernel can reconstruct open documents without reloading,
+preserving committed edits and identities. Reference STL meshes bypass CAD conversion and support
+sampled deviation measurement. Exports offer tessellation controls, bounded bytes and separate files
+in one archive; compact MCP responses reduce repeated feature-list output.
 
 This is the single draft integration PR for the 26-ticket mouse project. Keep it draft while the
 remaining work is queued. Follow [the durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
@@ -36,7 +41,9 @@ for dependencies, ticket status, full integration SHAs and validation.
 
 Validation: 9,560 passing tests on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are validated and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain unconfirmed without original data.
+concurrency. Existing lint and bundle-size warnings remain. All 21 listed integrations are validated
+and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain
+unconfirmed without original data.
 
 Control-pole NURBS adds the directly approved optional sketch control layout at sketch version 3,
 with a pure identity migration, atomic merge rule and new fixture. Existing documents remain
@@ -87,9 +94,11 @@ dirty/view/camera state survive. User explicitly approved clearing undo/redo aft
 reconstruction. Failed preparation is atomic; old native handles never revive. Browser tests
 inject a fatal-generation state rather than claiming a reproduced scan-specific crash.
 
-Remaining project work: #84–#85, #88–#90 (5 tickets). Delegated agents stopped because workspace
-credits were exhausted; partial worktrees and #89 geometry/reference checkpoints are preserved.
-21 tickets are delivered. Keep this PR draft until all 26 are complete and reviewed.
+Remaining project work: #84–#85, #88–#90 (5 tickets). Three implementation agents resumed after
+the earlier workspace interruption. Sweep and projection geometry/reference proofs pass; their
+feature editing and compatibility work continues. Setbacks and guided lofts still require accepted
+native constructions. Groove/rib is assigned after sweep. 21 tickets are delivered. Keep this PR
+draft until all 26 are complete and reviewed.
 
 Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
 Keep issues open and never merge this PR automatically.
