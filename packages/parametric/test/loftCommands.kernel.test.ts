@@ -9,6 +9,7 @@ import {
     type IPicker,
     Matrix4,
     Plane,
+    PubSub,
     ShapeTypes,
     type VisualShapeData,
     XYZ,
@@ -159,6 +160,31 @@ describe("loft command (real kernel)", () => {
 
         expect(bodies(doc)).toHaveLength(0);
         expect(base.visible).toBe(true);
+    });
+
+    test.each(["duplicate", "coplanar"])("rejects %s sections without changing the model", async (kind) => {
+        const { app, doc, base, top } = setup();
+        const second =
+            kind === "duplicate"
+                ? base
+                : new SketchNode({ document: doc, plane: planeAt(0), data: square(5) });
+        if (kind === "coplanar") doc.modelManager.addNode(second);
+        const command = new LoftFeatureCommand();
+        pickSections(doc, command, [base, second]);
+        const position = doc.history.position();
+        const errors: string[] = [];
+        const onToast = (_message: unknown, error?: unknown) => errors.push(String(error));
+        PubSub.default.sub("showToast", onToast);
+        try {
+            await command.execute(app);
+
+            expect(bodies(doc)).toHaveLength(0);
+            expect([base.visible, second.visible, top.visible]).toEqual([true, true, true]);
+            expect(doc.history.position()).toEqual(position);
+            expect(errors).toEqual([expect.stringContaining("same plane")]);
+        } finally {
+            PubSub.default.remove("showToast", onToast);
+        }
     });
 });
 

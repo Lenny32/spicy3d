@@ -11,6 +11,7 @@ import {
     Id,
     type IFace,
     Matrix4,
+    PubSub,
     property,
     SelectShapeStep,
     type ShapeMeshData,
@@ -113,6 +114,12 @@ export class LoftFeatureCommand extends CancelableCommand {
     /** Adds the body and hides the section sketches it consumes, as one undo step. */
     private commit(): void {
         const node = new ParametricBodyNode({ document: this.document, features: [this.feature()] });
+        const shape = node.shape;
+        if (!shape.isOk) {
+            PubSub.default.pub("showToast", "error.default:{0}", shape.error);
+            node.dispose();
+            return;
+        }
         Transaction.execute(this.document, "excute feature.loft", () => {
             this.document.modelManager.addNode(node);
             for (const { sketch } of this.sections) sketch.visible = false;

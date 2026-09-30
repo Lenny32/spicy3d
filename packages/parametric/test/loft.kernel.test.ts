@@ -164,6 +164,37 @@ describe("loft feature (real kernel)", () => {
         expect(idsByNormal(body)).toEqual(before);
     });
 
+    test.each([false, true])("circle-to-square face ids stay distinct across edits (ruled=%s)", (ruled) => {
+        const { sketches, body } = setup(
+            [
+                { z: 0, data: circle(10) },
+                { z: 10, data: square(10) },
+            ],
+            { ruled },
+        );
+        const checkIds = () => {
+            expect(body.shape.isOk).toBe(true);
+            const faces = facesOf(body);
+            const ids = faces.map((_, index) => body.faceIdAt(index));
+            expect(ids.every((id) => typeof id === "string")).toBe(true);
+            expect(new Set(ids).size).toBe(faces.length);
+            const caps = faces
+                .map((face, index) => ({ face, id: ids[index] }))
+                .filter(({ face }) => face.surface().isPlanar());
+            expect(caps).toHaveLength(2);
+            const bottom = caps.find(({ face }) => face.normal(0, 0)[1].z < 0);
+            const top = caps.find(({ face }) => face.normal(0, 0)[1].z > 0);
+            expect(bottom?.id).toBe(sectionSeed(sketches[0]));
+            expect(top?.id).toBe(sectionSeed(sketches[1]));
+            return ids;
+        };
+        const before = checkIds();
+
+        sketches[0].setDataEmitShapeChanged(circle(12));
+
+        expect(checkIds()).toEqual(before);
+    });
+
     test("a picked profile selects one of several in its sketch", () => {
         const doc = new TestDocument({ application: createMockApplication() });
         doc.visual = createMockVisualWithDocument(doc) as any;
