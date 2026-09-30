@@ -3,13 +3,16 @@
 
 import { Result } from "../foundation";
 import { Line, Plane, XYZ } from "../math";
+import { EMPTY_SCOPE, type ParameterValue, resolveUnitSpec, type Scope } from "../parameters/expression";
+import { ANGLE_UNITS, LENGTH_UNITS, type UnitSpec } from "../parameters/unitSpec";
 import { CurveUtils, type IConicalSurface, type ICurve, type IElementarySurface } from "../shape";
 import type {
     ConstructionDefinition,
     ConstructionGeometry,
     ConstructionRef,
     IConstructionResolver,
-    PathPosition,
+    PathPositionOf,
+    ResolvedConstructionDefinition,
     ResolvedConstructionSource,
 } from "./types";
 
@@ -239,7 +242,7 @@ function* edgeIntersections(a: Source, b: Source, solution?: number): Evaluation
 
 function* pathPoint(
     value: Source,
-    position: PathPosition,
+    position: PathPositionOf<number>,
     resolver: IConstructionResolver,
     requireTangentChoice = false,
 ): EvaluationFlow<{ point: XYZ; tangent: XYZ }> {
@@ -426,7 +429,7 @@ function* surfaceNormal(face: Extract<Source, { kind: "face" }>, contact: XYZ): 
 }
 
 function* evaluateFlow(
-    definition: ConstructionDefinition,
+    definition: ResolvedConstructionDefinition,
     resolver: IConstructionResolver,
 ): EvaluationFlow<Result<ConstructionGeometry>> {
     const get = (ref: ConstructionRef) => source(resolver, ref);
@@ -671,15 +674,87 @@ function* evaluateFlow(
     return Result.err("Unsupported construction definition");
 }
 
-/** Evaluates all Construct tool definitions without storing a stale geometry fallback. */
+/** The definition fields that hold a length or an angle, by the unit their value must carry. */
+const PARAMETER_FIELDS: ReadonlyArray<readonly [field: "distance" | "offset" | "angle", unit: UnitSpec]> = [
+    ["distance", LENGTH_UNITS],
+    ["offset", LENGTH_UNITS],
+    ["angle", ANGLE_UNITS],
+];
+
+function resolveParameter(field: string, value: unknown, unit: UnitSpec, scope: Scope): Result<number> {
+    if (typeof value === "number") {
+        return Number.isFinite(value)
+            ? Result.ok(value)
+            : Result.err(`Construction ${field} must be a finite number, got ${String(value)}`);
+    }
+    if (typeof value !== "string" || value.trim() === "") {
+        return Result.err(
+            `Construction ${field} must be a number or an expression, got ${JSON.stringify(value)}`,
+        );
+    }
+    const resolved = resolveUnitSpec(value as ParameterValue, scope, unit);
+    return resolved.isOk
+        ? resolved
+        : Result.err(`Construction ${field} "${value}" does not evaluate: ${resolved.error}`);
+}
+
+/**
+ * Resolves a definition's lengths and angles (numbers or expressions of the document's variables)
+ * against `scope`, so a bad expression fails naming its field before any geometry runs.
+ */
+export function resolveConstructionParameters(
+    definition: ConstructionDefinition,
+    scope: Scope = EMPTY_SCOPE,
+): Result<ResolvedConstructionDefinition> {
+    const resolved: Record<string, unknown> = { ...definition };
+    for (const [field, unit] of PARAMETER_FIELDS) {
+        const value = (definition as Record<string, unknown>)[field];
+        if (value === undefined) continue;
+        const number = resolveParameter(field, value, unit, scope);
+        if (!number.isOk) return Result.err(number.error);
+        resolved[field] = number.value;
+    }
+    if ("position" in definition && definition.position?.kind === "distance") {
+        const value = resolveParameter("position.value", definition.position.value, LENGTH_UNITS, scope);
+        if (!value.isOk) return Result.err(value.error);
+        resolved["position"] = { ...definition.position, value: value.value };
+    }
+    if ("position" in definition && definition.position?.kind === "normalized") {
+        const ratio: unknown = definition.position.value;
+        if (typeof ratio !== "number" || !Number.isFinite(ratio))
+            return Result.err(
+                `Construction position.value must be a finite ratio, got ${JSON.stringify(ratio)}`,
+            );
+    }
+    return Result.ok(resolved as ResolvedConstructionDefinition);
+}
+
+/** Whether any length or angle of the definition is an expression (it then depends on the variables). */
+export function constructionHasExpressions(definition: ConstructionDefinition): boolean {
+    const fields = definition as Record<string, unknown>;
+    if (PARAMETER_FIELDS.some(([field]) => typeof fields[field] === "string")) return true;
+    return (
+        "position" in definition &&
+        definition.position?.kind === "distance" &&
+        typeof definition.position.value === "string"
+    );
+}
+
+/**
+ * Evaluates all Construct tool definitions without storing a stale geometry fallback. Lengths and
+ * angles given as expressions resolve against `scope` (the document's variables).
+ */
 export function evaluateConstruction(
     definition: ConstructionDefinition,
     resolver: IConstructionResolver,
+    scope: Scope = EMPTY_SCOPE,
 ): Result<ConstructionGeometry> {
     let flow: EvaluationFlow<Result<ConstructionGeometry>> | undefined;
     try {
+        const parameters = resolveConstructionParameters(definition, scope);
+        if (!parameters.isOk) return Result.err(parameters.error);
         // A yielded Result is an expected failure. Unwind the suspended flow in finally.
-        flow = evaluateFlow(definition, resolver);
+        flow = evaluateFlow(parameters.value, resolver);
         const step = flow.next();
         if (!step.done) return Result.err(step.value.error);
         return step.value;

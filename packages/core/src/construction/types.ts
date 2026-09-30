@@ -3,6 +3,7 @@
 
 import type { Result } from "../foundation";
 import type { Plane, XYZ, XYZLike } from "../math";
+import type { ParameterValue } from "../parameters/expression";
 import type { ICurve, IEdge, IFace } from "../shape";
 
 export type ConstructionKind = "plane" | "axis" | "point" | "ucs";
@@ -40,32 +41,38 @@ export type ConstructionRef =
     | { kind: "fixed"; geometry: ConstructionGeometry }
     | { kind: "face-point"; face: ConstructionRef; u: number; v: number };
 
-export type ConstructionDefinition =
-    | { kind: "plane-offset"; source: ConstructionRef; distance: number; toPoint?: ConstructionRef }
+/**
+ * A construction definition over its numeric parameter type `N`: lengths (`distance`, `offset`, a
+ * path `distance` position) and angles (`angle`) are stored as a `ParameterValue` — a number or an
+ * expression of the document's variables, like a feature's `depth` — and resolved to plain numbers
+ * before evaluation. Counts, solution indices and normalized path positions stay numbers.
+ */
+export type ConstructionDefinitionOf<N> =
+    | { kind: "plane-offset"; source: ConstructionRef; distance: N; toPoint?: ConstructionRef }
     | { kind: "plane-midplane"; first: ConstructionRef; second: ConstructionRef; solution?: 0 | 1 }
     | {
           kind: "plane-angle";
           axis: ConstructionRef;
           baseline: ConstructionRef;
-          angle: number;
-          offset?: number;
+          angle: N;
+          offset?: N;
       }
-    | { kind: "plane-two-edges"; first: ConstructionRef; second: ConstructionRef; offset?: number }
+    | { kind: "plane-two-edges"; first: ConstructionRef; second: ConstructionRef; offset?: N }
     | {
           kind: "plane-three-points";
           first: ConstructionRef;
           second: ConstructionRef;
           third: ConstructionRef;
-          offset?: number;
+          offset?: N;
       }
-    | { kind: "plane-along-path"; path: ConstructionRef; position: PathPosition; offset?: number }
-    | { kind: "plane-tangent"; face: ConstructionRef; contact: ConstructionRef; offset?: number }
+    | { kind: "plane-along-path"; path: ConstructionRef; position: PathPositionOf<N>; offset?: N }
+    | { kind: "plane-tangent"; face: ConstructionRef; contact: ConstructionRef; offset?: N }
     | {
           kind: "plane-perpendicular";
           source: ConstructionRef;
           contact: ConstructionRef;
           orientation: ConstructionRef;
-          distance?: number;
+          distance?: N;
       }
     | { kind: "axis-analytic"; face: ConstructionRef }
     | { kind: "axis-normal"; source: ConstructionRef; contact: ConstructionRef }
@@ -77,7 +84,7 @@ export type ConstructionDefinition =
     | { kind: "point-three-planes"; first: ConstructionRef; second: ConstructionRef; third: ConstructionRef }
     | { kind: "point-center"; source: ConstructionRef }
     | { kind: "point-edge-plane"; edge: ConstructionRef; plane: ConstructionRef }
-    | { kind: "point-along-path"; path: ConstructionRef; position: PathPosition }
+    | { kind: "point-along-path"; path: ConstructionRef; position: PathPositionOf<N> }
     | {
           kind: "ucs";
           origin: ConstructionRef;
@@ -89,10 +96,16 @@ export type ConstructionDefinition =
           reverseSecond?: boolean;
       };
 
-export type PathPosition =
-    | { kind: "distance"; value: number }
+/** A stored definition: its lengths and angles may be expressions. */
+export type ConstructionDefinition = ConstructionDefinitionOf<ParameterValue>;
+/** A definition whose lengths and angles are resolved against the variable scope. */
+export type ResolvedConstructionDefinition = ConstructionDefinitionOf<number>;
+
+export type PathPositionOf<N> =
+    | { kind: "distance"; value: N }
     | { kind: "normalized"; value: number }
     | { kind: "to-point"; point: ConstructionRef };
+export type PathPosition = PathPositionOf<ParameterValue>;
 
 /** A resolver supplies exact, already world-transformed source geometry. */
 export type ResolvedConstructionSource =

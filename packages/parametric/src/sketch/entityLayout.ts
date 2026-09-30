@@ -17,8 +17,13 @@ import type { SketchEntityType } from "./sketchModel";
 export const PARAM_KIND_COORDINATE = 0;
 export const PARAM_KIND_LENGTH = 1;
 
-/** solver param kinds per entity type: line = 2 points, circle = center + radius, arc = 3 points. */
+/**
+ * solver param kinds per entity type: line = 2 points, circle = center + radius, arc = 3 points.
+ * A bspline has one point per fit point — a variable count, so its entry is empty; use
+ * `entityParamKinds`, which takes the count from the params.
+ */
 export const ENTITY_PARAM_KINDS: Record<SketchEntityType, number[]> = {
+    bspline: [],
     point: [PARAM_KIND_COORDINATE, PARAM_KIND_COORDINATE],
     ellipse: Array(6).fill(PARAM_KIND_COORDINATE),
     spline: Array(4).fill(PARAM_KIND_COORDINATE),
@@ -34,6 +39,11 @@ export const ENTITY_PARAM_KINDS: Record<SketchEntityType, number[]> = {
     ],
 };
 
+/** solver param kinds of an entity of `type` with `values` (a bspline: one coordinate per value). */
+export function entityParamKinds(type: SketchEntityType, values: readonly number[]): number[] {
+    return type === "bspline" ? values.map(() => PARAM_KIND_COORDINATE) : ENTITY_PARAM_KINDS[type];
+}
+
 /**
  * Pads/truncates a snapshot to the entity type's param layout. Hand-edited or
  * legacy data can carry a truncated snapshot — normalizing beats throwing from a
@@ -43,6 +53,6 @@ export const ENTITY_PARAM_KINDS: Record<SketchEntityType, number[]> = {
  */
 export function normalizeSnapshot(type: SketchEntityType, snapshot: number[]): number[] {
     const count = ENTITY_PARAM_KINDS[type]?.length;
-    if (count === undefined || snapshot.length === count) return snapshot;
+    if (count === undefined || type === "bspline" || snapshot.length === count) return snapshot;
     return Array.from({ length: count }, (_, index) => snapshot[index] ?? 0);
 }

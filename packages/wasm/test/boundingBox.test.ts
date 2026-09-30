@@ -15,6 +15,26 @@ beforeEach(() => {
 });
 
 describe("OccShape.boundingBox", () => {
+    test("a box query does not mesh the shape", () => {
+        const cylinder = unwrapOk(factory.cylinder(XYZ.unitZ, XYZ.zero, 10, 5));
+        const mesh = rs.spyOn(cylinder, "mesh", "get");
+        try {
+            expect(cylinder.boundingBox().max.x).toBeCloseTo(10, 6);
+            expect(mesh).not.toHaveBeenCalled();
+        } finally {
+            mesh.mockRestore();
+        }
+    });
+
+    test("meshing before a box query gives the same geometry bounds", () => {
+        const poles = [XYZ.zero, new XYZ(5, 20, 0), new XYZ(10, 0, 0)];
+        const unmeshed = unwrapOk(factory.bezier(poles));
+        const meshed = unwrapOk(factory.bezier(poles));
+        expect(meshed.mesh.edges?.position.length).toBeGreaterThan(0);
+        expect(meshed.boundingBox()).toEqual(unmeshed.boundingBox());
+        expect(meshed.boundingBox().max.y).toBeCloseTo(10, 6);
+    });
+
     test("a Bezier edge is boxed by the curve, not by its control polygon", () => {
         // The middle pole sits at y = 20; the curve peaks at y = 10 (t = 0.5).
         const edge = unwrapOk(factory.bezier([XYZ.zero, new XYZ(5, 20, 0), new XYZ(10, 0, 0)]));

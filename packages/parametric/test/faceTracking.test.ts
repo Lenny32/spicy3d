@@ -568,23 +568,28 @@ describe("ParametricBodyNode face tracking", () => {
         // shape has two faces / one edge, so boolean hits 0..1 are the main body's.
         const face = { shapeType: ShapeTypes.face, isEqual: () => false };
         const sub = { shapeType: ShapeTypes.edge, isEqual: () => false };
-        const prism = rs.fn(() =>
-            Result.ok({
+        // Both solids list themselves as their solid, as the kernel's sub-shape map
+        // does — the boolean's empty-result guard reads it.
+        const solid = (subShapes: (type: ShapeType) => unknown[]) => {
+            const shape = {
                 shapeType: ShapeTypes.solid,
                 isEqual: () => false,
                 dispose: rs.fn(),
-                findSubShapes: (type: ShapeType) =>
+                findSubShapes: (type: ShapeType): unknown[] =>
+                    type === ShapeTypes.solid ? [shape] : subShapes(type),
+            };
+            return shape;
+        };
+        const prism = rs.fn(() =>
+            Result.ok(
+                solid((type) =>
                     type === ShapeTypes.face ? [face, face] : type === ShapeTypes.edge ? [sub] : [],
-            }),
+                ),
+            ),
         );
         const booleanCutTracked = rs.fn((_args: any[], _tools: any[]) =>
             Result.ok({
-                shape: {
-                    shapeType: ShapeTypes.solid,
-                    isEqual: () => false,
-                    dispose: rs.fn(),
-                    findSubShapes: () => [],
-                },
+                shape: solid(() => []),
                 faceMap: [0, 2, -1],
                 edgeMap: [0, -1],
             }),

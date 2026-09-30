@@ -159,7 +159,7 @@ export function transformSketchSelection(
     result.constraints.push(...constraints.map((c) => ({ ...c, id: duplicate ? newConstraintId() : c.id })));
     if (copy && transform.kind === "mirror") {
         for (const e of source.entities) {
-            for (let pointIndex = 0; pointIndex < entityPointCount(e.type); pointIndex++) {
+            for (let pointIndex = 0; pointIndex < entityPointCount(e.type, e.params); pointIndex++) {
                 const original = { entityId: e.id, pointIndex };
                 result.constraints.push({
                     id: newConstraintId(),

@@ -9,9 +9,10 @@ import type { OccEdge, OccFace } from "../src/shape";
 import { createBox, createSphere, createTestConverter, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
 
-// The Release WASM build disables C++ exception catching, so any OCCT raise aborts the
-// module. These tests pin the preventive guards in the C++ query layer for degenerate
-// geometry: zero-length edges, geometry-less empty compounds, and surface-less faces.
+// An OCCT raise was fatal to the module before -fwasm-exceptions; the preventive guards stay
+// for clearer messages and for modules built without that handling. These tests pin the
+// preventive guards in the C++ query layer for degenerate geometry: zero-length edges,
+// geometry-less empty compounds, and surface-less faces.
 let factory: ShapeFactory;
 let converter: OccShapeConverter;
 
@@ -83,8 +84,8 @@ describe("zero-length curve guards", () => {
 
 describe("curve trim guards", () => {
     // Geom_TrimmedCurve raises Standard_ConstructionError on an empty parameter window or
-    // on a window outside a non-periodic basis curve's range; with exception catching
-    // disabled the raise would abort the module, so Curve::trim returns a null handle.
+    // on a window outside a non-periodic basis curve's range (fatal before -fwasm-exceptions;
+    // the guard stays for a clearer result), so Curve::trim returns a null handle.
 
     test("equal parameters return a null handle for a line and a circle", () => {
         const line = wasm.Curve.makeLine({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 });
@@ -184,8 +185,8 @@ describe("curve trim guards", () => {
 
     test("setTrim throws a catchable JS error instead of aborting", () => {
         // Geom_TrimmedCurve::SetTrim raises on an empty window or on one outside a
-        // non-periodic basis curve's range; with exception catching disabled the
-        // raise would abort the module, so the wrapper rejects them JS-side.
+        // non-periodic basis curve's range (fatal before -fwasm-exceptions; the guard
+        // stays for a clearer message), so the wrapper rejects them JS-side.
         const seg = unwrapOk(factory.bezier([XYZ.zero, { x: 10, y: 0, z: 0 }])) as OccEdge;
         const curve = seg.curve as OccTrimmedCurve;
         // a coincident window

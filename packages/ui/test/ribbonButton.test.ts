@@ -173,6 +173,26 @@ describe("RibbonPushButton", () => {
             }
         });
 
+        test("should put the command's help text on the line under the name and shortcut", () => {
+            CommandStore.registerCommand(TestCommand, {
+                key: PUSH_KEY,
+                icon: "icon-test-push",
+                helpText: "tooltip.feature.loft",
+            });
+            const profile = ShortcutProfiles[Config.instance.navigation3D].global;
+            profile[PUSH_KEY] = "Ctrl+T";
+            try {
+                const btn = new RibbonPushButton(PUSH_KEY, "icon-test", "large", () => {});
+                expect(btn.title).toBe(`command.${PUSH_KEY} (Ctrl+T)\ntooltip.feature.loft`);
+
+                delete profile[PUSH_KEY];
+                btn.updateShortcut();
+                expect(btn.title).toBe(`command.${PUSH_KEY}\ntooltip.feature.loft`);
+            } finally {
+                delete profile[PUSH_KEY];
+            }
+        });
+
         test("should remove shortcut from title when shortcut is cleared", () => {
             const profile = ShortcutProfiles[Config.instance.navigation3D].global;
             profile[PUSH_KEY] = "Ctrl+T";

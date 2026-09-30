@@ -21,7 +21,7 @@ import {
  */
 @command({
     key: "create.refSegment",
-    icon: "icon-line",
+    icon: "icon-refSegment",
 })
 export class RefSegment extends MultistepCommand {
     protected override executeMainTask(): void {

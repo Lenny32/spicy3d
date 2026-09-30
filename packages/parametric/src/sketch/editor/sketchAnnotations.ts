@@ -64,9 +64,11 @@ const CONSTRAINT_BADGES: Partial<Record<ConstraintKind, { label: string; command
     [ConstraintKind.TangentLineArc]: { label: "T", command: "constraint.tangent" },
     [ConstraintKind.TangentArcArc]: { label: "T", command: "constraint.tangent" },
     [ConstraintKind.TangentCircleArc]: { label: "T", command: "constraint.tangent" },
+    [ConstraintKind.TangentLineBSpline]: { label: "T", command: "constraint.tangent" },
     [ConstraintKind.PointOnLine]: { label: "⊙", command: "constraint.pointOn" },
     [ConstraintKind.PointOnCircle]: { label: "⊙", command: "constraint.pointOn" },
     [ConstraintKind.PointOnArc]: { label: "⊙", command: "constraint.pointOn" },
+    [ConstraintKind.PointOnBSpline]: { label: "⊙", command: "constraint.pointOn" },
     [ConstraintKind.Midpoint]: { label: "M", command: "constraint.midpoint" },
     [ConstraintKind.Symmetric]: { label: "S", command: "constraint.symmetric" },
     [ConstraintKind.HorizontalAlign]: { label: "⬌", command: "constraint.horizontalAlign" },
@@ -385,10 +387,21 @@ export class SketchAnnotationManager implements IDisposable {
             case ConstraintKind.PointOnLine:
             case ConstraintKind.PointOnCircle:
             case ConstraintKind.PointOnArc:
+            case ConstraintKind.PointOnBSpline:
             case ConstraintKind.Midpoint:
             case ConstraintKind.Fix:
                 // the constraint is about this one point
                 return [pointBadgeAnchor(this.solver.pointOf(constraint.refs[0]), px)];
+            case ConstraintKind.TangentLineBSpline: {
+                // beside the line, and at the bspline end the tangency holds at
+                const line = this.entityBadgeAnchor(
+                    constraint.refs[0].entityId,
+                    px,
+                    this.refsMidpoint(constraint.refs),
+                );
+                const end = pointBadgeAnchor(this.solver.pointOf(constraint.refs[2]), px);
+                return line === undefined ? [end] : [line, end];
+            }
             case ConstraintKind.HorizontalAlign:
             case ConstraintKind.VerticalAlign:
                 return constraint.refs.map((ref) => pointBadgeAnchor(this.solver.pointOf(ref), px));
@@ -421,7 +434,12 @@ export class SketchAnnotationManager implements IDisposable {
         const entity = this.solver.entity(entityId);
         if (entity === undefined) return undefined;
         const off = BADGE_OFFSET_PX * px;
-        if (entity.type === "point" || entity.type === "ellipse" || entity.type === "spline") {
+        if (
+            entity.type === "point" ||
+            entity.type === "ellipse" ||
+            entity.type === "spline" ||
+            entity.type === "bspline"
+        ) {
             return pointBadgeAnchor([entity.params[0], entity.params[1]], px);
         }
         if (entity.type === "line") {

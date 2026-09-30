@@ -31,6 +31,23 @@ export interface ReferenceRecord {
 }
 
 /** Names a label for a missing target from every version (the target exists in some parent). */
+/**
+ * The sketches a stored feature sweeps — what its `sketch:<sketchId>:…` tracked ids name: an
+ * extrude's or revolve's `sketchId`, every section's of a loft.
+ */
+export function featureSketchIds(feature: object): string[] {
+    const fields = feature as Readonly<Record<string, unknown>>;
+    const ids = typeof fields["sketchId"] === "string" ? [fields["sketchId"]] : [];
+    const sections = fields["sections"];
+    if (Array.isArray(sections)) {
+        for (const section of sections) {
+            const id = typeof section === "object" && section !== null ? section["sketchId"] : undefined;
+            if (typeof id === "string") ids.push(id);
+        }
+    }
+    return ids;
+}
+
 export interface TargetNames {
     node(id: string): string;
     /** The feature of `body` that swept `sketchId` in some version (what a `sketch:<id>:…` tracked id needs). */
@@ -180,9 +197,7 @@ export function collectReferences(
     };
     const sourcesOf = (features: readonly Json[]): Sources => ({
         features: new Set(features.map((f) => String(f["id"]))),
-        sketches: new Set(
-            features.flatMap((f) => (typeof f["sketchId"] === "string" ? [f["sketchId"]] : [])),
-        ),
+        sketches: new Set(features.flatMap(featureSketchIds)),
     });
     /** What a reference into `body` from outside it may use: all its features (when it has a timeline). */
     const featuresOf = (body: unknown): Sources | undefined => {

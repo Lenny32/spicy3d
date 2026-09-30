@@ -8,8 +8,11 @@ import type { Serialized } from "./serialize";
  * The serialized document envelope's format. Bump it — and register a migration from the previous
  * value plus a fixture under `packages/core/test/fixtures/documents/v<N>/` — whenever the shape of
  * the envelope or of any core `@serialize()` field changes.
+ * 2: construction definitions (`ConstructionNode.definitionJson`) take expressions of the document's
+ * variables for their lengths and angles (`distance`, `offset`, `angle`, a path `distance` position)
+ * — a build reading only v1 would evaluate such a construction to NaN.
  */
-export const DOCUMENT_FORMAT_VERSION = 1;
+export const DOCUMENT_FORMAT_VERSION = 2;
 
 /** The module name the envelope's own `formatVersion` is registered under. */
 export const DOCUMENT_MODULE = "document";
@@ -171,6 +174,10 @@ export class MigrationRegistry {
 
 /** The registry `Document.load` migrates through; feature packages register their modules on it. */
 export const DocumentMigrations = new MigrationRegistry();
+
+// document 1 → 2: construction lengths and angles may be expressions; every v1 construction stores
+// numbers, which v2 reads as they are — no data to rewrite.
+DocumentMigrations.registerMigration(DOCUMENT_MODULE, 1, (document) => document);
 
 export function registerDocumentModule(module: string, current: number, minimum = 1): void {
     DocumentMigrations.registerModule(module, current, minimum);

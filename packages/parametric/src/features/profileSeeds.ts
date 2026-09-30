@@ -5,6 +5,7 @@ import type { IEdge, IFace, XYZLike } from "@spicy3d/core";
 import { profileEdgeEntityIds, profileEntityIds } from "./profileEntities";
 import { captureRegionFingerprint } from "./profileRef";
 import { MATCH_TOLERANCE } from "./refGeometry";
+import { ID_COMPONENT_SEPARATOR } from "./trackedId";
 
 /**
  * Content-derived seed keys for profile regions and their boundary edges.
@@ -41,11 +42,10 @@ export function profileSeeds(all: IFace[]): string[] {
             seeds[group[0]] = key;
             continue;
         }
-        // Fingerprints are captured once per face — the comparator must stay pure,
-        // and each capture is two kernel queries.
-        const ranked = group
-            .map((index) => ({ index, region: captureRegionFingerprint(all[index]) }))
-            .sort((a, b) => compareRegionFingerprints(a.region, b.region));
+        // Capture once per face: ranking reuses the fingerprint's two kernel queries.
+        const ranked = rankRegions(
+            group.map((index) => ({ index, region: captureRegionFingerprint(all[index]) })),
+        );
         ranked.forEach(({ index }, occurrence) => {
             seeds[index] = occurrence === 0 ? key : `${key}~${occurrence}`;
         });
@@ -54,25 +54,29 @@ export function profileSeeds(all: IFace[]): string[] {
 }
 
 /**
- * Region-fingerprint order (bbox center, then area) — the tiebreak recipe of `matchProfileIndexes`.
- * Coordinates within `MATCH_TOLERANCE` count as equal, so regions aligned on an axis (two
- * crossing circles stacked vertically share their center x) are ordered by the next
- * coordinate, not by floating-point noise of the box computation.
+ * Rank by center x/y/z, then area. On each axis, group coordinates within
+ * MATCH_TOLERANCE of the group's minimum before ordering by the next axis.
+ * Pairwise fuzzy comparisons are not transitive and can make Array.sort depend on
+ * the kernel's enumeration order. Anchoring each group makes its membership deterministic.
  */
-function compareRegionFingerprints(
-    a: { center: XYZLike; area: number },
-    b: { center: XYZLike; area: number },
-): number {
-    return (
-        compareCoordinate(a.center.x, b.center.x) ||
-        compareCoordinate(a.center.y, b.center.y) ||
-        compareCoordinate(a.center.z, b.center.z) ||
-        a.area - b.area
-    );
-}
-
-function compareCoordinate(a: number, b: number): number {
-    return Math.abs(a - b) <= MATCH_TOLERANCE ? 0 : a - b;
+function rankRegions(
+    regions: { index: number; region: { center: XYZLike; area: number } }[],
+    axis = 0,
+): typeof regions {
+    if (axis === 3) return regions.sort((a, b) => a.region.area - b.region.area);
+    const coordinate = ["x", "y", "z"] as const;
+    const value = (entry: (typeof regions)[number]) => entry.region.center[coordinate[axis]];
+    regions.sort((a, b) => value(a) - value(b));
+    const ranked: typeof regions = [];
+    for (let start = 0; start < regions.length; ) {
+        let end = start + 1;
+        while (end < regions.length && value(regions[end]) - value(regions[start]) <= MATCH_TOLERANCE) {
+            end++;
+        }
+        ranked.push(...rankRegions(regions.slice(start, end), axis + 1));
+        start = end;
+    }
+    return ranked;
 }
 
 /**
@@ -93,4 +97,15 @@ export function profileEdgeSeeds(face: IFace, baseSeed: string, edges: IEdge[]):
         const entity = entities?.[index];
         return entity === undefined ? `${baseSeed}:e${index}` : `${baseSeed}:ent${entity}`;
     });
+}
+
+/** The entity-seed suffix `profileEdgeSeeds` ends an edge seed with. */
+const ENTITY_SEED = /:ent\d+$/;
+
+/**
+ * Whether a tracked id (or one component of a compound id) is an edge seed of a sketch entity
+ * (`profileEdgeSeeds`) — an identity of the entity itself, not of an edge's position.
+ */
+export function isEntitySeededId(id: string): boolean {
+    return id.split(ID_COMPONENT_SEPARATOR).some((component) => ENTITY_SEED.test(component));
 }

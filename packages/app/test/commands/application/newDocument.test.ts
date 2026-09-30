@@ -10,7 +10,7 @@ describe("NewDocument", () => {
         const data = (NewDocument as any).prototype.data;
         expect(data).not.toBeNull();
         expect(data.key).toBe("doc.new");
-        expect(data.icon).toBe("icon-new");
+        expect(data.icon).toBe("icon-file-plus");
     });
 
     test("should have isApplicationCommand flag", () => {

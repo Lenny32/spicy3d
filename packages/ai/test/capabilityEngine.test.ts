@@ -2,9 +2,21 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { BoundingBox, type IShape, Matrix4, Plane, Result, ShapeTypes } from "@spicy3d/core";
-import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
+import {
+    BoundingBox,
+    Config,
+    EditableShapeNode,
+    FolderNode,
+    type IDocument,
+    type IShape,
+    Matrix4,
+    Plane,
+    Result,
+    ShapeTypes,
+} from "@spicy3d/core";
+import { createMockApplication, createMockDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { buildCapabilityTools, summarizeRefIds } from "../src/tools/capabilityEngine";
+import { takeSlowOpWarnings } from "../src/tools/opBudget";
 
 describe("capabilityEngine", () => {
     test("exposes a single run_program tool with the full method enum", () => {
@@ -805,6 +817,47 @@ describe("capabilityEngine", () => {
             }
         });
 
+        test("loft hands sketch-like compound nodes to the factory as they are and keeps them", async () => {
+            const lower = { shapeType: ShapeTypes.compound };
+            const upper = { shapeType: ShapeTypes.compound };
+            const loft = rs.fn((..._args: unknown[]) =>
+                Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape),
+            );
+            const { removed, addNode } = setup({ loft });
+            try {
+                const nodes = [lower, upper].map(
+                    (shape, i) =>
+                        new EditableShapeNode({
+                            document: createMockDocument(),
+                            name: `sketch${i}`,
+                            shape: Result.ok(shape as unknown as IShape),
+                        }),
+                );
+                for (const node of nodes) addNode(node);
+
+                const result = await run([
+                    {
+                        id: "skin",
+                        method: "loft",
+                        args: {
+                            sections: nodes.map((node) => node.id),
+                            isSolid: false,
+                            isRuled: true,
+                            continuity: "c0",
+                        },
+                    },
+                ]);
+
+                // The factory chains each compound's edges into the section wire itself.
+                expect(loft.mock.calls[0][0]).toEqual([lower, upper]);
+                expect((loft.mock.calls[0][0] as unknown[])[0]).toBe(lower);
+                expect(result.created.map((c: { id: string }) => c.id)).toEqual(["skin"]);
+                expect(removed).toEqual([]);
+            } finally {
+                rs.unstubAllGlobals();
+            }
+        });
+
         test("shape.shapeType reports the name, not the numeric bit flag", async () => {
             const solid = { shapeType: ShapeTypes.solid };
             const box = rs.fn(() => Result.ok(solid as unknown as IShape));
@@ -1014,16 +1067,18 @@ describe("capabilityEngine", () => {
                 return { nodes };
             }
 
-            test("non-number numeric args reject with the op and param in the message", async () => {
+            test("numeric args that are neither a number nor an expression reject with the op and param in the message", async () => {
                 const box = rs.fn(() => Result.ok({} as IShape));
                 setup({ box });
                 try {
                     const tool = buildCapabilityTools()[0];
                     await expect(
                         tool.handler({
-                            ops: [{ id: "b", method: "box", args: { dx: "10", dy: 20, dz: 5 } }],
+                            ops: [{ id: "b", method: "box", args: { dx: [10], dy: 20, dz: 5 } }],
                         }),
-                    ).rejects.toThrow('op "box" (id "b") failed: dx must be a finite number, got "10"');
+                    ).rejects.toThrow(
+                        'op "box" (id "b") failed: dx must be a number or a length expression, got [10]',
+                    );
                     expect(box.mock.calls.length).toBe(0);
                 } finally {
                     rs.unstubAllGlobals();
@@ -1405,6 +1460,237 @@ describe("capabilityEngine", () => {
             } finally {
                 rs.unstubAllGlobals();
             }
+        });
+    });
+
+    // A real node tree: the clone's placement, the edit op's removal and the transaction's
+    // rollback are all node-tree behaviour.
+    describe("shape.clone", () => {
+        interface MockSolid {
+            label: string;
+            shapeType: number;
+            volume: () => number;
+            findSubShapes: () => { label: string; shapeType: number }[];
+            clone: () => MockSolid;
+        }
+
+        function solid(label: string): MockSolid {
+            return {
+                label,
+                shapeType: ShapeTypes.solid,
+                volume: () => 1000,
+                findSubShapes: () => [{ label: `${label}-face`, shapeType: ShapeTypes.face }],
+                clone: () => solid(`${label}-copy`),
+            };
+        }
+
+        function setup(factory: Record<string, unknown>) {
+            const doc = new TestDocument();
+            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            const folder = new FolderNode({ document: doc, name: "Parts" });
+            doc.modelManager.addNode(folder);
+            const skin = new EditableShapeNode({
+                document: doc,
+                name: "skin",
+                shape: Result.ok(solid("skin") as unknown as IShape),
+            });
+            folder.add(skin);
+            const app = createMockApplication({ shapeProvider: { factory } as any });
+            (app as any).activeView = { document: doc };
+            rs.stubGlobal("app", app);
+            return { doc, folder, skin };
+        }
+
+        function nodeById(doc: IDocument, id: string) {
+            return doc.modelManager.findNodes((n) => n.id === id)[0];
+        }
+
+        async function run(ops: Record<string, unknown>[]) {
+            const tool = buildCapabilityTools()[0];
+            return JSON.parse((await tool.handler({ ops })) as string);
+        }
+
+        afterEach(() => {
+            rs.unstubAllGlobals();
+        });
+
+        test("creates a visible node next to the source and backs the ref with it", async () => {
+            const { doc, folder, skin } = setup({});
+
+            const result = await run([{ id: "skc", method: "shape.clone", target: skin.id }]);
+
+            expect(result.created.length).toBe(1);
+            const createdEntry = result.created[0];
+            expect(createdEntry.id).toBe("skc");
+            expect(createdEntry.name).toBe("skin_copy");
+            expect(result.results.skc).toEqual({ ref: "skc", kind: "shape", nodeId: createdEntry.nodeId });
+
+            const copy = nodeById(doc, createdEntry.nodeId) as EditableShapeNode;
+            expect(copy).toBeInstanceOf(EditableShapeNode);
+            expect(copy.parent).toBe(folder);
+            expect(skin.nextSibling).toBe(copy);
+            expect(copy.visible).toBe(true);
+            expect((copy.shape.value as unknown as { label: string }).label).toBe("skin-copy");
+            expect(result.removed).toEqual([]);
+        });
+
+        test("an edit op on the clone consumes the clone, never the source", async () => {
+            const makeThickSolidBySimple = rs.fn((shape: IShape, _thickness: number) =>
+                Result.ok(solid(`${(shape as unknown as { label: string }).label}-thick`)),
+            );
+            const { doc, skin } = setup({ makeThickSolidBySimple });
+
+            const first = await run([
+                { id: "f", method: "shape.findSubShapes", target: skin.id, args: { subshapeType: "face" } },
+                { id: "skc", method: "shape.clone", target: skin.id },
+            ]);
+            const cloneNodeId = first.created[0].nodeId;
+
+            const second = await run([
+                { id: "t", method: "makeThickSolidBySimple", args: { shape: "skc", thickness: 1 } },
+            ]);
+
+            expect(makeThickSolidBySimple.mock.calls.length).toBe(1);
+            expect((makeThickSolidBySimple.mock.calls[0][0] as unknown as { label: string }).label).toBe(
+                "skin-copy",
+            );
+            expect(second.removed).toEqual([{ nodeId: cloneNodeId, name: "skin_copy" }]);
+            expect(nodeById(doc, cloneNodeId)).toBeUndefined();
+            expect(nodeById(doc, skin.id)).toBe(skin);
+
+            // The source's refs survive; the consumed clone's ref is dropped with its node.
+            const after = await run([
+                { id: "v", method: "shape.volume", target: skin.id },
+                { id: "ft", method: "shape.shapeType", target: "f#0" },
+            ]);
+            expect(after.results).toEqual({ v: 1000, ft: "face" });
+            await expect(run([{ id: "v2", method: "shape.volume", target: "skc" }])).rejects.toThrow(
+                "ai.error.unknownRef",
+            );
+        });
+
+        test("a failing later op rolls the clone node and its ref back", async () => {
+            const { doc, skin } = setup({});
+            const before = doc.modelManager.findNodes().map((n) => n.id);
+
+            await expect(
+                run([
+                    { id: "skc", method: "shape.clone", target: skin.id },
+                    { method: "transformedMul", args: {} },
+                ]),
+            ).rejects.toThrow("transformedMul requires args.shape");
+
+            expect(doc.modelManager.findNodes().map((n) => n.id)).toEqual(before);
+            expect(doc.modelManager.findNodes((n) => n.name === "skin_copy")).toEqual([]);
+            await expect(run([{ id: "v", method: "shape.volume", target: "skc" }])).rejects.toThrow(
+                "ai.error.unknownRef",
+            );
+        });
+
+        test("honours an explicit name", async () => {
+            const { doc, skin } = setup({});
+
+            const result = await run([{ id: "skc", method: "shape.clone", target: skin.id, name: "shell" }]);
+
+            expect(result.created[0].name).toBe("shell");
+            expect(nodeById(doc, result.created[0].nodeId)?.name).toBe("shell");
+        });
+    });
+
+    // Ops are synchronous: a cancellation is seen between ops, never inside one.
+    describe("cancellation and slow ops", () => {
+        function setup(factory: Record<string, unknown>) {
+            const doc = new TestDocument();
+            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            const app = createMockApplication({ shapeProvider: { factory } as any });
+            (app as any).activeView = { document: doc };
+            rs.stubGlobal("app", app);
+            return doc;
+        }
+
+        const solid = () => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape);
+        const defaultBudget = Config.instance.slowOpWarningSeconds;
+
+        afterEach(() => {
+            rs.unstubAllGlobals();
+            rs.restoreAllMocks();
+            Config.instance.slowOpWarningSeconds = defaultBudget;
+            takeSlowOpWarnings();
+            takeSlowOpWarnings();
+        });
+
+        test("a signal aborted during op 0 stops before op 1, rolls back and reports cancelled", async () => {
+            const controller = new AbortController();
+            const box = rs.fn(() => {
+                controller.abort();
+                return solid();
+            });
+            const cylinder = rs.fn(solid);
+            const doc = setup({ box, cylinder });
+            const before = doc.modelManager.findNodes().map((n) => n.id);
+
+            const tool = buildCapabilityTools()[0];
+            await expect(
+                tool.handler(
+                    {
+                        ops: [
+                            { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                            { id: "c", method: "cylinder", args: { radius: 1, dz: 1 } },
+                        ],
+                    },
+                    controller.signal,
+                ),
+            ).rejects.toThrow('cancelled before op 1 ("cylinder"); the whole program was rolled back');
+
+            expect(box.mock.calls.length).toBe(1);
+            expect(cylinder.mock.calls.length).toBe(0);
+            expect(doc.modelManager.findNodes().map((n) => n.id)).toEqual(before);
+            // The rolled-back box's ref is gone too.
+            await expect(
+                tool.handler({ ops: [{ id: "v", method: "shape.volume", target: "b" }] }),
+            ).rejects.toThrow("ai.error.unknownRef");
+        });
+
+        test("an op over the slow-op budget is noted with its name and duration", async () => {
+            let now = 0;
+            rs.spyOn(performance, "now").mockImplementation(() => now);
+            const box = rs.fn(() => {
+                now += 48_000;
+                return solid();
+            });
+            const cylinder = rs.fn(() => {
+                now += 5_000;
+                return solid();
+            });
+            setup({ box, cylinder });
+
+            await buildCapabilityTools()[0].handler({
+                ops: [
+                    { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                    { id: "c", method: "cylinder", args: { radius: 1, dz: 1 } },
+                ],
+            });
+
+            const warnings = takeSlowOpWarnings();
+            expect(warnings.length).toBe(1);
+            expect(warnings[0]).toContain('op "box" took 48 s (slow-op budget 30 s)');
+        });
+
+        test("the budget comes from Config", async () => {
+            Config.instance.slowOpWarningSeconds = 2;
+            let now = 0;
+            rs.spyOn(performance, "now").mockImplementation(() => now);
+            const cylinder = rs.fn(() => {
+                now += 5_000;
+                return solid();
+            });
+            setup({ cylinder });
+
+            await buildCapabilityTools()[0].handler({
+                ops: [{ id: "c", method: "cylinder", args: { radius: 1, dz: 1 } }],
+            });
+
+            expect(takeSlowOpWarnings()).toEqual([expect.stringContaining('op "cylinder" took 5 s')]);
         });
     });
 });

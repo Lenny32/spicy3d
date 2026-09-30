@@ -5,6 +5,8 @@ import {
     ANGLE_UNITS,
     ConstructionNode,
     type ConstructionRef,
+    Continuities,
+    type Continuity,
     type FeatureItem,
     type IDocument,
     Id,
@@ -30,7 +32,9 @@ import type {
     ExtrudeExtent,
     ExtrudeFeatureData,
     FeatureData,
+    LoftFeatureData,
     RevolveFeatureData,
+    ThickenFeatureData,
 } from "../features/feature";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
@@ -77,7 +81,9 @@ export type ParametricOp =
     | ConstructionInfoOp
     | ExtrudeOp
     | RevolveOp
+    | LoftOp
     | FilletChamferOp
+    | ThickenOp
     | BooleanOp
     | EditFeatureOp
     | FeaturesOp;
@@ -187,6 +193,21 @@ export interface RevolveOp {
     angle?: ParameterValue;
 }
 
+/** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
+export interface LoftOp {
+    op: "loft";
+    id: string;
+    name?: string;
+    /** Sketch op ids or existing sketch node ids, at least two; each sketch must hold a single profile. */
+    sections: string[];
+    /** Capped ends (default); false = an open surface. */
+    solid?: boolean;
+    /** Straight faces between consecutive sections; default smooth. */
+    ruled?: boolean;
+    /** A smooth loft's surface continuity (default "c2"). */
+    continuity?: Continuity;
+}
+
 export interface FilletChamferOp {
     op: "fillet" | "chamfer";
     id: string;
@@ -196,6 +217,23 @@ export interface FilletChamferOp {
     edgeIndexes: number[];
     radius?: ParameterValue;
     distance?: ParameterValue;
+}
+
+/**
+ * Thickens a body's current shape: a solid is shelled (opened at `openFaceIndexes`, else hollowed
+ * with a closed void), an open shell or face becomes a solid.
+ */
+export interface ThickenOp {
+    op: "thicken";
+    id: string;
+    name?: string;
+    body: string;
+    /** Signed length: positive grows along the face normals (outward for a solid), negative inward. */
+    thickness: ParameterValue;
+    joinType?: "arc" | "intersection";
+    mode?: "skin" | "pipe";
+    /** Indexes into the body's current face list (findSubShapes order) of the faces to open; solids only. */
+    openFaceIndexes?: number[];
 }
 
 export interface BooleanOp {
@@ -278,8 +316,23 @@ function refsFor(document: IDocument): Map<string, string> {
     return refs;
 }
 
+/** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
+export interface ProgramRunOptions {
+    /**
+     * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
+     * transaction rolls it back. An op already running is never interrupted.
+     */
+    signal?: AbortSignal;
+    /** Called after every op, failed ones included, with its wall time. */
+    onOpFinished?: (op: string, milliseconds: number) => void;
+}
+
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
-export function runParametricProgram(document: IDocument, ops: readonly ParametricOp[]): ProgramResult {
+export function runParametricProgram(
+    document: IDocument,
+    ops: readonly ParametricOp[],
+    options: ProgramRunOptions = {},
+): ProgramResult {
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -290,10 +343,16 @@ export function runParametricProgram(document: IDocument, ops: readonly Parametr
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
+        if (options.signal?.aborted) {
+            throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
+        }
+        const start = performance.now();
         try {
             runOp(state, op);
         } catch (err) {
             throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
+        } finally {
+            options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
     state.out.bodies = [...state.touched].map((body) => ({
@@ -335,9 +394,15 @@ function runOp(state: State, op: ParametricOp): void {
         case "revolve":
             runRevolveOp(state, op);
             break;
+        case "loft":
+            runLoftOp(state, op);
+            break;
         case "fillet":
         case "chamfer":
             runEdgeCornerOp(state, op);
+            break;
+        case "thicken":
+            runThickenOp(state, op);
             break;
         case "boolean":
             runBooleanOp(state, op);
@@ -671,6 +736,29 @@ function runRevolveOp(state: State, op: RevolveOp): void {
     });
 }
 
+function runLoftOp(state: State, op: LoftOp): void {
+    if (!Array.isArray(op.sections) || op.sections.length < 2) {
+        throw new Error('"sections" must list at least two sketches, in loft order');
+    }
+    if (op.continuity !== undefined && !(Continuities as readonly string[]).includes(op.continuity)) {
+        throw new Error(`"continuity" must be one of ${Continuities.join(", ")}`);
+    }
+    const sketches = op.sections.map((section) => resolveSketch(state, section));
+    const feature: LoftFeatureData = {
+        id: Id.generate(),
+        type: "loft",
+        sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
+        ...(op.solid === false ? { solid: false } : {}),
+        ...(op.ruled === true ? { ruled: true } : {}),
+        ...(op.ruled === true || op.continuity === undefined || op.continuity === "c2"
+            ? {}
+            : { continuity: op.continuity }),
+    };
+    createBody(state, op.id, op.name, [feature], () => {
+        for (const sketch of sketches) sketch.visible = false;
+    });
+}
+
 function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     const body = resolveBody(state, op.body);
     const shape = body.shape;
@@ -699,6 +787,49 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
         op.op === "fillet"
             ? { id: Id.generate(), type: "fillet", radius: value, edges: refs }
             : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
+    appendFeature(state, body, feature);
+    state.refs.set(op.id, body.id);
+}
+
+/** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */
+const THICKEN_JOIN_TYPE_NAMES = ["arc", "intersection"] as const;
+const THICKEN_MODE_NAMES = ["skin", "pipe"] as const;
+
+function runThickenOp(state: State, op: ThickenOp): void {
+    const body = resolveBody(state, op.body);
+    const shape = body.shape;
+    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
+    ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
+    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
+        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPE_NAMES.join(", ")}`);
+    }
+    if (op.mode !== undefined && !(THICKEN_MODE_NAMES as readonly string[]).includes(op.mode)) {
+        throw new Error(`"mode" must be one of ${THICKEN_MODE_NAMES.join(", ")}`);
+    }
+    if (op.openFaceIndexes !== undefined && !Array.isArray(op.openFaceIndexes)) {
+        throw new Error('"openFaceIndexes" must be an array of face indexes');
+    }
+    const faces = shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const openFaces = (op.openFaceIndexes ?? []).map((index) => {
+        const face = faces[index];
+        if (face === undefined) {
+            throw new Error(
+                `faceIndex ${index} is out of range on body "${op.body}" (0..${faces.length - 1})`,
+            );
+        }
+        // The capture the interactive thicken makes: body-local, with the face's tracked id.
+        const faceId = body.faceIdAt(index);
+        return captureExtentFaceRef(face, faceId, body.faceIdIsShared(faceId));
+    });
+    const feature: ThickenFeatureData = {
+        id: Id.generate(),
+        type: "thicken",
+        thickness: op.thickness,
+        ...(op.joinType === undefined || op.joinType === "arc" ? {} : { joinType: op.joinType }),
+        ...(op.mode === undefined || op.mode === "skin" ? {} : { mode: op.mode }),
+        ...(openFaces.length > 0 ? { openFaces } : {}),
+    };
     appendFeature(state, body, feature);
     state.refs.set(op.id, body.id);
 }

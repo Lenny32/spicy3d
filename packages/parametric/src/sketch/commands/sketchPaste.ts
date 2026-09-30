@@ -5,7 +5,7 @@ import { command, PubSub } from "@spicy3d/core";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { SketchUtilityCommand, sketchClipboard } from "./sketchUtilityCommand";
 
-@command({ key: "sketch.paste", icon: "icon-copy2" })
+@command({ key: "sketch.paste", icon: "icon-paste" })
 export class SketchPasteCommand extends SketchUtilityCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const clipboard = sketchClipboard.value;

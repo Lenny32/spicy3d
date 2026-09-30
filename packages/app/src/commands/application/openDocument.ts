@@ -6,7 +6,7 @@ import { openDocumentFile, pickDocumentFile } from "../../documentFiles";
 
 @command({
     key: "doc.open",
-    icon: "icon-open",
+    icon: "icon-folder-open",
     isApplicationCommand: true,
 })
 export class OpenDocument implements ICommand {

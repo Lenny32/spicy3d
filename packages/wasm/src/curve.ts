@@ -442,9 +442,10 @@ export class OccTrimmedCurve extends OccBoundedCurve implements ITrimmedCurve {
 
     setTrim(u1: number, u2: number): void {
         // Geom_TrimmedCurve::SetTrim raises Standard_ConstructionError on an
-        // empty window or on one outside a non-periodic basis curve's range,
-        // and a raise aborts the WASM module with exception catching disabled.
-        // Mirror the Curve::trim guards and fail with a catchable JS Error.
+        // empty window or on one outside a non-periodic basis curve's range
+        // (fatal before -fwasm-exceptions; the guard stays for a clearer message
+        // and modules built without that handling). Mirror the Curve::trim guards and fail with
+        // a catchable JS Error.
         if (Math.abs(u1 - u2) <= Precision.PConfusion) {
             throw new Error("setTrim: empty parameter window");
         }

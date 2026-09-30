@@ -4,6 +4,7 @@
 import type { IDocument, INode } from "@spicy3d/core";
 import type { Tool } from "../llm/types";
 import { getDocument } from "./documentContext";
+import { kernelStateInfo } from "./kernelTools";
 
 function summarizeNode(node: INode) {
     // parentId is what makes the tree legible: a FolderNode's children share its id, and a
@@ -11,14 +12,15 @@ function summarizeNode(node: INode) {
     return { id: node.id, type: node.constructor.name, name: node.name, parentId: node.parent?.id };
 }
 
+/** Once the geometry kernel crashed: `kernel: "crashed"` and the error every kernel tool returns. */
 function documentSummary(doc: IDocument) {
     const nodes = doc.modelManager.findNodes(() => true).map(summarizeNode);
-    return { hasActiveDocument: true, name: doc.name, nodeCount: nodes.length, nodes };
+    return { hasActiveDocument: true, name: doc.name, nodeCount: nodes.length, nodes, ...kernelStateInfo() };
 }
 
 async function readDocumentState(): Promise<string> {
     const doc = getDocument();
-    if (!doc) return JSON.stringify({ hasActiveDocument: false });
+    if (!doc) return JSON.stringify({ hasActiveDocument: false, ...kernelStateInfo() });
     return JSON.stringify(documentSummary(doc));
 }
 
@@ -35,7 +37,7 @@ async function readSelection(): Promise<string> {
  */
 export function documentSnapshot(): string {
     const doc = getDocument();
-    if (!doc) return JSON.stringify({ hasActiveDocument: false });
+    if (!doc) return JSON.stringify({ hasActiveDocument: false, ...kernelStateInfo() });
     const selected = doc.selection.getSelectedNodes().map(summarizeNode);
     return JSON.stringify({ ...documentSummary(doc), selected });
 }
@@ -45,7 +47,7 @@ export function buildReadTools(): Tool[] {
         {
             name: "get_document_state",
             description:
-                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it.",
+                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until the user reloads the page.",
             parameters: { type: "object", properties: {} },
             handler: readDocumentState,
         },

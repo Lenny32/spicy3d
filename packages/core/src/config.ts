@@ -147,6 +147,33 @@ export class Config extends Observable {
         this.setProperty("featureEditPreview", value);
     }
 
+    /**
+     * The most faces `makeThickSolidByJoin` accepts with `joinType: "intersection"`. OCCT's
+     * intersection join intersects the offset faces pairwise; on a shell with many narrow faces
+     * (a G2 loft) it may never finish, and a kernel call cannot be interrupted (docs/kernel.md).
+     * Page-level, not saved; `Infinity` lifts the guard.
+     */
+    get thickSolidIntersectionMaxFaces(): number {
+        return this.getPrivateValue("thickSolidIntersectionMaxFaces", 40);
+    }
+    set thickSolidIntersectionMaxFaces(value: number) {
+        if (!(value >= 0)) return;
+        this.setProperty("thickSolidIntersectionMaxFaces", value);
+    }
+
+    /**
+     * Seconds one modeling op (a `run_program` / `run_parametric` op) may take before the next
+     * MCP tool result carries a warning naming it. A soft budget only: synchronous kernel code
+     * cannot be preempted. Page-level, not saved; `Infinity` turns the warning off.
+     */
+    get slowOpWarningSeconds(): number {
+        return this.getPrivateValue("slowOpWarningSeconds", 30);
+    }
+    set slowOpWarningSeconds(value: number) {
+        if (!(value > 0)) return;
+        this.setProperty("slowOpWarningSeconds", value);
+    }
+
     @serialize()
     get themeMode() {
         return this.getPrivateValue("themeMode", "system");

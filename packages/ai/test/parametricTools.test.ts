@@ -33,8 +33,10 @@ describe("parametricTools", () => {
             "sketch",
             "extrude",
             "revolve",
+            "loft",
             "fillet",
             "chamfer",
+            "thicken",
             "boolean",
             "editFeature",
             "features",
@@ -57,7 +59,14 @@ describe("parametricTools", () => {
             "point",
             "ellipse",
             "spline",
+            "bspline",
         ]);
+        expect(properties.entities.items.properties.parametrization.enum).toEqual([
+            "chord",
+            "centripetal",
+            "uniform",
+        ]);
+        expect(properties.entities.items.properties.periodic.type).toBe("boolean");
         expect(properties.entities.items.properties.construction.type).toBe("boolean");
         // The schema is the only place a client learns an action exists — keep it in step with the engine.
         expect(properties.actions.items.properties.action.enum).toEqual([...SKETCH_ACTION_NAMES]);
@@ -76,6 +85,25 @@ describe("parametricTools", () => {
         try {
             await expect(runParametric().handler({})).rejects.toThrow(/non-empty "ops" array/);
             await expect(runParametric().handler({ ops: [] })).rejects.toThrow(/non-empty "ops" array/);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("passes the call's signal to the program: a cancelled call runs no op", async () => {
+        const add = rs.fn((_record: unknown) => {});
+        const document = createMockDocument({ history: { add } as any });
+        const app = createMockApplication();
+        (app as any).activeView = { document };
+        rs.stubGlobal("app", app);
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            await expect(
+                runParametric().handler({ ops: [{ op: "features", body: "b1" }] }, controller.signal),
+            ).rejects.toThrow('cancelled before op 0 ("features"); the whole program was rolled back');
+            expect(add).not.toHaveBeenCalled();
         } finally {
             rs.unstubAllGlobals();
         }

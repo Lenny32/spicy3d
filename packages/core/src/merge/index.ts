@@ -3,7 +3,7 @@
 
 export * from "./apply";
 export * from "./diff";
-export { expressionNames } from "./integrity";
+export { expressionNames, featureSketchIds } from "./integrity";
 export { deepFreeze, JsonEquality } from "./json";
 export { mergeOrder, stableKeys } from "./listOrder";
 export * from "./merge";

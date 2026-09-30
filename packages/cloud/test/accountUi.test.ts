@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { formatDateTime, formatRelative, PubSub, parseUtc, TitleBar } from "@spicy3d/core";
+import { formatDateTime, formatRelative, HomeBar, PubSub, parseUtc, TitleBar } from "@spicy3d/core";
 import { en } from "@spicy3d/i18n";
 import type { Account } from "../src/account/account";
 import type { ConfigResponse } from "../src/api";
@@ -352,7 +352,7 @@ describe("account email links", () => {
 describe("startAccountUi", () => {
     const config = { version: "0.0.1", apiVersion: 1, features: FEATURES } as unknown as ConfigResponse;
 
-    test("asks who is signed in, adds the account button, removes it on teardown", async () => {
+    test("asks who is signed in, adds the account buttons, removes them on teardown", async () => {
         const server = new FakeServer().on("GET /api/me", problem(401, "unauthorized"));
         const connection = new CloudConnection(config, server.client());
 
@@ -360,10 +360,12 @@ describe("startAccountUi", () => {
         try {
             expect(connection.account.status).toBe("signedOut");
             expect(TitleBar.items.items().some((item) => item instanceof AccountButton)).toBe(true);
+            expect(HomeBar.items.items().some((item) => item instanceof AccountButton)).toBe(true);
         } finally {
             stop();
         }
         expect(TitleBar.items.items().some((item) => item instanceof AccountButton)).toBe(false);
+        expect(HomeBar.items.items().some((item) => item instanceof AccountButton)).toBe(false);
     });
 
     test("opens the dialog of the link the app was opened with", async () => {

@@ -6,6 +6,7 @@ import {
     ConstructionNode,
     type FeatureItem,
     type FeatureReference,
+    featureSketchIds,
     type I18nKeys,
     type IDocument,
     type IEqualityComparer,
@@ -311,6 +312,7 @@ export class ParametricBodyNode
                 reselectable: handler?.reselectable === true,
                 editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
+                dependsOn: handler?.nodeIds(feature, this.document).filter((id) => id !== this.id),
                 parameters: handler?.parameters(feature) ?? [],
             };
         });
@@ -880,13 +882,16 @@ export class ParametricBodyNode
         const stop = this._rollbackIndex ?? features.length;
         for (let index = 0; index < features.length && index < stop; index++) {
             const feature = features[index];
-            if (feature.suppressed || !("sketchId" in feature) || feature.sketchId === undefined) continue;
-            let dangling = checked.get(feature.sketchId);
-            if (dangling === undefined) {
-                const sketch = findSketch(this.document, feature.sketchId);
-                dangling = sketch !== undefined && danglingProfileRefs(sketch).length > 0;
-                checked.set(feature.sketchId, dangling);
-            }
+            if (feature.suppressed) continue;
+            const dangling = featureSketchIds(feature).some((sketchId) => {
+                let found = checked.get(sketchId);
+                if (found === undefined) {
+                    const sketch = findSketch(this.document, sketchId);
+                    found = sketch !== undefined && danglingProfileRefs(sketch).length > 0;
+                    checked.set(sketchId, found);
+                }
+                return found;
+            });
             if (dangling) this._featureWarnings.set(feature.id, "Sketch has unresolved external references");
         }
     }

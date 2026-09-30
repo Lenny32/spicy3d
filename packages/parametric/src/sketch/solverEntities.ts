@@ -3,6 +3,7 @@
 
 import { PubSub } from "@spicy3d/core";
 import {
+    bsplineEndIndexes,
     ConstraintKind,
     isExternalEntityId,
     type SketchEntityData,
@@ -46,6 +47,8 @@ const ASSOCIATIVE_KINDS: readonly ConstraintKind[] = [
     ConstraintKind.TangentLineArc,
     ConstraintKind.TangentArcArc,
     ConstraintKind.TangentCircleArc,
+    ConstraintKind.PointOnBSpline,
+    ConstraintKind.TangentLineBSpline,
 ];
 
 export function isAssociativeConstraintKind(kind: ConstraintKind): boolean {
@@ -148,4 +151,32 @@ export function tangentConstraintFor(
         default:
             return undefined;
     }
+}
+
+/**
+ * The end tangent relating a line and an open bspline (`TangentLineBSpline`): the line runs along
+ * the curve's tangent at whichever end is closer to it (measured from the line's endpoints).
+ * `undefined` when the pair is not a line and an open bspline — a periodic bspline has no end.
+ */
+export function bsplineTangentConstraintFor(
+    solver: SketchSolver,
+    entityId1: number,
+    entityId2: number,
+): { kind: ConstraintKind; refs: SketchPointRef[] } | undefined {
+    const [e1, e2] = [solver.entity(entityId1), solver.entity(entityId2)];
+    if (e1 === undefined || e2 === undefined) return undefined;
+    const [line, bspline] = e1.type === "line" ? [e1, e2] : [e2, e1];
+    if (line.type !== "line" || bspline.type !== "bspline") return undefined;
+    const ends = bsplineEndIndexes(bspline);
+    if (ends === undefined) return undefined;
+    const lineEnds = lineRefs(line.id).map((ref) => solver.pointOf(ref));
+    const gap = (pointIndex: number) => {
+        const [u, v] = solver.pointOf({ entityId: bspline.id, pointIndex });
+        return Math.min(...lineEnds.map(([x, y]) => Math.hypot(x - u, y - v)));
+    };
+    const end = gap(ends[0]) <= gap(ends[1]) ? ends[0] : ends[1];
+    return {
+        kind: ConstraintKind.TangentLineBSpline,
+        refs: [...lineRefs(line.id), { entityId: bspline.id, pointIndex: end }],
+    };
 }

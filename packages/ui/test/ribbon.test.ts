@@ -212,7 +212,7 @@ describe("RibbonUI", () => {
 
     test("should publish doc.new when new-view button clicked", () => {
         const { ui } = createRibbonUI();
-        const newBtn = mustQuery(ui, "svg[icon='icon-plus']");
+        const newBtn = mustQuery(ui, "svg[icon='icon-file-plus']");
         // The svg mock stores handlers on `_onclick` regardless of realEvents
         const onclick = (newBtn as unknown as { _onclick?: () => void })._onclick;
         expect(onclick).toBeDefined();

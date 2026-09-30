@@ -21,25 +21,36 @@ export type Continuity = (typeof Continuities)[number];
 
 export interface ICurve extends IGeometry {
     get curveType(): CurveType;
+    /** @unit length length */
     uniformAbscissaByLength(length: number): XYZ[];
+    /** @unit none curveCount */
     uniformAbscissaByCount(curveCount: number): XYZ[];
     length(): number;
+    /** @unit length tolerance */
     parameter(point: XYZLike, tolerance: number): number | undefined;
     firstParameter(): number;
     lastParameter(): number;
     project(point: XYZLike): XYZ[];
+    /** @unit none parameter */
     value(parameter: number): XYZ;
+    /** @unit none n */
     isCN(n: number): boolean;
     /**
      * Trims the curve to the parameter window [u1, u2]. Returns `undefined` when the
      * window is invalid (empty within tolerance, or outside a non-periodic curve's
      * range) — the kernel reports those as a null handle instead of raising.
+     * @unit none u1 u2
      */
     trim(u1: number, u2: number): ITrimmedCurve | undefined;
+    /** @unit none u */
     d0(u: number): XYZ;
+    /** @unit none u */
     d1(u: number): { point: XYZ; vec: XYZ };
+    /** @unit none u */
     d2(u: number): { point: XYZ; vec1: XYZ; vec2: XYZ };
+    /** @unit none u */
     d3(u: number): { point: XYZ; vec1: XYZ; vec2: XYZ; vec3: XYZ };
+    /** @unit none u n */
     dn(u: number, n: number): XYZ;
     reverse(): void;
     reversed(): ICurve;
@@ -110,13 +121,20 @@ export interface IBoundedCurve extends ICurve {
 
 export interface IBezierCurve extends IBoundedCurve {
     degree(): number;
+    /** @unit none index */
     weight(index: number): number;
+    /** @unit none index weight */
     insertPoleAfter(index: number, point: XYZ, weight?: number): void;
+    /** @unit none index weight */
     insertPoleBefore(index: number, point: XYZ, weight?: number): void;
+    /** @unit none index */
     removePole(index: number): void;
+    /** @unit none index weight */
     setPole(index: number, point: XYZ, weight?: number): void;
+    /** @unit none index weight */
     setWeight(index: number, weight: number): void;
     nbPoles(): number;
+    /** @unit none index */
     pole(index: number): XYZ;
     poles(): XYZ[];
 }
@@ -124,12 +142,17 @@ export interface IBezierCurve extends IBoundedCurve {
 export interface IBSplineCurve extends IBoundedCurve {
     degree(): number;
     nbKnots(): number;
+    /** @unit none index */
     knot(index: number): number;
+    /** @unit none index value */
     setKnot(index: number, value: number): void;
     nbPoles(): number;
+    /** @unit none index */
     pole(index: number): XYZ;
     poles(): XYZ[];
+    /** @unit none index */
     weight(index: number): number;
+    /** @unit none index value */
     setWeight(index: number, value: number): void;
 }
 
@@ -140,6 +163,7 @@ export interface ITrimmedCurve extends IBoundedCurve {
      * tolerance or outside a non-periodic basis curve's range — the kernel
      * raises there, which the WASM build cannot survive, so the check is
      * enforced JS-side.
+     * @unit none u1 u2
      */
     setTrim(u1: number, u2: number): void;
 }
@@ -152,6 +176,7 @@ export interface IOffsetCurve extends ICurve {
 
 export interface IComplexCurve {
     nbCurves(): number;
+    /** @unit none index */
     curve(index: number): ICurve;
 }
 

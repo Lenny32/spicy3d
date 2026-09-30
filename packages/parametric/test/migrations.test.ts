@@ -3,7 +3,7 @@
 
 import { DocumentMigrations, migrateDocument } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
-import { PARAMETRIC_FORMAT_VERSION } from "../src/migrations";
+import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "../src/migrations";
 
 function fixture(name: string) {
     const found = loadDocumentFixtures().find((x) => x.name === name);
@@ -11,16 +11,19 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 3 (extrude extents)", () => {
+describe("parametric format 5 (thicken)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(3);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(3);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(5);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(5);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
     test.each([
         ["v1/rich.json", 1],
         ["v1/parametric2-extrude-targets.json", 2],
+        ["v1/parametric3-extrude-extents.json", 3],
+        ["v1/parametric4-loft.json", 4],
+        ["v2/construction-expressions.json", 4],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -29,7 +32,7 @@ describe("parametric format 3 (extrude extents)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 3 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 5 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
@@ -46,7 +49,7 @@ describe("parametric format 3 (extrude extents)", () => {
         expect(slot.extent).toBeUndefined();
     });
 
-    test("a parametric 3 document with extents needs no migration", () => {
+    test("a parametric 3 document keeps its extents through the migration", () => {
         const { data } = fixture("v1/parametric3-extrude-extents.json");
         expect(data["moduleVersions"]).toMatchObject({ parametric: 3 });
 
@@ -59,5 +62,92 @@ describe("parametric format 3 (extrude extents)", () => {
             .flatMap((x: any) => JSON.parse(x.featuresJson))
             .flatMap((x: any) => (x.extent === undefined ? [] : [x.extent.type]));
         expect(extents.sort()).toEqual(["throughAll", "toObject"]);
+    });
+
+    test("a parametric 4 document keeps its lofts through the migration", () => {
+        const { data } = fixture("v1/parametric4-loft.json");
+        expect(data["moduleVersions"]).toMatchObject({ parametric: 4 });
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const lofts = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "ParametricBodyNode")
+            .flatMap((x: any) => JSON.parse(x.featuresJson))
+            .map((x: any) => [x.type, x.sections.length]);
+        expect(lofts).toEqual([
+            ["loft", 3],
+            ["loft", 2],
+        ]);
+    });
+
+    test("a parametric 5 document with thickens needs no migration", () => {
+        const { data } = fixture("v2/parametric5-thicken.json");
+        expect(data["moduleVersions"]).toMatchObject({ parametric: 5 });
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const thickens = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "ParametricBodyNode")
+            .flatMap((x: any) => JSON.parse(x.featuresJson))
+            .filter((x: any) => x.type === "thicken")
+            .map((x: any) => [x.thickness, x.openFaces?.length ?? 0]);
+        expect(thickens).toEqual([
+            ["-wall_t", 1],
+            ["wall_t", 0],
+        ]);
+    });
+});
+
+/** Names of the fixtures stored at sketch format 1. */
+function sketchV1Fixtures(): string[] {
+    return loadDocumentFixtures()
+        .filter((x) => (x.data["moduleVersions"] as Record<string, number> | undefined)?.["sketch"] === 1)
+        .map((x) => x.name);
+}
+
+describe("sketch format 2 (bspline)", () => {
+    test("is the running version, reached from 1 without a gap", () => {
+        expect(SKETCH_FORMAT_VERSION).toBe(2);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(2);
+        expect(DocumentMigrations.findGaps()).toEqual([]);
+    });
+
+    test.each(sketchV1Fixtures())("%s (sketch 1) migrates with its sketches untouched", (name) => {
+        const { data } = fixture(name);
+        const original = structuredClone(data);
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 2 });
+        expect(migrated.value["models"]).toEqual(original["models"]);
+        expect(data).toEqual(original);
+    });
+
+    test("the sketch 1 corpus the migration test runs on is not empty", () => {
+        expect(sketchV1Fixtures().length).toBeGreaterThan(0);
+    });
+
+    test("a sketch 2 document with bsplines needs no migration and keeps them as stored", () => {
+        const { data } = fixture("v2/sketch2-bspline.json");
+        expect(data["moduleVersions"]).toMatchObject({ sketch: 2 });
+
+        const migrated = migrateDocument(data);
+
+        expect(migrated.isOk).toBe(true);
+        expect(migrated.value["models"]).toEqual(data["models"]);
+        const entities = (migrated.value["models"] as any).nodes
+            .filter((x: any) => x.__cla$$__ === "SketchNode")
+            .flatMap((x: any) => JSON.parse(x.dataJson).entities)
+            .filter((x: any) => x.type === "bspline")
+            .map((x: any) => [x.params.length / 2, x.parametrization, x.periodic ?? false]);
+        expect(entities).toEqual([
+            [5, "chord", false],
+            [5, "centripetal", true],
+        ]);
     });
 });

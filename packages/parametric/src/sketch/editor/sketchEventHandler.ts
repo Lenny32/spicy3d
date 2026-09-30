@@ -19,6 +19,7 @@ import {
     snapConstraintKind,
     snapTargetEntityId,
 } from "../autoConstraints";
+import { bsplinePolyline } from "../bsplineGeometry";
 import {
     arcAngles,
     ConstraintKind,
@@ -237,7 +238,7 @@ export class SketchEventHandler implements IEventHandler {
         let best: SketchPointRef | undefined;
         let bestDistance = PICK_TOLERANCE_PX;
         for (const entity of this.pickableEntities()) {
-            const pointCount = entityPointCount(entity.type);
+            const pointCount = entityPointCount(entity.type, entity.params);
             for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
                 const [u, v] = solver.pointOf({ entityId: entity.id, pointIndex });
                 const screen = view.worldToScreen(toWorld(plane, u, v));
@@ -768,7 +769,7 @@ function entityPointMeshes(editor: SketchEditor): ShapeMeshData[] {
     const plane = editor.node.plane;
     const meshes: ShapeMeshData[] = [];
     for (const entity of constraintTargetEntities(editor.solver)) {
-        for (let pointIndex = 0; pointIndex < entityPointCount(entity.type); pointIndex++) {
+        for (let pointIndex = 0; pointIndex < entityPointCount(entity.type, entity.params); pointIndex++) {
             const [u, v] = editor.solver.pointOf({ entityId: entity.id, pointIndex });
             meshes.push(
                 MeshDataUtils.createVertexMesh(
@@ -795,8 +796,8 @@ export function sketchEntityMesh(
     }
     if (entity.construction) lineType = "dash";
     let mesh: EdgeMeshData;
-    if (entity.type === "spline") {
-        const points = sampleSpline(entity.params).map((p) => toWorld(plane, ...p));
+    if (entity.type === "spline" || entity.type === "bspline") {
+        const points = curvePolyline(entity).map((p) => toWorld(plane, ...p));
         const position = new Float32Array((points.length - 1) * 6);
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
@@ -882,10 +883,19 @@ function arcSegmentMesh(
     return { position, range: [], color, lineType };
 }
 
+/** The polyline a free-form entity (spline, bspline) is drawn and picked along. */
+function curvePolyline(entity: SketchEntityData): [number, number][] {
+    if (entity.type === "spline") return sampleSpline(entity.params);
+    return bsplinePolyline(entity.params, {
+        parametrization: entity.parametrization,
+        periodic: entity.periodic,
+    });
+}
+
 /** uv distance to an entity's curve: segment, arc sweep, or circle circumference. */
 export function entityDistance(uv: [number, number], entity: SketchEntityData): number {
-    if (entity.type === "spline") {
-        const points = sampleSpline(entity.params);
+    if (entity.type === "spline" || entity.type === "bspline") {
+        const points = curvePolyline(entity);
         let distance = Number.POSITIVE_INFINITY;
         for (let i = 1; i < points.length; i++) {
             distance = Math.min(distance, pointToSegmentDistance(...uv, ...points[i - 1], ...points[i]));

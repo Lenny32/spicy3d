@@ -1,16 +1,10 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import {
-    type ButtonSize,
-    getShortcutText,
-    I18n,
-    type I18nKeys,
-    Localize,
-    type SplitButton,
-} from "@spicy3d/core";
+import { type ButtonSize, type CommandKeys, type I18nKeys, Localize, type SplitButton } from "@spicy3d/core";
 import { createIcon, div, label } from "@spicy3d/element";
 import { createDropdownItem, DropdownController, getItemData } from "./dropdownController";
+import { commandTooltip } from "./ribbonButton";
 import buttonStyle from "./ribbonButton.module.css";
 import style from "./ribbonSplitButton.module.css";
 
@@ -134,10 +128,9 @@ export class RibbonSplitButton extends HTMLElement {
         }
     }
 
-    private setTooltip(display: I18nKeys, command: Parameters<typeof getShortcutText>[0]) {
+    private setTooltip(display: I18nKeys, command: CommandKeys) {
         if (!this.#mainEl) return;
-        const shortcut = getShortcutText(command);
-        this.#mainEl.title = shortcut ? `${I18n.translate(display)} (${shortcut})` : I18n.translate(display);
+        this.#mainEl.title = commandTooltip(display, command);
     }
 }
 

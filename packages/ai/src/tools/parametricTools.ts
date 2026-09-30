@@ -5,6 +5,7 @@ import { Transaction } from "@spicy3d/core";
 import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
 import { requireDocument } from "./documentContext";
+import { noteOpDuration } from "./opBudget";
 
 /**
  * Loads the parametric module on first use. It must not be imported at module scope:
@@ -39,13 +40,24 @@ const POINT_REF_SCHEMA = {
 const ENTITY_SCHEMA = {
     type: "object",
     properties: {
-        type: { type: "string", enum: ["line", "circle", "arc", "point", "ellipse", "spline"] },
+        type: { type: "string", enum: ["line", "circle", "arc", "point", "ellipse", "spline", "bspline"] },
         params: { type: "array", items: { type: "number" } },
         points: {
             type: "array",
             items: { type: "array", items: { type: "number" } },
             description:
-                "spline only, instead of params: the interpolation points [[u,v], ...] in curve order",
+                "spline / bspline, instead of params: the points [[u,v], ...] in curve order (a bspline's fit points)",
+        },
+        parametrization: {
+            type: "string",
+            enum: ["chord", "centripetal", "uniform"],
+            description:
+                "bspline only: chord (default, follows unevenly spaced points without overshoot), centripetal (tighter at sharp turns) or uniform (evenly spaced points only)",
+        },
+        periodic: {
+            type: "boolean",
+            description:
+                "bspline only: a closed, smooth (C2) curve through the points — do NOT repeat the first point as the last",
         },
         construction: {
             type: "boolean",
@@ -183,8 +195,10 @@ const OPS_SCHEMA = {
                 "sketch",
                 "extrude",
                 "revolve",
+                "loft",
                 "fillet",
                 "chamfer",
+                "thicken",
                 "boolean",
                 "editFeature",
                 "features",
@@ -199,7 +213,7 @@ const OPS_SCHEMA = {
         id: {
             type: "string",
             description:
-                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/construct.",
+                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/construct.",
         },
         name: { type: "string", description: "Optional display name for the resulting node" },
         plane: {
@@ -209,13 +223,13 @@ const OPS_SCHEMA = {
         entities: {
             type: "array",
             description:
-                "Sketch geometry in sketch (u, v) coordinates: line [x1,y1,x2,y2]; circle [cx,cy,r]; arc [cx,cy,sx,sy,ex,ey] (center, start, end; counter-clockwise); point [x,y]; ellipse [cx,cy,ax,ay,bx,by] (center and two perpendicular axis ends); spline [sx,sy,ex,ey,...interior] or points. Entity ids are the 1-based position in this list. A closed profile needs its points in perimeter order, first point repeated as the last.",
+                "Sketch geometry in sketch (u, v) coordinates: line [x1,y1,x2,y2]; circle [cx,cy,r]; arc [cx,cy,sx,sy,ex,ey] (center, start, end; counter-clockwise); point [x,y]; ellipse [cx,cy,ax,ay,bx,by] (center and two perpendicular axis ends); spline [sx,sy,ex,ey,...interior] or points: uniform Catmull-Rom, one cubic edge per pair of neighbouring points, always open; bspline points (or params [x0,y0,x1,y1,...]): ONE interpolating B-spline edge through every point, chord-length parametrization by default, periodic: true for a closed smooth curve (first point NOT repeated) — prefer it for free-form outlines. Entity ids are the 1-based position in this list. A closed profile of lines/arcs needs its segments in perimeter order, each segment starting where the previous one ends.",
             items: ENTITY_SCHEMA,
         },
         constraints: {
             type: "array",
             description:
-                "Optional sketch constraints, applied after the entities. Omit entirely for a plain sketch of fixed coordinates — constraints are what makes the sketch re-solvable when a dimension changes. Point indexes: line 0=start 1=end; circle 0=center; arc 0=center 1=start 2=end; point 0; ellipse 0=center 1/2=axis ends; spline 0=start 1=end.",
+                "Optional sketch constraints, applied after the entities. Omit entirely for a plain sketch of fixed coordinates — constraints are what makes the sketch re-solvable when a dimension changes. Point indexes: line 0=start 1=end; circle 0=center; arc 0=center 1=start 2=end; point 0; ellipse 0=center 1/2=axis ends; spline 0=start 1=end; bspline i=fit point i (PointOn with a bspline entity slides a point along it — not one of that bspline's own fit points, which lie on it already and fail with \"A B-spline's own point already lies on it\"; Tangent of a line and an open bspline holds the line along the curve's end tangent).",
             items: CONSTRAINT_SCHEMA,
         },
         actions: {
@@ -250,12 +264,31 @@ const OPS_SCHEMA = {
             },
         },
         angle: { description: "Revolve angle in degrees (default 360)" },
+        sections: {
+            type: "array",
+            items: { type: "string" },
+            description:
+                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
+        },
+        solid: {
+            type: "boolean",
+            description: "Loft only: capped ends (default true); false = an open surface",
+        },
+        ruled: {
+            type: "boolean",
+            description: "Loft only: straight faces between sections (default smooth)",
+        },
+        continuity: {
+            type: "string",
+            enum: ["c0", "g1", "c1", "g2", "c2", "c3", "cn"],
+            description: "Loft only, not ruled: surface continuity (default c2)",
+        },
         body: { type: "string", description: "The body op id (or an existing body's node id)" },
         operation: {
             type: "string",
             enum: ["fuse", "cut", "common"],
             description:
-                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve has no join/cut form.)",
+                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve and loft have no join/cut form.)",
         },
         edgeIndexes: {
             type: "array",
@@ -265,6 +298,26 @@ const OPS_SCHEMA = {
         },
         radius: { description: "Fillet radius in mm" },
         distance: { description: "Chamfer distance in mm" },
+        thickness: {
+            description:
+                'Thicken only: signed wall thickness in mm (a number or an expression, e.g. "wall_t"; it re-evaluates when the variable changes). Positive grows along the face normals (outward for a solid), negative inward; never zero.',
+        },
+        joinType: {
+            type: "string",
+            enum: ["arc", "intersection"],
+            description: "Thicken only, solids: how the offset walls meet at edges (default arc = rounded)",
+        },
+        mode: {
+            type: "string",
+            enum: ["skin", "pipe"],
+            description: "Thicken only, solids: offset mode (default skin)",
+        },
+        openFaceIndexes: {
+            type: "array",
+            items: { type: "number" },
+            description:
+                "Thicken only, solids: indexes into the body's current face list (findSubShapes order) of the faces to remove, opening the shell. Omit for a closed hollow solid, and always for an open shell or surface (e.g. an open loft), which becomes a solid.",
+        },
         tools: {
             type: "array",
             items: { type: "string" },
@@ -284,7 +337,7 @@ const OPS_SCHEMA = {
         definition: {
             type: "object",
             description:
-                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. load_skill parametric-modeling for each kind\'s fields.',
+                'construct/editConstruction: { kind, ...fields } — kinds plane-offset, plane-midplane, plane-angle, plane-two-edges, plane-three-points, plane-along-path, plane-tangent, plane-perpendicular, axis-analytic, axis-normal, axis-two-planes, axis-two-points, axis-edge, point-vertex, point-two-edges, point-three-planes, point-center, point-edge-plane, point-along-path, ucs. References: "XY"/"YZ"/"ZX", { datum, member? }, { nodeId, face|edge|vertex: index }, { snap, at }, { path: [...] }, { point: [x,y,z] }, { axis: { origin, direction } }, { facePoint: { nodeId, face }, point }. Lengths (distance, offset, a distance position\'s value) and angles (angle) take a number or an expression of document variables, e.g. distance: "sec_x_1 * 2". load_skill parametric-modeling for each kind\'s fields.',
         },
         node: {
             type: "string",
@@ -308,14 +361,14 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, fillet, chamfer, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },
     ];
 }
 
-async function runParametric(args: Record<string, unknown>): Promise<string> {
+async function runParametric(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const document = requireDocument();
     if (typeof document === "string") return document;
 
@@ -336,7 +389,11 @@ async function runParametric(args: Record<string, unknown>): Promise<string> {
     // Synchronous by construction: the solver is initialized above, and a throw here
     // rolls the whole program back, so a half-built body never survives.
     Transaction.execute(document, "run_parametric", () => {
-        result = parametric.runParametricProgram(document, ops as ParametricOp[]);
+        // Cancellation is checked between ops; a running op is timed for the slow-op warning.
+        result = parametric.runParametricProgram(document, ops as ParametricOp[], {
+            signal,
+            onOpFinished: noteOpDuration,
+        });
         document.selection.clearSelection();
         document.visual.update();
     });

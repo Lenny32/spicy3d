@@ -6,6 +6,7 @@ import { buildSkillTool } from "../skills";
 import { buildAskUserTool } from "./askUser";
 import { buildCapabilityTools } from "./capabilityEngine";
 import { buildFileTools } from "./fileTools";
+import { guardKernelTool } from "./kernelTools";
 import { buildNodeTools } from "./nodeTools";
 import { buildParametricTools } from "./parametricTools";
 import { buildPropertyTools } from "./propertyTools";
@@ -15,8 +16,9 @@ import { buildSelectionTools } from "./selectionTools";
 import { buildVariableTools } from "./variableTools";
 import { buildViewTools } from "./viewTools";
 
+/** Every tool that touches the kernel refuses to start once it crashed (`kernelTools.ts`). */
 export function buildTools(): Tool[] {
-    return [
+    const tools: Tool[] = [
         ...buildReadTools(),
         ...buildRibbonTools(),
         ...buildNodeTools(),
@@ -33,4 +35,5 @@ export function buildTools(): Tool[] {
         ...buildVariableTools(),
         buildAskUserTool(),
     ];
+    return tools.map(guardKernelTool);
 }

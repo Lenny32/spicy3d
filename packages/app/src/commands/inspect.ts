@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    ANALYSIS_ICONS,
     CommandStore,
     command,
     documentLengthUnit,
@@ -18,7 +19,7 @@ import {
     Transaction,
 } from "@spicy3d/core";
 
-@command({ key: "inspect.measure", icon: "icon-measureSelect" })
+@command({ key: "inspect.measure", icon: "icon-measure" })
 export class InspectMeasureCommand extends MultistepCommand {
     protected override getSteps(): IStep[] {
         return [
@@ -102,7 +103,7 @@ abstract class InspectNodeCommand extends MultistepCommand {
     }
 }
 
-@command({ key: "inspect.section", icon: "icon-section" })
+@command({ key: "inspect.section", icon: "icon-sectionAnalysis" })
 export class InspectSectionCommand extends InspectNodeCommand {
     protected readonly kind = "section";
     protected readonly label = "Section Analysis";
@@ -143,7 +144,7 @@ export class InspectSectionCommand extends InspectNodeCommand {
     }
 }
 
-@command({ key: "inspect.interference", icon: "icon-checkShape" })
+@command({ key: "inspect.interference", icon: "icon-interference" })
 export class InspectInterferenceCommand extends InspectNodeCommand {
     protected readonly kind = "interference";
     protected readonly label = "Interference";
@@ -151,7 +152,7 @@ export class InspectInterferenceCommand extends InspectNodeCommand {
     protected override readonly minimumSources = 2;
 }
 
-@command({ key: "inspect.centerOfMass", icon: "icon-measureSelect" })
+@command({ key: "inspect.centerOfMass", icon: "icon-centerOfMass" })
 export class InspectCenterOfMassCommand extends InspectNodeCommand {
     protected readonly kind = "centerOfMass";
     protected readonly label = "Center of Mass";
@@ -230,7 +231,7 @@ for (const descriptor of advancedInspectCommands) {
     }
     CommandStore.registerCommand(AdvancedInspectCommand, {
         key: `inspect.${descriptor.kind}`,
-        icon: "icon-checkShape",
+        icon: ANALYSIS_ICONS[descriptor.kind],
     });
 }
 
@@ -283,12 +284,12 @@ abstract class InspectLibraryMembershipCommand extends MultistepCommand {
     }
 }
 
-@command({ key: "inspect.addToLibrary", icon: "icon-plus" })
+@command({ key: "inspect.addToLibrary", icon: "icon-addToLibrary" })
 export class InspectAddToLibraryCommand extends InspectLibraryMembershipCommand {
     protected readonly addMembership = true;
 }
 
-@command({ key: "inspect.removeFromLibrary", icon: "icon-minus" })
+@command({ key: "inspect.removeFromLibrary", icon: "icon-removeFromLibrary" })
 export class InspectRemoveFromLibraryCommand extends InspectLibraryMembershipCommand {
     protected readonly addMembership = false;
 }
