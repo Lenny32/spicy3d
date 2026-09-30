@@ -65,7 +65,7 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
                 return evaluateTracked(feature, context, tools.value, toolShapes, tracked);
             }
             const result = untrackedBoolean(feature.operation, context.input, toolShapes);
-            if (!result.isOk) return result;
+            if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
             return requireNonEmptyResult(feature.operation, context.input, result.value);
         } finally {
             owned.forEach((x) => x.dispose());
@@ -118,6 +118,18 @@ const EMPTY_RESULT_ERRORS: Record<BooleanOperation, string> = {
     fuse: "Boolean fuse produced an empty shape",
 };
 
+/** The kernel's own empty-result error (`booleanFailure` in `factory.cpp`, since the V8_0_1 build). */
+const KERNEL_EMPTY_RESULT_ERROR = "Boolean produced an empty shape";
+
+/**
+ * A kernel error as the feature reports it: the kernel's empty-result error becomes the
+ * operation-specific text `requireNonEmptyResult` gives, so an agent reads one message whichever
+ * layer caught the empty result (older binaries return the empty compound as a success).
+ */
+function booleanError(operation: BooleanOperation, error: string): string {
+    return error.trim() === KERNEL_EMPTY_RESULT_ERROR ? EMPTY_RESULT_ERRORS[operation] : error;
+}
+
 /** Whether `shape` holds at least one sub-shape of `type`; the probed wrappers are disposed. */
 function hasSubShape(shape: IShape, type: ShapeType): boolean {
     const found = shape.findSubShapes(type);
@@ -126,11 +138,13 @@ function hasSubShape(shape: IShape, type: ShapeType): boolean {
 }
 
 /**
- * The kernel reports a boolean whose result is an empty compound as a success, so
- * a common of disjoint bodies or a cut removing everything would silently leave an
- * empty body. A solid input must keep at least one solid (a shell/face input at
- * least one face); anything less is the feature's error. Only a topology walk,
- * no validity check, so it is cheap enough to run on every evaluation.
+ * Kernels built before the V8_0_1 rebuild report a boolean whose result is an empty
+ * compound as a success, so a common of disjoint bodies or a cut removing everything
+ * would silently leave an empty body (the current one fails it: `booleanError`); a
+ * result with vertices but no solid slips past the kernel's check either way. A solid
+ * input must keep at least one solid (a shell/face input at least one face); anything
+ * less is the feature's error. Only a topology walk, no validity check, so it is cheap
+ * enough to run on every evaluation.
  */
 function requireNonEmptyResult(operation: BooleanOperation, input: IShape, result: IShape): Result<IShape> {
     const required = [ShapeTypes.solid, ShapeTypes.face].find((type) => hasSubShape(input, type));
@@ -166,7 +180,7 @@ function evaluateTracked(
         return Result.err("boolean requires a preceding feature");
     }
     const result = tracked([input], toolShapes);
-    if (!result.isOk) return Result.err(result.error);
+    if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
     const nonEmpty = requireNonEmptyResult(feature.operation, input, result.value.shape);
     if (!nonEmpty.isOk) return nonEmpty;
     const { edgeMap, faceMap } = completeTrackedHistory([input, ...toolShapes], result.value);

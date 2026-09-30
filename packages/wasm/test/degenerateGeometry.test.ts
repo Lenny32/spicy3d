@@ -10,8 +10,9 @@ import { createBox, createSphere, createTestConverter, createTestFactory, unwrap
 import "./setup";
 
 // An OCCT raise was fatal to the module before -fwasm-exceptions; the preventive guards stay
-// for clearer messages and the committed binary. These tests pin the preventive guards in the C++ query layer for degenerate
-// geometry: zero-length edges, geometry-less empty compounds, and surface-less faces.
+// for clearer messages and for modules built without that handling. These tests pin the
+// preventive guards in the C++ query layer for degenerate geometry: zero-length edges,
+// geometry-less empty compounds, and surface-less faces.
 let factory: ShapeFactory;
 let converter: OccShapeConverter;
 

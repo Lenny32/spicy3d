@@ -143,6 +143,29 @@ describe("parametric boolean with an empty result", () => {
         expect(result.isOk ? "" : result.error).toContain(message);
     });
 
+    test("an older kernel returning the empty compound as a success gets the same message", () => {
+        const doc = newDoc();
+        const host = box(doc, [0, 0, 10, 10], 10);
+        const tool = box(doc, [50, 50, 60, 60], 10);
+        const factory = globalThis.shapeFactory as ShapeFactory;
+        const original = factory.booleanCommon;
+        // binaries before the V8_0_1 rebuild: IsDone() and an empty compound, no kernel error
+        factory.booleanCommon = () => factory.combine([]);
+        try {
+            const result = featureHandler("boolean")!.evaluate(boolean("common", tool), {
+                document: doc,
+                host,
+                input: host.shape.unchecked()!,
+                scope: new Map(),
+            });
+            expect(result.isOk ? "" : result.error).toBe(
+                "Boolean common produced an empty shape: the tools do not intersect the body",
+            );
+        } finally {
+            factory.booleanCommon = original;
+        }
+    });
+
     test("the untracked path keeps a non-empty common", () => {
         const doc = newDoc();
         const host = box(doc, [0, 0, 10, 10], 10);

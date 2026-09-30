@@ -87,8 +87,8 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
 /**
  * The profile face of every section, in loft order. Checked here rather than left to the kernel,
  * which raises on some degenerate inputs (fatal before -fwasm-exceptions; the checks stay for
- * clearer messages and the committed binary): at least two sections, each a single hole-free
- * profile, no two consecutive ones on the same plane.
+ * clearer messages and modules built without that handling): at least two sections, each a
+ * single hole-free profile, no two consecutive ones on the same plane.
  */
 export function resolveLoftSections(
     feature: LoftFeatureData,
