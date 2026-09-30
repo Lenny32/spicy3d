@@ -4,6 +4,7 @@
 import type { IEdge, IFace, XYZLike } from "@spicy3d/core";
 import { profileEdgeEntityIds, profileEntityIds } from "./profileEntities";
 import { captureRegionFingerprint } from "./profileRef";
+import { ID_COMPONENT_SEPARATOR } from "./trackedId";
 
 /**
  * Content-derived seed keys for profile regions and their boundary edges.
@@ -78,4 +79,15 @@ export function profileEdgeSeeds(face: IFace, baseSeed: string, edges: IEdge[]):
         const entity = entities?.[index];
         return entity === undefined ? `${baseSeed}:e${index}` : `${baseSeed}:ent${entity}`;
     });
+}
+
+/** The entity-seed suffix `profileEdgeSeeds` ends an edge seed with. */
+const ENTITY_SEED = /:ent\d+$/;
+
+/**
+ * Whether a tracked id (or one component of a compound id) is an edge seed of a sketch entity
+ * (`profileEdgeSeeds`) — an identity of the entity itself, not of an edge's position.
+ */
+export function isEntitySeededId(id: string): boolean {
+    return id.split(ID_COMPONENT_SEPARATOR).some((component) => ENTITY_SEED.test(component));
 }

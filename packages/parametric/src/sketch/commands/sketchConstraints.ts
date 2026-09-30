@@ -8,6 +8,7 @@ import type { SketchSolver } from "../solver";
 import {
     allowsConstraintOnEntity,
     arcStartRef,
+    bsplineTangentConstraintFor,
     centerRef,
     lineRefs,
     tangentConstraintFor,
@@ -209,7 +210,8 @@ export class TangentConstraintCommand extends SketchConstraintCommand {
         }
         const t1 = editor.solver.entity(e1)?.type;
         const t2 = editor.solver.entity(e2)?.type;
-        const tangent = tangentConstraintFor(t1, e1, t2, e2);
+        const tangent =
+            tangentConstraintFor(t1, e1, t2, e2) ?? bsplineTangentConstraintFor(editor.solver, e1, e2);
         if (tangent === undefined) {
             PubSub.default.pub("displayError", "Tangent does not apply to this pair of entities");
             return;
@@ -240,6 +242,9 @@ export class PointOnConstraintCommand extends SketchConstraintCommand {
             addAndCommit(editor, ConstraintKind.PointOnCircle, [p, centerRef(entityId)]);
         } else if (type === "arc") {
             addAndCommit(editor, ConstraintKind.PointOnArc, [p, centerRef(entityId), arcStartRef(entityId)]);
+        } else if (type === "bspline" && p.entityId !== entityId) {
+            // any point ref names the curve; its own fit points lie on it by construction
+            addAndCommit(editor, ConstraintKind.PointOnBSpline, [p, { entityId, pointIndex: 0 }]);
         }
     }
 }

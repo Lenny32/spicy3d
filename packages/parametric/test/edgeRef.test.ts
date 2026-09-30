@@ -333,6 +333,28 @@ describe("matchEdgeIndexesTracked — invariant verification and splits", () => 
         expect(result.unchecked()).toEqual([1]);
     });
 
+    test("adopts the one edge carrying a sketch entity's seed although its length changed", () => {
+        // k Bezier spans of a bspline became one edge: the span's length is not the curve's
+        const seed = "sketch:sk1:e1.2.3.4:ent7";
+        const ref: EdgeRef = { ...captureEdgeRef(splineEdge()), edgeId: seed };
+        const whole = { ...splineEdge(), length: () => 10 } as unknown as IEdge;
+        const shape = shapeWith(splineEdge(), whole);
+        const result = matchEdgeIndexesTracked(shape, [ref], ["f1:0", seed]);
+
+        expect(result.unchecked()).toEqual([1]);
+    });
+
+    test("demotes a merged edge whose compound id carries the entity seed as one component", () => {
+        // a boolean fused the entity's curve with another edge: the seed alone no longer names it
+        const seed = "sketch:sk1:e1.2.3.4:ent7";
+        const ref: EdgeRef = { ...captureEdgeRef(splineEdge()), edgeId: seed };
+        const merged = { ...splineEdge(), length: () => 10 } as unknown as IEdge;
+        const shape = shapeWith(merged, splineEdge());
+        const result = matchEdgeIndexesTracked(shape, [ref], [`${seed}|f2:3`, "f1:1"]);
+
+        expect(result.unchecked()).toEqual([1]);
+    });
+
     test("adopts every piece of an edge split into fragments sharing one id", () => {
         // A boolean split the referenced [0,10] edge into [0,4]+[4,10]; both pieces
         // inherit the id, and the edge feature applies to the whole original span.

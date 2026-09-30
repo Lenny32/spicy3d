@@ -429,6 +429,9 @@ export default {
         "command.sketch.spline": "Spline",
         "prompt.pickSplinePoint":
             "Pick next spline point; Enter to finish, Esc to cancel (interior points stay fixed)",
+        "command.sketch.bspline": "B-spline",
+        "prompt.pickBSplinePoint":
+            "Pick next B-spline point; Enter or click the last point again to finish, click the first point to close, Esc to cancel",
         "command.sketch.point": "Point",
         "sketch.polygon.inscribed": "Inscribed (off: circumscribed)",
         "sketch.ellipse.foci": "Use two foci",
@@ -1289,6 +1292,8 @@ export default {
         "diff.noun.ellipses": "ellipses",
         "diff.noun.spline": "spline",
         "diff.noun.splines": "splines",
+        "diff.noun.bspline": "B-spline",
+        "diff.noun.bsplines": "B-splines",
         "diff.noun.entity": "entity",
         "diff.noun.entities": "entities",
         "diff.noun.constraint": "constraint",

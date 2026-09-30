@@ -75,6 +75,66 @@ export function kernelCallFailure(op: string, error: unknown): string {
     return `${op} failed: ${name}: ${message}`;
 }
 
+/** Answer of `bspline` when the loaded module has no such binding. */
+export const BSPLINE_EDGE_UNAVAILABLE = "B-spline edges are not available in this kernel build";
+
+type BSplineBinding = (
+    poles: XYZLike[],
+    knots: number[],
+    multiplicities: number[],
+    degree: number,
+    periodic: boolean,
+    weights: number[],
+) => ShapeResult;
+
+/**
+ * `ShapeFactory.bspline` of the loaded module, or undefined when the module predates it (as the
+ * committed binary does): feature-detected on each call, so a rebuilt module is picked up.
+ */
+function bsplineBinding(): BSplineBinding | undefined {
+    const factoryClass = wasm.ShapeFactory as unknown as { bspline?: unknown };
+    const binding = factoryClass.bspline;
+    if (typeof binding !== "function") return undefined;
+    return (...args) => binding.apply(factoryClass, args) as ShapeResult;
+}
+
+/** The knot-layout rules `Geom_BSplineCurve` raises on, checked before the kernel sees the data. */
+function bsplineLayoutError(
+    poles: number,
+    knots: number[],
+    multiplicities: number[],
+    degree: number,
+    periodic: boolean,
+    weights: number[] | undefined,
+): string | undefined {
+    if (!Number.isInteger(degree) || degree < 1 || degree > 25)
+        return "B-spline degree must be an integer 1..25";
+    if (knots.length < 2 || knots.length !== multiplicities.length) {
+        return "B-spline needs at least two knots, one multiplicity per knot";
+    }
+    if (![...knots, ...multiplicities].every(Number.isFinite)) return "B-spline knots must be finite";
+    if (knots.some((knot, i) => i > 0 && !(knot > knots[i - 1])))
+        return "B-spline knots must be strictly increasing";
+    const last = multiplicities.length - 1;
+    const badMultiplicity = multiplicities.some((m, i) => {
+        const end = i === 0 || i === last;
+        return !Number.isInteger(m) || m < 1 || m > (end && !periodic ? degree + 1 : degree);
+    });
+    if (badMultiplicity) return "B-spline multiplicity out of range";
+    if (periodic && multiplicities[0] !== multiplicities[last]) {
+        return "Periodic B-spline needs equal first and last multiplicities";
+    }
+    const sum = multiplicities.reduce((a, b) => a + b, 0);
+    const expected = periodic ? sum - multiplicities[last] : sum - degree - 1;
+    if (expected < 2 || poles !== expected)
+        return `B-spline needs ${expected} poles for its knots, got ${poles}`;
+    if (weights !== undefined && weights.length > 0) {
+        if (weights.length !== poles) return "B-spline needs one weight per pole";
+        if (!weights.every((w) => Number.isFinite(w) && w > 0)) return "B-spline weights must be positive";
+    }
+    return undefined;
+}
+
 function convertShapeResult<P extends unknown[] = unknown[]>(
     factory: (...params: P) => ShapeResult,
     params: P,
@@ -461,6 +521,27 @@ export class ShapeFactory implements IShapeFactory {
             wasm.ShapeFactory.bezier,
             [points, weights ?? []],
             "Bezier",
+        ) as Result<IEdge>;
+    }
+    get supportsBSplineEdges(): boolean {
+        return bsplineBinding() !== undefined;
+    }
+    bspline(
+        poles: XYZLike[],
+        knots: number[],
+        multiplicities: number[],
+        degree: number,
+        periodic: boolean,
+        weights?: number[],
+    ): Result<IEdge> {
+        const binding = bsplineBinding();
+        if (binding === undefined) return Result.err(BSPLINE_EDGE_UNAVAILABLE);
+        const error = bsplineLayoutError(poles.length, knots, multiplicities, degree, periodic, weights);
+        if (error !== undefined) return Result.err(error);
+        return convertShapeResult(
+            binding,
+            [poles, knots, multiplicities, degree, periodic, weights ?? []],
+            "BSpline",
         ) as Result<IEdge>;
     }
     helix(

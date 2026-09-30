@@ -1332,6 +1332,74 @@ public:
         return ShapeResult { edge.Edge(), true, "" };
     }
 
+    // One B-spline edge from poles and knots in OCCT's layout: `knots` distinct and increasing with
+    // their `mults`, `weights` empty (non-rational) or one per pole. A periodic curve has
+    // sum(mults) - mults(last) poles, the first and last multiplicity equal. Everything
+    // Geom_BSplineCurve would raise on is checked first, so the error names the problem.
+    static ShapeResult bspline(const Vector3Array& poles, const NumberArray& knots, const NumberArray& mults,
+        int degree, bool periodic, const NumberArray& weights)
+    {
+        std::vector<Vector3> pts = vecFromJSArray<Vector3>(poles);
+        std::vector<double> knotValues = vecFromJSArray<double>(knots);
+        std::vector<int> multValues = vecFromJSArray<int>(mults);
+        std::vector<double> wts = vecFromJSArray<double>(weights);
+        if (degree < 1 || degree > Geom_BSplineCurve::MaxDegree()) {
+            return ShapeResult { TopoDS_Shape(), false, "B-spline degree must be 1.." + std::to_string(Geom_BSplineCurve::MaxDegree()) };
+        }
+        if (knotValues.size() < 2 || knotValues.size() != multValues.size()) {
+            return ShapeResult { TopoDS_Shape(), false, "B-spline needs at least two knots, one multiplicity per knot" };
+        }
+        int multSum = 0;
+        for (size_t i = 0; i < knotValues.size(); i++) {
+            if (i > 0 && !(knotValues[i] > knotValues[i - 1] + Precision::PConfusion())) {
+                return ShapeResult { TopoDS_Shape(), false, "B-spline knots must be strictly increasing" };
+            }
+            bool end = i == 0 || i + 1 == knotValues.size();
+            if (multValues[i] < 1 || multValues[i] > (end && !periodic ? degree + 1 : degree)) {
+                return ShapeResult { TopoDS_Shape(), false, "B-spline multiplicity out of range" };
+            }
+            multSum += multValues[i];
+        }
+        if (periodic && multValues.front() != multValues.back()) {
+            return ShapeResult { TopoDS_Shape(), false, "Periodic B-spline needs equal first and last multiplicities" };
+        }
+        int poleCount = periodic ? multSum - multValues.back() : multSum - degree - 1;
+        if (poleCount < 2 || static_cast<size_t>(poleCount) != pts.size()) {
+            return ShapeResult { TopoDS_Shape(), false, "B-spline pole count does not match its knots" };
+        }
+        if (!wts.empty() && wts.size() != pts.size()) {
+            return ShapeResult { TopoDS_Shape(), false, "B-spline needs one weight per pole" };
+        }
+        NCollection_Array1<gp_Pnt> arrayOfPole(1, pts.size());
+        for (size_t i = 0; i < pts.size(); i++) {
+            arrayOfPole.SetValue(i + 1, Vector3::toPnt(pts[i]));
+        }
+        NCollection_Array1<double> arrayOfKnot(1, knotValues.size());
+        NCollection_Array1<int> arrayOfMult(1, multValues.size());
+        for (size_t i = 0; i < knotValues.size(); i++) {
+            arrayOfKnot.SetValue(i + 1, knotValues[i]);
+            arrayOfMult.SetValue(i + 1, multValues[i]);
+        }
+        Handle(Geom_BSplineCurve) curve;
+        if (wts.empty()) {
+            curve = new Geom_BSplineCurve(arrayOfPole, arrayOfKnot, arrayOfMult, degree, periodic);
+        } else {
+            NCollection_Array1<double> arrayOfWeight(1, wts.size());
+            for (size_t i = 0; i < wts.size(); i++) {
+                if (!(wts[i] > 0)) {
+                    return ShapeResult { TopoDS_Shape(), false, "B-spline weights must be positive" };
+                }
+                arrayOfWeight.SetValue(i + 1, wts[i]);
+            }
+            curve = new Geom_BSplineCurve(arrayOfPole, arrayOfWeight, arrayOfKnot, arrayOfMult, degree, periodic);
+        }
+        BRepBuilderAPI_MakeEdge edge(curve);
+        if (!edge.IsDone()) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create B-spline" };
+        }
+        return ShapeResult { edge.Edge(), true, "" };
+    }
+
     static ShapeResult helix(
         const Vector3& origin,
         const Vector3& normal,
@@ -2478,6 +2546,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("circle", guardedEntry<&ShapeFactory::circle>("ShapeFactory.circle"))
         .class_function("arc", guardedEntry<&ShapeFactory::arc>("ShapeFactory.arc"))
         .class_function("bezier", guardedEntry<&ShapeFactory::bezier>("ShapeFactory.bezier"))
+        .class_function("bspline", guardedEntry<&ShapeFactory::bspline>("ShapeFactory.bspline"))
         .class_function("helix", guardedEntry<&ShapeFactory::helix>("ShapeFactory.helix"))
         .class_function("rect", guardedEntry<&ShapeFactory::rect>("ShapeFactory.rect"))
         .class_function("point", guardedEntry<&ShapeFactory::point>("ShapeFactory.point"))

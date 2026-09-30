@@ -59,7 +59,14 @@ describe("parametricTools", () => {
             "point",
             "ellipse",
             "spline",
+            "bspline",
         ]);
+        expect(properties.entities.items.properties.parametrization.enum).toEqual([
+            "chord",
+            "centripetal",
+            "uniform",
+        ]);
+        expect(properties.entities.items.properties.periodic.type).toBe("boolean");
         expect(properties.entities.items.properties.construction.type).toBe("boolean");
         // The schema is the only place a client learns an action exists — keep it in step with the engine.
         expect(properties.actions.items.properties.action.enum).toEqual([...SKETCH_ACTION_NAMES]);

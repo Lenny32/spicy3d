@@ -71,6 +71,27 @@ export interface IShapeFactory {
     solid(shells: IShell[]): Result<ISolid>;
     bezier(points: XYZLike[], weights?: number[]): Result<IEdge>;
     /**
+     * One B-spline edge from its poles and knots, in OCCT's layout: `knots` distinct and increasing,
+     * one multiplicity each; open curves have sum(multiplicities) − degree − 1 poles, periodic ones
+     * sum(multiplicities) − the last multiplicity (the last knot closes the period, first and last
+     * multiplicity equal). `weights` (one per pole, all positive) make it rational. A kernel build
+     * without the binding answers an error — `supportsBSplineEdges` tells beforehand.
+     * @unit none degree
+     */
+    bspline(
+        poles: XYZLike[],
+        knots: number[],
+        multiplicities: number[],
+        degree: number,
+        periodic: boolean,
+        weights?: number[],
+    ): Result<IEdge>;
+    /**
+     * Whether `bspline` builds edges on the loaded kernel (feature-detected: builds older than the
+     * binding lack it). Callers without it fall back to a chain of `bezier` segments.
+     */
+    readonly supportsBSplineEdges?: boolean;
+    /**
      * @unit length radius pitch
      * @unit angle angle
      */

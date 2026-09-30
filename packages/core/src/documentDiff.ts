@@ -85,6 +85,7 @@ const NOUNS: Record<string, [I18nKeys, I18nKeys]> = {
     point: ["diff.noun.point", "diff.noun.points"],
     ellipse: ["diff.noun.ellipse", "diff.noun.ellipses"],
     spline: ["diff.noun.spline", "diff.noun.splines"],
+    bspline: ["diff.noun.bspline", "diff.noun.bsplines"],
     entity: ["diff.noun.entity", "diff.noun.entities"],
     constraint: ["diff.noun.constraint", "diff.noun.constraints"],
     external: ["diff.noun.external", "diff.noun.externals"],

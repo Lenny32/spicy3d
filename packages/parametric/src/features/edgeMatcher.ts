@@ -10,6 +10,7 @@ import {
     refScore,
     refScoreRefs,
 } from "./edgeRef";
+import { isEntitySeededId } from "./profileSeeds";
 import { MATCH_TOLERANCE } from "./refGeometry";
 import { ID_COMPONENT_SEPARATOR, idIsShared, idsOverlap } from "./trackedId";
 
@@ -98,7 +99,9 @@ function captureEdgeRefs(edges: readonly IEdge[]): CapturedEdgeRef[] {
  *
  * An id that is gone — or whose edge no longer keeps the invariants (a positional id realigned
  * onto another edge; a merged free-form curve, whose length changed) — demotes the ref to
- * fingerprint matching.
+ * fingerprint matching. Except: a free-form ref whose id is a sketch entity's edge seed, carried
+ * by exactly one rebuilt edge as that edge's whole id (a merged edge's compound id does not
+ * count), is adopted even when its length changed (`uniqueEntityHit`).
  *
  * Narrowing: when exactly ONE of several hits still matches the fingerprint within
  * MATCH_TOLERANCE, the ref was captured from just that piece of an already split edge, so only
@@ -218,7 +221,7 @@ function resolveById(
     const componentIndex = () => (byComponent ??= indexByIdComponent(inputEdgeIds, edges.length));
 
     for (const [refIndex, ref] of refs.entries()) {
-        const hits = idHits(edges, ref, componentIndex);
+        const hits = idHits(edges, ref, inputEdgeIds, componentIndex);
         if (hits.length === 0) {
             remaining.push(refIndex);
             continue;
@@ -232,17 +235,52 @@ function resolveById(
     return Result.ok({ resolved, remaining });
 }
 
-/** Indexes of the edges whose id overlaps the ref's and which still satisfy its invariant. */
-function idHits(edges: IEdge[], ref: EdgeRef, componentIndex: () => Map<string, number[]>): number[] {
+/**
+ * Indexes of the edges whose id overlaps the ref's and which still satisfy its invariant — or the
+ * one edge carrying a sketch entity's seed (see `uniqueEntityHit`).
+ */
+function idHits(
+    edges: IEdge[],
+    ref: EdgeRef,
+    inputEdgeIds: readonly string[],
+    componentIndex: () => Map<string, number[]>,
+): number[] {
     if (ref.edgeId === undefined) return [];
 
+    const overlapping = overlappingIndexes(componentIndex(), ref.edgeId);
+    if (uniqueEntityHit(edges, inputEdgeIds, ref, overlapping)) return overlapping;
     const hits: number[] = [];
-    for (const index of overlappingIndexes(componentIndex(), ref.edgeId)) {
+    for (const index of overlapping) {
         if (keepsInvariant(edges[index], ref)) {
             hits.push(index);
         }
     }
     return hits;
+}
+
+/**
+ * A free-form ref whose id is a sketch entity's edge seed (`isEntitySeededId`) and which exactly
+ * one rebuilt edge carries — as its whole id, not as one component of a compound — is adopted by
+ * the id alone, whatever its length: the entity is the identity, and its curve may legitimately
+ * have changed length — a `bspline` entity built as k Bezier spans (a kernel without the B-spline
+ * binding) comes back as one edge on a kernel with it, and each span's length is not the curve's.
+ * An id several edges carry (k spans, or an edge a boolean split) keeps the invariant check, and
+ * so does an edge a boolean merged (its compound id holds the seed next to other ids: the entity's
+ * curve is only part of it); a degenerate edge is never adopted.
+ */
+function uniqueEntityHit(
+    edges: IEdge[],
+    inputEdgeIds: readonly string[],
+    ref: EdgeRef,
+    overlapping: readonly number[],
+): boolean {
+    if (overlapping.length !== 1 || ref.kind !== "other" || !isEntitySeededId(ref.edgeId ?? "")) return false;
+    if (inputEdgeIds[overlapping[0]] !== ref.edgeId) return false;
+    try {
+        return edges[overlapping[0]].length() > 0;
+    } catch {
+        return false;
+    }
 }
 
 /** Narrows the id hits to the piece actually picked, refusing one another ref already holds. */

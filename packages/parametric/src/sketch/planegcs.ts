@@ -1,9 +1,24 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import type { Circle, GcsSystem, Line, Point } from "@salusoft89/planegcs/dist/planegcs_dist/gcs_system";
+import type {
+    BSpline,
+    Circle,
+    GcsSystem,
+    IntVector,
+    Line,
+    Point,
+} from "@salusoft89/planegcs/dist/planegcs_dist/gcs_system";
 import initPlaneGcsModule from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.js";
 import wasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm";
+import {
+    type BSplineCurve2d,
+    type BSplineParametrization,
+    bsplinePoints,
+    closestBSplineParameter,
+    interpolateBSpline,
+    interpolateBSplineAt,
+} from "./bsplineGeometry";
 
 /**
  * The sketch constraint kinds. The numeric values are persisted in sketch data, so
@@ -77,6 +92,17 @@ export enum ConstraintKind {
     EqualAngle = 30,
     /** Two segments and a positive ratio: length(first) = ratio * length(second). */
     Scale = 31,
+    /**
+     * p.x, p.y — the point lies on a B-spline curve (`SolverSystem.add_point_on_bspline`); its curve
+     * parameter is a hidden solver param, so the point slides along the curve.
+     */
+    PointOnBSpline = 32,
+    /**
+     * l1.p1, l1.p2, a, b, each (x, y): the line runs along a B-spline's end tangent — parallel to the
+     * end pole segment a → b (a clamped curve leaves its end along the first / last pole leg). A
+     * direction only: the joint itself is a coincidence of its own.
+     */
+    TangentLineBSpline = 33,
 }
 
 /** Param count and trailing datum count of every kind. */
@@ -85,6 +111,8 @@ const LAYOUT: Record<ConstraintKind, { params: number; datums: number }> = {
     [ConstraintKind.Block]: { params: 0, datums: 0 },
     [ConstraintKind.EqualAngle]: { params: 16, datums: 0 },
     [ConstraintKind.Scale]: { params: 9, datums: 1 },
+    [ConstraintKind.PointOnBSpline]: { params: 2, datums: 0 },
+    [ConstraintKind.TangentLineBSpline]: { params: 8, datums: 0 },
     [ConstraintKind.P2PCoincident]: { params: 4, datums: 0 },
     [ConstraintKind.P2PDistance]: { params: 5, datums: 1 },
     [ConstraintKind.Equal]: { params: 2, datums: 0 },
@@ -150,6 +178,7 @@ export interface SolverDiagnosis {
 
 interface ModuleStatic {
     GcsSystem: new () => GcsSystem;
+    IntVector: new () => IntVector;
 }
 
 interface ConstraintRecord {
@@ -159,7 +188,45 @@ interface ConstraintRecord {
     readonly internal: boolean;
     /** Solver-only params this constraint owns (foot points, arc radii); removed with it. */
     readonly hidden: readonly number[];
+    /** The B-spline curve a curve constraint (`PointOnBSpline`) acts on. */
+    readonly curve?: number;
 }
+
+/**
+ * An interpolating B-spline in the native system: the fit points are ordinary params (a sketch
+ * entity's points), the poles solver-only params, and each fit point is held on the curve at its
+ * fit parameter — so constraints on the fit points drive the curve, and curve constraints
+ * (`PointOnBSpline`, an end tangent over the poles) act back on the fit points. The poles are
+ * determined by the fit points (as many poles as fit points): the curve adds no degree of freedom.
+ */
+interface CurveRecord {
+    /** Fit point param ids, (x, y) pairs in curve order. */
+    readonly fit: readonly number[];
+    /** Pole param ids, (x, y) pairs; owned by the curve. */
+    readonly poles: readonly number[];
+    readonly periodic: boolean;
+    readonly parametrization: BSplineParametrization;
+    /**
+     * The knot layout (knots, multiplicities, fit parameters) the native curve is built with, and
+     * the poles last interpolated on it. PlaneGCS caches a curve's knots when the curve's equations
+     * are created, so new knot values take a rebuild (`updateCurveKnots`).
+     */
+    shape: BSplineCurve2d;
+    /** Fit values the knot layout was computed from — what `curvesMoved` compares against. */
+    knotFit: number[];
+}
+
+/** Tags of the curves' own equations sit above every constraint tag (constraint id + 1). */
+const CURVE_TAG_BASE = 1 << 28;
+
+/**
+ * A fine solve re-solves (at most this often) while the fit points moved off their knot values;
+ * each pass shrinks the knot mismatch roughly twentyfold (an end tangent solved with the other fit
+ * points held needs four to five passes to meet 1e-7).
+ */
+const CURVE_REFRESH_PASSES = 8;
+/** Fit points moving less than this since the knots were computed keep the solve as it is. */
+const CURVE_REFRESH_TOLERANCE = 1e-10;
 
 let planeGcs: ModuleStatic | undefined;
 let initPromise: Promise<void> | undefined;
@@ -212,9 +279,12 @@ export class SolverSystem {
     private readonly values: number[] = [];
     private readonly alive: boolean[] = [];
     private readonly constraints: (ConstraintRecord | undefined)[] = [];
+    private readonly curves: (CurveRecord | undefined)[] = [];
     private readonly dragged = new Set<number>();
 
     private native: GcsSystem | undefined;
+    /** Native B-spline objects by curve id, valid while `native` is current. */
+    private nativeCurves = new Map<number, BSpline>();
     /** Native param index of every live param, valid while `native` is current. */
     private nativeIndex: number[] = [];
     /** Params the native system treats as fixed inputs (datums). */
@@ -265,6 +335,9 @@ export class SolverSystem {
                 throw new Error(`ParamInUse: param ${id} is referenced by a constraint`);
             }
         }
+        for (const curve of this.curves) {
+            if (curve?.fit.includes(id)) throw new Error(`ParamInUse: param ${id} is a B-spline fit point`);
+        }
         this.alive[id] = false;
         this.dragged.delete(id);
         this.invalidate();
@@ -292,6 +365,8 @@ export class SolverSystem {
     ): number {
         const layout = LAYOUT[kind];
         if (layout === undefined) throw new Error(`Unknown constraint kind: ${kind}`);
+        if (kind === ConstraintKind.PointOnBSpline)
+            throw new Error("PointOnBSpline is added with add_point_on_bspline");
         if (!driving) throw new Error("Reference (non-driving) constraints are not supported");
         const ids = Array.from(params);
         if (datum !== null && datum !== undefined) {
@@ -329,6 +404,179 @@ export class SolverSystem {
         this.invalidate();
     }
 
+    // ------------------------------------------------------------------ B-spline curves
+
+    /**
+     * Adds the interpolating B-spline through the fit point params `fit` ((x, y) pairs in curve
+     * order), with its poles as new solver-only params. Fails, touching nothing, when the fit
+     * points do not interpolate (`interpolateBSpline`). Returns the curve id.
+     */
+    add_bspline(fit: readonly number[], periodic: boolean, parametrization: BSplineParametrization): number {
+        for (const id of fit) this.assertParam(id);
+        const values = fit.map((id) => this.values[id]);
+        const shape = interpolateBSpline(bsplinePoints(values), { periodic, parametrization });
+        if (!shape.isOk) throw new Error(shape.error);
+        if (shape.value.poles.length * 2 !== fit.length) {
+            throw new Error(
+                "B-spline fit points must be distinct: a periodic curve does not repeat its first",
+            );
+        }
+        const poles = shape.value.poles.flatMap(([x, y]) => [this.pushParam(x), this.pushParam(y)]);
+        this.curves.push({
+            fit: [...fit],
+            poles,
+            periodic,
+            parametrization,
+            shape: shape.value,
+            knotFit: values,
+        });
+        this.invalidate();
+        return this.curves.length - 1;
+    }
+
+    /** Removes a curve and its poles. A curve still referenced by a live constraint cannot be removed. */
+    remove_bspline(id: number): void {
+        const curve = this.curves[id];
+        if (curve === undefined) throw new Error(`UnknownCurve: ${id}`);
+        for (const record of this.constraints) {
+            if (record === undefined) continue;
+            if (record.curve === id || record.params.some((param) => curve.poles.includes(param))) {
+                throw new Error(`CurveInUse: curve ${id} is referenced by a constraint`);
+            }
+        }
+        for (const pole of curve.poles) {
+            this.alive[pole] = false;
+            this.dragged.delete(pole);
+        }
+        this.curves[id] = undefined;
+        this.invalidate();
+    }
+
+    /** Pole param ids of a curve, (x, y) pairs — the end tangent constraint's legs. */
+    bspline_poles(id: number): readonly number[] {
+        const curve = this.curves[id];
+        if (curve === undefined) throw new Error(`UnknownCurve: ${id}`);
+        return curve.poles;
+    }
+
+    /** The curve's current shape (poles from the solver params, knots of the last refresh). */
+    bspline_shape(id: number): BSplineCurve2d {
+        const curve = this.curves[id];
+        if (curve === undefined) throw new Error(`UnknownCurve: ${id}`);
+        return this.shapeOf(curve);
+    }
+
+    /**
+     * Holds the point (px, py) on the curve; its curve parameter is a hidden param starting at the
+     * parameter closest to the point. Returns the constraint id (removed with `remove_constraint`).
+     */
+    add_point_on_bspline(curveId: number, px: number, py: number): number {
+        const curve = this.curves[curveId];
+        if (curve === undefined) throw new Error(`UnknownCurve: ${curveId}`);
+        this.assertParam(px);
+        this.assertParam(py);
+        const u = closestBSplineParameter(this.shapeOf(curve), [this.values[px], this.values[py]]);
+        this.constraints.push({
+            kind: ConstraintKind.PointOnBSpline,
+            params: [px, py],
+            internal: false,
+            hidden: [this.pushParam(u)],
+            curve: curveId,
+        });
+        this.invalidate();
+        return this.constraints.length - 1;
+    }
+
+    private shapeOf(curve: CurveRecord): BSplineCurve2d {
+        const poles = [];
+        for (let i = 0; i < curve.poles.length; i += 2) {
+            poles.push([this.values[curve.poles[i]], this.values[curve.poles[i + 1]]] as [number, number]);
+        }
+        return { ...curve.shape, poles };
+    }
+
+    /**
+     * Recomputes each curve's knot layout from its fit points' current values (chord-length and
+     * centripetal knots follow the points); a layout that changed invalidates the native system,
+     * whose curves cache their knots. Run before a fine solve — never in a drag frame, which keeps
+     * the layout it started with and stays cheap. A fit set that no longer interpolates (two points
+     * dragged together) keeps its previous layout.
+     */
+    private updateCurveKnots(): void {
+        for (const curve of this.curves) {
+            if (curve === undefined) continue;
+            const values = curve.fit.map((id) => this.values[id]);
+            const shape = interpolateBSpline(bsplinePoints(values), {
+                periodic: curve.periodic,
+                parametrization: curve.parametrization,
+            });
+            if (!shape.isOk || shape.value.poles.length * 2 !== curve.poles.length) continue;
+            curve.knotFit = values;
+            const same =
+                shape.value.degree === curve.shape.degree &&
+                shape.value.knots.every((knot, i) => knot === curve.shape.knots[i]) &&
+                shape.value.parameters.every((parameter, i) => parameter === curve.shape.parameters[i]);
+            if (same) continue;
+            curve.shape = shape.value;
+            this.invalidate();
+        }
+    }
+
+    /**
+     * Re-interpolates every curve's poles from its fit points' current values, on its current knot
+     * layout, and writes them into the model and the native system — before each solve, so a
+     * curve's own equations start satisfied: dragging one fit point moves the poles, never the
+     * other fit points (a least-change step would otherwise spread the drag over them). What a
+     * constraint asks of a curve (an end pulled, an end tangent turned) is kept off the fit points
+     * no constraint names by `solveWithFreeFitPointsPinned`; they move only when the constraints
+     * cannot be met without them.
+     */
+    private refreshCurvePoles(native: GcsSystem): void {
+        for (const curve of this.curves) {
+            if (curve === undefined) continue;
+            const values = curve.fit.map((id) => this.values[id]);
+            const shape = interpolateBSplineAt(bsplinePoints(values), curve.shape);
+            if (!shape.isOk) continue;
+            curve.shape = shape.value;
+            shape.value.poles.forEach(([x, y], i) => {
+                for (const [id, value] of [
+                    [curve.poles[2 * i], x],
+                    [curve.poles[2 * i + 1], y],
+                ]) {
+                    this.values[id] = value;
+                    native.set_p_param(this.nativeIndex[id], value, this.isFixed(id));
+                }
+            });
+        }
+    }
+
+    /** Whether a solve moved any curve's fit points off the values its knots were computed from. */
+    private curvesMoved(): boolean {
+        return this.curves.some(
+            (curve) =>
+                curve !== undefined &&
+                curve.parametrization !== "uniform" &&
+                curve.fit.some(
+                    (id, i) => Math.abs(this.values[id] - curve.knotFit[i]) > CURVE_REFRESH_TOLERANCE,
+                ),
+        );
+    }
+
+    /** The native system, current, with every curve's knots and poles refreshed (see above). */
+    private preparedNative(fine: boolean): GcsSystem {
+        if (fine) this.updateCurveKnots();
+        const native = this.ensureBuilt();
+        this.refreshCurvePoles(native);
+        return native;
+    }
+
+    /** @internal The native B-spline object of a curve, while the native system is current. */
+    nativeCurve(id: number): BSpline {
+        const curve = this.nativeCurves.get(id);
+        if (curve === undefined) throw new Error(`UnknownCurve: ${id}`);
+        return curve;
+    }
+
     // ------------------------------------------------------------------ Dragging
 
     /** Pins `ids` at their current values (set them to the cursor first) until `clear_dragged`. */
@@ -351,9 +599,48 @@ export class SolverSystem {
 
     /** Solves the system; `fine` is a full solve, otherwise a capped one for drag frames. */
     solve(fine: boolean): SolveReport {
-        const native = this.ensureBuilt();
+        let { report, pinDropped } = this.solveOnce(fine, true);
+        // chord-length knots follow the fit points: a fine solve that moved them re-solves against
+        // fresh knots, so the solved curve is the one the edges are built from. Once the pinned
+        // solve was dropped, the free fit points have moved with the plain solve: the passes refine
+        // that solution plain too (pinning them again would pull it towards the dropped one)
+        let pin = !pinDropped;
+        for (let pass = 0; fine && pass < CURVE_REFRESH_PASSES && this.curvesMoved(); pass++) {
+            ({ report, pinDropped } = this.solveOnce(fine, pin));
+            pin &&= !pinDropped;
+        }
+        return report;
+    }
+
+    /**
+     * One solve against the current knots; `pin` runs the pinned pre-solve first
+     * (`solveWithFreeFitPointsPinned`). `pinDropped`: a pinned solve ran and its solution was not
+     * kept (it failed, collapsed a line, or left the full system unsolvable from there).
+     */
+    private solveOnce(fine: boolean, pin: boolean): { report: SolveReport; pinDropped: boolean } {
+        const previous = this.native;
+        let native = this.preparedNative(fine);
+        const fresh = native !== previous;
         native.set_max_iterations(fine ? this.defaultMaxIterations : COARSE_MAX_ITERATIONS);
+        const pinned = pin ? this.solveWithFreeFitPointsPinned(native) : undefined;
+        let pinDropped = pinned !== undefined && !pinned.applied;
+        if (pinned !== undefined && fresh) {
+            // a native system takes its DOF count and conflict diagnosis from its first solve, so
+            // one first solved pinned is replaced: the solve below is the new one's first
+            native = this.rebuilt(fine);
+        }
+        // the solve that reports runs unpinned: after a pinned solve that succeeded it starts
+        // converged and moves nothing
         let status = native.solve_system(DOG_LEG);
+        if (pinned?.applied && !this.reportable(native, status)) {
+            // the pinned solution satisfied the constraints in a way the full system cannot build
+            // on (a configuration it diagnoses, or one it cannot leave): drop it and solve plain
+            // from where the solve started
+            this.restoreValues(pinned.before);
+            pinDropped = true;
+            native = this.rebuilt(fine);
+            status = native.solve_system(DOG_LEG);
+        }
         if (!isSolved(status) && this.dragged.size > 0) {
             // the dragged position may be off the geometry's reach (a point held on a
             // line, say): let the dragged params follow the constraints instead
@@ -368,13 +655,106 @@ export class SolverSystem {
         // an unapplied solve may leave its iterate behind in the native params
         if (!isSolved(status)) this.pushValues(native);
         this.cachedDofs = native.dof();
-        return { result: this.resultOf(native, status) };
+        return { report: { result: this.resultOf(native, status) }, pinDropped };
+    }
+
+    /** A fresh native system for the current values (knots kept: they were refreshed already). */
+    private rebuilt(fine: boolean): GcsSystem {
+        this.invalidate();
+        const native = this.preparedNative(false);
+        native.set_max_iterations(fine ? this.defaultMaxIterations : COARSE_MAX_ITERATIONS);
+        return native;
+    }
+
+    /** Whether a solve ended solved and without a conflict — a result worth reporting as is. */
+    private reportable(native: GcsSystem, status: number): boolean {
+        return isSolved(status) && !native.has_conflicting() && !native.has_redundant();
+    }
+
+    /** Writes back a snapshot of `values` (the params alive now), undoing every solve since. */
+    private restoreValues(snapshot: readonly number[]): void {
+        for (let id = 0; id < snapshot.length; id++) {
+            if (this.alive[id]) this.values[id] = snapshot[id];
+        }
+    }
+
+    /**
+     * A curve adds no degree of freedom, but its fit points are free params: a least-norm solver
+     * step spreads whatever a constraint asks of a curve (an end pulled along, an end tangent
+     * turned) over every fit point, so points no constraint names would creep — and in a drag,
+     * where each frame re-interpolates the poles from the fit points, the spread of every frame is
+     * baked in and ratchets. So a solve first runs with those fit points (neither dragged, a datum
+     * nor named by any constraint) held fixed; only when that cannot be solved (a curve that must
+     * reshape to reach a fixed point on it, say) does the plain solve that follows move them.
+     *
+     * A pinned success is not trusted on its own: with the curve held, a constraint can be met
+     * trivially — a zero-length line satisfies the parallel equation an end tangent is emitted as.
+     * A solution that collapsed a line a direction constraint acts on is refused here, and the
+     * caller drops an applied one when the unpinned solve after it does not come out clean.
+     * Returns undefined when no pinned solve ran, else whether its solution was applied and the
+     * values from before it.
+     */
+    private solveWithFreeFitPointsPinned(
+        native: GcsSystem,
+    ): { applied: boolean; before: number[] } | undefined {
+        const pinned = this.freeFitParams();
+        if (pinned.length === 0) return undefined;
+        const pin = (fixed: boolean) => {
+            for (const id of pinned) native.set_p_param(this.nativeIndex[id], this.values[id], fixed);
+        };
+        const before = [...this.values];
+        pin(true);
+        const status = native.solve_system(DOG_LEG);
+        let applied = isSolved(status);
+        if (applied) {
+            this.applySolution(native);
+            if (this.collapsedLine(before)) {
+                this.restoreValues(before);
+                applied = false;
+            }
+        }
+        if (!applied) this.pushValues(native);
+        pin(false);
+        return { applied, before };
+    }
+
+    /**
+     * Whether a line some direction constraint acts on (parallel, perpendicular, angle, tangent,
+     * point on line, …) is now shorter than `LINE_COLLAPSE_TOLERANCE` though it was not in `before`:
+     * such equations hold trivially for a zero-length line.
+     */
+    private collapsedLine(before: readonly number[]): boolean {
+        const length = (values: readonly number[], ids: readonly number[], at: number) =>
+            Math.hypot(values[ids[at + 2]] - values[ids[at]], values[ids[at + 3]] - values[ids[at + 1]]);
+        for (const record of this.constraints) {
+            if (record === undefined) continue;
+            for (const at of directionLines(record)) {
+                const collapsed = length(this.values, record.params, at) < LINE_COLLAPSE_TOLERANCE;
+                if (collapsed && length(before, record.params, at) >= LINE_COLLAPSE_TOLERANCE) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Fit point params that are neither dragged, datums nor referenced by any constraint. */
+    private freeFitParams(): number[] {
+        if (!this.curves.some((curve) => curve !== undefined)) return [];
+        const named = new Set<number>();
+        for (const record of this.constraints) {
+            if (record !== undefined) for (const id of record.params) named.add(id);
+        }
+        const free: number[] = [];
+        for (const curve of this.curves) {
+            if (curve === undefined) continue;
+            for (const id of curve.fit) if (!named.has(id) && !this.isFixed(id)) free.push(id);
+        }
+        return free;
     }
 
     /** Degrees of freedom of the whole system (dragged params count as free). */
     dofs(): number {
         if (this.cachedDofs === undefined || this.dirty) {
-            const native = this.ensureBuilt();
+            const native = this.preparedNative(true);
             native.solve_system(DOG_LEG);
             this.cachedDofs = native.dof();
             this.pushValues(native);
@@ -384,7 +764,7 @@ export class SolverSystem {
 
     /** Conflicting and redundant constraint ids, and the DOF count, as of a fresh solve. */
     diagnose(): SolverDiagnosis {
-        const native = this.ensureBuilt();
+        const native = this.preparedNative(true);
         native.solve_system(DOG_LEG);
         const diagnosis = {
             conflicting: this.constraintIdsOf(native.get_conflicting()),
@@ -396,9 +776,15 @@ export class SolverSystem {
     }
 
     free(): void {
+        this.deleteNativeCurves();
         this.native?.delete();
         this.native = undefined;
         this.dirty = true;
+    }
+
+    private deleteNativeCurves(): void {
+        for (const curve of this.nativeCurves.values()) curve.delete();
+        this.nativeCurves.clear();
     }
 
     // ------------------------------------------------------------------ Model helpers
@@ -504,6 +890,8 @@ export class SolverSystem {
     private constraintIdsOf(tags: { size(): number; get(i: number): number; delete(): void }): number[] {
         const ids: number[] = [];
         for (let i = 0; i < tags.size(); i++) {
+            // a curve's own equations are no constraint of the caller's
+            if (tags.get(i) >= CURVE_TAG_BASE) continue;
             const id = tags.get(i) - 1;
             if (!ids.includes(id)) ids.push(id);
         }
@@ -523,6 +911,7 @@ export class SolverSystem {
 
     private ensureBuilt(): GcsSystem {
         if (!this.dirty && this.native !== undefined) return this.native;
+        this.deleteNativeCurves();
         this.native?.delete();
         const native = new this.module.GcsSystem();
         native.set_debug_mode(0);
@@ -548,6 +937,9 @@ export class SolverSystem {
             // native DOF count keeps treating them as free
             this.nativeIndex[id] = native.push_p_param(this.values[id], this.datumParams.has(id));
         }
+        this.curves.forEach((curve, id) => {
+            if (curve !== undefined) this.emitCurve(native, curve, id);
+        });
         this.constraints.forEach((record, id) => {
             if (record !== undefined) new NativeConstraintBuilder(native, this, record, id + 1).emit();
         });
@@ -556,6 +948,62 @@ export class SolverSystem {
         this.dirty = false;
         this.applyDragged(this.dragged.size > 0);
         return native;
+    }
+
+    /**
+     * The native B-spline of a curve, and its interpolation equations: each fit point on the curve
+     * at its (fixed) fit parameter. A clamped curve starts and ends on its first and last pole, a
+     * periodic one has no ends (its first fit point stands in for them).
+     */
+    private emitCurve(native: GcsSystem, curve: CurveRecord, id: number): void {
+        const { module } = this;
+        const index = (paramId: number) => this.nativeIndex[paramId];
+        const vector = (values: readonly number[]) => {
+            const out = new module.IntVector();
+            for (const value of values) out.push_back(value);
+            return out;
+        };
+        const shape = curve.shape;
+        const knots = shape.knots.map((knot) => native.push_p_param(knot, true));
+        const weights = shape.poles.map(() => native.push_p_param(1, true));
+        const [sx, sy, ex, ey] = curve.periodic
+            ? [curve.fit[0], curve.fit[1], curve.fit[0], curve.fit[1]]
+            : [
+                  curve.poles[0],
+                  curve.poles[1],
+                  curve.poles[curve.poles.length - 2],
+                  curve.poles[curve.poles.length - 1],
+              ];
+        const vectors = [
+            vector(curve.poles.map(index)),
+            vector(weights),
+            vector(knots),
+            vector(shape.multiplicities),
+        ];
+        try {
+            const bspline = native.make_bspline(
+                index(sx),
+                index(sy),
+                index(ex),
+                index(ey),
+                vectors[0],
+                vectors[1],
+                vectors[2],
+                vectors[3],
+                shape.degree,
+                curve.periodic,
+            );
+            this.nativeCurves.set(id, bspline);
+            const tag = CURVE_TAG_BASE + id;
+            shape.parameters.forEach((parameter, i) => {
+                const u = native.push_p_param(parameter, true);
+                const point = native.make_point(index(curve.fit[2 * i]), index(curve.fit[2 * i + 1]));
+                native.add_constraint_point_on_bspline(point, bspline, u, tag, true, 1);
+                point.delete();
+            });
+        } finally {
+            for (const v of vectors) v.delete();
+        }
     }
 
     /** Toggles the fixed flag of every dragged param in the current native system. */
@@ -591,6 +1039,38 @@ export class SolverSystem {
     /** @internal Current value of a param. */
     valueOf(id: number): number {
         return this.values[id];
+    }
+}
+
+/** Below this length a line a direction constraint acts on counts as collapsed (see `collapsedLine`). */
+const LINE_COLLAPSE_TOLERANCE = 1e-6;
+
+/**
+ * Offsets (into a constraint's params) of the lines, each (x1, y1, x2, y2), whose direction the
+ * constraint's equations use — equations a zero-length line satisfies whatever its direction.
+ */
+function directionLines(record: ConstraintRecord): number[] {
+    switch (record.kind) {
+        case ConstraintKind.Horizontal:
+        case ConstraintKind.Vertical:
+        case ConstraintKind.TangentLineCircle:
+        case ConstraintKind.TangentLineArc:
+        case ConstraintKind.Collinear:
+            return [0];
+        case ConstraintKind.Parallel:
+        case ConstraintKind.Perpendicular:
+        case ConstraintKind.Angle:
+        case ConstraintKind.TangentLineBSpline:
+            return [0, 4];
+        case ConstraintKind.EqualAngle:
+            return [0, 4, 8, 12];
+        case ConstraintKind.PointOnLine:
+        case ConstraintKind.P2LDistance:
+            return [2];
+        case ConstraintKind.Symmetric:
+            return [4];
+        default:
+            return [];
     }
 }
 
@@ -730,7 +1210,18 @@ class NativeConstraintBuilder {
                 native.add_constraint_vertical_pp(this.pt(0), this.pt(2), tag, true, 1);
                 return;
             case ConstraintKind.Parallel:
+            case ConstraintKind.TangentLineBSpline:
                 native.add_constraint_parallel(this.line(0), this.line(4), tag, true, 1);
+                return;
+            case ConstraintKind.PointOnBSpline:
+                native.add_constraint_point_on_bspline(
+                    this.pt(0),
+                    this.system.nativeCurve(this.record.curve!),
+                    this.h(0),
+                    tag,
+                    true,
+                    1,
+                );
                 return;
             case ConstraintKind.Perpendicular:
                 native.add_constraint_perpendicular_pppp(

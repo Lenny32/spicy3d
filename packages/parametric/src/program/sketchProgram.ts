@@ -14,6 +14,11 @@ import {
 import { isBodyTrackingNode } from "../features/bodyTracking";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { applyAutoConstraints } from "../sketch/autoConstraints";
+import {
+    BSPLINE_PARAMETRIZATIONS,
+    type BSplineParametrization,
+    bsplinePoints,
+} from "../sketch/bsplineGeometry";
 import { addPolygon } from "../sketch/commands/sketchPolygon";
 import { addRectangle } from "../sketch/commands/sketchRectangle";
 import { applyDimensions, suggestDimensions } from "../sketch/editor/constraintAnalyzer";
@@ -43,6 +48,7 @@ import type { SketchNode } from "../sketch/sketchNode";
 import { SketchSolver } from "../sketch/solver";
 import {
     arcStartRef,
+    bsplineTangentConstraintFor,
     centerRef,
     constraintTargetEntities,
     lineRefs,
@@ -71,8 +77,15 @@ export interface SketchPointSpec {
 export interface SketchEntitySpec {
     type: SketchEntityType;
     params?: number[];
-    /** Spline only: the interpolation points, first and last are the endpoints. */
+    /**
+     * Spline and bspline: the points in curve order (instead of `params`). A spline's first and
+     * last are its endpoints; a bspline's are all fit points (point index i = point i).
+     */
     points?: [number, number][];
+    /** Bspline only: `chord` (default), `centripetal` or `uniform`. */
+    parametrization?: BSplineParametrization;
+    /** Bspline only: a closed C2 curve; the first point is not repeated as the last. */
+    periodic?: boolean;
     construction?: boolean;
     /** Names the entity for later refs in this program. */
     name?: string;
@@ -435,6 +448,22 @@ export class SketchSession {
     }
 
     private createEntity(spec: SketchEntitySpec): number {
+        if (spec.type === "bspline") {
+            const parametrization = spec.parametrization ?? "chord";
+            if (!BSPLINE_PARAMETRIZATIONS.includes(parametrization)) {
+                throw new Error(
+                    `unknown parametrization "${parametrization}" (${BSPLINE_PARAMETRIZATIONS.join(", ")})`,
+                );
+            }
+            if (spec.periodic !== undefined && typeof spec.periodic !== "boolean") {
+                throw new Error('"periodic" must be true or false');
+            }
+            // stored params are the fit points in curve order, exactly what addBSpline takes
+            const points = spec.points ?? bsplinePoints(evenParams(spec.params ?? [], "bspline params"));
+            const id = this.solver.addBSpline(points, { parametrization, periodic: spec.periodic === true });
+            if (!id.isOk) throw new Error(id.error);
+            return id.value;
+        }
         if (spec.type === "spline") {
             // stored params are [start, end, ...interior]; addSpline takes them in curve order
             const points = spec.points ?? splinePoints(evenParams(spec.params ?? [], "spline params"));
@@ -727,7 +756,9 @@ export class SketchSession {
             case "Tangent": {
                 need(2, "two entities");
                 const [a, b] = entities;
-                const tangent = tangentConstraintFor(typeOf(a), a, typeOf(b), b);
+                const tangent =
+                    tangentConstraintFor(typeOf(a), a, typeOf(b), b) ??
+                    bsplineTangentConstraintFor(this.solver, a, b);
                 if (tangent === undefined) throw new Error("tangent does not apply to this pair of entities");
                 return [this.withDatums(tangent.kind, spec, tangent.refs)];
             }
@@ -752,7 +783,14 @@ export class SketchSession {
                             arcStartRef(target),
                         ]),
                     ];
-                throw new Error('"PointOn" targets a line, circle or arc');
+                if (type === "bspline")
+                    return [
+                        this.withDatums(ConstraintKind.PointOnBSpline, spec, [
+                            points[0],
+                            { entityId: target, pointIndex: 0 },
+                        ]),
+                    ];
+                throw new Error('"PointOn" targets a line, circle, arc or bspline');
             }
             case "PointOnLine":
             case "Midpoint":
@@ -862,14 +900,17 @@ export class SketchSession {
     private pointRef(spec: SketchPointSpec): SketchPointRef {
         const entityId = this.entityId(spec?.entity);
         const pointIndex = spec.point ?? 0;
-        const type = isDatumEntityId(entityId)
-            ? entityId === SKETCH_ORIGIN_ID
-                ? "point"
-                : "line"
-            : (this.solver.entity(entityId)?.type ??
-              this.solver.externalEntitiesData().find((e) => e.id === entityId)?.type);
-        if (type === undefined) throw new Error(`unknown sketch entity ${entityId}`);
-        if (!Number.isInteger(pointIndex) || pointIndex < 0 || pointIndex >= entityPointCount(type)) {
+        const entity = isDatumEntityId(entityId)
+            ? { type: entityId === SKETCH_ORIGIN_ID ? ("point" as const) : ("line" as const), params: [] }
+            : (this.solver.entity(entityId) ??
+              this.solver.externalEntitiesData().find((e) => e.id === entityId));
+        if (entity === undefined) throw new Error(`unknown sketch entity ${entityId}`);
+        const { type } = entity;
+        if (
+            !Number.isInteger(pointIndex) ||
+            pointIndex < 0 ||
+            pointIndex >= entityPointCount(type, entity.params)
+        ) {
             throw new Error(`point ${pointIndex} does not exist on ${type} ${entityId}`);
         }
         return { entityId, pointIndex };
@@ -999,8 +1040,9 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
                   : "fixed",
             entities: data.entities.map((entity) => ({
                 ...entity,
-                points: Array.from({ length: entityPointCount(entity.type) }, (_, pointIndex) =>
-                    solver.pointOf({ entityId: entity.id, pointIndex }),
+                points: Array.from(
+                    { length: entityPointCount(entity.type, entity.params) },
+                    (_, pointIndex) => solver.pointOf({ entityId: entity.id, pointIndex }),
                 ),
             })),
             constraints: data.constraints.map((c) => {

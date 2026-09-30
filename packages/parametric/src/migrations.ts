@@ -16,8 +16,13 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * those bodies with "Unknown feature type".
  */
 export const PARAMETRIC_FORMAT_VERSION = 5;
-/** Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references). */
-export const SKETCH_FORMAT_VERSION = 1;
+/**
+ * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
+ * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
+ * and `periodic`) and the `PointOnBSpline` / `TangentLineBSpline` constraint kinds — a build reading
+ * only v1 knows neither and could not solve or build those sketches.
+ */
+export const SKETCH_FORMAT_VERSION = 2;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -38,3 +43,7 @@ registerMigration("parametric", 3, (document) => document);
 
 // parametric 4 → 5: the `thicken` feature type is new; every v4 feature list is a valid v5 one.
 registerMigration("parametric", 4, (document) => document);
+
+// sketch 1 → 2: the `bspline` entity type and its two constraint kinds are new; every v1 sketch is a
+// valid v2 one (the `spline` entity is unchanged) — no data to rewrite.
+registerMigration("sketch", 1, (document) => document);
