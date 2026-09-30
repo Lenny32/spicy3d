@@ -157,7 +157,13 @@ public:
     static BoundingBox boundingBox(const TopoDS_Shape& shape, bool useTriangulation)
     {
         Bnd_Box obx;
-        BRepBndLib::Add(shape, obx, useTriangulation);
+        if (useTriangulation) {
+            BRepBndLib::Add(shape, obx, true);
+        } else {
+            // Exact box from the geometry: plain Add is loose on B-spline / offset geometry
+            // (pole hulls) and widened by the shape tolerance.
+            BRepBndLib::AddOptimal(shape, obx, false, false);
+        }
         // A shape without geometry (e.g. an empty compound) leaves a void box, whose corners raise.
         if (obx.IsVoid()) {
             return BoundingBox { Vector3 { 0.0, 0.0, 0.0 }, Vector3 { 0.0, 0.0, 0.0 } };

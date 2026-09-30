@@ -191,15 +191,10 @@ export class OccShape implements IShape {
     }
 
     boundingBox(): BoundingBox {
-        if (!this._boundingBox) {
-            const points =
-                this.mesh.faces?.position ?? this.mesh.edges?.position ?? this.mesh.vertexs?.position ?? [];
-            if (points.length > 0) {
-                this._boundingBox = BoundingBox.fromNumbers(points);
-            } else {
-                this._boundingBox = wasm.Shape.boundingBox(this.shape, this._mesh !== undefined);
-            }
-        }
+        // Query geometry bounds without building a display mesh. Bounds that depend on
+        // whether meshing happened first would make the face fingerprints built on them
+        // (ProfileRef centers) order-dependent.
+        this._boundingBox ??= wasm.Shape.boundingBox(this.shape, false);
         return this._boundingBox;
     }
 

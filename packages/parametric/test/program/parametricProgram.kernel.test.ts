@@ -89,7 +89,11 @@ function createdBody(
 /** Every top-level node id in the document, for the "nothing was left behind" assertions. */
 const nodeIds = (doc: TestDocument) => doc.modelManager.findNodes(() => true).map((n) => n.id);
 
-const round = (x: number) => Math.round(x * 1e6) / 1e6;
+const round = (x: number) => {
+    const rounded = Math.round(x * 1e6) / 1e6;
+    // Geometry bounds can approach zero from either side; their sign is irrelevant after rounding.
+    return Object.is(rounded, -0) ? 0 : rounded;
+};
 
 function extent(body: ParametricBodyNode): number[] {
     const box = body.shape.unchecked()!.boundingBox();
