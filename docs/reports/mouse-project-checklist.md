@@ -56,8 +56,8 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #83 Support variable-radius fillets | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
-| #86 Expose persistent edge references through MCP | #100 | Implementing | mouse_86 | mouse/86-persistent-edges | Pending | — | — |
-| #87 Add rule-based edge selection through MCP | #86 | Queued | — | — | Pending | — | — |
+| #86 Expose persistent edge references through MCP | #100 | Done (pushed) | mouse_86 | mouse/86-persistent-edges | 127 worker tests; 57 integrated tests; tsc/check | 91f48b5e47ac39c510a31a0dd0546874f226b224 | — |
+| #87 Add rule-based edge selection through MCP | #86 | Implementing | mouse_86 | mouse/87-edge-selectors | Pending | — | — |
 | #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
@@ -122,3 +122,12 @@ worker native failure is latched, and MCP run_program still uses synchronous nat
 
 #86 reuses the existing saved EdgeRef shape through a runtime query/selection API; #101 reuses
 existing MeshNode and Material payloads via a distinct STL mesh import. Neither needs migrations.
+
+#86 is integrated: the `edges` query returns body-scoped persistent references, and fillet/chamfer
+accept `edgeRefs` across calls. Real-kernel regressions prove references survive actual index drift
+after an extrusion edit and boolean cut; malformed, wrong-body, unresolved and ambiguous refs fail
+before feature append. Five tickets are delivered; 21 remain. #87 is now active after #86.
+
+The initial OCCT compilation on `/mnt/d` was too slow. The pinned toolchain and final #81 sources
+are being copied to a unique WSL `/tmp/spicy3d-mouse-native.*` build directory; release artifacts
+will be copied back to #81's worktree before native regression validation and integration.
