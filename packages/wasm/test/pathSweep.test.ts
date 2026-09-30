@@ -67,6 +67,8 @@ describe("tracked pipe-shell sweep", () => {
         expect(start).not.toBeUndefined();
         if (!start) throw new Error("Circle has no initial point");
         const tangent = vec.normalize();
+        expect(tangent).not.toBeUndefined();
+        if (!tangent) throw new Error("Circle has no initial tangent");
         const section = unwrapOk(f.wire([unwrapOk(f.circle(tangent, start, 1))]));
         const result = unwrapOk(f.sweepTracked(section, path, true, false));
         expect(result.shape.checkShape()).toBe(true);
