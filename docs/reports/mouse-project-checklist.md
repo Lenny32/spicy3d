@@ -57,7 +57,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #84 Support fillet corner setbacks | #81, #82; shared schema | Queued | — | — | Pending | — | — |
 | #85 Support guide and boundary curves in parametric lofts | Shared schema; kernel feasibility | Queued | — | — | Pending | — | — |
 | #86 Expose persistent edge references through MCP | #100 | Done (pushed) | mouse_86 | mouse/86-persistent-edges | 127 worker tests; 57 integrated tests; tsc/check | 91f48b5e47ac39c510a31a0dd0546874f226b224 | — |
-| #87 Add rule-based edge selection through MCP | #86 | Implementing | mouse_86 | mouse/87-edge-selectors | Pending | — | — |
+| #87 Add rule-based edge selection through MCP | #86 | Done (pushed) | mouse_86 | mouse/87-edge-selectors | 138 worker tests; 65 integrated tests; tsc/check | ca359de87e2b1b52e6d2132bd679d9fbb6e4b322 | — |
 | #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
@@ -143,3 +143,10 @@ mutations remain serialized and use asynchronous transactions with exact referen
 safe metadata reads expose committed state while geometry is pending. Runtime editing locks block
 interactive mutations during the transaction. Existing hybrid parametric opt-in stays unchanged.
 Worker cancellation, full main-kernel recovery and async progress remain separate #97/#98/#92 tasks.
+
+#87 is integrated: selectors intersect feature origin, adjoining face sets, outer-wire/curve
+membership, radius and full-edge elevation. They return persistent refs with empty/ambiguous
+diagnostics and report unselectable degenerate edges. Real-kernel tests exclude holes from outer
+outlines and distinguish cylinder rims from sphere/torus edges. Seven tickets delivered; 19 remain.
+The app and all three plugins build after #86/#101. #104 is active in root's isolated worktree;
+#93 is in read-only schema/solver design with mouse_86, pending root's concrete schema approval.
