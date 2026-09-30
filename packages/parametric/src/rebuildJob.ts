@@ -10,6 +10,7 @@ export type RebuildSteps = Generator<RebuildPause, Result<IShape>, void>;
 /** Owns a suspended replay and its timer; cancellation runs the replay's disposal finally. */
 export class RebuildJob {
     readonly settled: Promise<void>;
+    featureIndex?: number;
     private resolve!: () => void;
     private timer?: ReturnType<typeof setTimeout>;
     private done = false;
@@ -36,6 +37,7 @@ export class RebuildJob {
 
     start(pause: RebuildPause): void {
         if (typeof pause === "number") {
+            this.featureIndex = pause;
             this.progress(pause);
             if (!this.done) this.timer = setTimeout(() => this.tick(), 0);
         } else {

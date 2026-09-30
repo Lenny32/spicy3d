@@ -936,7 +936,13 @@ function recordSubShapeRefs(
     results[opId] = { count: refs.length, refs, kind: "shape" };
 }
 
-async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
+export type ProgramProgress = { completed: number; total: number; method?: string };
+
+async function runProgram(
+    ops: Op[],
+    signal?: AbortSignal,
+    progress?: (value: ProgramProgress) => void,
+): Promise<string> {
     const doc = activeDocument();
     const factory = globalThis.app.shapeProvider.factory;
     const assertIdle = () => {
@@ -989,6 +995,7 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
                     variables,
                     signal,
                     owner,
+                    progress,
                 );
                 throwIfCancelled(signal, ops.length, "commit");
                 owner.run(() => {
@@ -1051,10 +1058,12 @@ async function runOps(
     variables: ProgramVariables,
     signal: AbortSignal | undefined,
     owner: IDocumentMutationScope,
+    progress?: (value: ProgramProgress) => void,
 ): Promise<void> {
     const { created, removed, results } = output;
     for (const [index, op] of ops.entries()) {
         throwIfCancelled(signal, index, String(op.method));
+        progress?.({ completed: index, total: ops.length, method: String(op.method) });
         const numeric: NumericArgs = { ...variables, resolved: {} };
         try {
             await timeOpAsync(
@@ -1066,6 +1075,7 @@ async function runOps(
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
             }
+            progress?.({ completed: index + 1, total: ops.length });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             const where = op.target !== undefined ? `target "${String(op.target)}"` : `id "${op.id ?? ""}"`;
@@ -1410,11 +1420,11 @@ function buildModelingTool(): Tool {
         description:
             'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results" (shape.clone also adds its copy as a new node, listed in "created", so edit ops on the clone never consume the source). The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it). Numeric args take a number or an expression string over the document variables ("wall_t / 2"; lengths in mm and angles in degrees are unit-checked), evaluated ONCE when the op runs — the nodes are not linked to the variables, so use run_parametric for dimensions that must follow them; the values expressions resolved to come back in "resolved" (per op id).',
         parameters: runProgramParameters(),
-        handler: handleRunProgram,
+        handler: (args, signal) => handleRunProgram(args, signal),
     };
 }
 
-function runProgramParameters(): JsonSchema {
+export function runProgramParameters(): JsonSchema {
     return {
         type: "object",
         properties: {
@@ -1467,7 +1477,11 @@ function allOpMethods(): string[] {
     ];
 }
 
-function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+export function handleRunProgram(
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    progress?: (value: ProgramProgress) => void,
+): Promise<string> {
     const ops = Array.isArray(args) ? args : (args as { ops?: unknown }).ops;
     if (!Array.isArray(ops)) {
         return Promise.resolve(
@@ -1476,7 +1490,7 @@ function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): 
             }),
         );
     }
-    return runProgram(ops as Op[], signal);
+    return runProgram(ops as Op[], signal, progress);
 }
 
 export function buildCapabilityTools(): Tool[] {
