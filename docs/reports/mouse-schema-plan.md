@@ -53,6 +53,28 @@ releases need not read the newly saved sketch-3 payload.
 
 ## Reserved later feature payloads
 
-#83/#84, #85, #88/#89/#90 and #94/#95 remain pending kernel feasibility and concrete design.
+#83/#84, #85, #88/#89/#90 and #95 remain pending kernel feasibility and concrete design.
 No worker may bump parametric versions or introduce these fields independently. Assign consecutive
 versions and serialize migration/rule ownership after each payload design is reviewed.
+
+## #94: associative extrusion starting face
+
+Approved owning module version: **parametric 6**, from parametric 5. Worker: `mouse_86`.
+Add optional `startFace?: { nodeId?: string; face: ProfileRef }` to the extrusion payload.
+Absent `startFace` preserves existing extrusion behavior. Reuse `startOffset` as an axial offset
+of the selected starting surface. For distance extent, depth separates the starting surface and
+its translated copy along the extrusion axis; the cap remains exact curved geometry.
+
+Resolve and re-anchor the face using the existing extent timeline rules, and include it in
+dependencies, cache keys and previews. Ambiguous intersections or incomplete coverage fail
+explicitly. A witness may select a split cell but must not approximate the cap. Preserve existing
+profile-origin history and end-cap tracking, including stable curved starting edges.
+
+The pure parametric 5→6 migration is identity. Add an atomic startFace merge field and a NEW
+fixture; existing fixtures remain immutable. The worker owns only this version/migration step
+and corresponding extrusion rule. Other payload versions remain unassigned.
+
+Required proof includes a cylinder-wall boss with nonplanar starting cap, upstream radius edits,
+downstream references, transformed/linked/external timelines, both directions and offsets,
+invalid/ambiguous targets, expressions, old fixtures, merge and UI undo. Serialize native artifact
+builds with #82 and #103 so each committed binary matches all committed C++ sources.
