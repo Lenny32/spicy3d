@@ -3,6 +3,7 @@
 
 import {
     Annotation,
+    AsyncController,
     CancelableCommand,
     Combobox,
     ConstructionNode,
@@ -124,12 +125,27 @@ export class Export extends CancelableCommand {
         property.combobox!.items.push(...app.dataExchange.exportFormats());
     }
 
+    @property("common.confirm")
+    public confirm() {
+        this.controller?.success();
+    }
+
     protected async executeAsync() {
         const nodes = await this.selectNodesAsync();
+        if (this.checkCanceled()) return;
         if (!nodes || nodes.length === 0) {
             PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
             return;
         }
+
+        // Keep the options panel open even when no interactive model pick is needed.
+        const controller = new AsyncController();
+        this.controller = controller;
+        const confirmed = await new Promise<boolean>((resolve) => {
+            controller.onCompleted(() => resolve(true));
+            controller.onCancelled(() => resolve(false));
+        });
+        if (!confirmed || this.checkCanceled()) return;
 
         PubSub.default.pub(
             "showPermanent",
