@@ -61,7 +61,7 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #88 Add a parametric sweep along a 3D path | Shared schema | Queued | — | — | Pending | — | — |
 | #89 Add associative curve projection onto surfaces | Shared schema | Queued | — | — | Pending | — | — |
 | #90 Add a parametric groove or rib along a curve on a face | #88, #89 | Queued | — | — | Pending | — | — |
-| #91 Invalidate feature caches only for dependent variables | — | Integrated; awaiting push | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | Publishing approval pending (auto-review) |
+| #91 Invalidate feature caches only for dependent variables | — | Done (pushed) | mouse_91 | mouse/91-dependent-cache | 154 worker regressions; 131 integrated cache/kernel tests; typecheck/check | 9c18b315741371a09d9b5a0d5679a056b2bced57 | — |
 | #92 Expose asynchronous rebuild progress through MCP | #96; worker architecture | Queued | — | — | Pending | — | — |
 | #93 Support control-point and weighted NURBS in parametric sketches | Shared sketch schema | Queued | — | — | Pending | — | — |
 | #94 Add an associative from-face extrusion start | Shared schema | Queued | — | — | Pending | — | — |
@@ -69,25 +69,26 @@ one request/cancel/recovery protocol before #96/#97/#98/#92 implementation. No s
 | #96 Run expensive kernel operations in a bounded worker | KERNEL-01 architecture | Queued | — | — | Pending | — | — |
 | #97 Cancel an in-flight kernel operation | #96 | Queued | — | — | Pending | — | — |
 | #98 Recover a crashed kernel without reloading the tab | #96, #97 | Queued | — | — | Pending | — | — |
-| #99 Add compact run_parametric responses | #106 (shared program file) | Integrated; awaiting push | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | Publishing approval pending (auto-review) |
-| #100 Do not return subshape references already evicted from the ref store | — | Integrated; awaiting push | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | Publishing approval pending (auto-review) |
+| #99 Add compact run_parametric responses | #106 (shared program file) | Done (pushed) | mouse_99 | mouse/99-compact-responses | 54 integrated MCP/program tests; typecheck/check | ba9a096c5e8ccb49262c874cfaef9d3074ac67d2 | — |
+| #100 Do not return subshape references already evicted from the ref store | — | Done (pushed) | mouse_100 | mouse/100-subshape-refs | 95 integrated capability/skill tests; check | 2df0ca446ccaae926f630881ef2c2a3373324ab8 | — |
 | #101 Import scan files as lightweight reference MeshNodes | — | Queued | — | — | Pending | — | — |
 | #102 Measure CAD-to-reference-mesh deviation | #101 | Queued | — | — | Pending | — | — |
 | #103 Expose STL tessellation tolerance in export | Serialize converter/export API | Queued | — | — | Pending | — | — |
 | #104 Return exported model bytes or a resource through MCP | Serialize export API | Queued | — | — | Pending | — | — |
 | #105 Batch-export separate model files without repeated downloads | #104 | Queued | — | — | Pending | — | — |
-| #106 Honor extrude names when appending to an existing body | — | Integrated; awaiting push | mouse_106 | mouse/106-extrude-names | 38 real-kernel program tests; npm run check | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 | Publishing approval pending (auto-review) |
+| #106 Honor extrude names when appending to an existing body | — | Done (pushed) | mouse_106 | mouse/106-extrude-names | 38 real-kernel program tests; npm run check | e9b6d1b078f74c90deac96b7620dcb9f4808cf20 | — |
 
 ## Opening delivery status
 
-Four tickets are reviewed, locally integrated and validated. The other 22 remain queued; this is
+Four tickets are reviewed, integrated, validated and pushed; their issues carry the [done] prefix and full-SHA validation comments, with labels preserved and issues left open. The other 22 remain queued; this is
 an opening implementation, not completion of the project. Saved document version 2, parametric
 version 5 and sketch version 2 are unchanged; no migrations or merge rules needed changes.
 
-Publishing was rejected by automatic approval review because it did not consider the request to
-start the plan explicit enough to publish the plan/audit to GitHub. A focused approval request is
-pending. No push, PR creation or issue status/comment updates have been performed. The reviewable
-[local draft PR description](mouse-project-pr.md) contains all four integration SHAs.
+The user explicitly approved publication and commits to this branch on 2026-09-30, resolving the
+initial automatic-approval rejection. The branch and reports are published, and the single
+[draft PR #107](https://github.com/Lenny32/spicy3d/pull/107) targets develop. It stays draft while
+22 tickets remain queued. [The PR description](mouse-project-pr.md) lists all four integration SHAs.
+No pushes to develop/main and no PR merge have been performed.
 
 Next correctness work: #81 then #82. Windows lacks CMake on PATH and no local emsdk/OCCT build tree
 was found; WSL Ubuntu has CMake/Ninja, but the WASM prerequisites must be set up before C++ changes

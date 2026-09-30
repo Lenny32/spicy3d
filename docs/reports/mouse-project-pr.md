@@ -2,10 +2,10 @@ Mouse modeling project: correctness fixes and MCP efficiency
 
 Appended join/cut extrusion operations now retain the caller's feature name, and large subshape
 queries keep every returned reference usable. The integration also adds compact parametric
-responses and reuse feature geometry when unrelated document variables change.
+responses and reuses feature geometry when unrelated document variables change.
 
 This is the single draft integration PR for the 26-ticket mouse project. Keep it draft while the
-remaining work is queued. Follow [the durable checklist](docs/reports/mouse-project-checklist.md)
+remaining work is queued. Follow [the durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
 for dependencies, ticket status, full integration SHAs and validation.
 
 | Ticket | Behavior | Integration commit |
@@ -17,7 +17,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 
 Validation: 9,181 passing tests across 542 files, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are locally validated. Scan-specific historical failures remain unconfirmed without original data.
+concurrency. Existing lint and bundle-size warnings remain. All four opening integrations are validated and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain unconfirmed without original data.
 
 No save payloads, schema versions, migrations or merge rules change in this opening implementation.
 The shared schema plan reserves root ownership of versions/migrations before overlapping modeling
