@@ -6,8 +6,8 @@ import type { Tool } from "../llm/types";
 
 /**
  * The tools that build or rebuild geometry (directly, or through a parametric rebuild / an
- * export / opening a document). Once the kernel crashed they refuse to start — the page must be
- * reloaded — while reading, viewing, selecting, grouping and saving stay available.
+ * export / opening a document). Once the kernel crashes they refuse to start until
+ * main-kernel recovery succeeds or the page reloads. The recovery tool retains normal FIFO ordering.
  */
 export const KERNEL_TOOLS: ReadonlySet<string> = new Set([
     "run_program",

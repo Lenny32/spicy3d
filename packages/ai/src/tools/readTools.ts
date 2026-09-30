@@ -68,7 +68,7 @@ export function buildReadTools(): Tool[] {
         {
             name: "get_document_state",
             description:
-                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until the user reloads the page.",
+                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until recover_kernel succeeds or the user reloads the page. Successful recovery preserves committed edits but clears undo/redo.",
             parameters: { type: "object", properties: {} },
             handler: readDocumentState,
         },

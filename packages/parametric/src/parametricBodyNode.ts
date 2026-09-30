@@ -743,6 +743,11 @@ export class ParametricBodyNode
         );
     }
 
+    /** Recovery cancels ephemeral old-generation work without changing saved features. */
+    cancelForKernelRecovery(): void {
+        this.cancelRebuild("kernel-recovery");
+    }
+
     private cancelRebuild(reason = "superseded"): void {
         const job = this._job;
         this._job = undefined;

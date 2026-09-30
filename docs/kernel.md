@@ -68,14 +68,9 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
 
 After an abort or a fatal trap, `packages/wasm/src/kernelGuard.ts` runs a small probe (a unit box)
 against the module. Often the module survives, and nothing changes. If the probe fails, core's
-`KernelState` records the kernel as crashed with the first reason, and from then on nothing
-re-enters the module. Every factory and converter call fails at once with
-`Kernel crashed (<reason>); reload the page`. The module cannot be re-created in place, because
-every `OccShape` wraps a handle into it. The MCP kernel tools (`KERNEL_TOOLS` in `kernelTools.ts`)
-answer that error without starting work. `get_document_state` and the `spicy3d://document`
-resource report `kernel: "crashed"`, and the error-recovery skill tells agents not to retry. The app
-shows one persistent banner with a Reload action. Reading, viewing, selecting and saving keep
-working.
+`KernelState` records the kernel as crashed with the first reason. Its native generation is permanently retired: resetting public crash state cannot revive its handles. Factory and converter calls refuse to enter that generation. MCP kernel tools answer the crash error before starting work, while metadata tools report `kernel: "crashed"`.
+
+The application offers Recover and Reload. Recover creates a fresh main WASM instance and stages reconstruction of every open document from its last healthy committed checkpoint. All candidates must validate before activation. Success preserves committed unsaved edits, stable document/feature IDs and clean/dirty status, then clears undo/redo as explicitly approved. Scene-backed MCP refs re-derive; standalone geometry and creation snapshots invalidate. Preparation failure keeps original document graphs and history. A later viewport refresh failure reports an error while the new kernel stays healthy. See [main-kernel recovery](kernel-recovery.md) for bounds, limitations and API details. `recover_kernel` uses the normal MCP mutation FIFO. Reload remains available if a current checkpoint or supported document reconstruction is unavailable.
 
 A main-thread hang is not a crash: the page cannot detect or end it. A worker hang is ended by
 its finite deadline without marking the main kernel crashed.
