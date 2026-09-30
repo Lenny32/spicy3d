@@ -215,6 +215,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                 groupName: "ribbon.group.modify",
                 items: [
                     "feature.fillet",
+                    "feature.cornerSetback",
                     "feature.chamfer",
                     "feature.thicken",
                     { type: "split", items: ["feature.fuse", "feature.cut", "feature.common"] },

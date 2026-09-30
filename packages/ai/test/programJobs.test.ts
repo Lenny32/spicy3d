@@ -269,7 +269,7 @@ test("runtime rebuild status observes yielded feature indexes without flushing g
 });
 
 test("input copies isolate queued jobs from later argument edits and oversized results stay committed", async () => {
-    setup();
+    const { doc } = setup();
     const execute = rs.fn(async (args: Record<string, unknown>) =>
         JSON.stringify({ data: "x".repeat(1_048_576), received: args }),
     );
@@ -291,6 +291,7 @@ test("input copies isolate queued jobs from later argument edits and oversized r
         { ops: [{ ...boxOp, args: { dx: 10, dy: 10, dz: 10 } }] },
         expect.any(AbortSignal),
         expect.any(Function),
+        doc,
     );
     expect(jobs.read({ jobId: started.jobId }, context)).toMatchObject({
         state: "completed",

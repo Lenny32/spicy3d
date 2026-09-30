@@ -572,7 +572,14 @@ export class Document extends Observable implements IDocument {
     static async loadHeadless(
         app: IApplication,
         stored: Serialized,
-    ): Promise<Result<Document, DocumentFormatError | { kind: "loadFailed"; message: string }>> {
+        options: { signal?: AbortSignal } = {},
+    ): Promise<
+        Result<
+            Document,
+            DocumentFormatError | { kind: "loadFailed"; message: string } | { kind: "cancelled" }
+        >
+    > {
+        if (options.signal?.aborted) return Result.err({ kind: "cancelled" });
         const span = PerformanceTrace.enabled
             ? PerformanceTrace.begin("document.migrate", { headless: true })
             : undefined;
@@ -580,8 +587,9 @@ export class Document extends Observable implements IDocument {
         if (PerformanceTrace.enabled) PerformanceTrace.end(span, { ok: migrated.isOk });
         if (!migrated.isOk) return Result.err(migrated.error);
         try {
-            return Result.ok(await Document.build(app, migrated.value, {}, true));
+            return Result.ok(await Document.build(app, migrated.value, {}, true, options.signal));
         } catch (error) {
+            if (options.signal?.aborted) return Result.err({ kind: "cancelled" });
             return Result.err({
                 kind: "loadFailed",
                 message: error instanceof Error ? error.message : String(error),
@@ -594,24 +602,35 @@ export class Document extends Observable implements IDocument {
         data: Serialized,
         source: DocumentSource,
         headless: boolean,
+        signal?: AbortSignal,
     ): Promise<Document> {
         const span = PerformanceTrace.enabled
             ? PerformanceTrace.begin("document.load", { headless })
             : undefined;
         const document = new Document(app, data["name"], data["id"], source, { headless });
+        // Cancellation stops owned kernel work; disposal waits until deserialization has unwound.
+        const cancel = () => KernelRecoveryValidation.quiesce(document);
+        signal?.addEventListener("abort", cancel, { once: true });
         try {
-            await Document.fill(document, data);
+            await Document.fill(document, data, signal);
         } catch (error) {
             // a headless document is nobody's: it must not outlive a failed load
             if (headless) document.dispose();
             throw error;
         } finally {
+            signal?.removeEventListener("abort", cancel);
             if (PerformanceTrace.enabled) PerformanceTrace.end(span);
         }
         return document;
     }
 
-    private static async fill(document: Document, data: Serialized): Promise<void> {
+    private static async fill(document: Document, data: Serialized, signal?: AbortSignal): Promise<void> {
+        const checkCancelled = () => {
+            if (!signal?.aborted) return;
+            KernelRecoveryValidation.quiesce(document);
+            throw new Error("Headless document loading was cancelled");
+        };
+        checkCancelled();
         document.foreignModuleVersions = Document.foreignVersionsOf(data["moduleVersions"]);
         document.history.disabled = true;
         // Before the models: a body's feature chain resolves its parameters against
@@ -625,11 +644,13 @@ export class Document extends Observable implements IDocument {
         }
 
         await document.modelManager.deserialize(data["models"]);
+        checkCancelled();
         document.analyses.attachModel();
         document.history.disabled = false;
         // Derived work suppresses its own writes, never the user's edits between batches.
         const loadedPosition = document.history.position();
         await DocumentRebuilds.settled(document);
+        checkCancelled();
         document.markSaved(loadedPosition);
     }
 

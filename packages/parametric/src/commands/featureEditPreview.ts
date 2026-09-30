@@ -221,9 +221,10 @@ export class FeatureChainPreview {
  * kernel produced no face mesh.
  */
 export function previewMeshes(body: ParametricBodyNode, shape: IShape): ShapeMeshData[] | undefined {
-    const transform = body.worldTransform();
-    const world = transform.equals(Matrix4.identity()) ? shape : shape.transformedMul(transform);
+    let world: IShape = shape;
     try {
+        const transform = body.worldTransform();
+        world = transform.equals(Matrix4.identity()) ? shape : shape.transformedMul(transform);
         const { faces, edges } = world.mesh;
         if (faces === undefined) return undefined;
         return edges === undefined ? [faces] : [faces, edges];

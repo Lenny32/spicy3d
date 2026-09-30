@@ -28,6 +28,8 @@ export interface NodeRebuildStatus {
  * (its resolution). Other shape nodes report their `shape`.
  */
 export interface IRebuildStatusSource {
+    /** Optional worker preparation before reading a synchronous status. */
+    prepareRebuildStatus?(options?: RebuildOptions): Promise<void>;
     /** Evaluates the node if needed and reports how it went. */
     rebuildStatus(): NodeRebuildStatus;
 }
@@ -103,6 +105,8 @@ export async function collectRebuildReport(
     const nodes = document.modelManager.findNodes();
     const report = new Map<string, RebuildFailure>();
     for (const [index, node] of nodes.entries()) {
+        if (options.signal?.aborted) return Result.err({ kind: "cancelled" });
+        if (isRebuildStatusSource(node)) await node.prepareRebuildStatus?.(options);
         if (options.signal?.aborted) return Result.err({ kind: "cancelled" });
         const status = statusOf(node);
         const label = node.name || node.id;

@@ -25,6 +25,7 @@ import {
     ParameterShapeNode,
     PerformanceTrace,
     PubSub,
+    type RebuildOptions,
     Result,
     type Scope,
     ShapeNode,
@@ -381,6 +382,28 @@ export class ParametricBodyNode
     }
 
     /** The merge's validation pass (`IRebuildStatusSource`): the body's shape and each feature's error. */
+    async prepareRebuildStatus(options: RebuildOptions = {}): Promise<void> {
+        if (
+            !this.features.some(
+                (feature) =>
+                    feature.type === "fillet" && !feature.suppressed && feature.cornerSetbacks !== undefined,
+            )
+        )
+            return;
+        const cancel = () => this.cancelRebuild("validation-cancelled");
+        if (options.signal?.aborted) {
+            cancel();
+            return;
+        }
+        options.signal?.addEventListener("abort", cancel, { once: true });
+        try {
+            void this.shape;
+            await this.whenRebuilt();
+        } finally {
+            options.signal?.removeEventListener("abort", cancel);
+        }
+    }
+
     rebuildStatus(): NodeRebuildStatus {
         void this.shape;
         this._job?.flush();

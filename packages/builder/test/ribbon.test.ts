@@ -145,6 +145,7 @@ describe("mergeRibbonProfiles", () => {
         const modify = findGroup(merged, "ribbon.tab.solid", "ribbon.group.modify");
         expect(flattenItems(modify.items)).toEqual([
             "feature.fillet",
+            "feature.cornerSetback",
             "feature.chamfer",
             "feature.thicken",
             "feature.fuse",

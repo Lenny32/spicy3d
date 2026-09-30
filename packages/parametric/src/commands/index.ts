@@ -4,6 +4,7 @@
 import "./booleanCommand";
 import "./edgeCornerCommand";
 import "./edgeCornerEditCommand";
+import "./cornerSetbackCommand";
 import "./extrudeCommand";
 import "./extrudeEditCommand";
 import "./loftCommand";

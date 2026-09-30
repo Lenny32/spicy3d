@@ -19,6 +19,7 @@ import type { EdgeRef } from "../features/edgeRef";
 import type { ChamferFeatureData, FilletFeatureData } from "../features/feature";
 import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import type { ParametricBodyNode } from "../parametricBodyNode";
+import { CornerSetbackCommand } from "./cornerSetbackCommand";
 import { edgeCornerArrowData } from "./edgeCornerCommand";
 import { EdgeCornerPickHandler } from "./edgeCornerPickStep";
 import {
@@ -318,5 +319,10 @@ export class ChamferEditCommand extends EdgeCornerEditCommand {
     }
 }
 
-registerFeatureEditor("fillet", (body, featureId) => new FilletEditCommand(body, featureId));
+registerFeatureEditor("fillet", (body, featureId) => {
+    const feature = body.features.find((item) => item.id === featureId);
+    return feature?.type === "fillet" && feature.cornerSetbacks !== undefined
+        ? new CornerSetbackCommand(body, featureId)
+        : new FilletEditCommand(body, featureId);
+});
 registerFeatureEditor("chamfer", (body, featureId) => new ChamferEditCommand(body, featureId));

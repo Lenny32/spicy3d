@@ -142,6 +142,7 @@ export default {
         "prompt.select.sweepPath": "Select the next path edge in traversal order; Confirm finishes the path",
         "command.feature.thicken": "Thicken",
         "command.feature.fillet": "Fillet",
+        "command.feature.cornerSetback": "Corner setbacks",
         "command.feature.chamfer": "Chamfer",
         "command.feature.fuse": "Fuse",
         "command.feature.cut": "Cut",
@@ -1471,6 +1472,15 @@ export default {
         "fillet.variableRadius": "Variable radius",
         "fillet.editRadiusLaw": "Edit radius law…",
         "fillet.cornerSetback": "Corner setback",
+        "dialog.title.cornerSetback": "Fillet corner setbacks",
+        "fillet.cornerHelp":
+            "Edit three setbacks along the selected edges from their shared corner. Recompute explicitly; fitting can take about a minute and stops after 90 seconds. Preview shows the corner step; confirmation validates later features. Supports one three-edge constant-radius corner with eligible convex support geometry. Unsupported or inaccurate patches are rejected.",
+        "fillet.cornerPick":
+            "Select exactly three edges meeting at one corner of a parametric body, then choose Corner setbacks. Variable radius is not supported.",
+        "fillet.cornerRecompute": "Recompute preview",
+        "fillet.cornerCancelSolve": "Cancel recompute",
+        "fillet.cornerWorking": "Fitting corner in the geometry worker…",
+        "fillet.cornerReady": "Corner preview is ready. Confirm validates the remaining feature chain.",
         "fillet.radiusLaw": "Fillet radius law",
         "fillet.lawPosition": "Position (%)",
         "fillet.lawRadius": "Law radius",

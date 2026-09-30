@@ -4,6 +4,7 @@
 import { DocumentRebuilds, type IDocument, KernelRecovery, KernelState } from "@spicy3d/core";
 import type { Tool, ToolCallContext } from "../llm/types";
 import { handleRunProgram, type ProgramProgress, runProgramParameters } from "./capabilityEngine";
+import { cornerJobDefinitions, executeCornerJob } from "./cornerJobs";
 import { getDocument } from "./documentContext";
 
 type JobState = "queued" | "running" | "cancelling" | "completed" | "cancelled" | "failed";
@@ -31,11 +32,18 @@ export function isProgramJobTool(tool: Tool): boolean {
     return jobTools.has(tool);
 }
 
+export type ProgramJobExecutor = (
+    args: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    progress: ((value: ProgramProgress) => void) | undefined,
+    document: IDocument,
+) => Promise<string>;
+
 export class ProgramJobs {
     private readonly jobs = new Map<string, Job>();
 
     constructor(
-        private readonly execute = handleRunProgram,
+        private readonly execute: ProgramJobExecutor = handleRunProgram,
         private readonly now = Date.now,
     ) {}
 
@@ -88,9 +96,14 @@ export class ProgramJobs {
                             "The active document changed before this job started; no edits were made",
                         );
                     if (KernelState.current.message) throw new Error(KernelState.current.message);
-                    const result = await this.execute(input, job.controller.signal, (value) => {
-                        job.progress = { ...value };
-                    });
+                    const result = await this.execute(
+                        input,
+                        job.controller.signal,
+                        (value) => {
+                            job.progress = { ...value };
+                        },
+                        document,
+                    );
                     if (new TextEncoder().encode(result).length > MAX_RESULT_BYTES) {
                         job.state = "completed";
                         job.error =
@@ -101,6 +114,7 @@ export class ProgramJobs {
                     if (payload && typeof payload === "object" && "error" in payload)
                         throw new Error(String(payload.error));
                     job.result = payload;
+                    job.error = undefined;
                     job.state = "completed";
                 } catch (error) {
                     job.state = job.controller.signal.aborted ? "cancelled" : "failed";
@@ -181,9 +195,16 @@ export class ProgramJobs {
 }
 
 const PAGE_JOBS = new ProgramJobs();
-export const cancelAllProgramJobs = (reason: string): void => PAGE_JOBS.cancelAll(reason);
+const CORNER_JOBS = new ProgramJobs(executeCornerJob);
+export const cancelAllProgramJobs = (reason: string): void => {
+    PAGE_JOBS.cancelAll(reason);
+    CORNER_JOBS.cancelAll(reason);
+};
 KernelRecovery.current.addQuiesce(() => cancelAllProgramJobs("Main kernel recovery cancelled modeling jobs"));
-export const forgetProgramJobs = (caller: string): void => PAGE_JOBS.forget(caller);
+export const forgetProgramJobs = (caller: string): void => {
+    PAGE_JOBS.forget(caller);
+    CORNER_JOBS.forget(caller);
+};
 
 export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
     const idParameters = { type: "object", properties: { jobId: { type: "string" } }, required: ["jobId"] };
@@ -230,6 +251,12 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
             },
         },
     ];
+    for (const tool of tools) jobTools.add(tool);
+    return tools;
+}
+
+export function buildCornerJobTools(jobs = CORNER_JOBS): Tool[] {
+    const tools = cornerJobDefinitions(jobs);
     for (const tool of tools) jobTools.add(tool);
     return tools;
 }

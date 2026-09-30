@@ -255,6 +255,7 @@ export const I18N_KEYS = [
     "command.feature.extrudeTarget",
     "command.feature.chamfer",
     "command.feature.fillet",
+    "command.feature.cornerSetback",
     "command.feature.revolve",
     "command.feature.loft",
     "loft.spine",
@@ -1379,6 +1380,13 @@ export const I18N_KEYS = [
     "fillet.addSample",
     "fillet.lawHelp",
     "fillet.cornerSetback",
+    "dialog.title.cornerSetback",
+    "fillet.cornerHelp",
+    "fillet.cornerPick",
+    "fillet.cornerRecompute",
+    "fillet.cornerCancelSolve",
+    "fillet.cornerWorking",
+    "fillet.cornerReady",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

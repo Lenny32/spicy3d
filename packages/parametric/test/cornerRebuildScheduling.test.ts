@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { DocumentRebuilds, Result } from "@spicy3d/core";
+import { collectRebuildReport, DocumentRebuilds, Result } from "@spicy3d/core";
 import { createMockApplication, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { featureHandler, registerFeature } from "../src/features/feature";
 import "../src/features/edgeCorner";
@@ -85,4 +85,42 @@ test("an explicitly synchronous live flush fails clearly without falling back to
     expect(node.shape.error).toMatch(/cancelable worker recomputation/);
     expect(prepare).not.toHaveBeenCalled();
     expect(native).not.toHaveBeenCalled();
+});
+
+test("generic merge status preparation awaits the corner and abort cancels it without a synchronous flush", async () => {
+    let start!: () => void;
+    let finish!: () => void;
+    const started = new Promise<void>((done) => {
+        start = done;
+    });
+    const ready = new Promise<void>((done) => {
+        finish = done;
+    });
+    const cancel = rs.fn(() => finish());
+    const synchronous = rs.fn(() => Result.err("No synchronous fallback"));
+    registerFeature("fillet", {
+        ...originalFillet,
+        evaluate: synchronous,
+        prepareAsync: () => {
+            start();
+            return { ready, cancel, canFallback: false, take: () => Result.err("cancelled") };
+        },
+    });
+    const node = createBody();
+    const controller = new AbortController();
+    const work = collectRebuildReport(cadDocument, { signal: controller.signal });
+    try {
+        await started;
+        expect(node.isRebuilding).toBe(true);
+        expect(synchronous).not.toHaveBeenCalled();
+        controller.abort();
+        expect(await work).toEqual(Result.err({ kind: "cancelled" }));
+        expect(cancel).toHaveBeenCalled();
+        expect(node.isRebuilding).toBe(false);
+        expect(synchronous).not.toHaveBeenCalled();
+    } finally {
+        controller.abort();
+        finish();
+        await work;
+    }
 });

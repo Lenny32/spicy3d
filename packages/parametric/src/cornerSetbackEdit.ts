@@ -33,6 +33,8 @@ export interface PreparedCornerSetbackEdit {
 
 function requireEditable(body: ParametricBodyNode, options: CornerSetbackEditOptions): void {
     if (options.signal?.aborted) throw new Error("Corner setback edit was cancelled");
+    if (body.document.modelManager.findNode((node) => node === body) !== body)
+        throw new Error("The corner body was removed from this document");
     if (body.document.repository?.isReadOnly) throw new Error("This document is read-only");
     if (body.rollbackIndex !== undefined) throw new Error("Finish the active timeline session first");
     if (body.document.application.executingCommand && !options.allowActiveCommand)

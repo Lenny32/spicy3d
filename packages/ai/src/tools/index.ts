@@ -9,7 +9,7 @@ import { buildFileTools, buildReferenceMeshImportTool } from "./fileTools";
 import { guardKernelTool } from "./kernelTools";
 import { buildNodeTools } from "./nodeTools";
 import { buildParametricTools } from "./parametricTools";
-import { buildProgramJobTools } from "./programJobs";
+import { buildCornerJobTools, buildProgramJobTools } from "./programJobs";
 import { buildPropertyTools } from "./propertyTools";
 import { buildReadTools } from "./readTools";
 import { buildRecoveryTools } from "./recoveryTools";
@@ -41,6 +41,7 @@ export function buildTools(): Tool[] {
         buildReferenceDeviationTool(),
         ...buildProgramJobTools(),
         ...buildRecoveryTools(),
+        ...buildCornerJobTools(),
     ];
     return tools.map(guardKernelTool);
 }
