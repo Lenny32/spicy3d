@@ -20,6 +20,7 @@ import { captureEdgeRef, type EdgeRef } from "./edgeRef";
 import type { FeatureContext } from "./feature";
 import { collectEdges } from "./profileGeometry";
 import { MATCH_TOLERANCE } from "./refGeometry";
+import { isReusableTopologyIdentity } from "./reusableTopologyIdentity";
 import { combineIds } from "./trackedId";
 
 /** Whole source-local edges, authored in traversal order. Shared by sweep and projection. */
@@ -211,7 +212,7 @@ export function resolvePathReferences(
             indexes.map((index) => ({
                 edge: source.edges[index],
                 seed: source.ids?.[index] ?? seed,
-                stable: source.ids?.[index] !== undefined,
+                stable: isReusableTopologyIdentity(source.ids?.[index]),
                 reference: referenceIndex,
             })),
         );

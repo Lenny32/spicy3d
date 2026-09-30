@@ -12,6 +12,7 @@ import {
 } from "@spicy3d/core";
 import { projectForwardCurve, projectionCurveId } from "./projectedCurves";
 import type { ResolvedProjectionTarget } from "./projectionTargetReferences";
+import { isReusableTopologyIdentity } from "./reusableTopologyIdentity";
 
 /** A logical source span, compatible with the shared path resolver's reference result. */
 export interface ProjectionSourceSpan {
@@ -40,7 +41,11 @@ export function buildProjectionResult(
         return Result.err("Projection direction must be finite");
     if (source.length === 0 || source.length > 256)
         return Result.err("Projection requires 1 to 256 logical source references");
-    if (source.some((span) => !span.stable) || !target.stableIdentity)
+    if (
+        source.some((span) => !span.stable || !isReusableTopologyIdentity(span.seed)) ||
+        !target.stableIdentity ||
+        !isReusableTopologyIdentity(target.seed)
+    )
         return Result.err("Associative projection requires tracked source edges and a tracked target face");
     const inverse = hostWorld.invert();
     if (inverse === undefined) return Result.err("Projection host placement is not invertible");

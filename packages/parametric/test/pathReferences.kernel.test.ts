@@ -57,6 +57,27 @@ function tracking(source: EditableShapeNode, ids: string[]) {
     });
 }
 
+test.each([
+    "untracked:runtime-one",
+    "source-edge|untracked:runtime-two",
+    "path-ref:authored-only",
+])("existing runtime token %s never claims reusable path ancestry", (id) => {
+    const { source, context, edges } = fixture(line(point(0, 0, 0), point(0, 0, 10)));
+    tracking(source, [id]);
+    const reference = capturePathReference(source, 0);
+    expect(reference.isOk).toBe(true);
+    const result = resolvePathReferences({ nodeId: source.id, edges: [reference.value] }, context);
+    expect(result.isOk, result.error).toBe(true);
+    try {
+        expect(result.value.edgeSeeds).toEqual([id]);
+        expect(result.value.edgeSeedStable).toEqual([false]);
+        expect(result.value.references[0].stable).toBe(false);
+        expect(result.value.references[0].edges[0].length()).toBeCloseTo(edges[0].length(), 8);
+    } finally {
+        result.value.dispose();
+    }
+});
+
 describe("ordered whole-edge path references (real kernel)", () => {
     test("orients a connected three-dimensional chain without reversing its source edges", () => {
         const a = point(0, 0, 0),

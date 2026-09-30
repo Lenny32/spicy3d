@@ -49,6 +49,33 @@ function scene() {
     return { doc, circle, target, index, context };
 }
 
+test.each([
+    "untracked:runtime-face",
+    "section-face|untracked:runtime-face",
+    "path-ref:authored-face",
+])("projection target token %s cannot become claimed reusable native ancestry", (id) => {
+    const { target, index, context } = scene();
+    const original = target.faceIdAt.bind(target);
+    const spy = rs
+        .spyOn(target, "faceIdAt")
+        .mockImplementation((faceIndex) => (faceIndex === index ? id : original(faceIndex)));
+    try {
+        const reference = captureProjectionTarget(target, index);
+        expect(reference.isOk).toBe(true);
+        const result = resolveProjectionTarget(reference.value, context);
+        expect(result.isOk).toBe(true);
+        try {
+            expect(result.value.seed).toBe(id);
+            expect(result.value.stableIdentity).toBe(false);
+            expect(result.value.face.surface().isPlanar()).toBe(false);
+        } finally {
+            result.value.dispose();
+        }
+    } finally {
+        spy.mockRestore();
+    }
+});
+
 test("projection target refs resolve world placement into host space and retain real radius ancestry", () => {
     const { circle, target, index, context } = scene();
     target.transform = Matrix4.fromTranslation(100, 0, 0);
