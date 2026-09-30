@@ -1,6 +1,7 @@
 Mouse modeling project: parametric geometry, kernel recovery and MCP workflows
 
-This integration adds editable weighted sketch NURBS, variable-radius fillets, exact curved-face
+This integration adds associative 3D path sweeps and directional surface projection, with editable
+profiles, paths and targets. It also adds weighted sketch NURBS, variable-radius fillets, exact curved-face
 extrusion starts and automatic next-face extents. Corner operations reject invalid geometry with
 actionable diagnostics. Persistent edge references and selectors survive compatible upstream edits;
 feature caches track actual variable dependencies, and appended extrusions retain caller names.
@@ -38,10 +39,12 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #83 | Editable expression-based variable-radius fillets | 948b0d5a85576d788e16f6115085817da2c544af |
 | #95 | Automatic exact next-face extrusion with bounded search | d3c3715ffce28f8eeb0410b17b808049a17e0cc7 |
 | #98 | Reconstruct open documents in a fresh kernel without reloading | 9f3b108a36f3b889197f286d47cfafa7b617b317 |
+| #88 | Associative path sweep with real section/path history and editable UI/MCP | c6963df7eab1e0ceeb29c1a2b8756a28a461f630 |
+| #89 | Associative directional projection with complete trimmed-face coverage | 279b538db3f00c5b26b55ce37f45c791b3afb54b |
 
 Validation: 9,560 passing tests on the latest combined integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
-concurrency. Existing lint and bundle-size warnings remain. All 21 listed integrations are validated
+concurrency. Existing lint and bundle-size warnings remain. All 23 listed integrations are validated
 and pushed; their issues are marked [done] and remain open. Scan-specific historical failures remain
 unconfirmed without original data.
 
@@ -94,11 +97,19 @@ dirty/view/camera state survive. User explicitly approved clearing undo/redo aft
 reconstruction. Failed preparation is atomic; old native handles never revive. Browser tests
 inject a fatal-generation state rather than claiming a reproduced scan-specific crash.
 
-Remaining project work: #84–#85, #88–#90 (5 tickets). Three implementation agents resumed after
-the earlier workspace interruption. Sweep and projection geometry/reference proofs pass; their
-feature editing and compatibility work continues. Setbacks and guided lofts still require accepted
-native constructions. Groove/rib is assigned after sweep. 21 tickets are delivered. Keep this PR
-draft until all 26 are complete and reviewed.
+Additional #88 validation: 293 worker tests, 144 focused integration tests and 314 native/fixture
+checks, pinned native rebuild, TypeScript and required lint. Actual upstream edits, tracked
+cap/seam identity, UI undo and distinct MCP JSON-reference calls pass.
+Additional #89 validation: 171 worker tests and 103 combined sweep/projection integration tests;
+TypeScript, required lint, exact curved coverage, ancestry, UI undo and MCP reference roundtrips.
+Approved parametric versions 9 and 10 add pure migrations, atomic merge rules and immutable
+fixtures. Existing fixtures remain unchanged; document envelope 2 and sketch 3 remain.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
+Remaining project work: #84, #85 and #90 (3 tickets). Three implementation agents are continuing
+concurrently. Strict asymmetric setback geometry and two/three-section guided-loft proofs pass;
+product integration and compatibility work continues. Face sweep is implementing actual support
+normal framing and tracked join/cut. 23 tickets are delivered. Keep this PR draft until all 26
+are complete and reviewed.
+
+Refs #88, #89, #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103, #92, #94, #83, #95, #98.
 Keep issues open and never merge this PR automatically.
