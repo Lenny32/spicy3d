@@ -41,6 +41,7 @@ describe("parametricTools", () => {
             "boolean",
             "editFeature",
             "features",
+            "edges",
             "editSketch",
             "sketchInfo",
             "construct",

@@ -25,7 +25,8 @@ import {
     type XYZLike,
 } from "@spicy3d/core";
 import { isBodyTrackingNode } from "../features/bodyTracking";
-import { captureEdgeRef } from "../features/edgeRef";
+import { matchEdgesAnchored } from "../features/edgeMatcher";
+import { captureEdgeRef, type EdgeRef } from "../features/edgeRef";
 import { captureExtentFaceRef } from "../features/extrudeExtent";
 import type {
     BooleanOperation,
@@ -86,7 +87,8 @@ export type ParametricOp =
     | ThickenOp
     | BooleanOp
     | EditFeatureOp
-    | FeaturesOp;
+    | FeaturesOp
+    | EdgesOp;
 
 export interface SketchOp {
     op: "sketch";
@@ -214,9 +216,30 @@ export interface FilletChamferOp {
     name?: string;
     body: string;
     /** Indexes into the body's current edge list (findSubShapes order). */
-    edgeIndexes: number[];
+    edgeIndexes?: number[];
+    /** Body-scoped persistent refs returned by the edges op; alternative to indexes. */
+    edgeRefs?: PersistentEdgeReference[];
     radius?: ParameterValue;
     distance?: ParameterValue;
+}
+
+/** A portable, body-local selection; its fingerprint and tracked id use the existing EdgeRef contract. */
+export interface PersistentEdgeReference {
+    bodyId: string;
+    edge: EdgeRef;
+}
+
+export interface EdgesOp {
+    op: "edges";
+    id?: string;
+    body: string;
+    /** Omit to query all edges; indexes describe only the current shape. */
+    edgeIndexes?: number[];
+}
+
+export interface EdgesReport {
+    bodyId: string;
+    edges: { index: number; reference: PersistentEdgeReference }[];
 }
 
 /**
@@ -437,6 +460,9 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "editFeature":
             runEditFeatureOp(state, op);
+            break;
+        case "edges":
+            runEdgesOp(state, op);
             break;
         case "features":
             runFeaturesOp(state, op);
@@ -802,18 +828,24 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     ensureUnit(value, scope, LENGTH_UNITS, op.op === "fillet" ? "radius" : "distance");
 
     const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
-    const refs = op.edgeIndexes.map((index) => {
-        const edge = edges[index];
-        if (edge === undefined) {
-            throw new Error(
-                `edgeIndex ${index} is out of range on body "${op.body}" (0..${edges.length - 1})`,
-            );
+    if ((op.edgeIndexes !== undefined) === (op.edgeRefs !== undefined)) {
+        throw new Error('provide exactly one of "edgeIndexes" or "edgeRefs"');
+    }
+    const refs =
+        op.edgeRefs !== undefined
+            ? persistentEdges(op.edgeRefs, body)
+            : captureIndexes(body, edges, op.edgeIndexes!);
+    if (refs.length === 0) throw new Error("select at least one edge");
+    if (op.edgeRefs !== undefined) {
+        const matched = matchEdgesAnchored(
+            shape.value,
+            refs,
+            edges.map((_, index) => body.edgeIdAt(index) ?? ""),
+        );
+        if (!matched.isOk) {
+            throw new Error(`persistent edge selection is missing or ambiguous: ${matched.error}`);
         }
-        // Same capture the interactive fillet uses: the tracked id is what makes the
-        // ref survive a rebuild, the fingerprint is what matches when it does not.
-        const id = body.edgeIdAt(index);
-        return captureEdgeRef(edge, id, body.edgeIdIsShared(id));
-    });
+    }
 
     const feature: FeatureData =
         op.op === "fillet"
@@ -821,6 +853,86 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
             : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
     appendFeature(state, body, feature);
     state.refs.set(op.id, body.id);
+}
+
+function captureIndexes(body: ParametricBodyNode, edges: IEdge[], indexes: number[]): EdgeRef[] {
+    if (!Array.isArray(indexes)) throw new Error('"edgeIndexes" must be an array');
+    return indexes.map((index) => {
+        const edge = Number.isInteger(index) ? edges[index] : undefined;
+        if (edge === undefined) {
+            throw new Error(
+                `edgeIndex ${index} is out of range on body "${body.id}" (0..${edges.length - 1})`,
+            );
+        }
+        // Same capture the interactive fillet uses: the tracked id is what makes the
+        // ref survive a rebuild, the fingerprint is what matches when it does not.
+        const id = body.edgeIdAt(index);
+        return captureEdgeRef(edge, id, body.edgeIdIsShared(id));
+    });
+}
+
+/** Validate untrusted MCP data without extending the saved EdgeRef payload. */
+function persistentEdges(given: PersistentEdgeReference[], body: ParametricBodyNode): EdgeRef[] {
+    if (!Array.isArray(given)) throw new Error('"edgeRefs" must be an array');
+    const vector = (value: unknown): boolean => {
+        if (value === null || typeof value !== "object") return false;
+        const v = value as XYZLike;
+        return [v.x, v.y, v.z].every((n) => typeof n === "number" && Number.isFinite(n));
+    };
+    const plain = (v: XYZLike): XYZLike => ({ x: v.x, y: v.y, z: v.z });
+    return given.map((reference) => {
+        if (reference?.bodyId !== body.id) throw new Error("edge reference belongs to a different body");
+        const edge = reference.edge;
+        if (
+            !edge ||
+            (edge.edgeId !== undefined && typeof edge.edgeId !== "string") ||
+            (edge.splitPiece !== undefined && typeof edge.splitPiece !== "boolean")
+        ) {
+            throw new Error("invalid persistent edge reference");
+        }
+        const valid =
+            edge.kind === "line"
+                ? vector(edge.start) && vector(edge.end)
+                : edge.kind === "circle"
+                  ? vector(edge.center) &&
+                    vector(edge.axis) &&
+                    Number.isFinite(edge.radius) &&
+                    edge.radius > 0
+                  : edge.kind === "other" &&
+                    vector(edge.mid) &&
+                    Number.isFinite(edge.length) &&
+                    edge.length > 0;
+        if (!valid) throw new Error("invalid persistent edge fingerprint");
+        // Drop unknown caller fields: only the existing saved ref fields cross into a feature.
+        const ref: EdgeRef =
+            edge.kind === "line"
+                ? { kind: "line", start: plain(edge.start), end: plain(edge.end) }
+                : edge.kind === "circle"
+                  ? {
+                        kind: "circle",
+                        center: plain(edge.center),
+                        axis: plain(edge.axis),
+                        radius: edge.radius,
+                    }
+                  : { kind: "other", mid: plain(edge.mid), length: edge.length };
+        if (edge.edgeId !== undefined) ref.edgeId = edge.edgeId;
+        if (edge.splitPiece === true) ref.splitPiece = true;
+        return ref;
+    });
+}
+
+function runEdgesOp(state: State, op: EdgesOp): void {
+    const body = resolveBody(state, op.body);
+    const shape = body.shape;
+    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    const indexes = op.edgeIndexes === undefined ? edges.map((_, index) => index) : op.edgeIndexes;
+    const refs = captureIndexes(body, edges, indexes);
+    const report: EdgesReport = {
+        bodyId: body.id,
+        edges: refs.map((edge, i) => ({ index: indexes[i], reference: { bodyId: body.id, edge } })),
+    };
+    state.out.results[op.id ?? "edges"] = report;
 }
 
 /** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */

@@ -80,7 +80,8 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
-- { op: "fillet", id, body, edgeIndexes, radius }  /  { op: "chamfer", id, body, edgeIndexes, distance }
+- { op: "edges", body, id?, edgeIndexes? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
 - { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
@@ -216,10 +217,18 @@ every feature that names it rebuilds. Reach for a variable when a dimension is o
 likely to come back to, and a plain number when it is incidental. run_program's numeric args accept
 the same expressions, but evaluate them ONCE: its nodes keep the number and do not follow the variable.
 
-Selecting edges for fillet/chamfer: "edgeIndexes" index the body's current edge list (findSubShapes
-order). Get them with a run_program query on the body node first — shape.findSubShapes(target: "b1",
-args: { subshapeType: "edge" }) returns refs like e#3, and that number IS the index to pass.
-Identify the edges you want by geometry (edge.ends, edge.length) before picking.
+Selecting edges for fillet/chamfer: query run_parametric [{ op: "edges", body: "b1", id: "picks" }].
+results.picks = { bodyId, edges: [{ index, reference: { bodyId, edge } }, ...] }. The edge fingerprint
+contains local line endpoints, circle center/axis/radius, or other curve midpoint/length, plus its
+tracked edgeId when available. Select by geometry and retain each whole reference object. A later
+call accepts [{ op: "fillet", id: "f1", body: "b1", edgeRefs: [<reference>], radius: 3 }].
+Use exactly one of edgeRefs or edgeIndexes, with at least one selection. References belong to one
+body: another body is refused. Existing tracked-id/fingerprint matching follows upstream rebuilds,
+including edge reordering; a removed or ambiguous edge fails. Already split pieces remain narrow.
+References are plain JSON and may be reused across calls; query again when intentionally selecting
+new topology. These differ from run_program's subshape refs (including grouped refs): those identify
+positions in a current shape, not persistent parametric selections. edgeIndexes remain supported
+for immediate picks, but must be queried again after upstream edits.
 
 Example — a 40x30 plate, 20 tall, then round one top edge R3:
  [ { op: "sketch", id: "s1", plane: "XY", name: "Plate outline", entities: [
