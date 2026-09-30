@@ -177,7 +177,10 @@ RegionsResult failedResult(GuardTag<RegionsResult>, const std::string& error)
 
 TrackedShapeResult failedResult(GuardTag<TrackedShapeResult>, const std::string& error)
 {
-    return TrackedShapeResult { TopoDS_Shape(), false, error, { }, { } };
+    TrackedShapeResult result { };
+    result.isOk = false;
+    result.error = error;
+    return result;
 }
 
 // Marks output sub-shapes identical to or derived (Modified/Generated — guarded, some
@@ -1713,29 +1716,38 @@ public:
 
     static const char* offsetErrorName(BRepOffset_Error error)
     {
-        switch (error) {
-        case BRepOffset_NoError:
+        if (error == BRepOffset_NoError) {
             // only called when IsDone() is false: the algorithm stopped without a status
             return "no status reported";
-        case BRepOffset_UnknownError:
+        }
+        if (error == BRepOffset_UnknownError) {
             return "BRepOffset_UnknownError";
-        case BRepOffset_BadNormalsOnGeometry:
+        }
+        if (error == BRepOffset_BadNormalsOnGeometry) {
             return "BRepOffset_BadNormalsOnGeometry";
-        case BRepOffset_C0Geometry:
+        }
+        if (error == BRepOffset_C0Geometry) {
             return "BRepOffset_C0Geometry";
-        case BRepOffset_NullOffset:
+        }
+        if (error == BRepOffset_NullOffset) {
             return "BRepOffset_NullOffset";
-        case BRepOffset_NotConnectedShell:
+        }
+        if (error == BRepOffset_NotConnectedShell) {
             return "BRepOffset_NotConnectedShell";
-        case BRepOffset_CannotTrimEdges:
+        }
+        if (error == BRepOffset_CannotTrimEdges) {
             return "BRepOffset_CannotTrimEdges";
-        case BRepOffset_CannotFuseVertices:
+        }
+        if (error == BRepOffset_CannotFuseVertices) {
             return "BRepOffset_CannotFuseVertices";
-        case BRepOffset_CannotExtentEdge:
+        }
+        if (error == BRepOffset_CannotExtentEdge) {
             return "BRepOffset_CannotExtentEdge";
-        case BRepOffset_UserBreak:
+        }
+        if (error == BRepOffset_UserBreak) {
             return "BRepOffset_UserBreak";
-        case BRepOffset_MixedConnectivity:
+        }
+        if (error == BRepOffset_MixedConnectivity) {
             return "BRepOffset_MixedConnectivity";
         }
         return "BRepOffset_UnknownError";
@@ -2231,26 +2243,31 @@ public:
 
     static const char* loftShapeTypeName(TopAbs_ShapeEnum type)
     {
-        switch (type) {
-        case TopAbs_COMPOUND:
+        if (type == TopAbs_COMPOUND) {
             return "compound";
-        case TopAbs_COMPSOLID:
-            return "compound solid";
-        case TopAbs_SOLID:
-            return "solid";
-        case TopAbs_SHELL:
-            return "shell";
-        case TopAbs_FACE:
-            return "face";
-        case TopAbs_WIRE:
-            return "wire";
-        case TopAbs_EDGE:
-            return "edge";
-        case TopAbs_VERTEX:
-            return "vertex";
-        default:
-            return "shape";
         }
+        if (type == TopAbs_COMPSOLID) {
+            return "compound solid";
+        }
+        if (type == TopAbs_SOLID) {
+            return "solid";
+        }
+        if (type == TopAbs_SHELL) {
+            return "shell";
+        }
+        if (type == TopAbs_FACE) {
+            return "face";
+        }
+        if (type == TopAbs_WIRE) {
+            return "wire";
+        }
+        if (type == TopAbs_EDGE) {
+            return "edge";
+        }
+        if (type == TopAbs_VERTEX) {
+            return "vertex";
+        }
+        return "shape";
     }
 
     static ShapeResult loft(const ShapeArray& sections, bool isSolid, bool isRuled, GeomAbs_Shape continuity)
