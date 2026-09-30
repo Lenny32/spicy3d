@@ -31,7 +31,9 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   synchronously when a worker is unavailable or timed out. Other main-thread calls can still hang.
 - **Cancellation.** A call cancelled while queued never starts. Programs check their signal
   between operations and before commit, rolling back if cancelled. A pending native operation
-  is bounded by its deadline; user-triggered immediate worker termination is separate work (#97).
+  in the strict bounded bridge terminates its worker generation immediately on abort, reports
+  cancellation, and rolls back before the next queued mutation. See [cancellation](kernel-cancellation.md).
+  Other synchronous calls still only check cancellation between operations.
 - **Document consistency.** A yielding MCP program holds a runtime document ownership scope;
   new UI commands and direct property/tree edits are blocked until commit or rollback.
   Its internal mutations and replay run under scoped authority, and other documents remain editable.

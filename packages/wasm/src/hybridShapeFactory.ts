@@ -69,7 +69,8 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         workerProfile.install(profileEnabled);
     }
 
-    shapeOperation(request: BoundedShapeRequest): IAsyncShapeOperation<IShape> {
+    shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape> {
+        if (signal?.aborted) return this.failedShapeOperation("Geometry worker operation cancelled");
         if (this.nativeFailure) return this.failedShapeOperation(this.nativeFailure);
         const prepared: IShape[] = [];
         const capture = (shape: IShape): ShapeReplica => {
@@ -141,18 +142,30 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         let reply: KernelResult<ShapeReplica> | undefined;
         let consumed = false;
         const abort = new AbortController();
+        const onAbort = () => {
+            abort.abort();
+            // Retire synchronously so a following call can create its generation immediately.
+            if (worker.isClosed) this.retireWorker(worker);
+        };
         const cancel = () => {
             if (consumed) return;
             consumed = true;
             reply = undefined;
             this.active.delete(cancel);
-            abort.abort();
+            signal?.removeEventListener("abort", onAbort);
+            onAbort();
         };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) abort.abort();
         this.active.add(cancel);
-        const ready = worker.request("boundedReplica", args, abort.signal).then((result) => {
-            if (!consumed) reply = result;
-            if (!result.ok && result.error.code === "timeout") this.retireWorker(worker);
-        });
+        const ready = worker
+            .request("boundedReplica", args, abort.signal, { terminateOnAbort: true })
+            .then((result) => {
+                signal?.removeEventListener("abort", onAbort);
+                if (!consumed) reply = result;
+                if (!result.ok && (result.error.code === "timeout" || result.error.code === "cancelled"))
+                    this.retireWorker(worker);
+            });
         return {
             ready,
             cancel,
@@ -332,7 +345,8 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     for (const input of inputs) input.dispose();
                     inputs = [];
                     if (canFallback) this.disable();
-                    else if (result.error.code !== "timeout") this.quarantine(result.error.message);
+                    else if (result.error.code !== "timeout" && result.error.code !== "cancelled")
+                        this.quarantine(result.error.message);
                     return Result.err(result.error.message);
                 }
                 const owned: IShape[] = [];

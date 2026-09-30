@@ -32,11 +32,14 @@ function setup() {
         finish = resolve;
     });
     let answer: Result<IShape> = Result.err("Geometry worker operation timed out after 90000 ms");
-    const shapeOperation = rs.fn((_request: BoundedShapeRequest) => ({
-        ready,
-        take: () => answer,
-        cancel: () => {},
-    }));
+    const shapeOperation = rs.fn((_request: BoundedShapeRequest, signal?: AbortSignal) => {
+        const abort = () => {
+            answer = Result.err("Geometry worker operation cancelled");
+            finish();
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+        return { ready, take: () => answer, cancel: () => signal?.removeEventListener("abort", abort) };
+    });
     const app = createMockApplication({
         shapeProvider: { factory: { box, fillet, boundedOperations: { shapeOperation } } } as never,
     });
@@ -239,6 +242,94 @@ test("program entry rechecks command ownership after waiting for earlier rebuild
         await expect(tool.handler({ ops: [boxOp("new")] })).rejects.toThrow("active command or transaction");
         expect(box).not.toHaveBeenCalled();
         expect(DocumentMutations.isHeld(doc)).toBe(false);
+    } finally {
+        doc.dispose();
+    }
+});
+
+test("aborting native program work restores exact refs/history before the next queued mutation", async () => {
+    const { doc, tool, shapeOperation, finish } = setup();
+    await tool.handler({ ops: [boxOp("source")] });
+    const before = documentSnapshot();
+    const position = doc.history.position();
+    const nodes = doc.modelManager.findNodes(() => true).map((node) => node.id);
+    let observed: { snapshot: string; position: object; held: boolean } | undefined;
+    const next = rs.fn(async () => {
+        observed = {
+            snapshot: documentSnapshot(),
+            position: doc.history.position(),
+            held: DocumentMutations.isHeld(doc),
+        };
+        return tool.handler({ ops: [{ method: "shape.volume", target: "source", id: "volume" }] });
+    });
+    const server = createMcpServer({
+        tools: [
+            tool,
+            {
+                name: "next_mutation",
+                description: "reuse committed reference",
+                parameters: { type: "object", properties: {} },
+                handler: next,
+            },
+        ],
+        instructions: "test",
+    });
+    const client = new Client({ name: "cancel-test", version: "1" }, {});
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    const signal = new AbortController();
+    try {
+        const running = client.callTool(
+            {
+                name: "run_program",
+                arguments: { ops: [boxOp("source", 22), filletOp("cancelled", "source")] },
+            },
+            undefined,
+            { signal: signal.signal },
+        );
+        const rejected = expect(running).rejects.toThrow(/abort|cancel/i);
+        await rs.waitFor(() => expect(shapeOperation).toHaveBeenCalledTimes(1));
+        expect(shapeOperation.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+        const queued = client.callTool({ name: "next_mutation", arguments: {} });
+        expect(next).not.toHaveBeenCalled();
+        signal.abort();
+        await rejected;
+        const response = await queued;
+        expect(response.isError).not.toBe(true);
+        expect(response.content).toEqual([
+            { type: "text", text: JSON.stringify({ created: [], removed: [], results: { volume: 10 } }) },
+        ]);
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(observed).toEqual({ snapshot: before, position, held: false });
+        expect(doc.history.position()).toBe(position);
+        expect(doc.modelManager.findNodes(() => true).map((node) => node.id)).toEqual(nodes);
+        expect(AutosaveHolds.isHeld).toBe(false);
+        await expect(
+            tool.handler({ ops: [{ method: "shape.volume", target: "cancelled", id: "volume" }] }),
+        ).rejects.toThrow("ai.error.unknownRef");
+    } finally {
+        finish();
+        await client.close();
+        await server.close();
+        doc.dispose();
+    }
+});
+
+test("a late abort cannot undo an already committed program", async () => {
+    const { doc, tool } = setup();
+    const signal = new AbortController();
+    try {
+        await tool.handler({ ops: [boxOp("committed")] }, signal.signal);
+        const position = doc.history.position();
+        signal.abort();
+        const reused = JSON.parse(
+            (await tool.handler({
+                ops: [{ method: "shape.volume", target: "committed", id: "volume" }],
+            })) as string,
+        );
+        expect(reused.results.volume).toBe(10);
+        expect(doc.history.position()).toBe(position);
+        expect(doc.history.undoCount()).toBe(1);
     } finally {
         doc.dispose();
     }
