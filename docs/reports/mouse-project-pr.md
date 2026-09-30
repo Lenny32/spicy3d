@@ -27,6 +27,7 @@ for dependencies, ticket status, full integration SHAs and validation.
 | #96 | Bounded worker operations with transactional rollback and responsive metadata | dadd98ce831e8ef831c3e415c3596979bb0531a8 |
 | #82 | Native corner preflight and actionable OCCT construction diagnostics | c316e7b99e7368f605e1793c7a85dbbbc35cd6b2 |
 | #97 | Terminate in-flight native workers and roll back cancelled programs | 5c6728d30a1995f787a75f030b32c57973add2a1 |
+| #103 | Isolated STL linear/angular tessellation controls in UI and MCP | 16a7b3796fb0a46b5f1130993409302bdb932639 |
 
 Validation: 9,356 passing tests on the combined NURBS/worker integration, one skip; production build, TypeScript and required
 repository check pass. Windows validation requires Git's POSIX shell on PATH and bounded Rstest
@@ -56,7 +57,11 @@ Additional #82 validation: pinned native rebuild, 163 worker and 183 integrated 
 Additional #97 validation: 1159 worker tests, 37 integrated checks, TypeScript and required lint;
 actual native-entry cancellation in Chromium/Firefox, old-handle rejection and fresh geometry.
 
-Remaining project work: #83–#85, #88–#90, #92, #94–#95, #98, #103 (11 tickets).
+Additional #103 validation: 247 worker and 111 integration tests, rebuilt native artifacts,
+TypeScript and required lint. Actual curved fidelity/coarsening, physical units and CAD/cache
+immutability checks pass. Custom tessellation remains synchronous and is approximation control.
 
-Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97.
+Remaining project work: #83–#85, #88–#90, #92, #94–#95, #98 (10 tickets).
+
+Refs #106, #100, #99, #91, #86, #101, #87, #104, #81, #105, #102, #82, #93, #96, #97, #103.
 Keep issues open and never merge this PR automatically.
