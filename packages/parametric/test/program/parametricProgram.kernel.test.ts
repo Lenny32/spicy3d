@@ -32,6 +32,7 @@ import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
+    type EdgesReport,
     type ParametricOp,
     type ProgramRunOptions,
     runParametricProgram,
@@ -1112,4 +1113,182 @@ test("the MCP compact handler returns only the edited feature from a large body"
         rs.unstubAllGlobals();
         doc.close();
     }
+});
+
+describe("persistent program edge references (real kernel)", () => {
+    test.each([
+        "fillet",
+        "chamfer",
+    ] as const)("%s reuses JSON reference after upstream edge reorder", async (op) => {
+        const doc = newDoc();
+        (doc as any).selection = createMockSelection();
+        const created = run(doc, [
+            { op: "sketch", id: "stableSketch", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "stableBody", sketch: "stableSketch", depth: 20 },
+        ]);
+        const bodyId = created.created.find((entry) => entry.id === "stableBody")!.nodeId;
+        const body = bodyOf(doc, bodyId);
+        const app = createMockApplication();
+        (app as any).activeView = { document: doc };
+        rs.stubGlobal("app", app);
+        try {
+            const tool = buildParametricTools()[0];
+            const response = JSON.parse(
+                (await tool.handler({ ops: [{ op: "edges", body: bodyId, id: "picks" }] })) as string,
+            );
+            const picks = response.results.picks as EdgesReport;
+            expect(picks.bodyId).toBe(bodyId);
+            expect(picks.edges).toHaveLength(12);
+            // Retain the complete response as an external caller would, before rebuilding.
+            const portablePicks = JSON.parse(JSON.stringify(picks)) as EdgesReport;
+            // Change the source extrusion and cut an upstream hole before applying the saved pick.
+            run(doc, [
+                {
+                    op: "editFeature",
+                    body: bodyId,
+                    featureId: body.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+                { op: "sketch", id: "hole", entities: [{ type: "circle", params: [20, 15, 3] }] },
+                { op: "extrude", id: "cut", body: bodyId, sketch: "hole", depth: 25, operation: "cut" },
+            ]);
+            const current = run(doc, [{ op: "edges", body: bodyId }]).results["edges"] as EdgesReport;
+            const selected = portablePicks.edges.find((row) => {
+                const edge = row.reference.edge;
+                return (
+                    edge.kind === "line" &&
+                    edge.start.z === 20 &&
+                    edge.end.z === 20 &&
+                    current.edges.some(
+                        (now) => now.reference.edge.edgeId === edge.edgeId && now.index !== row.index,
+                    )
+                );
+            });
+            expect(selected).not.toBeUndefined();
+            if (!selected) throw new Error("test requires reordered top edge");
+            expect(selected.reference.edge.edgeId).toEqual(expect.any(String));
+            const portable = selected.reference;
+            const moved = current.edges.find((row) => row.reference.edge.edgeId === portable.edge.edgeId)!;
+            expect(moved).not.toBeUndefined();
+            expect(moved.index).not.toBe(selected.index);
+            expect(moved.reference.edge).not.toEqual(portable.edge);
+            const applied = JSON.parse(
+                (await tool.handler({
+                    ops: [
+                        {
+                            op,
+                            id: "rounded",
+                            body: bodyId,
+                            edgeRefs: [portable],
+                            ...(op === "fillet" ? { radius: 1 } : { distance: 1 }),
+                        },
+                    ],
+                })) as string,
+            );
+            expect(applied.bodies[0].features).toHaveLength(3);
+            expect(body.shape.isOk).toBe(true);
+            expect(body.featureItems()[2].error).toBeUndefined();
+            const feature = body.features[2];
+            expect(feature.type).toBe(op);
+            if (feature.type !== "fillet" && feature.type !== "chamfer") throw new Error("wrong feature");
+            expect(feature.edges[0].edgeId).toBe(portable.edge.edgeId);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("invalid queries and selections fail without changing body features", () => {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "s", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "b", sketch: "s", depth: 20 },
+        ]);
+        const body = bodyOf(doc, created.created[1].nodeId);
+        const picks = run(doc, [{ op: "edges", body: "b", edgeIndexes: [0] }]).results[
+            "edges"
+        ] as EdgesReport;
+        const before = body.featuresJson;
+        for (const index of [-1, 12, 0.5]) {
+            expect(() => run(doc, [{ op: "edges", body: "b", edgeIndexes: [0, index] }])).toThrow(
+                /out of range/,
+            );
+        }
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [{ ...picks.edges[0].reference, bodyId: "another" }],
+                },
+            ]),
+        ).toThrow(/different body/);
+        expect(() =>
+            run(doc, [{ op: "fillet", id: "f", body: "b", radius: 1, edgeRefs: [], edgeIndexes: [0] }]),
+        ).toThrow(/exactly one/);
+        expect(() => run(doc, [{ op: "fillet", id: "f", body: "b", radius: 1, edgeRefs: [] }])).toThrow(
+            /at least one/,
+        );
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: { kind: "other", mid: { x: 900, y: 900, z: 900 }, length: 3 },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/Edge not found/);
+        expect(() =>
+            run(doc, [
+                {
+                    op: "chamfer",
+                    id: "c",
+                    body: "b",
+                    distance: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "line",
+                                start: { x: 0, y: 15, z: 20 },
+                                end: { x: 40, y: 15, z: 20 },
+                            },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/ambiguous/i);
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "circle",
+                                center: { x: 0, y: 0, z: 0 },
+                                axis: { x: 0, y: 0, z: 1 },
+                                radius: -1,
+                            },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/invalid persistent edge fingerprint/);
+        expect(body.featuresJson).toBe(before);
+    });
 });
