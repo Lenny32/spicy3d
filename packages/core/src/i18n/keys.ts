@@ -1373,6 +1373,7 @@ export const I18N_KEYS = [
     "fillet.lawRadius",
     "fillet.addSample",
     "fillet.lawHelp",
+    "fillet.cornerSetback",
 ] as const;
 
 export type I18nKeys = (typeof I18N_KEYS)[number];

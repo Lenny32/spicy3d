@@ -11,7 +11,8 @@ import {
     loadDocumentFixtures,
     TestDocument,
 } from "@spicy3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory, initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "../src/migrations";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { SketchNode } from "../src/sketch/sketchNode";
@@ -21,14 +22,17 @@ const WASM_BINARY = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
 );
 
+let asyncFactory: HybridShapeFactory;
 beforeAll(async () => {
     await initWasm({ wasmBinary: WASM_BINARY });
+    asyncFactory = new HybridShapeFactory(() => new NativeWorkerTransport().client);
     Object.defineProperty(globalThis, "shapeFactory", {
-        value: new ShapeFactory(),
+        value: new ShapeFactory(asyncFactory),
         writable: true,
         configurable: true,
     });
 });
+afterAll(() => asyncFactory.dispose());
 
 test("the parametric and sketch modules are registered with whole chains", () => {
     expect(DocumentMigrations.moduleVersions()).toMatchObject({
@@ -55,7 +59,12 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
             (n) => n instanceof ConstructionNode,
         ) as ConstructionNode[];
         expect(bodies.length + sketches.length + constructions.length).toBeGreaterThan(0);
-        for (const body of bodies) expect(body.shape.isOk).toBe(true);
+        for (const body of bodies) {
+            void body.shape;
+            expect(await body.whenRebuilt()).toBe(true);
+            expect(body.shape.isOk).toBe(true);
+            expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+        }
         for (const sketch of sketches) expect(sketch.shape.isOk).toBe(true);
         for (const construction of constructions) {
             expect(construction.geometry.isOk, construction.errorMessage).toBe(true);
@@ -65,7 +74,8 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
         expect(unknown.map((n) => n.className)).not.toContain("ParametricBodyNode");
         expect(unknown.map((n) => n.className)).not.toContain("SketchNode");
         expect(doc.modelManager.serialize()).toEqual(data["models"]);
-    });
+        doc.dispose();
+    }, 180_000);
 });
 
 test("the approved next/from-face fixture rebuilds its exact depth and offset after load", async () => {

@@ -20,8 +20,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * 9: associative sweeps with a sketch section and an ordered 3D path reference.
  * 10: associative directional projection of source curves onto one trimmed target face.
  * 11: support-normal face sweeps with section/path/support picks and join/cut behavior.
+ * 12: independently editable fillet corner setbacks; older readers would silently omit the corner patch.
  */
-export const PARAMETRIC_FORMAT_VERSION = 11;
+export const PARAMETRIC_FORMAT_VERSION = 12;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -75,3 +76,6 @@ registerMigration("parametric", 9, (document) => document);
 
 // parametric 10 → 11: faceSweep is new; prior feature lists retain their meaning verbatim.
 registerMigration("parametric", 10, (document) => document);
+
+// parametric 11 → 12: absent corner setbacks retain the prior constant/variable fillet operation.
+registerMigration("parametric", 11, (document) => document);

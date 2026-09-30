@@ -1465,6 +1465,7 @@ export default {
         "file.stl.angularTolerance": "Angular deflection (degrees)",
         "fillet.variableRadius": "Variable radius",
         "fillet.editRadiusLaw": "Edit radius law…",
+        "fillet.cornerSetback": "Corner setback",
         "fillet.radiusLaw": "Fillet radius law",
         "fillet.lawPosition": "Position (%)",
         "fillet.lawRadius": "Law radius",

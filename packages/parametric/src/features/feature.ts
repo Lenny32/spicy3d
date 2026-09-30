@@ -19,6 +19,7 @@ import {
     type TrackedShape,
     type XYZLike,
 } from "@spicy3d/core";
+import type { FilletCornerSetback } from "./cornerSetbacks";
 import type { EdgeRef } from "./edgeRef";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import type { ProfileRef } from "./profileRef";
@@ -224,6 +225,8 @@ export interface FilletFeatureData extends FeatureBase {
     readonly radius: ParameterValue;
     /** Optional smooth law, normalized arc length along each selected edge's natural curve direction. */
     readonly radiusLaw?: FilletRadiusPoint[];
+    /** Optional independently controlled setbacks at one three-edge corner (constant radius only). */
+    readonly cornerSetbacks?: FilletCornerSetback[];
     readonly edges: EdgeRef[];
 }
 

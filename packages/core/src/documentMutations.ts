@@ -14,6 +14,15 @@ export interface IDocumentMutationScope {
 export class DocumentMutations {
     private static readonly owners = new WeakMap<IDocument, symbol>();
     private static readonly active = new WeakMap<IDocument, symbol>();
+    private static readonly scopes = new WeakMap<IDocument, IDocumentMutationScope>();
+
+    /** Capture explicit authority for resumed geometry callbacks during an owned write. */
+    static captureScope(document: IDocument): IDocumentMutationScope | undefined {
+        const owner = DocumentMutations.owners.get(document);
+        return owner !== undefined && DocumentMutations.active.get(document) === owner
+            ? DocumentMutations.scopes.get(document)
+            : undefined;
+    }
 
     static isHeld(document: IDocument): boolean {
         return DocumentMutations.owners.has(document);
@@ -33,7 +42,7 @@ export class DocumentMutations {
             DocumentMutations.assertWritable(document),
         );
         let released = false;
-        return {
+        const scope: IDocumentMutationScope = {
             run: <T>(action: () => T): T => {
                 if (released) throw new Error("Document mutation scope was released");
                 const previous = DocumentMutations.active.get(document);
@@ -50,7 +59,10 @@ export class DocumentMutations {
                 released = true;
                 releaseHistory();
                 DocumentMutations.owners.delete(document);
+                DocumentMutations.scopes.delete(document);
             },
         };
+        DocumentMutations.scopes.set(document, scope);
+        return scope;
     }
 }

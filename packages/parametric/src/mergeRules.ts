@@ -159,7 +159,21 @@ registerMergePayload("parametric.features", {
                 // their order or endpoint values invalid, so resolve the whole law atomically.
                 fillet: {
                     kind: "object",
-                    fields: { ...featureBase, radius: expression, radiusLaw: atomic, edges },
+                    fields: {
+                        ...featureBase,
+                        radius: expression,
+                        radiusLaw: atomic,
+                        edges,
+                        // A triplet's references and their associated distances must remain coherent.
+                        cornerSetbacks: {
+                            kind: "atomic",
+                            of: {
+                                kind: "object",
+                                atomic: true,
+                                fields: { edges, distances: { kind: "atomic", of: expression } },
+                            },
+                        },
+                    },
                 },
                 chamfer: { kind: "object", fields: { ...featureBase, distance: expression, edges } },
                 boolean: {

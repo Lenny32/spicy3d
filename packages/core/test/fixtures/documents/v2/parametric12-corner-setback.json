@@ -1,0 +1,84 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 12,
+        "sketch": 3
+    },
+    "id": "fixture-parametric12-corner-setback",
+    "name": "Fixture parametric v12: independent corner setback expressions",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[0,0,40,0]},{\"id\":2,\"type\":\"line\",\"params\":[40,0,40,40]},{\"id\":3,\"type\":\"line\",\"params\":[40,40,0,40]},{\"id\":4,\"type\":\"line\",\"params\":[0,40,0,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-block",
+                "name": "body.sketch1",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"feature-block\",\"type\":\"extrude\",\"depth\":40,\"sketchId\":\"sketch-block\"},{\"id\":\"feature-corner\",\"type\":\"fillet\",\"radius\":2,\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":40},\"edgeId\":\"feature-block:4\"},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":40,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":0},\"edgeId\":\"sketch:sketch-block:e1.2.3.4:ent4\"},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":40,\"y\":0,\"z\":0},\"edgeId\":\"sketch:sketch-block:e1.2.3.4:ent1\"}],\"cornerSetbacks\":[{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":40},\"edgeId\":\"feature-block:4\"},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":40,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":0},\"edgeId\":\"sketch:sketch-block:e1.2.3.4:ent4\"},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":40,\"y\":0,\"z\":0},\"edgeId\":\"sketch:sketch-block:e1.2.3.4:ent1\"}],\"distances\":[\"setback - 0.01 mm\",\"setback\",\"setback + 0.01 mm\"]}]}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-block",
+                "name": "body.parametricBody1",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "variable-setback",
+            "name": "setback",
+            "expression": "2.5 mm",
+            "type": "length"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

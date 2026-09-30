@@ -4,6 +4,7 @@
 import {
     type AsyncController,
     ConstructionNode,
+    DocumentMutations,
     DocumentRebuilds,
     type FeatureItem,
     type FeatureReference,
@@ -193,6 +194,25 @@ export class ParametricBodyNode
     private _job?: RebuildJob;
     private _run?: RebuildRun;
     private _forceSynchronous = false;
+    private _preparedCorner?: {
+        json: string;
+        input: IShape;
+        tracking: ShapeTracking;
+        take(): Result<IShape>;
+    };
+
+    /** Runtime-only, single-use candidate; exact input identity is checked at consumption. */
+    installPreparedCorner(candidate: NonNullable<ParametricBodyNode["_preparedCorner"]>): () => void {
+        if (this._preparedCorner) throw new Error("A corner candidate is already installed");
+        this._preparedCorner = candidate;
+        return () => {
+            if (this._preparedCorner === candidate) this._preparedCorner = undefined;
+        };
+    }
+
+    cancelCornerEditRebuild(): void {
+        this.cancelRebuild("corner-edit-cancelled");
+    }
     private _replayCancelled = false;
     private _lastRebuildSucceeded = true;
     /** Nested consumers must finish against the caller's in-flight timeline, without yielding. */
@@ -650,7 +670,13 @@ export class ParametricBodyNode
             !this._forceSynchronous &&
             !ParametricBodyNode.synchronousDocuments.has(this.document) &&
             ParametricBodyNode.evaluationDepth === 0 &&
-            this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD;
+            (this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD ||
+                this.features.some(
+                    (feature) =>
+                        feature.type === "fillet" &&
+                        !feature.suppressed &&
+                        feature.cornerSetbacks !== undefined,
+                ));
         const revision = DocumentRebuilds.revision(this.document);
         const featuresJson = this.featuresJson;
         const scopeJson = JSON.stringify([...this.document.variables.evaluate().scope]);
@@ -666,6 +692,8 @@ export class ParametricBodyNode
         };
         this._run = run;
         const steps = this.evaluateChain(asynchronous, run);
+        const mutationScope = DocumentMutations.captureScope(this.document);
+        const owned = <T>(action: () => T): T => (mutationScope ? mutationScope.run(action) : action());
         const advance = () => {
             const batchTrace = PerformanceTrace.enabled
                 ? PerformanceTrace.begin("body.batch", { nodeId: this.id })
@@ -673,7 +701,7 @@ export class ParametricBodyNode
             this._evaluating = true;
             ParametricBodyNode.evaluationDepth++;
             try {
-                return steps.next();
+                return owned(() => steps.next());
             } finally {
                 this._timeline.endRun();
                 ParametricBodyNode.evaluationDepth--;
@@ -692,37 +720,40 @@ export class ParametricBodyNode
                 this.document,
                 steps,
                 advance,
-                (result) => {
-                    if (this._job !== job || this._isDisposed) return;
-                    this._job = undefined;
-                    if (run.outcome === "cancelled") {
+                (result) =>
+                    owned(() => {
+                        if (this._job !== job || this._isDisposed) return;
+                        this._job = undefined;
+                        if (run.outcome === "cancelled") {
+                            const result = this.generateShape("superseded");
+                            if (result.isOk) this.shape = result;
+                            return;
+                        }
+                        this._lastRebuildSucceeded = result.isOk;
+                        this.reportRebuildProgress(undefined);
+                        if (result.isOk) this.shape = result;
+                        else if (!this._shape.isOk) this._shape = result;
+                        this.emitPropertyChanged("featuresJson", this.featuresJson);
+                        this.document.visual.update();
+                    }),
+                (index) => this.reportRebuildProgress(index),
+                (error) =>
+                    owned(() => {
+                        if (this._job !== job) return;
+                        this._job = undefined;
+                        this._lastRebuildSucceeded = false;
+                        this.reportRebuildProgress(undefined);
+                        this._featureErrors.set(this.features[0]?.id ?? "", String(error));
+                        this.emitPropertyChanged("featuresJson", this.featuresJson);
+                    }),
+                run.current,
+                () =>
+                    owned(() => {
+                        if (this._job !== job || this._isDisposed) return;
+                        this._job = undefined;
                         const result = this.generateShape("superseded");
                         if (result.isOk) this.shape = result;
-                        return;
-                    }
-                    this._lastRebuildSucceeded = result.isOk;
-                    this.reportRebuildProgress(undefined);
-                    if (result.isOk) this.shape = result;
-                    else if (!this._shape.isOk) this._shape = result;
-                    this.emitPropertyChanged("featuresJson", this.featuresJson);
-                    this.document.visual.update();
-                },
-                (index) => this.reportRebuildProgress(index),
-                (error) => {
-                    if (this._job !== job) return;
-                    this._job = undefined;
-                    this._lastRebuildSucceeded = false;
-                    this.reportRebuildProgress(undefined);
-                    this._featureErrors.set(this.features[0]?.id ?? "", String(error));
-                    this.emitPropertyChanged("featuresJson", this.featuresJson);
-                },
-                run.current,
-                () => {
-                    if (this._job !== job || this._isDisposed) return;
-                    this._job = undefined;
-                    const result = this.generateShape("superseded");
-                    if (result.isOk) this.shape = result;
-                },
+                    }),
                 () => {
                     run.synchronous = true;
                 },
@@ -845,6 +876,15 @@ export class ParametricBodyNode
      */
     timelineStateAt(index: number): FeatureTimelineState | undefined {
         return this._timeline.stateAt(index);
+    }
+
+    /** Includes the final output when a new corner is appended, without changing timeline lookup semantics. */
+    cornerEditStateAt(index: number): FeatureTimelineState | undefined {
+        if (index < this.features.length) return this.timelineStateAt(index);
+        if (index !== this.features.length) return undefined;
+        const count = this.features.filter((feature) => !feature.suppressed).length;
+        const entry = this._timeline.entryAt(count - 1);
+        return entry && { shape: entry.shape, faceIds: entry.faceIds, edgeIds: entry.edgeIds };
     }
 
     /**
@@ -1289,9 +1329,27 @@ export class ParametricBodyNode
         // An async evaluation's cost is its wall time up to the answer: the worker's kernel
         // time is what a later rebuild of this step pays too.
         const started = performance.now();
-        const pending = asynchronous
-            ? featureHandler(feature.type)?.prepareAsync?.(feature, context)
+        const prepared =
+            feature.type === "fillet" && feature.cornerSetbacks !== undefined
+                ? this._preparedCorner
+                : undefined;
+        const preparedOperation: IAsyncShapeOperation<IShape> | undefined = prepared
+            ? {
+                  ready: Promise.resolve(),
+                  cancel: () => {},
+                  canFallback: false,
+                  take: () => {
+                      this._preparedCorner = undefined;
+                      if (prepared.json !== JSON.stringify(feature) || prepared.input !== input)
+                          return Result.err("Corner preview is stale; recompute before confirming");
+                      Object.assign(tracking, prepared.tracking);
+                      return prepared.take();
+                  },
+              }
             : undefined;
+        const pending =
+            preparedOperation ??
+            (asynchronous ? featureHandler(feature.type)?.prepareAsync?.(feature, context) : undefined);
         return {
             pending,
             finish: (synchronous) => {

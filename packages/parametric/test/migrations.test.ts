@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 11 (support-normal groove/rib)", () => {
+describe("parametric format 12 (independent corner setbacks)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(11);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(11);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(12);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(12);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -30,6 +30,7 @@ describe("parametric format 11 (support-normal groove/rib)", () => {
         ["v2/parametric8-next.json", 8],
         ["v2/parametric9-sweep.json", 9],
         ["v2/parametric10-projection.json", 10],
+        ["v2/parametric11-face-sweep.json", 11],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -38,7 +39,7 @@ describe("parametric format 11 (support-normal groove/rib)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 11 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 12 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
