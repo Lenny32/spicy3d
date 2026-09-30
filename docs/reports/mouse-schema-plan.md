@@ -202,3 +202,37 @@ downstream references, UI/MCP editing, cancel and one-step undo. Version/migrati
 registration waits for #89's committed version-10 step. Native feasibility may proceed earlier
 after the sweep implementation, using the shared serialized build slot. #84 and #85 versions
 remain unassigned until their geometry and concrete payload designs pass review.
+
+## #84: independent fillet corner setbacks
+
+Reserved owning module version: **parametric 12**, following #90's parametric 11. Worker: `mouse_101`.
+Add optional `FilletFeatureData.cornerSetbacks` as a list of
+`{ edges: [EdgeRef, EdgeRef, EdgeRef]; distances: [ParameterValue, ParameterValue, ParameterValue] }`.
+Initially require exactly one triplet matching the feature's three selected edges, one unambiguous
+eligible trihedral corner and a constant radius; reject combination with `radiusLaw` explicitly.
+Absent setbacks preserve existing fillet behavior. Distances are independently editable expressions
+in millimetres, finite and positive, larger than the radius and shorter than each selected arc length.
+
+The accepted native feasibility construction trims actual rolling strips and support surfaces,
+fits a bounded tangent-constrained plate, repairs parameter consistency, sews and validates the
+result. Require the unchanged 0.0001 mm boundary/tolerance limit and 0.001 rad tangent limit,
+valid closed BREP, no self-interference, positive reduced volume, retained constant-radius strips
+and unchanged input geometry/display cache. Finite independent boundary checks are not a global
+mathematical certificate. Unsupported or failed fits return specific errors. The faster experimental
+quadrilateral construction has not met the tangent limit and is not approved for production.
+
+Native tracking must compose actual copy, fillet, trimming and sewing ancestry: retained supports,
+rolling strips, the new corner cap and connector/section edges keep their actual contributing
+input face/edge provenance. Do not manufacture history through positional or nearest-geometry IDs.
+Use a dedicated tracked worker operation for expensive live solves, retaining the existing
+**90-second** deadline, generation termination for cancel/timeout and no main-thread fallback.
+Handle synchronous shape reads and configuration flushes explicitly so they cannot invoke the
+expensive solver on the live main thread. Preview uses explicit recompute/confirm/cancel rather
+than continuous dragging. Explicit synchronous native proof/headless evaluation remains possible.
+
+The pure parametric 11→12 migration is identity. Setback picks and distances form one atomic
+coherent payload, with declared expression dependencies. Add a NEW immutable fixture, old-document
+and cloud roundtrip/merge tests, independent-distance geometry and actual history proofs,
+scalar/expression UI/MCP editing, rollback, cancel and one-step undo. Version/migration/rule/fixture
+registration waits for #90's committed version-11 step. Runtime/native implementation may proceed
+under the serialized native build slot. #85's owning version remains unassigned.
