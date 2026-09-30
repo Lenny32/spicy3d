@@ -1537,6 +1537,36 @@ public:
         return pipeTracked(section, path, solid, roundCorner, nullptr);
     }
 
+    static TrackedShapeResult copyTracked(const TopoDS_Shape& input)
+    {
+        if (input.IsNull())
+            return failedResult(GuardTag<TrackedShapeResult> { }, "Tracked copy input is null");
+        BRepBuilderAPI_Copy copy(input, true, false);
+        const auto output = copy.Shape();
+        if (!copy.IsDone() || output.IsNull() || !BRepCheck_Analyzer(output).IsValid())
+            return failedResult(GuardTag<TrackedShapeResult> { }, "Tracked copy result is invalid");
+        TrackedShapeResult result { output, true, "", { }, { } };
+        auto history = [&](TopAbs_ShapeEnum type, std::vector<int>& map, std::vector<int>& ancestors) {
+            NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> originals, copied;
+            TopExp::MapShapes(input, type, originals);
+            TopExp::MapShapes(output, type, copied);
+            if (originals.Extent() != copied.Extent())
+                throw Standard_Failure("Tracked copy changed input topology");
+            map.assign(copied.Extent(), -1);
+            for (int i = 1; i <= originals.Extent(); ++i) {
+                const int index = copied.FindIndex(copy.ModifiedShape(originals.FindKey(i)));
+                if (index <= 0 || map[index - 1] != -1)
+                    throw Standard_Failure("Tracked copy has no unique original ancestry");
+                map[index - 1] = i - 1;
+                ancestors.push_back(index - 1);
+                ancestors.push_back(i - 1);
+            }
+        };
+        history(TopAbs_FACE, result.faceMap, result.faceAncestors);
+        history(TopAbs_EDGE, result.edgeMap, result.edgeAncestors);
+        return result;
+    }
+
     static TrackedShapeResult faceSweepTracked(const TopoDS_Wire& section,
         const TopoDS_Wire& path, const TopoDS_Face& support, bool roundCorner)
     {
@@ -3600,6 +3630,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
         .class_function("sweepTracked", guardedEntry<&ShapeFactory::sweepTracked>("ShapeFactory.sweepTracked"))
         .class_function("faceSweepTracked", guardedEntry<&ShapeFactory::faceSweepTracked>("ShapeFactory.faceSweepTracked"))
+        .class_function("copyTracked", guardedEntry<&ShapeFactory::copyTracked>("ShapeFactory.copyTracked"))
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
         .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))

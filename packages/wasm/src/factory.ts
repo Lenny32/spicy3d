@@ -969,6 +969,13 @@ export class ShapeFactory implements IShapeFactory {
             "Face sweep",
         );
     }
+    copyTracked(shape: IShape): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { copyTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).copyTracked;
+        if (!binding) return Result.err("Tracked deep copy requires a newer geometry kernel");
+        return convertTrackedShapeResult(binding, [ensureOccShape(shape)[0]], "Copy");
+    }
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape> {
         return convertShapeResult(
             wasm.ShapeFactory.revolve,
