@@ -4,11 +4,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { rs } from "@rstest/core";
 import {
+    I18n,
     type IFace,
     type IPicker,
     Matrix4,
     Plane,
+    PubSub,
     ShapeTypes,
     Transaction,
     type VisualShapeData,
@@ -181,6 +184,59 @@ describe("thicken command (real kernel)", () => {
 
         expect(body.features[1]).toMatchObject({ thickness: "-wall_t" });
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 8, 3);
+    });
+
+    test("a face picked on an open shell is refused with a tip, and the shell is thickened whole", async () => {
+        const { app, doc } = setup();
+        const sketches = [0, 20].map((z) => {
+            const sketch = new SketchNode({
+                document: doc,
+                plane: new Plane({ origin: new XYZ({ x: 0, y: 0, z }), normal: XYZ.unitZ, xvec: XYZ.unitX }),
+                data: { entities: [{ id: 1, type: "circle", params: [0, 0, 10] }], constraints: [] },
+            });
+            doc.modelManager.addNode(sketch);
+            return sketch;
+        });
+        const tube = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "l1",
+                    type: "loft",
+                    sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
+                    solid: false,
+                },
+            ],
+        });
+        doc.modelManager.addNode(tube);
+        expect(tube.shape.isOk).toBe(true);
+        const [face] = tube.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+        expect(face).not.toBeUndefined();
+        const pick = {
+            shape: face,
+            owner: { node: tube },
+            transform: Matrix4.identity(),
+            indexes: [0],
+        } as unknown as VisualShapeData;
+        const publish = rs.spyOn(PubSub.default, "pub");
+        try {
+            const command = new ThickenFeatureCommand();
+            pickFaces(doc, command, tube, [pick], () => {
+                command.thickness = 2;
+            });
+
+            await command.execute(app);
+
+            expect(publish).toHaveBeenCalledWith("showFloatTip", {
+                level: "warn",
+                msg: I18n.translate("prompt.thicken.openFacesSolidOnly"),
+            });
+            expect(tube.features).toHaveLength(2);
+            expect(tube.features[1]).not.toHaveProperty("openFaces");
+            expect(tube.shape.value.findSubShapes(ShapeTypes.solid)).toHaveLength(1);
+        } finally {
+            publish.mockRestore();
+        }
     });
 
     test("a thickness that does not resolve adds nothing", async () => {

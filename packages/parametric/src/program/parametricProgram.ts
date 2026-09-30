@@ -791,8 +791,9 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     state.refs.set(op.id, body.id);
 }
 
-const THICKEN_JOIN_TYPES = ["arc", "intersection"] as const;
-const THICKEN_MODES = ["skin", "pipe"] as const;
+/** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */
+const THICKEN_JOIN_TYPE_NAMES = ["arc", "intersection"] as const;
+const THICKEN_MODE_NAMES = ["skin", "pipe"] as const;
 
 function runThickenOp(state: State, op: ThickenOp): void {
     const body = resolveBody(state, op.body);
@@ -800,11 +801,11 @@ function runThickenOp(state: State, op: ThickenOp): void {
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
     if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
     ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
-    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPES as readonly string[]).includes(op.joinType)) {
-        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPES.join(", ")}`);
+    if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
+        throw new Error(`"joinType" must be one of ${THICKEN_JOIN_TYPE_NAMES.join(", ")}`);
     }
-    if (op.mode !== undefined && !(THICKEN_MODES as readonly string[]).includes(op.mode)) {
-        throw new Error(`"mode" must be one of ${THICKEN_MODES.join(", ")}`);
+    if (op.mode !== undefined && !(THICKEN_MODE_NAMES as readonly string[]).includes(op.mode)) {
+        throw new Error(`"mode" must be one of ${THICKEN_MODE_NAMES.join(", ")}`);
     }
     if (op.openFaceIndexes !== undefined && !Array.isArray(op.openFaceIndexes)) {
         throw new Error('"openFaceIndexes" must be an array of face indexes');

@@ -389,7 +389,7 @@ describe("construction parameters as expressions", () => {
         [
             "a broken path distance",
             { kind: "point-along-path", path: axis(), position: { kind: "distance", value: "nope" } },
-            'Construction position "nope" does not evaluate: ',
+            'Construction position.value "nope" does not evaluate: ',
         ],
         [
             "an empty expression",

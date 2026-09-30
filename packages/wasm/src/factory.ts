@@ -23,6 +23,7 @@ import {
     Precision,
     Result,
     ShapeTypes,
+    ShapeTypeUtils,
     type TrackedShape,
     type XYZ,
     type XYZLike,
@@ -101,15 +102,37 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
 }
 
 /**
- * A thick solid the kernel answered is checked with `checkShape()` before it is handed out: an
- * offset of steep, narrow faces can come back invalid, and a later boolean or inspection on it
- * may raise inside the kernel. Newer kernel builds check it in C++ too; this covers older ones.
+ * A thick solid the kernel answered is checked before it is handed out:
+ *
+ * - it must hold a solid: `makeThickSolidByJoin` on an open shell without closing faces answers
+ *   `IsDone` with a compound of the offset faces, which `checkShape()` accepts; `notSolidHint`
+ *   says what to call instead;
+ * - it must pass `checkShape()`: an offset of steep, narrow faces can come back invalid, and a
+ *   later boolean or inspection on it may raise inside the kernel. Newer kernel builds check it in
+ *   C++ too; this covers older ones.
  */
-function validThickSolid(result: Result<IShape, string>, op: string): Result<IShape, string> {
+function validThickSolid(
+    result: Result<IShape, string>,
+    op: string,
+    notSolidHint = "",
+): Result<IShape, string> {
     if (!result.isOk) return result;
-    if (result.value.checkShape()) return result;
-    result.value.dispose();
+    const shape = result.value;
+    if (!containsSolid(shape)) {
+        const type = ShapeTypeUtils.stringValue(shape.shapeType);
+        shape.dispose();
+        return Result.err(`${op} failed: the result is not a solid (${type})${notSolidHint}`);
+    }
+    if (shape.checkShape()) return result;
+    shape.dispose();
     return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+}
+
+function containsSolid(shape: IShape): boolean {
+    if (shape.shapeType === ShapeTypes.solid) return true;
+    const solids = shape.findSubShapes(ShapeTypes.solid);
+    for (const solid of solids) solid.dispose();
+    return solids.length > 0;
 }
 
 /**
@@ -817,6 +840,7 @@ export class ShapeFactory implements IShapeFactory {
                 "MakeThickSolidByJoin",
             ),
             "MakeThickSolidByJoin",
+            "; for an open shell use makeThickSolidBySimple",
         );
     }
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape> {

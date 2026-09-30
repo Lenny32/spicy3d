@@ -68,6 +68,8 @@ type RefKind = "shape" | "curve" | "surface";
  */
 interface NumericArgs {
     readonly scope: Scope;
+    /** name -> error of the variables whose own expression does not evaluate (absent from `scope`) */
+    readonly broken: ReadonlyMap<string, string>;
     /** param name -> resolved value, for the args given as expressions */
     readonly resolved: Record<string, number>;
 }
@@ -479,9 +481,23 @@ function coerceNumber(p: ShapeCapabilityParam, v: unknown, numeric: NumericArgs)
         throw new Error(`${p.name} must be ${expected}, got ${describe(v)}`);
     }
     const value = resolveNumericExpression(v, unit, numeric.scope);
-    if (!value.isOk) throw new Error(`${p.name} must be ${expected}, got ${describe(v)} (${value.error})`);
+    if (!value.isOk) {
+        throw new Error(
+            `${p.name} must be ${expected}, got ${describe(v)} (${value.error}${brokenCause(value.error, numeric)})`,
+        );
+    }
     numeric.resolved[p.name] = value.value;
     return value.value;
+}
+
+/**
+ * Why an identifier the expression names is unknown when it is a document variable: a variable
+ * whose own expression does not evaluate is left out of the scope, so it reads as undefined.
+ */
+function brokenCause(error: string, numeric: NumericArgs): string {
+    const name = /^Unknown identifier: ([A-Za-z_][A-Za-z0-9_]*)/.exec(error)?.[1];
+    const cause = name === undefined ? undefined : numeric.broken.get(name);
+    return cause === undefined ? "" : ` (variable "${name}" does not evaluate: ${cause})`;
 }
 
 function resolveNumericExpression(source: string, unit: ShapeParamUnit, scope: Scope): Result<number> {
@@ -883,7 +899,11 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const removed: RemovedNode[] = [];
     const results: Record<string, unknown> = {};
     // Expression args resolve against the variables as they are now, once for the whole program.
-    const scope = doc.variables.evaluate().scope;
+    const evaluated = doc.variables.evaluate();
+    const variables: ProgramVariables = {
+        scope: evaluated.scope,
+        broken: brokenVariables(doc, evaluated.errors),
+    };
     const resolved: Record<string, Record<string, number>> = {};
 
     // The transaction rolls the scene back on failure; refs registered by this program
@@ -894,7 +914,7 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     const nullSnapshot = new Set(nullRefs);
     try {
         Transaction.execute(doc, "AI program", () => {
-            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, scope, signal);
+            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, variables, signal);
             doc.selection.clearSelection();
             doc.visual.update();
         });
@@ -908,6 +928,20 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
             ? { created, removed, results, resolved }
             : { created, removed, results },
     );
+}
+
+/** The variables a program's expression args resolve against, taken once per run_program call. */
+type ProgramVariables = Omit<NumericArgs, "resolved">;
+
+/** The variables whose expression does not evaluate, by name (`errors` is keyed by variable id). */
+function brokenVariables(doc: IDocument, errors: ReadonlyMap<string, string>): Map<string, string> {
+    const broken = new Map<string, string>();
+    if (errors.size === 0) return broken;
+    for (const item of doc.variables.items ?? []) {
+        const error = errors.get(String(item.id));
+        if (error !== undefined && typeof item.name === "string") broken.set(item.name, error);
+    }
+    return broken;
 }
 
 /** What a program reports back; `resolved` = op id (or `ops[i]`) -> its expression args' values. */
@@ -929,13 +963,13 @@ function runOps(
     factory: unknown,
     localRefs: Map<string, LocalRef>,
     output: ProgramOutput,
-    scope: Scope,
+    variables: ProgramVariables,
     signal: AbortSignal | undefined,
 ): void {
     const { created, removed, results } = output;
     for (const [index, op] of ops.entries()) {
         throwIfCancelled(signal, index, String(op.method));
-        const numeric: NumericArgs = { scope, resolved: {} };
+        const numeric: NumericArgs = { ...variables, resolved: {} };
         try {
             timeOp(String(op.method), () =>
                 runOp(op, doc, factory, localRefs, created, removed, results, numeric),

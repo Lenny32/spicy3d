@@ -35,7 +35,7 @@ function setup(factory: Record<string, unknown>) {
     const app = createMockApplication({ shapeProvider: { factory: factory as any } });
     (app as any).activeView = { document: doc };
     rs.stubGlobal("app", app);
-    return { evaluate };
+    return { evaluate, doc };
 }
 
 const run = async (ops: unknown[]) =>
@@ -107,6 +107,32 @@ describe("run_program numeric expressions", () => {
             ]),
         ).rejects.toThrow(
             'thickness must be a number or a length expression, got "wall_t2" (Unknown identifier: wall_t2)',
+        );
+        expect(thick).not.toHaveBeenCalled();
+    });
+
+    test("a variable whose own expression is broken reports why it is unknown", async () => {
+        const box = rs.fn(() => Result.ok(solid));
+        const thick = rs.fn(() => Result.ok(solid));
+        const { doc } = setup({ box, makeThickSolidBySimple: thick });
+        Object.assign(doc.variables, {
+            items: [
+                { id: "v1", name: "wall_t", type: "length", expression: "3.75" },
+                { id: "v9", name: "rim", type: "length", expression: "wall_t +" },
+            ],
+            evaluate: () => ({
+                scope: new Map<string, EvaluatedValue>([["wall_t", { value: 3.75, unit: LENGTH_UNITS }]]),
+                errors: new Map([["v9", "Unexpected end of expression"]]),
+            }),
+        });
+
+        await expect(
+            run([
+                { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                { method: "makeThickSolidBySimple", args: { shape: "b", thickness: "rim * 2" } },
+            ]),
+        ).rejects.toThrow(
+            'thickness must be a number or a length expression, got "rim * 2" (Unknown identifier: rim (variable "rim" does not evaluate: Unexpected end of expression))',
         );
         expect(thick).not.toHaveBeenCalled();
     });

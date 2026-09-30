@@ -163,11 +163,13 @@ describe("thicken feature (real kernel)", () => {
         expect(inward.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 6, 3);
         // Six outer faces and the six faces of the void.
         expect(faces(inward)).toHaveLength(12);
+        expect(inward.shape.value.checkShape()).toBe(true);
 
         const outward = boxBody(newDoc());
         thicken(outward, { thickness: 2, joinType: "intersection" });
         expect(errorOf(outward, "t1")).toBeUndefined();
         expect(outward.shape.value.volume()).toBeCloseTo(24 * 24 * 14 - 4000, 3);
+        expect(outward.shape.value.checkShape()).toBe(true);
     });
 
     test.each([

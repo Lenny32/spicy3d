@@ -91,7 +91,10 @@ text) is possible as an interim step, see phase 1.
    runs chosen expensive ops (thick solid / offset on many faces, booleans on large inputs) from BREP
    text, with a timeout and a cancel that call `terminate()` and re-create the worker. The result
    comes back as BREP. The call site stays synchronous for everything else, and only the MCP program
-   runner awaits these ops. This removes the reported hang with a bounded change.
+   runner awaits these ops. This removes the reported hang with a bounded change. run_program's op
+   loop runs inside the synchronous `Transaction.execute`, so an awaited worker op needs the
+   `Transaction.executeAsync` variant; the parametric feature handlers (`registerFeature`) stay
+   synchronous and are not routed to the worker in this phase.
 2. **Headless application in the worker.** A DOM-free `IApplication` for `Document.loadHeadless`,
    used for the merge validation (`validateMerge`) off the main thread first. It is useful on its
    own and exercises the model in the worker.
@@ -121,6 +124,22 @@ text) is possible as an interim step, see phase 1.
 - Phase 3: mirror consistency (property tests: random command sequences, where the main-thread
   mirror must equal the worker's tree after each), undo/redo parity, and picking by index.
 - MCP: `get_document_state` answers while a long op runs in the worker.
+
+## Acceptance Criteria
+
+- [ ] Phase 1: a worker op over its timeout or cancelled is terminated, the worker is re-created, the
+      next call works, and the document is back at its last committed state.
+- [ ] Phase 1: `get_document_state` answers while a long op runs in the worker.
+- [ ] The kernel test suites pass against both the main-thread module and the worker entry.
+- [ ] Each later phase has its own implementation ticket with a synchronous-`IShape` inventory
+      (phase 3) and a latency budget for interactive previews.
+- [ ] No save-format change; the CSP needs no new source.
+
+## Dependencies and Complexity
+
+Dependencies: none for phase 1 (the WASM build for `web,worker`); phase 2 builds on
+`Document.loadHeadless`, phases 3 and 4 on phase 2. Complexity: phase 1 medium, phase 2 medium,
+phase 3 very high, phase 4 low once phase 3 is done.
 
 ## Out of scope
 

@@ -7,6 +7,7 @@ import {
     Combobox,
     command,
     GetOrSelectNodeStep,
+    I18n,
     type I18nKeys,
     Id,
     type IFace,
@@ -127,7 +128,11 @@ export class ThickenFeatureCommand extends CancelableCommand {
                     break;
                 }
                 const data = pick.shapes[0];
-                if (!solid || data === undefined || data.owner.node !== body) continue;
+                if (data === undefined || data.owner.node !== body) continue;
+                if (!solid) {
+                    showPreviewProblem(I18n.translate("prompt.thicken.openFacesSolidOnly"));
+                    continue;
+                }
                 this.toggleFace(body, data.indexes[0], data.shape as IFace);
                 this.displayPreview();
             }

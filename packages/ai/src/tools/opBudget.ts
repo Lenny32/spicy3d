@@ -16,6 +16,12 @@ export function throwIfCancelled(signal: AbortSignal | undefined, index: number,
     throw new Error(`cancelled before op ${index} ("${method}"); the whole program was rolled back`);
 }
 
+/**
+ * Warnings noted since the last tool result. The MCP server (mcp/server.ts) is the only caller of
+ * the tool handlers and the only consumer: it drains them into every result. A new caller of the
+ * handlers (an in-page chat agent, say) must drain them into its own results too, with
+ * `takeSlowOpWarnings`, or its slow ops surface on an unrelated later MCP call.
+ */
 const pending: string[] = [];
 
 /** Records one op's wall time; over the budget it becomes a warning for the next tool result. */
