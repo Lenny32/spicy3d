@@ -10,6 +10,8 @@
 #include "utils.hpp"
 #include <BOPAlgo_BuilderFace.hxx>
 #include <BOPAlgo_Splitter.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -36,6 +38,7 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
+#include <BRepLib_CheckCurveOnSurface.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
@@ -78,6 +81,7 @@
 #include <NCollection_IndexedMap.hxx>
 #include <Precision.hxx>
 #include <ShapeAnalysis_Edge.hxx>
+#include <ShapeFix_Edge.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_FixSmallFace.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -1711,6 +1715,143 @@ public:
         const TopoDS_Wire& path, bool solid,
         bool roundCorner)
     {
+        return pipeTracked(section, path, solid, roundCorner, nullptr);
+    }
+
+    static TrackedShapeResult faceSweepTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, const TopoDS_Face& support, bool roundCorner)
+    {
+        auto fail = [](const std::string& error) {
+            return failedResult(GuardTag<TrackedShapeResult> { }, error);
+        };
+        if (section.IsNull() || path.IsNull() || support.IsNull())
+            return fail("Face sweep requires a section, path and trimmed support face");
+        // Face construction changes wire flags, and p-curves mutate edge representations.
+        // Own deep copies before any builders or validators can touch borrowed topology.
+        BRepBuilderAPI_Copy sectionCopy(section, true, false), pathCopy(path, true, false), supportCopy(support, true, false);
+        const auto ownedSection = TopoDS::Wire(sectionCopy.Shape());
+        const auto ownedPath = TopoDS::Wire(pathCopy.Shape());
+        const auto ownedSupport = TopoDS::Face(supportCopy.Shape());
+        if (!BRepCheck_Analyzer(ownedSection).IsValid() || !BRepCheck_Analyzer(ownedPath).IsValid()
+            || !BRepCheck_Analyzer(ownedSupport).IsValid())
+            return fail("Face sweep input topology is invalid");
+        BRepBuilderAPI_MakeFace profileFace(ownedSection, true);
+        if (!profileFace.IsDone())
+            return fail("Face sweep section must be a planar closed profile");
+        BRepAdaptor_Surface profileSurface(profileFace.Face(), true);
+        if (profileSurface.GetType() != GeomAbs_Plane)
+            return fail("Face sweep section must be planar");
+        TopoDS_Vertex start, end;
+        TopExp::Vertices(ownedPath, start, end);
+        if (start.IsNull())
+            return fail("Face sweep path has no start vertex");
+        const gp_Pnt startPoint = BRep_Tool::Pnt(start);
+        BRepTools_WireExplorer explorer(ownedPath);
+        if (!explorer.More())
+            return fail("Face sweep path has no edge");
+        const TopoDS_Edge first = explorer.Current();
+        BRepAdaptor_Curve curve(first);
+        gp_Pnt curvePoint;
+        gp_Vec tangent;
+        curve.D1(first.Orientation() == TopAbs_REVERSED ? curve.LastParameter() : curve.FirstParameter(), curvePoint, tangent);
+        const double tolerance = 1e-6;
+        if (tangent.SquareMagnitude() <= tolerance * tolerance)
+            return fail("Face sweep path start tangent is degenerate");
+        const gp_Pln plane = profileSurface.Plane();
+        if (plane.Distance(startPoint) > tolerance
+            || !plane.Axis().Direction().IsParallel(gp_Dir(tangent), 1e-6))
+            return fail("Face sweep section must be authored at the path start, perpendicular to its tangent");
+        BRepClass_FaceClassifier sectionClassifier(profileFace.Face(), startPoint, tolerance);
+        if (sectionClassifier.State() != TopAbs_IN && sectionClassifier.State() != TopAbs_ON)
+            return fail("Face sweep section must contain the path start");
+
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pathEdges;
+        TopExp::MapShapes(ownedPath, TopAbs_EDGE, pathEdges);
+        if (pathEdges.Extent() < 1 || pathEdges.Extent() > 256)
+            return fail("Face sweep requires 1-256 path pieces");
+        ShapeFix_Edge fixer;
+        for (int i = 1; i <= pathEdges.Extent(); ++i) {
+            const auto edge = TopoDS::Edge(pathEdges.FindKey(i));
+            const double previousTolerance = BRep_Tool::Tolerance(edge);
+            fixer.FixAddPCurve(edge, ownedSupport, false, tolerance);
+            double firstParameter, lastParameter;
+            const auto pcurve = BRep_Tool::CurveOnSurface(edge, ownedSupport, firstParameter, lastParameter);
+            if (pcurve.IsNull())
+                return fail("Face sweep path has no support p-curve");
+            BRepLib::SameParameter(edge, tolerance);
+            BRepLib_CheckCurveOnSurface consistency(edge, ownedSupport);
+            consistency.Perform();
+            if (!BRep_Tool::SameParameter(edge) || !consistency.IsDone()
+                || !std::isfinite(consistency.MaxDistance()) || consistency.MaxDistance() > tolerance
+                || BRep_Tool::Tolerance(edge) > previousTolerance + 1e-9
+                || !BRepCheck_Analyzer(edge).IsValid())
+                return fail("Face sweep path p-curve is inconsistent with its 3D geometry");
+            GProp_GProps inputProperties, coveredProperties, remainderProperties;
+            BRepGProp::LinearProperties(edge, inputProperties);
+            BRepAlgoAPI_Common common(edge, ownedSupport);
+            common.SetNonDestructive(true);
+            common.Build();
+            if (!common.IsDone() || common.HasErrors())
+                return fail("Face sweep could not validate trimmed support coverage");
+            BRepGProp::LinearProperties(common.Shape(), coveredProperties);
+            BRepAlgoAPI_Cut remaining(edge, ownedSupport);
+            remaining.SetNonDestructive(true);
+            remaining.Build();
+            if (!remaining.IsDone() || remaining.HasErrors())
+                return fail("Face sweep could not validate the unsupported path remainder");
+            BRepGProp::LinearProperties(remaining.Shape(), remainderProperties);
+            const double allowed = std::max(tolerance, inputProperties.Mass() * 1e-7);
+            if (inputProperties.Mass() <= tolerance
+                || std::abs(inputProperties.Mass() - coveredProperties.Mass()) > allowed
+                || remainderProperties.Mass() > allowed)
+                return fail("Every whole path edge must lie on the selected trimmed support face");
+        }
+        auto result = pipeTracked(ownedSection, ownedPath, true, roundCorner, &ownedSupport);
+        if (!result.isOk)
+            return result;
+        // Copy maps establish the original input enumeration contract explicitly.
+        auto remapping = [&](TopAbs_ShapeEnum type) {
+            std::vector<int> remap;
+            int offset = 0;
+            for (auto item : { std::make_pair(TopoDS_Shape(section), &sectionCopy), std::make_pair(TopoDS_Shape(path), &pathCopy) }) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> originals, copied;
+                TopExp::MapShapes(item.first, type, originals);
+                TopExp::MapShapes(item.second->Shape(), type, copied);
+                const int copyOffset = remap.size();
+                remap.resize(copyOffset + copied.Extent(), -1);
+                for (int i = 1; i <= originals.Extent(); ++i) {
+                    const int index = copied.FindIndex(item.second->ModifiedShape(originals.FindKey(i)));
+                    if (index <= 0 || remap[copyOffset + index - 1] != -1)
+                        throw Standard_Failure("Face sweep copy lost unique input ancestry");
+                    remap[copyOffset + index - 1] = offset + i - 1;
+                }
+                offset += originals.Extent();
+            }
+            return remap;
+        };
+        const auto edgeRemap = remapping(TopAbs_EDGE), vertexRemap = remapping(TopAbs_VERTEX);
+        auto remapIndex = [](int& index, const std::vector<int>& map) {
+            if (index < 0)
+                return;
+            if (index >= static_cast<int>(map.size()) || map[index] < 0)
+                throw Standard_Failure("Face sweep history lost original input ancestry");
+            index = map[index];
+        };
+        for (auto* map : { &result.edgeMap, &result.faceEdgeMap })
+            for (int& index : *map)
+                remapIndex(index, edgeRemap);
+        for (auto* pairs : { &result.edgeAncestors, &result.pipeFaceEdges })
+            for (size_t i = 1; i < pairs->size(); i += 2)
+                remapIndex((*pairs)[i], edgeRemap);
+        for (auto* pairs : { &result.pipeFaceVertices, &result.pipeEdgeVertices })
+            for (size_t i = 1; i < pairs->size(); i += 2)
+                remapIndex((*pairs)[i], vertexRemap);
+        return result;
+    }
+
+    static TrackedShapeResult pipeTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, bool solid, bool roundCorner, const TopoDS_Face* support)
+    {
         if (section.IsNull() || path.IsNull()) {
             return failedResult(GuardTag<TrackedShapeResult> { },
                 "Sweep requires a section and path wire");
@@ -1726,7 +1867,12 @@ public:
                 "Sweep path has no unambiguous endpoints");
         }
         BRepOffsetAPI_MakePipeShell pipe(path);
-        pipe.SetMode(true);
+        if (support) {
+            if (!pipe.SetMode(*support))
+                return failedResult(GuardTag<TrackedShapeResult> { }, "Face sweep could not establish a support-normal Darboux frame");
+            pipe.SetTolerance(1e-6, 1e-6, 1e-6);
+        } else
+            pipe.SetMode(true);
         pipe.SetIsBuildHistory(true);
         pipe.SetTransitionMode(roundCorner ? BRepBuilderAPI_RoundCorner
                                            : BRepBuilderAPI_RightCorner);
@@ -3635,6 +3781,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("fillet", guardedEntry<&ShapeFactory::fillet>("ShapeFactory.fillet"))
         .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
         .class_function("sweepTracked", guardedEntry<&ShapeFactory::sweepTracked>("ShapeFactory.sweepTracked"))
+        .class_function("faceSweepTracked", guardedEntry<&ShapeFactory::faceSweepTracked>("ShapeFactory.faceSweepTracked"))
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
         .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))

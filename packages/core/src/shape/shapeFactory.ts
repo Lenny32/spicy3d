@@ -159,6 +159,13 @@ export interface IShapeFactory {
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
     /** A single section swept along a path, retaining both profile and path ancestry. */
     sweepTracked?(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape>;
+    /** A solid swept with a real support-normal frame; every path edge must lie on the trimmed face. */
+    faceSweepTracked?(
+        section: IWire,
+        path: IWire,
+        support: IFace,
+        roundCorner: boolean,
+    ): Result<TrackedShape>;
     /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;

@@ -372,3 +372,19 @@ test("distinct MCP calls round-trip tracked source refs through JSON and upstrea
         rs.stubGlobal("shapeFactory", factory);
     }
 });
+
+test("an explicit rebuild after host placement changes recomputes host-local projection", () => {
+    const { projection } = fixture();
+    expect(projection.shape.isOk).toBe(true);
+    const midpoint = (shape: import("@spicy3d/core").IShape) => {
+        const edge = shape.findSubShapes(ShapeTypes.edge)[0] as IEdge;
+        return edge.pointAt((edge.firstParameter() + edge.lastParameter()) / 2);
+    };
+    const original = midpoint(projection.shape.value);
+    projection.transform = Matrix4.fromTranslation(3, 0, 0);
+    const rebuilt = projection["generateShape"]();
+    expect(rebuilt.isOk).toBe(true);
+    const local = midpoint(rebuilt.value);
+    expect(local.x).toBeCloseTo(original.x - 3, 5);
+    expect(projection.worldTransform().ofPoint(local).x).toBeCloseTo(original.x, 5);
+});

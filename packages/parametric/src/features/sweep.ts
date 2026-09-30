@@ -12,6 +12,7 @@ import {
     ShapeTypes,
     sha256HexSync,
     type TrackedShape,
+    VisualNode,
 } from "@spicy3d/core";
 import { matchEdgesInEdges } from "./edgeMatcher";
 import { captureEdgeRef } from "./edgeRef";
@@ -231,7 +232,13 @@ const handler: FeatureHandler<SweepFeatureData> = {
     ],
     cacheKey: (feature, document) => {
         const host = hostOf(feature, document);
-        return host ? pathReferenceDependencies(feature.path, document, host).key : undefined;
+        const node = host && document.modelManager.findNode((candidate) => candidate.id === host);
+        return node instanceof VisualNode
+            ? JSON.stringify([
+                  node.worldTransform().toArray(),
+                  pathReferenceDependencies(feature.path, document, node.id).key,
+              ])
+            : undefined;
     },
     cacheRefIds: (feature, document) => {
         const host = hostOf(feature, document);

@@ -326,3 +326,14 @@ describe("associative path sweep feature (real kernel)", () => {
         }
     });
 });
+
+test("an explicit sweep rebuild after host placement changes uses current local coordinates", () => {
+    const { body } = setup();
+    expect(body.shape.isOk).toBe(true);
+    const original = body.shape.value.geometryBoundingBox();
+    body.transform = Matrix4.fromTranslation(3, 0, 0);
+    const rebuilt = body["generateShape"]();
+    expect(rebuilt.isOk).toBe(true);
+    expect(rebuilt.value.geometryBoundingBox().max.x).toBeCloseTo(original.max.x - 3, 5);
+    expect(rebuilt.value.volume()).toBeCloseTo(40, 5);
+});
