@@ -12,6 +12,7 @@ import {
     type Matrix4,
     PubSub,
     Result,
+    type StlExportOptions,
     type VisualNode,
     XYZ,
 } from "@spicy3d/core";
@@ -296,7 +297,7 @@ describe("DefaultDataExchange", () => {
         function stubShapeConverter() {
             const converter = {
                 convertToSTL: rs.fn(
-                    (_shapes: IShape[], _options?: { binary: boolean }) =>
+                    (_shapes: IShape[], _options?: StlExportOptions) =>
                         Result.ok(new Uint8Array([1, 2, 3])) as Result<BlobPart>,
                 ),
                 convertToSTEP: rs.fn(
@@ -395,6 +396,48 @@ describe("DefaultDataExchange", () => {
             expect(converter[method]).toHaveBeenCalledTimes(1);
             expect(converter[method]).toHaveBeenCalledWith([transformed], { lengthUnit: "mm" });
             expect(converter.convertToSTL).not.toHaveBeenCalled();
+        });
+
+        test.each([
+            ".stl",
+            ".stl binary",
+        ])("scales mm tolerance into cm for %s and preserves angular degrees", async (type) => {
+            const converter = stubShapeConverter();
+            const doc = createMockDocument();
+            const { node, transformed } = createShapeNode(doc, "stl-cm-tolerance");
+            const scaled = new MockShape({ id: "scaled" });
+            transformed.transformedMul = rs.fn((_matrix: Matrix4) => scaled);
+            const result = await exchange.export(type, [node], {
+                lengthUnit: "cm",
+                stl: { linearTolerance: 0.2, angularTolerance: 6 },
+            });
+            expect(result).toEqual([new Uint8Array([1, 2, 3])]);
+            expect(converter.convertToSTL).toHaveBeenCalledWith([scaled], {
+                binary: type === ".stl binary",
+                linearTolerance: 0.020000000000000004,
+                angularTolerance: 6,
+            });
+        });
+
+        test("refuses invalid tolerance and non-STL tolerance before kernel work", async () => {
+            const converter = stubShapeConverter();
+            const doc = createMockDocument();
+            const { node, transformedMul } = createShapeNode(doc, "invalid-tolerance");
+            expect(await exchange.export(".stl", [node], { stl: { linearTolerance: -1 } })).toBeUndefined();
+            expect(await exchange.export(".step", [node], { stl: { angularTolerance: 5 } })).toBeUndefined();
+            expect(transformedMul).not.toHaveBeenCalled();
+            expect(converter.convertToSTL).not.toHaveBeenCalled();
+            expect(converter.convertToSTEP).not.toHaveBeenCalled();
+            expect(pubSpy).toHaveBeenCalledWith(
+                "showToast",
+                "error.default:{0}",
+                expect.stringContaining("linearTolerance"),
+            );
+            expect(pubSpy).toHaveBeenCalledWith(
+                "showToast",
+                "error.default:{0}",
+                expect.stringContaining("only to STL"),
+            );
         });
 
         test("should scale an STL export in cm by 0.1 and keep the physical size", async () => {

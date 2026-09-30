@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DataExportOptions,
     download,
     I18n,
     type IApplication,
@@ -11,6 +12,7 @@ import {
     Matrix4,
     Transaction,
     VisualNode,
+    validateStlTessellation,
 } from "@spicy3d/core";
 import type { Tool } from "../llm/types";
 import { imageByteBudget } from "./imageEncoding";
@@ -97,18 +99,34 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     const format = args["format"] as string;
     const formatError = validateFormat(app, format);
     if (formatError) return JSON.stringify({ error: formatError });
+    const custom = args["linearTolerance"] !== undefined || args["angularTolerance"] !== undefined;
+    let options: DataExportOptions | undefined;
+    if (custom) {
+        if (format !== ".stl" && format !== ".stl binary")
+            return JSON.stringify({ error: "Tessellation tolerances apply only to STL exports" });
+        options = {
+            stl: {
+                linearTolerance: args["linearTolerance"] as number | undefined,
+                angularTolerance: args["angularTolerance"] as number | undefined,
+            },
+        };
+        const error = validateStlTessellation(options.stl);
+        if (error) return JSON.stringify({ error });
+    }
 
     const mode = args["mode"] === undefined ? "merged" : args["mode"];
     if (mode !== "merged" && mode !== "separate")
         return JSON.stringify({ error: 'mode must be "merged" or "separate"' });
-    if (mode === "separate") return handleSeparateExport(app, doc, args, format, delivery, maxBytes);
+    if (mode === "separate") return handleSeparateExport(app, doc, args, format, delivery, maxBytes, options);
 
     const nodes = resolveNodes(doc, args["ids"]);
     if (typeof nodes === "string") return JSON.stringify({ error: nodes });
     const visuals = nodes.filter((n): n is VisualNode => n instanceof VisualNode);
     if (visuals.length === 0) return JSON.stringify({ error: "no exportable nodes" });
 
-    const data = await app.dataExchange.export(format, visuals);
+    const data = options
+        ? await app.dataExchange.export(format, visuals, options)
+        : await app.dataExchange.export(format, visuals);
     if (!data) {
         return JSON.stringify({ error: "export failed: no exportable geometry for this format" });
     }
@@ -197,6 +215,7 @@ async function handleSeparateExport(
     format: string,
     delivery: "download" | "base64",
     maxBytes: number,
+    options?: DataExportOptions,
 ): Promise<string> {
     const ids = args["ids"];
     if (ids !== undefined && (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")))
@@ -234,7 +253,9 @@ async function handleSeparateExport(
         while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
         output.filename = filename;
         try {
-            const data = await app.dataExchange.export(format, [node]);
+            const data = options
+                ? await app.dataExchange.export(format, [node], options)
+                : await app.dataExchange.export(format, [node]);
             if (!data) {
                 output.error = "Export failed: no exportable geometry for this format";
                 continue;
@@ -332,6 +353,19 @@ export function buildFileTools(): Tool[] {
                     filename: {
                         type: "string",
                         description: "Optional file name; the format extension is appended when missing",
+                    },
+                    linearTolerance: {
+                        type: "number",
+                        exclusiveMinimum: 0,
+                        description:
+                            "STL only: absolute linear tessellation deflection in millimetres; omit to preserve legacy relative deflection",
+                    },
+                    angularTolerance: {
+                        type: "number",
+                        exclusiveMinimum: 0,
+                        maximum: 180,
+                        description:
+                            "STL only: angular tessellation deflection in degrees; omit to preserve the legacy 0.2-radian setting",
                     },
                 },
                 required: ["format"],

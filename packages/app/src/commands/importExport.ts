@@ -7,6 +7,7 @@ import {
     Combobox,
     ConstructionNode,
     command,
+    type DataExportOptions,
     documentLengthUnit,
     download,
     exportLengthUnit,
@@ -23,6 +24,7 @@ import {
     readFilesAsync,
     Transaction,
     VisualNode,
+    validateStlTessellation,
 } from "@spicy3d/core";
 import { importFiles } from "../utils";
 
@@ -75,7 +77,59 @@ export class Export extends CancelableCommand {
         return this.getPrivateValue("format", ".step");
     }
     public set format(value: string) {
-        this.setProperty("format", value, () => this.emitUnitChanged());
+        this.setProperty("format", value, () => {
+            this.emitUnitChanged();
+            this.emitPropertyChanged("isStl", this.isStl);
+        });
+    }
+
+    public get isStl(): boolean {
+        return this.format === ".stl" || this.format === ".stl binary";
+    }
+
+    @property("file.stl.customTessellation", { dependencies: [{ property: "isStl", value: true }] })
+    public get customTessellation(): boolean {
+        return this.getPrivateValue("customTessellation", false);
+    }
+    public set customTessellation(value: boolean) {
+        this.setProperty("customTessellation", value);
+    }
+
+    @property("file.stl.linearTolerance", {
+        quantity: "length",
+        dependencies: [
+            { property: "isStl", value: true },
+            { property: "customTessellation", value: true },
+        ],
+    })
+    public get linearTolerance(): number {
+        return this.getPrivateValue("linearTolerance", 0.1);
+    }
+    public set linearTolerance(value: number) {
+        this.setProperty("linearTolerance", value);
+    }
+
+    @property("file.stl.angularTolerance", {
+        dependencies: [
+            { property: "isStl", value: true },
+            { property: "customTessellation", value: true },
+        ],
+    })
+    public get angularTolerance(): number {
+        return this.getPrivateValue("angularTolerance", 10);
+    }
+    public set angularTolerance(value: number) {
+        this.setProperty("angularTolerance", value);
+    }
+
+    private get exportOptions(): DataExportOptions {
+        return {
+            lengthUnit: this.outputUnit,
+            ...(this.isStl &&
+                this.customTessellation && {
+                    stl: { linearTolerance: this.linearTolerance, angularTolerance: this.angularTolerance },
+                }),
+        };
     }
 
     /**
@@ -147,6 +201,11 @@ export class Export extends CancelableCommand {
     }
 
     protected async executeAsync() {
+        const error = validateStlTessellation(this.exportOptions.stl);
+        if (error) {
+            PubSub.default.pub("showToast", "error.default:{0}", error);
+            return;
+        }
         const nodes = await this.selectNodesAsync();
         if (!nodes || nodes.length === 0) {
             PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
@@ -176,9 +235,7 @@ export class Export extends CancelableCommand {
     }
 
     private async exportMergedAsync(nodes: VisualNode[]) {
-        const data = await this.application.dataExchange.export(this.format, nodes, {
-            lengthUnit: this.outputUnit,
-        });
+        const data = await this.application.dataExchange.export(this.format, nodes, this.exportOptions);
         if (!data) return;
         download(data, `${this.fileBaseName ?? nodes[0].name}${this.suffix}`);
     }
@@ -190,9 +247,7 @@ export class Export extends CancelableCommand {
         const usedNames = new Set<string>();
 
         for (const node of nodes) {
-            const data = await this.application.dataExchange.export(this.format, [node], {
-                lengthUnit: this.outputUnit,
-            });
+            const data = await this.application.dataExchange.export(this.format, [node], this.exportOptions);
             if (!data) continue;
             zip.file(this.uniqueFileName(node.name, usedNames), new Blob(data));
         }
