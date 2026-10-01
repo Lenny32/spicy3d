@@ -19,6 +19,7 @@ import { buildTools } from "../tools";
 import { parseAskRequest } from "../tools/askUser";
 import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
 import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tools/cloudTools";
+import { forgetExports } from "../tools/exportChunks";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { takeSlowOpWarnings } from "../tools/opBudget";
 import { forgetProgramJobs, isProgramJobTool } from "../tools/programJobs";
@@ -214,6 +215,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             for (const caller of callers) {
                 forgetCloudCaller(caller);
                 forgetProgramJobs(caller);
+                forgetExports(caller);
             }
             callers.clear();
             closed?.();

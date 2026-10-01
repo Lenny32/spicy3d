@@ -1,9 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { rs } from "@rstest/core";
 import { VisualNode } from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
+import { createMcpServer } from "../src/mcp/server";
+import { buildExportChunkTool, forgetExports, retainExport } from "../src/tools/exportChunks";
 import { buildFileTools } from "../src/tools/fileTools";
 import { withImageByteBudget } from "../src/tools/imageEncoding";
 
@@ -119,5 +127,218 @@ describe("MCP export byte delivery", () => {
         const normal = JSON.parse((await tool.handler({ format: ".step", delivery: "base64" })) as string);
         expect(normal.data).toBe("YWJj");
         expect(download).not.toHaveBeenCalled();
+    });
+});
+
+describe("chunked export delivery", () => {
+    afterEach(() => {
+        forgetExports("chunks-test");
+        rs.restoreAllMocks();
+        rs.unstubAllGlobals();
+    });
+
+    test.each([
+        ".stl binary",
+        ".step",
+    ])("saves a multi-MB %s through MCP ranges with only metadata in the export result", async (format) => {
+        const bytes = new Uint8Array(84 + 50000 * 50);
+        for (let i = 84; i < bytes.length; i++) bytes[i] = i % 256;
+        new DataView(bytes.buffer).setUint32(80, 50000, true);
+        const { tool, download } = prepare([bytes]);
+        const server = createMcpServer({
+            tools: [tool, buildExportChunkTool()],
+            instructions: "x",
+            imageByteBudget: () => 8192,
+        });
+        const client = new Client({ name: "file-client", version: "1" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        const directory = await mkdtemp(join(tmpdir(), "spicy-export-"));
+        try {
+            await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+            const call = async (name: string, args: Record<string, unknown>) => {
+                const response = await client.callTool({ name, arguments: args });
+                expect(response.isError).not.toBe(true);
+                expect(new TextEncoder().encode(JSON.stringify(response)).length).toBeLessThanOrEqual(8192);
+                const content = response.content as { type: string; text: string }[];
+                expect(content[0].type).toBe("text");
+                return JSON.parse(content[0].text);
+            };
+            const metadata = await call("export_nodes", { format, delivery: "chunks" });
+            expect(metadata.bytes).toBe(bytes.length);
+            expect(metadata.data).toBeUndefined();
+            expect(metadata.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+            expect(metadata.triangles).toBe(format === ".stl binary" ? 50000 : undefined);
+            expect(JSON.stringify(metadata).length).toBeLessThan(512);
+            const path = join(directory, metadata.filename);
+            let offset = 0;
+            let eof = false;
+            while (!eof) {
+                const chunk = await call("read_export_chunk", { exportId: metadata.exportId, offset });
+                const decoded = Buffer.from(chunk.data, "base64");
+                expect(decoded.length).toBe(chunk.bytes);
+                expect(chunk.offset).toBe(offset);
+                expect(chunk.bytes).toBeGreaterThan(0);
+                await writeFile(path, decoded, { flag: offset === 0 ? "w" : "a" });
+                offset += chunk.bytes;
+                eof = chunk.eof;
+            }
+            expect(offset).toBe(bytes.length);
+            expect(await readFile(path)).toEqual(Buffer.from(bytes));
+            expect(await call("read_export_chunk", { exportId: metadata.exportId, release: true })).toEqual({
+                ok: true,
+                released: true,
+            });
+            expect(download).not.toHaveBeenCalled();
+        } finally {
+            await client.close();
+            await server.close();
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("keeps exact ranges, supports eof reads and enforces session ownership and release", async () => {
+        const { tool } = prepare([Uint8Array.of(0, 255), "é", new Blob(["tail"])]);
+        const owner = { caller: "chunks-test" };
+        const metadata = JSON.parse(
+            (await tool.handler({ format: ".step", delivery: "chunks" }, undefined, owner)) as string,
+        );
+        const reader = buildExportChunkTool();
+        const read = async (args: Record<string, unknown>, caller = owner.caller) =>
+            JSON.parse(
+                (await reader.handler({ exportId: metadata.exportId, ...args }, undefined, {
+                    caller,
+                })) as string,
+            );
+        expect((await read({ offset: 1, length: 3 })).data).toBe("/8Op");
+        expect(await read({ offset: 8 })).toMatchObject({ bytes: 0, data: "", eof: true });
+        expect((await read({}, "someone-else")).error).toContain("not found");
+        for (const args of [
+            { offset: -1 },
+            { offset: 9 },
+            { offset: 0.5 },
+            { offset: null },
+            { length: 0 },
+            { length: 49153 },
+            { length: null },
+            { release: "true" },
+        ]) {
+            expect(typeof (await read(args)).error).toBe("string");
+        }
+        expect(await read({ release: true })).toEqual({ ok: true, released: true });
+        expect((await read({})).error).toContain("not found");
+    });
+
+    test("reports ASCII STL triangles and retrieves separate ZIP exports", async () => {
+        const { tool } = prepare(["solid p\nfacet normal 0 0 1\nendfacet\nendsolid p"]);
+        const owner = { caller: "chunks-test" };
+        const ascii = JSON.parse(
+            (await tool.handler({ format: ".stl binary", delivery: "chunks" }, undefined, owner)) as string,
+        );
+        expect(ascii.triangles).toBe(1);
+        const zipped = JSON.parse(
+            (await tool.handler(
+                { format: ".step", delivery: "chunks", mode: "separate" },
+                undefined,
+                owner,
+            )) as string,
+        );
+        expect(zipped.mimeType).toBe("application/zip");
+        expect(zipped.filename).toBe("models.zip");
+        expect(zipped.outputs).toEqual([
+            { id: "n1", filename: "part.step", mimeType: "model/step", bytes: 46 },
+        ]);
+        const reader = buildExportChunkTool();
+        const chunk = JSON.parse(
+            (await reader.handler({ exportId: zipped.exportId }, undefined, owner)) as string,
+        );
+        const { default: JSZip } = await import("jszip");
+        const zip = await JSZip.loadAsync(Buffer.from(chunk.data, "base64"));
+        expect(await zip.file("part.step")!.async("string")).toBe(
+            "solid p\nfacet normal 0 0 1\nendfacet\nendsolid p",
+        );
+    });
+
+    test("refuses metadata that cannot fit the relay", async () => {
+        const { tool } = prepare(["abc"]);
+        const limited = JSON.parse(
+            await withImageByteBudget(
+                100,
+                async () =>
+                    (await tool.handler({ format: ".step", delivery: "chunks" }, undefined, {
+                        caller: "chunks-test",
+                    })) as string,
+            ),
+        );
+        expect(limited).toEqual({ error: "Export metadata exceeds the relay response limit" });
+    });
+
+    test("expires and forgets retained exports", async () => {
+        const { tool } = prepare(["abc"]);
+        const owner = { caller: "chunks-test" };
+        const create = async () =>
+            JSON.parse(
+                (await tool.handler({ format: ".step", delivery: "chunks" }, undefined, owner)) as string,
+            );
+        const reader = buildExportChunkTool();
+        const first = await create();
+        forgetExports(owner.caller);
+        expect(
+            JSON.parse((await reader.handler({ exportId: first.exportId }, undefined, owner)) as string)
+                .error,
+        ).toContain("not found");
+        const second = await create();
+        const now = Date.now();
+        rs.spyOn(Date, "now").mockReturnValue(now + 600001);
+        expect(
+            JSON.parse((await reader.handler({ exportId: second.exportId }, undefined, owner)) as string)
+                .error,
+        ).toContain("expired");
+    });
+
+    test("rejects size, cache and relay limits without inline bytes", async () => {
+        const { tool } = prepare(["abc"]);
+        const owner = { caller: "chunks-test" };
+        const limited = JSON.parse(
+            (await tool.handler(
+                { format: ".step", delivery: "chunks", maxBytes: 2 },
+                undefined,
+                owner,
+            )) as string,
+        );
+        expect(limited).toMatchObject({ error: "Export exceeds maxBytes", bytes: 3, maxBytes: 2 });
+        const metadata = JSON.parse(
+            (await tool.handler({ format: ".step", delivery: "chunks" }, undefined, owner)) as string,
+        );
+        const reader = buildExportChunkTool();
+        const tiny = JSON.parse(
+            await withImageByteBudget(
+                10,
+                async () =>
+                    (await reader.handler({ exportId: metadata.exportId }, undefined, owner)) as string,
+            ),
+        );
+        expect(tiny.error).toContain("cannot fit");
+        expect(tiny.data).toBeUndefined();
+        const tooBig = new Blob([new Uint8Array(32 * 1024 * 1024 + 1)]);
+        expect(
+            JSON.parse(
+                await retainExport(
+                    tooBig,
+                    { filename: "big.step", mimeType: "model/step", bytes: tooBig.size },
+                    32 * 1024 * 1024,
+                    owner.caller,
+                ),
+            ).error,
+        ).toContain("maxBytes");
+        const full = new Blob([new Uint8Array(32 * 1024 * 1024)]);
+        const details = { filename: "big.step", mimeType: "model/step", bytes: full.size };
+        forgetExports(owner.caller);
+        const first = JSON.parse(await retainExport(full, details, full.size, owner.caller));
+        const second = JSON.parse(await retainExport(full, details, full.size, owner.caller));
+        expect(first.delivery).toBe("chunks");
+        expect(second.delivery).toBe("chunks");
+        expect(
+            JSON.parse(await retainExport(new Blob(["x"]), { ...details, bytes: 1 }, 1, owner.caller)).error,
+        ).toContain("cache is full");
     });
 });

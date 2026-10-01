@@ -4,6 +4,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Logger } from "@spicy3d/core";
 import { forgetCloudCaller } from "../tools/cloudTools";
+import { forgetExports } from "../tools/exportChunks";
 import { imageBudgetFor } from "../tools/imageEncoding";
 import { forgetProgramJobs } from "../tools/programJobs";
 import {
@@ -110,6 +111,7 @@ export class RemoteMcpSession {
         this.gate.forget(agentId);
         forgetCloudCaller(agentId);
         forgetProgramJobs(agentId);
+        forgetExports(agentId);
         const agents = this.options.state.current.agents.filter((a) => a.id !== agentId);
         this.options.state.update({ agents });
         void this.relay
@@ -138,6 +140,7 @@ export class RemoteMcpSession {
             if (!ids.has(previous.id)) {
                 forgetCloudCaller(previous.id);
                 forgetProgramJobs(previous.id);
+                forgetExports(previous.id);
             }
         }
         this.options.state.update({

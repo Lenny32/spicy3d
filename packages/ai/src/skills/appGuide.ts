@@ -141,6 +141,7 @@ The workflow to teach:
 - {doc.save} stores the document in the browser (IndexedDB); it then appears in the start screen's recents.
 - {doc.saveToFile} downloads the document as a .cd file, which {doc.open} reads back.
 - There is NO autosave — nothing is stored until the user saves. Closing with a document open asks for confirmation first.
+- For large agent-side exports, call export_nodes with delivery="chunks" (up to 32 MiB). The result contains exportId, filename, bytes, sha256 and STL triangles, without inline file data. A client script calls read_export_chunk with that exportId and byte offset/length, decodes each base64 range directly to disk, advances offset by returned bytes until eof, verifies the full SHA-256, then calls release=true. Keep chunk responses out of model context. Exports belong to that MCP session, expire after 10 minutes, and disappear on disconnect; re-export if lost. The page cache holds 64 MiB; release completed exports. Browser download remains the default; inline base64 is for small files.
 - Import: .step, .stp, .iges, .igs, .brep, .stl. Export: .step, .iges, .brep, .stl, .stl binary, .ply, .ply binary, .obj — the export dialog chooses the format and can pack several objects into a .zip.
 - Dropping files onto the window: a .cd opens, plugin files load, anything else is imported.`,
 
