@@ -79,11 +79,17 @@ test("published corner job fits native geometry through the strict worker protoc
             expectedEdgeRefs: feature.edges,
             distances: [2.49, 2.5, 2.51],
         });
-        let status = await call("get_corner_setback_job", { jobId: started.jobId });
-        for (let i = 0; i < 1000 && !["completed", "failed", "cancelled"].includes(status.state); i++) {
-            await new Promise((resolve) => setTimeout(resolve, 5));
-            status = await call("get_corner_setback_job", { jobId: started.jobId });
-        }
+        const status = await rs.waitFor(
+            async () => {
+                const value = await call("get_corner_setback_job", { jobId: started.jobId });
+                if (!["completed", "failed", "cancelled"].includes(value.state)) {
+                    throw new Error(`Corner job is still ${value.state}`);
+                }
+                return value;
+            },
+            // Native corner fits take about a minute; leave room for slower CI runners.
+            { timeout: 120_000, interval: 25 },
+        );
         expect(status.state, status.error).toBe("completed");
         expect(status.progress).toMatchObject({ completed: 1, total: 1 });
         expect(
