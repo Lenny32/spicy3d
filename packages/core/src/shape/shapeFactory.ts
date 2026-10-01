@@ -405,6 +405,10 @@ export type BoundedShapeRequest =
           intersection: boolean;
       };
 
+/** Runtime-only checks, isolated from the kernel holding the document's native shapes. */
+export type BoundedShapeQuery = { method: "checkSelfIntersection"; shape: IShape };
+
 export interface IBoundedShapeFactory {
+    shapeQuery(request: BoundedShapeQuery, signal?: AbortSignal): IAsyncShapeOperation<boolean>;
     shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape>;
 }

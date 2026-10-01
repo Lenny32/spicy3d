@@ -4,6 +4,7 @@
 import { Config, type IDisposable, type IFace, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
 import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";
+import type { OccShape } from "../src/shape";
 import { type IKernelWorkerTransport, KernelWorkerClient } from "../src/workerClient";
 import type { KernelMessage } from "../src/workerProtocol";
 import { createBox, createSphere, unwrapOk } from "./helpers";
@@ -515,6 +516,171 @@ test("cancelling a bounded operation leaves a simultaneous boolean request runni
         expect(hybrid.available).toBe(true);
         boolean!.cancel();
     } finally {
+        hybrid.dispose();
+    }
+});
+
+test.each([
+    true,
+    false,
+])("bounded self-intersection forwards the kernel answer %s without touching the source", async (answer) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const binding = rs.spyOn(wasm.Shape, "checkSelfIntersection").mockReturnValue(answer);
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        expect(binding).not.toHaveBeenCalled();
+        await task.ready;
+        expect(unwrapOk(task.take())).toBe(answer);
+        expect(binding).toHaveBeenCalledTimes(1);
+        expect(transport.client.isClosed).toBe(true);
+        expect(box.volume()).toBeCloseTo(6000, 7);
+    } finally {
+        binding.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+function freeFormShell() {
+    const factory = new ShapeFactory();
+    const sections = Array.from({ length: 9 }, (_, i) =>
+        keep(
+            unwrapOk(
+                factory.polygon(
+                    Array.from({ length: 8 }, (_, j) => {
+                        const angle = ((j % 7) * 2 * Math.PI) / 7;
+                        const radius = 80 + 15 * Math.sin(i * 0.6 + angle);
+                        return new XYZ(radius * Math.cos(angle) + i * 3, radius * Math.sin(angle), i * 25);
+                    }),
+                ),
+            ),
+        ),
+    );
+    return keep(unwrapOk(factory.loft(sections, false, false, "c2")));
+}
+
+test.each([
+    "timeout",
+    "cancel",
+] as const)("a large free-form shell check ends on %s and the next query uses a fresh worker", async (stop) => {
+    const shell = freeFormShell();
+    const before = wasm.Converter.convertToBrep((shell as OccShape).shape);
+    const faces = shell.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    expect(faces).toHaveLength(7);
+    const transport = new HungTransport();
+    let generations = 0;
+    const hybrid = new HybridShapeFactory(() =>
+        ++generations === 1 ? new KernelWorkerClient(transport) : new NativeWorkerTransport().client,
+    );
+    const signal = new AbortController();
+    const budget = Config.instance.slowOpWarningSeconds;
+    try {
+        Config.instance.slowOpWarningSeconds = 30;
+        rs.useFakeTimers();
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: shell }, signal.signal);
+        expect(transport.messages[0]).toMatchObject({ operation: "checkSelfIntersectionReplica" });
+        await rs.advanceTimersByTimeAsync(29_999);
+        expect(transport.terminated).toBe(0);
+        if (stop === "cancel") signal.abort();
+        else await rs.advanceTimersByTimeAsync(1);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(stop === "cancel" ? "cancelled" : "timed out after 30000 ms");
+        expect(task.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+        expect(wasm.Converter.convertToBrep((shell as OccShape).shape)).toBe(before);
+        expect(shell.checkShape()).toBe(true);
+        rs.useRealTimers();
+        const box = keep(createBox(new ShapeFactory()));
+        const next = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await next.ready;
+        expect(unwrapOk(next.take())).toBe(true);
+        expect(generations).toBe(2);
+    } finally {
+        Config.instance.slowOpWarningSeconds = budget;
+        hybrid.dispose();
+    }
+});
+
+test.each([5, Infinity])("self-intersection stays bounded with slow-op budget %s", async (seconds) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const previous = Config.instance.slowOpWarningSeconds;
+    try {
+        rs.useFakeTimers();
+        Config.instance.slowOpWarningSeconds = seconds;
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        const deadline = seconds === Infinity ? 30_000 : seconds * 1000;
+        await rs.advanceTimersByTimeAsync(deadline);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(`timed out after ${deadline} ms`);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        Config.instance.slowOpWarningSeconds = previous;
+        hybrid.dispose();
+    }
+});
+
+test.each([
+    "missing",
+    "failure",
+] as const)("a %s self-intersection binding returns an error Result", async (mode) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const original = wasm.Shape.checkSelfIntersection;
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        if (mode === "missing")
+            Object.defineProperty(wasm.Shape, "checkSelfIntersection", {
+                value: undefined,
+                configurable: true,
+                writable: true,
+            });
+        else
+            wasm.Shape.checkSelfIntersection = () => {
+                throw new Error("native check failed");
+            };
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(
+            mode === "missing"
+                ? "not available in this kernel build"
+                : "Worker operation failed: checkSelfIntersectionReplica",
+        );
+        expect(task.canFallback).toBe(false);
+        expect(transport.client.isClosed).toBe(true);
+        expect(box.volume()).toBeCloseTo(6000, 7);
+    } finally {
+        wasm.Shape.checkSelfIntersection = original;
+        hybrid.dispose();
+    }
+});
+
+test("a pre-aborted self-intersection query never copies inputs or creates a worker", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const serialize = rs.spyOn(wasm.Converter, "convertToBrep");
+    const createWorker = rs.fn(() => new NativeWorkerTransport().client);
+    const hybrid = new HybridShapeFactory(createWorker);
+    const signal = new AbortController();
+    signal.abort();
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box }, signal.signal);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("cancelled");
+        expect(createWorker).not.toHaveBeenCalled();
+        expect(serialize).not.toHaveBeenCalled();
+    } finally {
+        serialize.mockRestore();
         hybrid.dispose();
     }
 });

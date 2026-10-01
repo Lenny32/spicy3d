@@ -11,7 +11,7 @@ OCCT 8.0 is compiled to one WebAssembly module (`packages/wasm/lib/spicy-wasm.wa
 page retains a main-thread instance for local shape handles and synchronous queries, previews,
 meshing, imports and exports. The existing hybrid worker runs opt-in parametric booleans, and
 MCP `run_program` uses its bounded factory bridge for boolean fuse/cut/common, fillet/chamfer,
-loft, and thick-solid simple/join. Worker inputs and outputs are verified BREP replicas;
+loft, thick-solid simple/join, and the `shape.checkSelfIntersection` query. Worker inputs and outputs are verified BREP replicas;
 no native handles cross realms.
 
 While a main-thread native call runs, nothing else in the tab runs: no rendering, no input,
@@ -25,13 +25,17 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   (`packages/ai/src/mcp/server.ts`), preserving cross-call program refs. Built-in metadata reads
   `get_document_state`, `get_selection`, and the document resource remain responsive during a
   pending worker operation and report a captured committed-state snapshot.
-- **Finite worker deadline.** Worker requests have a 90-second deadline; corner-setback fits have
+- **Finite worker deadline.** Self-intersection queries have a deadline of at most 30 seconds (shorter when the
+  slow-op budget is lower), including worker initialization and BREP import. Worker requests
+  otherwise have a 90-second deadline; corner-setback fits have
   180 seconds for their fixed plate-fit budget (roughly three times the measured reference cost).
   Corner jobs default to a 240-second queue-inclusive deadline and remain immediately cancelable.
   A timeout terminates
   its generation, fails the program, and rolls back nodes/history and reference registries.
   A following operation creates a fresh worker. Selected bounded factory methods never retry
-  synchronously when a worker is unavailable or timed out. Other main-thread calls can still hang.
+  synchronously when a worker is unavailable or timed out. The self-intersection query also
+  refuses synchronous fallback. Use `start_program_job` with the query to get live progress
+  and cancel it through `cancel_program_job`; metadata and job status calls remain responsive. Other main-thread calls can still hang.
 - **Cancellation.** A call cancelled while queued never starts. Programs check their signal
   between operations and before commit, rolling back if cancelled. A pending native operation
   in the strict bounded bridge terminates its worker generation immediately on abort, reports
@@ -65,7 +69,7 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   (`Thick solid is invalid`), not a solid. The inspections (`inspectionCommonVolume`,
   `inspectionMass`) refuse an input that fails `checkShape()`. They also run a bounded
   self-intersection test (`BOPAlgo_ArgumentAnalyzer`, up to 200 faces per shape).
-  `Shape.checkSelfIntersection` is feature-detected: an older binary answers "not available".
+  `Shape.checkSelfIntersection` in the worker is feature-detected: an older binary answers "not available".
 
 ### Thicken offset diagnostics (#121)
 
@@ -123,3 +127,16 @@ its finite deadline without marking the main kernel crashed.
 Phase 1 of [KERNEL-01](../tickets/kernel-01-worker-kernel.md) extends the existing hybrid worker
 with bounded MCP factory execution. Full model evaluation and
 main-kernel recovery (#98) remain separate work.
+
+
+### Self-intersection query isolation (#120)
+
+The MCP query runs on a verified BREP copy in a worker dedicated to that operation. Cancellation
+or deadline terminates only that worker; the main kernel's source shapes and the resident boolean
+worker remain intact. The next query creates a fresh instance. Timeout is an error, never a
+successful validity result; choose a simpler skin or skip this expensive check explicitly when
+appropriate, understanding that `checkShape` alone does not establish absence of self-intersection.
+Direct synchronous `IShape.checkSelfIntersection()` calls (including feature validation) still
+use the existing binding. OCCT has no cooperative cancellation hook in this offline build; stopping
+a running check requires terminating its worker. Replica capture on the main thread and other
+synchronous checks remain potential blocking work.

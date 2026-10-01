@@ -1076,8 +1076,8 @@ interface ProgramOutput {
 
 /**
  * Runs every op in order, restating any failure as an error naming the offending op. A cancelled
- * call stops before the next op (the caller's transaction rolls everything back); an op that
- * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
+ * call stops before the next op (the caller's transaction rolls everything back). Bounded worker
+ * operations terminate on cancellation; synchronous ops are timed for the slow-op warning.
  */
 async function runOps(
     ops: Op[],
@@ -1100,7 +1100,8 @@ async function runOps(
                 String(op.method),
                 () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner, signal),
                 (factory as IShapeFactory).boundedOperations !== undefined &&
-                    boundedRequest(op.method, []) !== undefined,
+                    (boundedRequest(op.method, []) !== undefined ||
+                        op.method === "shape.checkSelfIntersection"),
             );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
@@ -1231,6 +1232,32 @@ async function runOp(
         return;
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
+    if (!cap && op.method === "shape.checkSelfIntersection") {
+        if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
+        if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
+        const bounded = (factory as IShapeFactory).boundedOperations;
+        if (!bounded?.shapeQuery)
+            throw new Error("Self-intersection check requires a bounded geometry worker");
+        const query = queryCapabilities.find((c) => c.method === op.method)!;
+        const pending = owner.run(() => {
+            const entry = resolveQueryTarget(query, op.target, doc, localRefs);
+            return bounded.shapeQuery(
+                { method: "checkSelfIntersection", shape: entry.value as IShape },
+                signal,
+            );
+        });
+        try {
+            await pending.ready;
+            owner.run(() => {
+                const result = pending.take();
+                if (!result.isOk) throw new Error(result.error);
+                results[op.id!] = result.value;
+            });
+        } finally {
+            pending.cancel();
+        }
+        return;
+    }
     if (!cap) {
         owner.run(() => runQueryOp(op, doc, localRefs, created, results, numeric));
         return;

@@ -133,13 +133,18 @@ export class KernelWorkerClient {
         operation: K,
         args: KernelOperations[K]["args"],
         signal?: AbortSignal,
-        options?: { terminateOnAbort?: boolean },
+        options?: { terminateOnAbort?: boolean; deadlineMs?: number },
     ): Promise<KernelResult<KernelOperations[K]["result"]>> {
         if (this.closed)
             return Promise.resolve({ ok: false, error: { code: "closed", message: "Worker closed" } });
         if (signal?.aborted) return Promise.resolve(this.cancelled());
         const id = ++this.nextId;
-        const deadlineMs = operation === "cornerSetbackReplica" ? CORNER_WORKER_DEADLINE_MS : this.deadlineMs;
+        const limit = operation === "cornerSetbackReplica" ? CORNER_WORKER_DEADLINE_MS : this.deadlineMs;
+        const requested = options?.deadlineMs;
+        const deadlineMs =
+            requested !== undefined && Number.isFinite(requested) && requested > 0
+                ? Math.min(limit, requested)
+                : limit;
         const trace = PerformanceTrace.captureId;
         return new Promise((resolve) => {
             const deadline = setTimeout(

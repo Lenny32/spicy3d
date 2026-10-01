@@ -4,7 +4,9 @@
 import {
     type AsyncTrackedBoolean,
     type AsyncTrackedCorner,
+    type BoundedShapeQuery,
     type BoundedShapeRequest,
+    Config,
     type IAsyncShapeFactory,
     type IAsyncShapeOperation,
     type IBoundedShapeFactory,
@@ -75,6 +77,22 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
     }
 
     shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape> {
+        return this.boundedOperation(request, signal);
+    }
+
+    shapeQuery(request: BoundedShapeQuery, signal?: AbortSignal): IAsyncShapeOperation<boolean> {
+        return this.boundedOperation(request, signal);
+    }
+
+    private boundedOperation(
+        request: BoundedShapeRequest,
+        signal?: AbortSignal,
+    ): IAsyncShapeOperation<IShape>;
+    private boundedOperation(request: BoundedShapeQuery, signal?: AbortSignal): IAsyncShapeOperation<boolean>;
+    private boundedOperation(
+        request: BoundedShapeRequest | BoundedShapeQuery,
+        signal?: AbortSignal,
+    ): IAsyncShapeOperation<IShape | boolean> {
         if (signal?.aborted) return this.failedShapeOperation("Geometry worker operation cancelled");
         if (this.nativeFailure) return this.failedShapeOperation(this.nativeFailure);
         const prepared: IShape[] = [];
@@ -88,7 +106,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                 throw new Error("Input clone topology order changed");
             return { brep: exportBrep(frozen.shape, "input"), topology };
         };
-        let args: BoundedReplicaRequest;
+        let args: BoundedReplicaRequest | { method: "checkSelfIntersection"; shape: ShapeReplica };
         let worker: KernelWorkerClient;
         try {
             switch (request.method) {
@@ -101,6 +119,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                 case "chamfer":
                     args = { ...request, shape: capture(request.shape) };
                     break;
+                case "checkSelfIntersection":
                 case "makeThickSolidBySimple":
                     args = { ...request, shape: capture(request.shape) };
                     break;
@@ -139,7 +158,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
             );
         }
         for (const shape of prepared) shape.dispose();
-        let reply: KernelResult<ShapeReplica> | undefined;
+        let reply: KernelResult<ShapeReplica | boolean> | undefined;
         let consumed = false;
         const abort = new AbortController();
         const onAbort = () => {
@@ -158,15 +177,21 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         signal?.addEventListener("abort", onAbort, { once: true });
         if (signal?.aborted) abort.abort();
         this.active.add(cancel);
-        const ready = worker
-            .request("boundedReplica", args, abort.signal, { terminateOnAbort: true })
-            .then((result) => {
-                signal?.removeEventListener("abort", onAbort);
-                if (!consumed) reply = result;
+        const budget = Config.instance.slowOpWarningSeconds * 1000;
+        const pending =
+            args.method === "checkSelfIntersection"
+                ? worker.request("checkSelfIntersectionReplica", { shape: args.shape }, abort.signal, {
+                      terminateOnAbort: true,
+                      deadlineMs: Number.isFinite(budget) && budget > 0 ? Math.min(30_000, budget) : 30_000,
+                  })
+                : worker.request("boundedReplica", args, abort.signal, { terminateOnAbort: true });
+        const ready = pending.then((result) => {
+            signal?.removeEventListener("abort", onAbort);
+            if (!consumed) reply = result;
+            worker.dispose();
+            if (!result.ok && (result.error.code === "timeout" || result.error.code === "cancelled"))
                 worker.dispose();
-                if (!result.ok && (result.error.code === "timeout" || result.error.code === "cancelled"))
-                    worker.dispose();
-            });
+        });
         return {
             ready,
             cancel,
@@ -195,6 +220,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     }
                     return Result.err(message);
                 }
+                if (typeof answer.value === "boolean") return Result.ok(answer.value);
                 let shape: OccShape | undefined;
                 try {
                     shape = importReplica(answer.value);
@@ -214,7 +240,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         };
     }
 
-    private failedShapeOperation(message: string): IAsyncShapeOperation<IShape> {
+    private failedShapeOperation<T>(message: string): IAsyncShapeOperation<T> {
         return {
             ready: Promise.resolve(),
             canFallback: false,

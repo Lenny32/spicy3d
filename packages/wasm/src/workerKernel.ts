@@ -71,6 +71,41 @@ export class WorkerKernel {
         switch (request.operation) {
             case "cornerSetbackReplica":
                 return this.cornerSetbackReplica(request.args);
+            case "checkSelfIntersectionReplica": {
+                const check = (
+                    m.Shape as unknown as { checkSelfIntersection?: (shape: TopoDS_Shape) => boolean }
+                ).checkSelfIntersection;
+                if (typeof check !== "function")
+                    return {
+                        ok: false,
+                        error: {
+                            code: "unavailable",
+                            message: "Self-intersection check is not available in this kernel build",
+                        },
+                    };
+                const shape = m.Converter.convertFromBrep(request.args.shape.brep);
+                return this.native(
+                    () => {
+                        if (
+                            shape.isNull() ||
+                            !sameReplicaTopology(request.args.shape.topology, replicaTopology(m, shape))
+                        )
+                            return {
+                                ok: false,
+                                error: { code: "invalid", message: "Input BREP topology order changed" },
+                            };
+                        return {
+                            ok: true,
+                            value: this.measure(
+                                "worker.kernel.operation",
+                                () => Boolean(check.call(m.Shape, shape)),
+                                "checkSelfIntersection",
+                            ),
+                        };
+                    },
+                    () => shape.delete(),
+                );
+            }
             case "boundedReplica":
                 return this.boundedReplica(request.args);
             case "ready":

@@ -84,6 +84,7 @@ export type KernelOperations = {
         args: { shape: ShapeReplica; edges: number[]; radius: number; distances: number[]; mesh?: boolean };
         result: CornerReplica;
     };
+    checkSelfIntersectionReplica: { args: { shape: ShapeReplica }; result: boolean };
     boundedReplica: { args: BoundedReplicaRequest; result: ShapeReplica };
     ready: { args: undefined; result: undefined };
     box: { args: { origin: Vector3; size: Vector3 }; result: KernelHandle };
