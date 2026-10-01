@@ -217,6 +217,85 @@ test.each([
     }
 });
 
+test.each([
+    { initial: 30, redo: false },
+    { initial: 30, redo: true },
+    { initial: -30, redo: false },
+    { initial: -30, redo: true },
+])("session follows variable-only replay after an outside edit: %j", ({ initial, redo }) => {
+    const { doc, restoreFactory } = setup();
+    const variable = { id: "tilt", name: "tilt", type: "angle" as const, expression: String(initial) };
+    const start = { entityId: 1, pointIndex: 0 };
+    const end = { entityId: 1, pointIndex: 1 };
+    const radians = (initial * Math.PI) / 180;
+    Object.assign(shapeFactory, { line: () => Result.ok(new MockShape()) });
+    try {
+        doc.variables.setItems([variable]);
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [
+                    { id: 1, type: "line", params: [0, 0, 10 * Math.cos(radians), 10 * Math.sin(radians)] },
+                ],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                    },
+                ],
+            },
+        });
+        doc.modelManager.addNode(node);
+        const changeTilt = (degrees: number) =>
+            Transaction.execute(doc, "Edit tilt", () =>
+                doc.variables.setItems([{ ...variable, expression: String(degrees) }]),
+            );
+        const expectTilt = (editor: SketchEditor, degrees: number) => {
+            const y = 10 * Math.sin((degrees * Math.PI) / 180);
+            expect(doc.variables.evaluate().scope.get("tilt")?.value).toBe(degrees);
+            expect(editor.solver.pointOf(end)[1]).toBeCloseTo(y, 6);
+            expect(node.data.entities[0].params[3]).toBeCloseTo(y, 6);
+        };
+        changeTilt(-initial);
+        expect(node.data.entities[0].params[3]).toBeCloseTo(-10 * Math.sin(radians), 6);
+        const editor = SketchEditor.enter(node);
+        const undoCount = doc.history.undoCount();
+        doc.history.undo();
+        expectTilt(editor, initial);
+        expect(doc.history.undoCount()).toBe(undoCount - 1);
+        expect(doc.history.redoCount()).toBe(1);
+        if (redo) {
+            doc.history.redo();
+            expectTilt(editor, -initial);
+            expect(doc.history.undoCount()).toBe(undoCount);
+            expect(doc.history.redoCount()).toBe(0);
+        }
+        const restored = redo ? -initial : initial;
+        const next = redo ? initial / 2 : -initial / 2;
+        changeTilt(next);
+        expectTilt(editor, next);
+        doc.history.undo();
+        expectTilt(editor, restored);
+        // Reopen after replay to exercise the node's remembered solved scope too.
+        editor.exit();
+        const reopened = SketchEditor.enter(node);
+        expectTilt(reopened, restored);
+        changeTilt(next);
+        expectTilt(reopened, next);
+        reopened.exit();
+        expect(node.data.entities[0].params[3]).toBeCloseTo(10 * Math.sin((next * Math.PI) / 180), 6);
+    } finally {
+        SketchEditor.exit();
+        restoreFactory();
+        doc.dispose();
+    }
+});
+
 const DATA: SketchData = {
     entities: [{ id: 1, type: "line", params: [0, 0, 10, 0] }],
     constraints: [],

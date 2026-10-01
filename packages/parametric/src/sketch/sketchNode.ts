@@ -639,11 +639,23 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         return solver;
     }
 
-    /** After history replay, the restored table is the scope of the restored geometry. */
+    /** After geometry replays, reset against the restored parameter table. */
     resetScopedSolver(solver: SketchSolver): void {
         const scope = this.document.variables.evaluate().scope;
         solver.reset(this.data, scope);
         this._solvedScope = scope;
+    }
+
+    /** Persists a session's variable-only replay as derived geometry, preserving redo. */
+    persistScopedSolver(solver: SketchSolver): void {
+        const solved = solver.toData();
+        const anchors = this.data.anchors;
+        if (anchors !== undefined) solved.anchors = anchors;
+        this._solvedScope = this.document.variables.evaluate().scope;
+        this.withoutHistory(() => {
+            this.setProperty("dataJson", JSON.stringify(solved));
+            this.setShape(this.generateShape());
+        });
     }
 
     /** `IVariableConsumer`: sketches re-solve before the bodies that read them. */
