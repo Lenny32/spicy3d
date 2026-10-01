@@ -256,6 +256,8 @@ function isEmbindClass(value: unknown): value is new (...args: unknown[]) => obj
 const STATIC_SKIP = new Set(["prototype", "length", "name", "arguments", "caller"]);
 
 export interface KernelGuardOptions {
+    /** Candidate instances are guarded without replacing the public error-classification context. */
+    install?: boolean;
     /**
      * Run after an abort or a fatal-looking trap: throws when the module no longer works. Without
      * one the kernel is never marked crashed.
@@ -274,9 +276,7 @@ export function guardKernelModule<M extends object>(module: M, options: KernelGu
     if (moduleGenerations.has(module)) return module;
     const generation: KernelGeneration = { probe: options.probe };
     moduleGenerations.set(module, generation);
-    currentGeneration = generation;
-    probe = options.probe;
-    lastAbort = undefined;
+    if (options.install !== false) installKernelModule(module);
     const prototypes = new Set<object>();
     const record = module as Record<string, unknown>;
     for (const key of Object.getOwnPropertyNames(module)) {
@@ -312,6 +312,15 @@ export function guardKernelModule<M extends object>(module: M, options: KernelGu
     }
     for (const proto of prototypes) guardMembers(proto, JS_ONLY_METHODS, generation);
     return module;
+}
+
+/** Select the public generation only at initial installation or successful recovery publication. */
+export function installKernelModule(module: object): void {
+    const generation = moduleGenerations.get(module);
+    if (!generation) throw new Error("Public kernel must be guarded before installation");
+    currentGeneration = generation;
+    probe = generation.probe;
+    lastAbort = generation.lastAbort;
 }
 
 /**

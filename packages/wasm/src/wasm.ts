@@ -5,6 +5,7 @@ import { type IKernelRecoveryContext, KernelState } from "@spicy3d/core";
 import MainModuleFactory, { type MainModule } from "../lib/spicy-wasm";
 import {
     guardKernelModule,
+    installKernelModule,
     onKernelModuleAbort,
     retireKernelModule,
     runKernelPreparation,
@@ -30,6 +31,7 @@ export interface InitWasmOptions {
 export async function initWasm(options?: InitWasmOptions) {
     const module = await createWasmModule(options);
     global.wasm = module;
+    installKernelModule(module);
     return module;
 }
 
@@ -43,7 +45,7 @@ export async function createWasmModule(options?: InitWasmOptions): Promise<MainM
         ...(options?.wasmBinary && { wasmBinary: options.wasmBinary }),
     });
     probeKernel(module);
-    instance = guardKernelModule(module, { probe: () => probeKernel(module) });
+    instance = guardKernelModule(module, { probe: () => probeKernel(module), install: false });
     return instance;
 }
 
@@ -67,6 +69,7 @@ export async function createWasmRecoveryContext(options?: InitWasmOptions): Prom
         publish() {
             if (disposed) throw new Error("Recovery context has been disposed");
             global.wasm = module;
+            installKernelModule(module);
             published = true;
         },
         dispose() {

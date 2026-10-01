@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import { KernelCrashedError, KernelState, Result } from "@spicy3d/core";
 import {
+    classifyKernelError,
     guardKernelModule,
     guardKernelResults,
     KernelHandleOwnershipError,
@@ -94,6 +95,18 @@ beforeEach(() => {
 });
 
 afterEach(() => KernelState.current.reset());
+
+test("guarding a candidate preserves the live probe and remembered abort", () => {
+    onKernelAbort("live abort");
+    const candidateProbe = rs.fn(() => {});
+    guardKernelModule(createModule(), { probe: candidateProbe, install: false });
+    probeFails = true;
+    const error = classifyKernelError(new WebAssembly.RuntimeError("unreachable"));
+    expect(error).toBeInstanceOf(KernelCrashedError);
+    expect((error as Error).message).toContain("after Aborted(live abort)");
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(candidateProbe).not.toHaveBeenCalled();
+});
 
 const CRASHED = "Kernel crashed (Aborted(undefined)); reload the page";
 
