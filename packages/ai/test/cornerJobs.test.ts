@@ -25,6 +25,7 @@ import {
     type ProgramJobExecutor,
     ProgramJobs,
 } from "../src/tools/programJobs";
+import { waitForTerminalJob } from "./_helpers/waitForTerminalJob";
 
 const hook = rs.hoisted(() => ({
     apply: rs.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve(undefined)),
@@ -113,13 +114,8 @@ async function connect(extra: import("../src/llm/types").Tool[] = [], queue = ne
     };
     return { client, call, marker };
 }
-async function terminal(call: Awaited<ReturnType<typeof connect>>["call"], jobId: string) {
-    for (let i = 0; i < 100; i++) {
-        const value = await call("get_corner_setback_job", { jobId });
-        if (["completed", "cancelled", "failed"].includes(value.state)) return value;
-        await tick();
-    }
-    throw new Error("Corner job did not settle");
+function terminal(call: Awaited<ReturnType<typeof connect>>["call"], jobId: string) {
+    return waitForTerminalJob(call, "get_corner_setback_job", jobId);
 }
 test("published tools append and only their private identity grants job bypass", () => {
     const tools = buildTools();
