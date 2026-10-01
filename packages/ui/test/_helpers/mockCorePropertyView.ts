@@ -51,5 +51,6 @@ rs.mock("@spicy3d/core", () => {
         // rs.hoisted(require(...)) may snapshot a partial core module; provide the
         // real duck-type semantics explicitly so PropertyView's feature list works.
         isFeatureListNode: (node: unknown) => typeof (node as any)?.featureItems === "function",
+        isTransientNode: (node: { readonly isTransient?: boolean }) => node.isTransient === true,
     };
 });

@@ -91,7 +91,7 @@ export class GroupCommand extends MultistepCommand {
                     componentId: component.id,
                     insert: component.origin,
                 });
-                this.document.modelManager.rootNode.add(group);
+                this.document.modelManager.addNode(group);
             }
         });
     }

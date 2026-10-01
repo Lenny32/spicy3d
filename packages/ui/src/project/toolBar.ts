@@ -1,12 +1,10 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type I18nKeys, type INode, NodeUtils, PubSub } from "@spicy3d/core";
+import { I18n, type I18nKeys, PubSub } from "@spicy3d/core";
 import { a, svg } from "@spicy3d/element";
 import type { ProjectView } from "./projectView";
 import style from "./toolBar.module.css";
-import type { Tree } from "./tree";
-import { TreeGroup } from "./tree/treeItemGroup";
 
 export class ToolBar extends HTMLElement {
     constructor(readonly projectView: ProjectView) {
@@ -17,7 +15,7 @@ export class ToolBar extends HTMLElement {
 
     private render() {
         const buttons = [
-            { icon: "icon-folder-plus", tip: "items.tool.newFolder", command: this.newGroup },
+            { icon: "icon-folder-plus", tip: "browser.newComponent", command: this.newGroup },
             { icon: "icon-unexpand", tip: "items.tool.unexpandAll", command: this.unExpandAll },
             { icon: "icon-expand", tip: "items.tool.expandAll", command: this.expandAll },
         ];
@@ -38,6 +36,7 @@ export class ToolBar extends HTMLElement {
     }
 
     private readonly newGroup = () => {
+        if (!this.projectView.activeTree()?.actions.editable) return;
         PubSub.default.pub("executeCommand", "create.folder");
     };
 
@@ -52,21 +51,7 @@ export class ToolBar extends HTMLElement {
     private setExpand(expand: boolean) {
         const tree = this.projectView.activeTree();
         if (!tree) return;
-        const first = this.projectView.activeDocument?.modelManager.rootNode.firstChild;
-        if (first) this.setNodeExpand(tree, first, expand);
-    }
-
-    private setNodeExpand(tree: Tree, list: INode, expand: boolean) {
-        const item = tree.treeItem(list);
-        if (item instanceof TreeGroup) {
-            item.isExpanded = expand;
-        }
-        if (NodeUtils.isLinkedListNode(list) && list.firstChild) {
-            this.setNodeExpand(tree, list.firstChild, expand);
-        }
-        if (list.nextSibling) {
-            this.setNodeExpand(tree, list.nextSibling, expand);
-        }
+        tree.setExpanded(expand);
     }
 }
 

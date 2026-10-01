@@ -3,7 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
 import type { IDocument, INode, VisualNode, VisualShapeData } from "@spicy3d/core";
-import { createMockDocument, TestNode } from "@spicy3d/core/test-utils";
+import {
+    createMockDocument,
+    createPlainNode as createPlainTestNode,
+    TestNode,
+} from "@spicy3d/core/test-utils";
 import { SelectionManager } from "../src/selectionManager";
 
 function createVisualNode(): VisualNode {
@@ -11,7 +15,7 @@ function createVisualNode(): VisualNode {
 }
 
 function createPlainNode(): INode {
-    return {} as unknown as INode;
+    return createPlainTestNode();
 }
 
 describe("SelectionManager", () => {
