@@ -17,8 +17,12 @@ function tool(name: string, handler: Tool["handler"]): Tool {
     return { name, description: `${name} tool.`, parameters: { type: "object", properties: {} }, handler };
 }
 
-async function connect(tools: Tool[], capabilities: ConstructorParameters<typeof Client>[1] = {}) {
-    const server = createMcpServer({ tools, instructions: "be careful" });
+async function connect(
+    tools: Tool[],
+    capabilities: ConstructorParameters<typeof Client>[1] = {},
+    queue?: SerialQueue,
+) {
+    const server = createMcpServer({ tools, instructions: "be careful", queue });
     const client = new Client({ name: "test", version: "1" }, capabilities);
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -274,6 +278,8 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
     });
     const read = buildReadTools().find((entry) => entry.name === "get_document_state")!;
     const called = rs.spyOn(read, "handler");
+    const queue = new SerialQueue();
+    const queued = rs.spyOn(queue, "run");
     const mutation = tool("mutation", async () => {
         doc.name = "partial";
         start();
@@ -281,13 +287,14 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
         doc.name = "committed";
         return "{}";
     });
-    const { client } = await connect([mutation, read]);
+    const { client } = await connect([mutation, read], {}, queue);
     const changing = client.callTool({ name: "mutation", arguments: {} });
     let reading: ReturnType<typeof client.callTool> | undefined;
     try {
         await started;
         reading = client.callTool({ name: "get_document_state", arguments: {} });
-        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        // Prove the server received and queued the read before checking that it is held.
+        await rs.waitFor(() => expect(queued).toHaveBeenCalledTimes(2));
         expect(called).not.toHaveBeenCalled();
         release();
         const result = await reading;
@@ -299,6 +306,7 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
         await reading;
         await client.close();
         called.mockRestore();
+        queued.mockRestore();
         rs.unstubAllGlobals();
     }
 });
