@@ -204,7 +204,8 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
                     if (span) PerformanceTrace.end(span);
                     return extrudeHandler.evaluate(feature, context);
                 }
-                const { inputs, result } = answer.value;
+                const { inputs, result, warning } = answer.value;
+                if (warning) context.warn?.(warning);
                 const subs: IShape[] = [];
                 let accepted = false;
                 try {
@@ -249,8 +250,7 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
                 source === undefined
                     ? extrudeFromSketch(feature, context, extents.value, startOffset)
                     : extrudeFromSourceFaces({ ...feature, source }, context, extents.value, startOffset);
-            const result = combineWithInput(built, feature, context);
-            return feature.operation === undefined ? result : validateBooleanResult(result);
+            return combineWithInput(built, feature, context);
         } finally {
             extents.value.dispose();
         }
@@ -354,16 +354,20 @@ export function combineWithTool(
                 (_, index) => `${featureId}:tool:e${index}`,
             ),
         };
-        return applyTrackedOperation(featureId, input, context.tracking, tracked, ids);
+        return applyTrackedOperation(featureId, input, context.tracking, tracked, ids, context.warn);
     }
+    let result: Result<IShape>;
     switch (operation) {
         case "cut":
-            return shapeFactory.booleanCut([input], [tool]);
+            result = shapeFactory.booleanCut([input], [tool]);
+            break;
         case "common":
-            return shapeFactory.booleanCommon([input], [tool]);
+            result = shapeFactory.booleanCommon([input], [tool]);
+            break;
         default:
-            return shapeFactory.booleanFuse([input], [tool], true);
+            result = shapeFactory.booleanFuse([input], [tool], true);
     }
+    return validateBooleanResult(result, [input], [tool], context.warn);
 }
 
 function positionalToolIds(
@@ -423,14 +427,12 @@ function combineWithInput(
         return Result.err("Extrude join/cut/intersect requires a preceding feature");
     }
     try {
-        switch (feature.operation) {
-            case "cut":
-                return shapeFactory.booleanCut([context.input], [built.value]);
-            case "common":
-                return shapeFactory.booleanCommon([context.input], [built.value]);
-            default:
-                return shapeFactory.booleanFuse([context.input], [built.value], true);
-        }
+        return combineWithTool(
+            feature.id,
+            feature.operation,
+            { ...context, tracking: undefined },
+            built.value,
+        );
     } finally {
         // The prism is an intermediate input — the kernel reads it eagerly.
         built.value.dispose();
@@ -590,7 +592,12 @@ function pressPullOperationTracked(
     try {
         const result = tracked([context.input], [built.value]);
         if (!result.isOk) return Result.err(result.error);
-        const valid = validateBooleanResult(Result.ok(result.value.shape));
+        const valid = validateBooleanResult(
+            Result.ok(result.value.shape),
+            [context.input],
+            [built.value],
+            context.warn,
+        );
         if (!valid.isOk) return valid;
         const tool = {
             faceIds: (built.value.findSubShapes(ShapeTypes.face) as IFace[]).map(
@@ -639,7 +646,7 @@ function extrudeOperationTracked(
     const tool = sweepProfiles(feature, resolved.value.sketch, sides, resolved.value.profiles, offsetVec);
     if (!tool.isOk) return Result.err(tool.error);
     try {
-        return applyTrackedOperation(feature.id, input, tracking, tracked, tool.value);
+        return applyTrackedOperation(feature.id, input, tracking, tracked, tool.value, context.warn);
     } finally {
         // The prism is an intermediate input — the kernel reads it eagerly.
         tool.value.shape.dispose();
@@ -653,10 +660,11 @@ function applyTrackedOperation(
     tracking: ShapeTracking,
     tracked: TrackedMethod,
     tool: { shape: IShape; faceIds: string[]; edgeIds: string[] },
+    warn?: (message: string) => void,
 ): Result<IShape> {
     const result = tracked([input], [tool.shape]);
     if (!result.isOk) return Result.err(result.error);
-    const valid = validateBooleanResult(Result.ok(result.value.shape));
+    const valid = validateBooleanResult(Result.ok(result.value.shape), [input], [tool.shape], warn);
     if (!valid.isOk) return valid;
 
     const { edgeMap, faceMap } = completeTrackedHistory([input, tool.shape], result.value);

@@ -1,7 +1,10 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDisposable, type IFace, type IShape, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { type IDisposable, type IFace, type IShape, Matrix4, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { OccShapeConverter } from "../src/converter";
 import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";
 import type { OccShape } from "../src/shape";
@@ -459,4 +462,84 @@ test("several positive solids are accepted by sync and worker booleans", async (
     expect(result.isOk).toBe(true);
     owned.push(...result.value.inputs, result.value.result.shape);
     expect(result.value.result.shape.volume()).toBeCloseTo(sync.volume(), 6);
+});
+
+test.each([
+    "cut",
+    "fuse",
+] as const)("%s accepts inherited simplifySolid BREP defects in both worker paths", async (operation) => {
+    const input = keep(
+        unwrapOk(
+            new OccShapeConverter().convertFromBrep(
+                readFileSync(path.resolve(import.meta.dirname, "models/simplifySolid.brep"), "utf8"),
+            ),
+        ),
+    );
+    expect(input.checkShape()).toBe(false);
+    const tool = keep(unwrapOk(factory.cylinder(XYZ.unitZ, XYZ.zero, 25, 300)));
+    expect(tool.checkShape()).toBe(true);
+    const hybrid = keep(new HybridShapeFactory(() => new NativeWorkerTransport().client));
+    const task = hybrid.booleanTracked(operation, [input], [tool])!;
+    await task.ready;
+    const answer = task.take();
+    expect(answer.isOk).toBe(true);
+    owned.push(...answer.value.inputs, answer.value.result.shape);
+
+    const bounded = hybrid.shapeOperation({
+        method: operation === "cut" ? "booleanCut" : "booleanFuse",
+        left: [input],
+        right: [tool],
+    });
+    await bounded.ready;
+    const result = bounded.take();
+    expect(result.isOk).toBe(true);
+    keep(result.value);
+    expect(result.value.volume()).toBeGreaterThan(0);
+});
+
+test.each([
+    "cut",
+    "fuse",
+] as const)("tracked %s warns when result topology inherits an invalid operand", async (operation) => {
+    const input = invalidSolid() as OccShape;
+    const output = invalidSolid() as OccShape;
+    const tool = keep(createBox(factory, 5, 10, 15));
+    const method = operation === "cut" ? "booleanCutTracked" : "booleanFuseTracked";
+    const original = wasm.ShapeFactory[method];
+    rs.spyOn(wasm.ShapeFactory, method).mockImplementation((left, right) => {
+        const result = original(left, right);
+        Object.defineProperty(result, "shape", { get: () => output.shape });
+        return result;
+    });
+    const hybrid = keep(new HybridShapeFactory(() => new NativeWorkerTransport().client));
+    const task = hybrid.booleanTracked(operation, [input], [tool])!;
+    await task.ready;
+    const answer = task.take();
+    expect(answer.isOk).toBe(true);
+    owned.push(...answer.value.inputs, answer.value.result.shape);
+    expect(answer.value.result.shape.checkShape()).toBe(false);
+    expect(answer.value.warning).toBe("input 0 is already invalid (checkShape false)");
+});
+
+test.each([
+    "booleanCut",
+    "booleanFuse",
+] as const)("bounded %s accepts inherited invalid topology", async (method) => {
+    const input = invalidSolid() as OccShape;
+    const output = invalidSolid() as OccShape;
+    const tool = keep(createBox(factory, 5, 10, 15));
+    const original = wasm.ShapeFactory[method];
+    rs.spyOn(wasm.ShapeFactory, method).mockImplementation((left, right) => {
+        const result = original(left, right);
+        Object.defineProperty(result, "shape", { get: () => output.shape });
+        return result;
+    });
+    const hybrid = keep(new HybridShapeFactory(() => new NativeWorkerTransport().client));
+    const task = hybrid.shapeOperation({ method, left: [input], right: [tool] });
+    await task.ready;
+    const answer = task.take();
+    expect(answer.isOk).toBe(true);
+    keep(answer.value);
+    expect(answer.value.checkShape()).toBe(false);
+    expect(answer.value.volume()).toBeGreaterThan(0);
 });

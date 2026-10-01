@@ -3,11 +3,18 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { type IFace, Plane, Result, ShapeTypes, XYZ } from "@spicy3d/core";
+import { type IFace, type IShape, Matrix4, Plane, Result, ShapeTypes, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
+import { validateBooleanResult } from "../src/features/boolean";
+import { combineWithTool } from "../src/features/extrude";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
-import { type BooleanFeatureData, type ExtrudeFeatureData, featureHandler } from "../src/features/feature";
+import {
+    type BooleanFeatureData,
+    type ExtrudeFeatureData,
+    featureEvaluationError,
+    featureHandler,
+} from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { SketchNode } from "../src/sketch/sketchNode";
 import "./sketch/setup";
@@ -174,4 +181,111 @@ test("sync extrude common rejects an invalid positive-volume result", () => {
     );
     body.setFeaturesEmitShapeChanged([...body.features, common]);
     expect(body.featureItems()[2].error).toContain('extrude step "common": Boolean result: invalid shape');
+});
+
+test.each([
+    "cut",
+    "fuse",
+] as const)("sync %s accepts inherited simplifySolid defects, including the extrude fallback", (operation) => {
+    const input = new OccShapeConverter().convertFromBrep(
+        readFileSync(path.resolve(import.meta.dirname, "../../wasm/test/models/simplifySolid.brep"), "utf8"),
+    ).value;
+    const tool = shapeFactory.cylinder(XYZ.unitZ, XYZ.zero, 25, 300).value;
+    const owned: IShape[] = [input, tool];
+    try {
+        expect(input.checkShape()).toBe(false);
+        expect(tool.checkShape()).toBe(true);
+        const warn = rs.fn((_message: string) => {});
+        const raw =
+            operation === "cut"
+                ? shapeFactory.booleanCut([input], [tool])
+                : shapeFactory.booleanFuse([input], [tool], true);
+        expect(raw.isOk).toBe(true);
+        expect(raw.value.checkShape()).toBe(false);
+        const result = validateBooleanResult(raw, [input], [tool], warn);
+        expect(result.isOk).toBe(true);
+        owned.push(result.value);
+        expect(warn).toHaveBeenCalledWith("input 0 is already invalid (checkShape false)");
+        warn.mockClear();
+        const tracked =
+            operation === "cut"
+                ? shapeFactory.booleanCutTracked!([input], [tool])
+                : shapeFactory.booleanFuseTracked!([input], [tool]);
+        expect(tracked.isOk).toBe(true);
+        const trackedResult = validateBooleanResult(Result.ok(tracked.value.shape), [input], [tool], warn);
+        expect(trackedResult.isOk).toBe(true);
+        owned.push(trackedResult.value);
+        expect(warn).toHaveBeenCalledWith("input 0 is already invalid (checkShape false)");
+        warn.mockClear();
+        const doc = new TestDocument({ application: createMockApplication() });
+        const fallback = combineWithTool(
+            "fallback",
+            operation,
+            {
+                document: doc,
+                host: { id: "host", worldTransform: () => Matrix4.identity() },
+                input,
+                scope: new Map(),
+                warn,
+            },
+            tool,
+        );
+        expect(fallback.isOk).toBe(true);
+        owned.push(fallback.value);
+        expect(warn).toHaveBeenCalledWith("input 0 is already invalid (checkShape false)");
+    } finally {
+        owned.forEach((shape) => shape.dispose());
+    }
+});
+
+test.each([
+    ["boolean requires a preceding feature", "boolean requires a preceding feature"],
+    ["Boolean tool not found", "Boolean tool not found"],
+    [
+        "Boolean result: invalid shape (checkShape is false)",
+        'boolean step "cut": Boolean result: invalid shape (checkShape is false)',
+    ],
+    [
+        'boolean step "cut": Boolean result: invalid shape',
+        'boolean step "cut": Boolean result: invalid shape',
+    ],
+])("feature context preserves or prefixes %s", (error, expected) => {
+    expect(featureEvaluationError({ id: "cut", type: "boolean", operation: "cut", toolIds: [] }, error)).toBe(
+        expected,
+    );
+});
+
+test("an inherited topology defect never excuses an inside-out result", () => {
+    const input = shapeFactory.box(Plane.XY, 10, 10, 10).value;
+    const output = shapeFactory.box(Plane.XY, 5, 5, 5).value;
+    try {
+        rs.spyOn(input, "checkShape").mockReturnValue(false);
+        output.reserve();
+        expect(output.volume()).toBeCloseTo(-125, 6);
+        const result = validateBooleanResult(Result.ok(output), [input]);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("solid 0 has invalid volume");
+    } finally {
+        input.dispose();
+    }
+});
+
+test("accepted invalid boolean warnings survive feature cache reuse", () => {
+    const { body, cut } = scenario();
+    const output = shapeFactory.box(Plane.XY, 5, 5, 5).value;
+    try {
+        rs.spyOn(body.shape.value, "checkShape").mockReturnValue(false);
+        rs.spyOn(shapeFactory, "booleanCutTracked").mockImplementation(() => {
+            const shape = output.clone();
+            rs.spyOn(shape, "checkShape").mockReturnValue(false);
+            return Result.ok({ shape, faceMap: [], edgeMap: [] });
+        });
+        body.setFeaturesEmitShapeChanged([...body.features, cut]);
+        expect(body.featureItems()[1].error).toBeUndefined();
+        expect(body.featureItems()[1].warning).toBe("input 0 is already invalid (checkShape false)");
+        body.setFeaturesEmitShapeChanged([...body.features]);
+        expect(body.featureItems()[1].warning).toBe("input 0 is already invalid (checkShape false)");
+    } finally {
+        output.dispose();
+    }
 });

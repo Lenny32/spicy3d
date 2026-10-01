@@ -215,7 +215,7 @@ test("deleting a boolean tool during rollback fails restoration, undo heals and 
     expect(parent).not.toBeUndefined();
     Transaction.execute(doc, "delete tool", () => parent.remove(tool));
     expect(body.setRollbackIndex(undefined)).toBe(false);
-    expect(body.featureItems()[1].error).toBe('boolean step "cut": Boolean tool not found');
+    expect(body.featureItems()[1].error).toBe("Boolean tool not found");
     expect(body.shape.value).toBe(prefix);
     doc.history.undo();
     expect(tool.parent).toBe(parent);
@@ -224,7 +224,7 @@ test("deleting a boolean tool during rollback fails restoration, undo heals and 
     const restored = body.shape.value;
     doc.history.redo();
     expect(tool.parent).toBeUndefined();
-    expect(body.featureItems()[1].error).toBe('boolean step "cut": Boolean tool not found');
+    expect(body.featureItems()[1].error).toBe("Boolean tool not found");
     expect(body.shape.value).toBe(restored);
     expect(body.featuresJson).toBe(features);
     doc.history.undo();

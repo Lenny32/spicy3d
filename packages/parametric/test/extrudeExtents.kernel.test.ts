@@ -382,9 +382,7 @@ describe("through all", () => {
         });
         doc.modelManager.addNode(body);
         expect(body.shape.isOk).toBe(false);
-        expect(errors(body)).toEqual([
-            'extrude step "lone": Through all needs a body to go through (join, cut or intersect)',
-        ]);
+        expect(errors(body)).toEqual(["Through all needs a body to go through (join, cut or intersect)"]);
     });
 
     test("symmetric: through the body both ways from a mid plane", () => {
@@ -456,7 +454,7 @@ describe("two-sided", () => {
             extent: top,
         });
         expect(errors(body)[1]).toBe(
-            'extrude step "hole": A symmetric extrude cannot end on a face: give the second side its own extent',
+            "A symmetric extrude cannot end on a face: give the second side its own extent",
         );
     });
 });
@@ -547,7 +545,7 @@ describe("a target face that goes away fails the feature", () => {
         expect(volume(body)).toBeCloseTo(4500, 3);
 
         Transaction.execute(doc, "delete plate", () => plate.parent!.remove(plate));
-        expect(errors(body)).toEqual([undefined, 'extrude step "post": Extent face\'s body not found']);
+        expect(errors(body)).toEqual([undefined, "Extent face's body not found"]);
 
         doc.history.undo();
         expect(errors(body)).toEqual([undefined, undefined]);
@@ -575,7 +573,7 @@ describe("a target face that goes away fails the feature", () => {
         append(plate, { id: "shave", type: "extrude", sketchId: under.id, depth: 1, operation: "cut" });
         expect(volume(plate)).toBeCloseTo(400 * 4, 3);
 
-        expect(errors(body)[1]).toBe('extrude step "post": Extent face: Face not found after rebuild');
+        expect(errors(body)[1]).toBe("Extent face: Face not found after rebuild");
     });
 });
 

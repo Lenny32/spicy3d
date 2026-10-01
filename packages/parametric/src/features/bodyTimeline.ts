@@ -50,6 +50,8 @@ export interface FeatureCacheEntry {
      * to guess whether replaying the later steps is fast enough to preview live.
      */
     readonly evaluationMs?: number;
+    /** Runtime-only operation warning retained across cache hits. */
+    readonly warning?: string;
 }
 
 /** Which of the two tracked id arrays a query addresses. */

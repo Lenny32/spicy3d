@@ -102,7 +102,8 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
                     if (span) PerformanceTrace.end(span);
                     return booleanHandler.evaluate(feature, context);
                 }
-                const { inputs, result } = answer.value;
+                const { inputs, result, warning } = answer.value;
+                if (warning) context.warn?.(warning);
                 const subs: IShape[] = [];
                 let accepted = false;
                 try {
@@ -146,7 +147,7 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
             }
             const result = untrackedBoolean(feature.operation, context.input, toolShapes);
             if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
-            const valid = validateBooleanResult(result);
+            const valid = validateBooleanResult(result, [context.input], toolShapes, context.warn);
             return valid.isOk ? requireNonEmptyResult(feature.operation, context.input, valid.value) : valid;
         } finally {
             owned.forEach((x) => x.dispose());
@@ -266,7 +267,7 @@ function evaluateTracked(
     }
     const result = tracked([input], toolShapes);
     if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
-    const valid = validateBooleanResult(Result.ok(result.value.shape));
+    const valid = validateBooleanResult(Result.ok(result.value.shape), [input], toolShapes, context.warn);
     if (!valid.isOk) return valid;
     const nonEmpty = requireNonEmptyResult(feature.operation, input, valid.value);
     if (!nonEmpty.isOk) return nonEmpty;
@@ -294,22 +295,37 @@ function evaluateTracked(
 
 registerFeature("boolean", booleanHandler);
 
-/** Validate the result, not operands: imported tolerances may still boolean successfully. */
-export function validateBooleanResult(result: Result<IShape>): Result<IShape> {
+/** Analyze operands only when a result fails, so inherited import defects remain accepted. */
+export function validateBooleanResult(
+    result: Result<IShape>,
+    inputs: readonly IShape[] = [],
+    tools: readonly IShape[] = [],
+    warn?: (message: string) => void,
+): Result<IShape> {
     if (!result.isOk) return result;
     const shape = result.value;
     let solids: IShape[] = [];
     let error: string | undefined;
     try {
         solids = shape.findSubShapes(ShapeTypes.solid);
-        // Empty compounds must reach the operation-specific empty-result guard.
-        if (!shape.checkShape()) error = "Boolean result: invalid shape (checkShape is false)";
+        const valid = shape.checkShape();
         const tolerance = solids.length ? volumeTolerance(shape.volume(), shape.boundingBox()) : 0;
         for (const [index, solid] of solids.entries()) {
             const volume = solid.volume();
             if (!Number.isFinite(volume) || volume < -tolerance) {
                 error ??= `Boolean result: solid ${index} has invalid volume (${volume} mm³)`;
             }
+        }
+        // Component orientation remains strict even when topology defects came from an operand.
+        if (!error && !valid) {
+            const warnings = [
+                ...inputs.map((shape, index) => ({ shape, label: `input ${index}` })),
+                ...tools.map((shape, index) => ({ shape, label: `tool ${index}` })),
+            ]
+                .filter(({ shape }) => !shape.checkShape())
+                .map(({ label }) => `${label} is already invalid (checkShape false)`);
+            if (warnings.length) warn?.(warnings.join("; "));
+            else error = "Boolean result: invalid shape (checkShape is false)";
         }
     } catch (cause) {
         error = `Boolean result validation failed: ${cause instanceof Error ? cause.message : String(cause)}`;

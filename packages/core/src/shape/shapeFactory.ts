@@ -344,6 +344,8 @@ export interface IAsyncShapeOperation<T> {
 }
 
 export interface AsyncTrackedBoolean {
+    /** Runtime diagnostic, never serialized with the document. */
+    readonly warning?: string;
     readonly result: TrackedShape;
     /** Owned immutable replicas in args-then-tools order, for geometry history completion. */
     readonly inputs: IShape[];

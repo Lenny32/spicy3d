@@ -415,9 +415,7 @@ describe("an extrude through two bodies", () => {
         Transaction.execute(s.doc, "delete", () => s.left.parent!.remove(s.left));
 
         const status = s.right.rebuildStatus();
-        expect(status.features!.find((x) => x.id === entry.id)?.error).toBe(
-            `extrudeTarget step "${entry.id}": Linked extrude not found`,
-        );
+        expect(status.features!.find((x) => x.id === entry.id)?.error).toBe("Linked extrude not found");
 
         s.doc.history.undo();
         expect(s.right.rebuildStatus().features!.find((x) => x.id === entry.id)?.error).toBeUndefined();

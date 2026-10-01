@@ -313,6 +313,8 @@ export interface FeatureContext {
     readonly tracking?: ShapeTracking;
     /** Only the final result of this replay needs an eagerly transferred worker mesh. */
     readonly meshResult?: boolean;
+    /** Runtime diagnostic; never serialized. */
+    readonly warn?: (message: string) => void;
 }
 
 export interface ShapeTracking {
@@ -509,8 +511,18 @@ export function evaluateFeature(feature: FeatureData, context: FeatureContext): 
     return result.isOk ? result : Result.err(featureEvaluationError(feature, result.error));
 }
 
+// Feature handlers return strings for both user validation and kernel failures. Recognize
+// operation/validity diagnostics rather than adding context to every user-facing message.
+const KERNEL_FAILURE_PATTERNS = [
+    /invalid (?:shape|solid|volume|topology)|shape to thicken is invalid|BRepCheck|inside out/i,
+    /result:|input \d+:|validation failed|Standard_|kernel/i,
+    /(?:fillet|chamfer|loft|thicken|boolean|extrude|sweep|revolve|offset|native operation).*(?:failed|failure|rejected)/i,
+    /Boolean .*produced an empty shape|ancestry is incomplete/i,
+];
+
 /** Keep kernel geometry failures attached to the feature that attempted to consume them. */
 export function featureEvaluationError(feature: FeatureData, error: string): string {
     const prefix = `${feature.type} step "${feature.id}": `;
-    return !error.startsWith(prefix) ? prefix + error : error;
+    if (error.startsWith(prefix)) return error;
+    return KERNEL_FAILURE_PATTERNS.some((pattern) => pattern.test(error)) ? prefix + error : error;
 }

@@ -345,7 +345,7 @@ describe("thicken feature (real kernel)", () => {
             doc.modelManager.addNode(body);
 
             expect(body.shape.isOk).toBe(false);
-            expect(errorOf(body, "t1")).toBe('thicken step "t1": Thicken requires a preceding feature');
+            expect(errorOf(body, "t1")).toBe("Thicken requires a preceding feature");
         });
 
         test.each([
@@ -357,7 +357,7 @@ describe("thicken feature (real kernel)", () => {
             const body = boxBody(doc);
             thicken(body, { thickness, openFaces: [topFaceRef(body)] });
 
-            expect(errorOf(body, "t1")).toBe(`thicken step "t1": ${message}`);
+            expect(errorOf(body, "t1")).toBe(message);
         });
 
         test("an expression naming no variable fails the feature", () => {
@@ -375,7 +375,7 @@ describe("thicken feature (real kernel)", () => {
             const body = tubeBody(doc);
             thicken(body, { thickness: 2, openFaces: [ref] });
 
-            expect(errorOf(body, "t1")).toBe('thicken step "t1": Only a solid can have open faces');
+            expect(errorOf(body, "t1")).toBe("Only a solid can have open faces");
         });
 
         test("a wall thicker than the solid fails without breaking the kernel", () => {

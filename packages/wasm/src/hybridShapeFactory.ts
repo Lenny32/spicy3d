@@ -578,7 +578,11 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     const capturedInputs = inputs;
                     inputs = []; // Ownership goes to the caller; the completed task retains none.
                     accepted = true;
-                    return Result.ok({ result: tracked, inputs: capturedInputs });
+                    return Result.ok({
+                        result: tracked,
+                        inputs: capturedInputs,
+                        warning: result.value.warning,
+                    });
                 } catch (error) {
                     trapped = error instanceof WebAssembly.RuntimeError;
                     this.mainTrapped = trapped;

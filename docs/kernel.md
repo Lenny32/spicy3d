@@ -171,18 +171,26 @@ cancellation hook in this offline build; stopping a running check requires termi
 
 ### Boolean and downstream validity (#119)
 
-The tracked boolean worker and bounded operation bridge check operands and results with
-`BRepCheck_Analyzer` before export/history acceptance. Every solid component is checked for
-finite, non-negative signed volume: a positive compound total cannot hide an inside-out
-component. Bounded fillet/chamfer and loft also reject invalid inputs. Geometry rejection is
-an ordinary operation error; it neither falls back to the synchronous kernel nor disables a
-healthy worker. Parametric rebuild errors identify the feature type and step id.
+The tracked boolean worker and bounded operation bridge pre-check boolean operands for
+finite, non-negative signed volume, without running `BRepCheck_Analyzer` on them. Boolean
+results run the analyzer and check every solid component's volume. A positive compound
+total cannot hide an inside-out component: negative or non-finite component volumes are
+always rejected, even when an operand is already invalid.
 
-These checks run inside the existing terminable worker request deadline. They do not add
-main-thread analyzer calls or the more expensive self-intersection analyzer. Synchronous
-compatibility calls check component volumes only below 200 faces, using the inspection
-pre-check cutoff; larger shapes need the worker path for this validation. Synchronous
-positive-volume topology failures remain outside this gate. Empty boolean results remain
-subject to the existing feature-specific empty-result errors. Thicken retains its existing
-orientation repair for a valid inside-out offset before it becomes a feature result; the
-bounded bridge performs the same repair before checking every output component.
+Only when a result fails the topology analyzer are its operands analyzed. If any operand
+already fails `checkShape`, the result is accepted, preserving support for imported STEP/BREP
+tolerance defects. Parametric features report a runtime warning naming the invalid input or
+tool; bounded operations accept silently. If all operands are valid, the invalid result is
+rejected. Valid results incur no operand analyzer calls. Bounded fillet/chamfer and loft
+continue to reject invalid inputs and results. Geometry rejection is an ordinary operation
+error; it neither falls back to the synchronous kernel nor disables a healthy worker. Kernel
+and validity errors identify the parametric feature type and step id; user validation errors
+keep their original wording.
+
+Worker checks run inside the existing terminable request deadline. Synchronous parametric
+boolean compatibility paths also run `checkShape` and per-solid volume checks on results,
+with the same invalid-operand policy and no face-count cutoff. These main-thread calls can
+block; neither path adds the more expensive self-intersection analyzer. Empty boolean
+results retain the existing feature-specific errors. Thicken retains its orientation repair
+for a valid inside-out offset before it becomes a feature result; the bounded bridge performs
+the same repair before checking every output component.

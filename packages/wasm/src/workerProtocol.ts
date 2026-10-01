@@ -41,6 +41,8 @@ export type ReplicaInput = ShapeReplica | { handle: KernelHandle };
 export type BooleanReplica = ShapeReplica & {
     handle?: KernelHandle;
     tracking: WorkerTracking;
+    /** Runtime diagnostic, never part of the BREP or document. */
+    warning?: string;
     mesh?: WorkerMesh;
     nativeMs?: number;
 };
@@ -93,7 +95,7 @@ export type KernelOperations = {
     bounds: { args: { handle: KernelHandle }; result: BoundingBox };
     boolean: {
         args: { operation: "fuse" | "cut" | "common"; left: KernelHandle[]; right: KernelHandle[] };
-        result: { handle: KernelHandle; tracking: WorkerTracking };
+        result: { handle: KernelHandle; tracking: WorkerTracking; warning?: string };
     };
     mesh: { args: { handle: KernelHandle }; result: WorkerMesh };
     release: { args: { handles: KernelHandle[] }; result: undefined };

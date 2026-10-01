@@ -157,7 +157,7 @@ test("failed restoration retries remain failures until a complete run succeeds",
         expect(node.requestRollbackIndex(undefined)).toBe(true);
         expect(await node.whenRebuilt()).toBe(false);
         expect(node.shape.value).toBe(preview);
-        expect(node.featureItems()[8].error).toBe('test-rebuild-step step "f8": synthetic failure');
+        expect(node.featureItems()[8].error).toBe("synthetic failure");
     }
     expect(
         PerformanceTrace.snapshot()
@@ -325,7 +325,7 @@ test("a failed restore keeps the preview and its tracking; disposal releases bot
     expect(await node.whenRebuilt()).toBe(false);
     expect(node.shape.value).toBe(preview);
     expect(node.faceIdAt(0)).toBe("f3:face");
-    expect(node.featureItems()[8].error).toBe('test-rebuild-step step "f8": synthetic failure');
+    expect(node.featureItems()[8].error).toBe("synthetic failure");
     expect(node.timelineStateAt(8)).toBeUndefined();
     node.dispose();
     for (const value of shapes) expect(value.dispose).toHaveBeenCalledTimes(1);

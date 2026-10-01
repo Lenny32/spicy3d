@@ -1062,6 +1062,7 @@ export class ParametricBodyNode
                               cacheHit: true,
                           })
                         : undefined;
+                    if (cached.warning) this._featureWarnings.set(feature.id, cached.warning);
                     nextCache.push(cached);
                     step = Result.ok(cached);
                     if (featureTrace) PerformanceTrace.end(featureTrace);
@@ -1417,7 +1418,11 @@ export class ParametricBodyNode
             outputEdgeIds: [],
         };
         const variables = trackVariableScope(scope);
+        let warning: string | undefined;
         const context = {
+            warn: (message: string) => {
+                warning = message;
+            },
             document: this.document,
             host: this,
             input,
@@ -1470,6 +1475,7 @@ export class ParametricBodyNode
                     resolvedEdges: tracking.resolvedEdges,
                     resolvedFaces: tracking.resolvedFaces,
                 };
+                if (warning) this._featureWarnings.set(feature.id, warning);
                 const variableDependencies = variables.dependencies();
                 nextCache.push({
                     json: this.cacheKey(feature, scope, variableDependencies),
@@ -1480,6 +1486,7 @@ export class ParametricBodyNode
                     faceIds: output.faceIds,
                     edgeIds: output.edgeIds,
                     evaluationMs,
+                    warning,
                 });
                 return Result.ok(output);
             },
