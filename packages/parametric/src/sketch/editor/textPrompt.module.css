@@ -1,0 +1,15 @@
+.content {
+    display: grid;
+    gap: 8px;
+    min-width: 300px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.error {
+    color: red;
+}

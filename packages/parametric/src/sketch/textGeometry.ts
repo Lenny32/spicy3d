@@ -4,16 +4,23 @@
 import { Result } from "@spicy3d/core";
 import { glyphContours, type OutlineSegment, type Point2 } from "./fonts/fontOutlines";
 import { NOTO_SANS } from "./fonts/notoSans.generated";
-import { ConstraintKind } from "./sketchModel";
+import { ConstraintKind } from "./planegcs";
 import type { SketchSolver } from "./solver";
 
-/** Command input only: text is baked into existing v3 sketch entities, never serialized. */
+/** Deterministic text layout settings shared by editable text and exploded geometry. */
 export interface TextOutlineOptions {
     value: string;
     x: number;
     y: number;
     height: number;
     angle: number;
+    frame?: { width: number; height: number };
+    alignment?: "left" | "center" | "right";
+    verticalAlignment?: "bottom" | "middle" | "top";
+    spacing?: number;
+    flipHorizontal?: boolean;
+    flipVertical?: boolean;
+    font?: "sans";
 }
 
 type TextGeometryError =
@@ -29,13 +36,43 @@ export function textContours(options: TextOutlineOptions): Result<OutlineSegment
     const { value, x, y, height, angle } = options;
     if (![x, y, height, angle].every(Number.isFinite) || height <= 0)
         return Result.err("error.sketch.invalidTextSize");
+    if (
+        options.frame &&
+        (![options.frame.width, options.frame.height].every(Number.isFinite) ||
+            options.frame.width <= 0 ||
+            options.frame.height <= 0)
+    )
+        return Result.err("error.sketch.invalidTextSize");
+    if (!Number.isFinite(options.spacing ?? 0) || (options.spacing ?? 0) <= -100)
+        return Result.err("error.sketch.invalidTextSize");
+    if (options.font !== undefined && options.font !== "sans")
+        return Result.err("error.sketch.unsupportedTextCharacter");
     const scale = height / NOTO_SANS.capHeight;
     const radians = ((angle % 360) * Math.PI) / 180;
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
     const result: OutlineSegment[][] = [];
-    for (const [row, line] of value.split("\n").entries()) {
-        let pen = 0;
+    const lines = value.replace(/\r\n?/g, "\n").split("\n");
+    const pitch = LINE_PITCH * NOTO_SANS.capHeight;
+    const spacing = 1 + (options.spacing ?? 0) / 100;
+    for (const [row, line] of lines.entries()) {
+        const chars = [...line];
+        if (chars.some((char) => NOTO_SANS.glyphs[char] === undefined))
+            return Result.err("error.sketch.unsupportedTextCharacter");
+        const advance = chars.reduce((sum, char) => sum + NOTO_SANS.glyphs[char][0] * spacing, 0);
+        const frameWidth = (options.frame?.width ?? 0) / scale;
+        let pen =
+            options.frame === undefined || options.alignment === undefined || options.alignment === "left"
+                ? 0
+                : (frameWidth - advance) * (options.alignment === "center" ? 0.5 : 1);
+        const firstBaseline =
+            options.frame === undefined
+                ? 0
+                : options.verticalAlignment === "top"
+                  ? options.frame.height / scale - NOTO_SANS.capHeight
+                  : options.verticalAlignment === "middle"
+                    ? (options.frame.height / scale - NOTO_SANS.capHeight + (lines.length - 1) * pitch) / 2
+                    : (lines.length - 1) * pitch;
         for (const char of line) {
             const glyph = NOTO_SANS.glyphs[char];
             if (glyph === undefined) return Result.err("error.sketch.unsupportedTextCharacter");
@@ -45,8 +82,10 @@ export function textContours(options: TextOutlineOptions): Result<OutlineSegment
                 contourCache.set(char, contours);
             }
             const place = ([u, v]: Point2): Point2 => {
-                const lx = (u + pen) * scale;
-                const ly = (v - row * LINE_PITCH * NOTO_SANS.capHeight) * scale;
+                let lx = (u + pen) * scale;
+                let ly = (v + firstBaseline - row * pitch) * scale;
+                if (options.flipHorizontal) lx = (options.frame?.width ?? 0) - lx;
+                if (options.flipVertical) ly = (options.frame?.height ?? 0) - ly;
                 return [x + lx * cos - ly * sin, y + lx * sin + ly * cos];
             };
             for (const contour of contours) {
@@ -59,7 +98,7 @@ export function textContours(options: TextOutlineOptions): Result<OutlineSegment
                     ),
                 );
             }
-            pen += glyph[0];
+            pen += glyph[0] * spacing;
         }
     }
     if (

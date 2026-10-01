@@ -38,12 +38,15 @@ import {
     toWorld,
     worldPerPixel,
 } from "../sketchModel";
+import { type SketchTextData, textContains, textRotationPoint } from "../sketchText";
 import { constraintTargetEntities } from "../solverEntities";
 import { sampleSpline } from "../splineGeometry";
+import { textFrameMesh, textOutlineMesh } from "../textVisual";
 import { promptControlBSpline } from "./controlBSplinePrompt";
 import { applyConstraintIcon, type BadgeSymbol, badgeSymbol, isBadgeEventTarget } from "./sketchAnnotations";
 import style from "./sketchAnnotations.module.css";
 import type { SketchEditor, SketchEntityTypeFilter } from "./sketchEditor";
+import { promptSketchText } from "./textPrompt";
 
 const PICK_TOLERANCE_PX = 8;
 const CIRCLE_SEGMENTS = 64;
@@ -67,6 +70,13 @@ const ENTITY_POINT_COLOR = 0x8c9aa8;
 export class SketchEventHandler implements IEventHandler {
     isEnabled: boolean = true;
 
+    private textDrag?: {
+        text: SketchTextData;
+        draft: SketchTextData;
+        rotate: boolean;
+        start: [number, number];
+    };
+    private lastTextClick?: { id: number; time: number };
     private draggingRef?: SketchPointRef;
     private dragPreviewId?: number;
     private hoverMeshId?: number;
@@ -75,7 +85,9 @@ export class SketchEventHandler implements IEventHandler {
 
     get selectedEntityIds(): number[] {
         return [...this.selectedEntities].filter(
-            (id) => id > 0 && this.editor.solver.entity(id) !== undefined,
+            (id) =>
+                id > 0 &&
+                (this.editor.solver.entity(id) !== undefined || this.editor.solver.text(id) !== undefined),
         );
     }
 
@@ -295,6 +307,16 @@ export class SketchEventHandler implements IEventHandler {
             consider(SKETCH_X_AXIS_ID, Math.abs(uv[1]));
             consider(SKETCH_Y_AXIS_ID, Math.abs(uv[0]));
         }
+        if (
+            type === undefined &&
+            !datum &&
+            best === undefined &&
+            (this.editor.activePick === undefined || this.editor.activePick.includeText)
+        ) {
+            for (const text of this.editor.solver.texts()) {
+                if (textContains(text, uv, tolerance)) return text.id;
+            }
+        }
         return best;
     }
 
@@ -308,6 +330,26 @@ export class SketchEventHandler implements IEventHandler {
         // events over an annotation badge carry badge-relative offsets; ignoring
         // them keeps the hover alive instead of clearing it with garbage uv
         if (isBadgeEventTarget(event.target)) return;
+        if (this.textDrag) {
+            const uv = this.pointerToUV(view, event);
+            if (!uv) return;
+            const { text, start, rotate } = this.textDrag;
+            const draft = { ...text };
+            if (rotate) {
+                draft.angle =
+                    (Math.atan2(uv[1] - text.y, uv[0] - text.x) * 180) / Math.PI -
+                    (Math.atan2(text.frame.height + text.height, text.frame.width / 2) * 180) / Math.PI;
+            } else {
+                draft.x += uv[0] - start[0];
+                draft.y += uv[1] - start[1];
+            }
+            this.textDrag.draft = draft;
+            this.editor.annotations.setGeometryPreview([
+                textOutlineMesh(this.editor.node.plane, draft),
+                textFrameMesh(this.editor.node.plane, draft),
+            ]);
+            return;
+        }
         if (this.draggingRef !== undefined) {
             const uv = this.pointerToUV(view, event);
             if (uv !== undefined) {
@@ -346,6 +388,38 @@ export class SketchEventHandler implements IEventHandler {
         if (this.consumePickClick(view, event)) return;
         if (event.button !== 0) return;
 
+        const uv = this.pointerToUV(view, event);
+        const tolerance = this.worldTolerance(view, event);
+        if (uv && tolerance) {
+            for (const id of this.selectedEntityIds) {
+                const text = this.editor.solver.text(id);
+                if (!text) continue;
+                const knob = textRotationPoint(text);
+                if (Math.hypot(uv[0] - knob[0], uv[1] - knob[1]) <= tolerance) {
+                    this.textDrag = { text, draft: text, rotate: true, start: uv };
+                    return;
+                }
+            }
+        }
+        const textId = this.hitTestEntity(view, event);
+        const text = textId === undefined ? undefined : this.editor.solver.text(textId);
+        if (text) {
+            const now = performance.now();
+            if (
+                event.detail >= 2 ||
+                (this.lastTextClick?.id === text.id && now - this.lastTextClick.time < 350)
+            ) {
+                promptSketchText(this.editor, text, text.id);
+                this.lastTextClick = undefined;
+            } else {
+                const selected = this.selectedEntities.has(text.id);
+                this.selectEntity(view, text.id, event.shiftKey);
+                if (selected && uv && !event.shiftKey)
+                    this.textDrag = { text, draft: text, rotate: false, start: uv };
+                this.lastTextClick = { id: text.id, time: now };
+            }
+            return;
+        }
         const ref = this.hitTestPoint(view, event);
         // the datum origin and external references are pickable for constraints but never draggable
         if (ref !== undefined && !isDatumEntityId(ref.entityId) && !isExternalEntityId(ref.entityId)) {
@@ -407,6 +481,19 @@ export class SketchEventHandler implements IEventHandler {
     }
 
     pointerUp(view: IView, _event: PointerEvent): void {
+        if (this.textDrag) {
+            const { text, draft } = this.textDrag;
+            this.textDrag = undefined;
+            this.editor.annotations.setGeometryPreview([]);
+            const changed = this.editor.solver.updateText(text.id, draft);
+            if (changed.isOk) {
+                this.editor.solve(true);
+                this.editor.commit();
+            }
+            this.updateSelectionHighlight(view);
+            return;
+        }
+
         if (this.draggingRef === undefined) return;
         const ref = this.draggingRef;
         this.draggingRef = undefined;
@@ -426,6 +513,16 @@ export class SketchEventHandler implements IEventHandler {
     }
 
     keyDown(view: IView, event: KeyboardEvent): void {
+        const text =
+            this.selectedEntityIds.length === 1
+                ? this.editor.solver.text(this.selectedEntityIds[0])
+                : undefined;
+        if (event.key === "Enter" && !this.editor.isPicking && text) {
+            event.stopImmediatePropagation();
+            promptSketchText(this.editor, text, text.id);
+            return;
+        }
+
         if (
             event.key === "Enter" &&
             !this.editor.isPicking &&
@@ -446,6 +543,12 @@ export class SketchEventHandler implements IEventHandler {
 
     /** Escape peels off one layer at a time: label placement, pick, constraint selection, entity selection, session. */
     private handleEscape(view: IView): void {
+        if (this.textDrag) {
+            this.textDrag = undefined;
+            this.editor.annotations.setGeometryPreview([]);
+            return;
+        }
+
         if (this.editor.annotations.isLabelDragging) {
             this.editor.annotations.cancelLabelDrag();
         } else if (this.editor.isPicking) {
@@ -561,6 +664,7 @@ export class SketchEventHandler implements IEventHandler {
         }
         this.selectedEntities.clear();
         this.draggingRef = undefined;
+        this.textDrag = undefined;
     }
 
     // ------------------------------------------------------------------ Hover, drag and snap feedback
@@ -612,6 +716,9 @@ export class SketchEventHandler implements IEventHandler {
                     mesh: this.datumAxisMesh(entityId, VisualConfig.highlightEdgeColor),
                 };
             }
+            const text = entityId === undefined ? undefined : this.editor.solver.text(entityId);
+            if (text)
+                return { key: `entity:${text.id}`, mesh: textOutlineMesh(this.editor.node.plane, text) };
             const entity = entityId === undefined ? undefined : this.editor.solver.entity(entityId);
             if (entity !== undefined) {
                 return { key: `entity:${entityId}`, mesh: sketchEntityMesh(this.editor, entity) };
@@ -661,6 +768,22 @@ export class SketchEventHandler implements IEventHandler {
             .map((id) => this.editor.solver.entity(id))
             .filter((entity) => entity !== undefined)
             .map((entity) => sketchEntityMesh(this.editor, entity, VisualConfig.selectedEdgeColor));
+        for (const id of this.selectedEntities) {
+            const text = this.editor.solver.text(id);
+            if (text) {
+                meshes.push(
+                    textOutlineMesh(this.editor.node.plane, text),
+                    textFrameMesh(this.editor.node.plane, text),
+                );
+                meshes.push(
+                    MeshDataUtils.createVertexMesh(
+                        toWorld(this.editor.node.plane, ...textRotationPoint(text)),
+                        VisualConfig.editVertexSize,
+                        VisualConfig.selectedEdgeColor,
+                    ),
+                );
+            }
+        }
         this.selectionMeshId = view.document.visual.context.displayMesh(meshes, { onTop: true });
         this.syncAnnotationHighlights();
         view.update();

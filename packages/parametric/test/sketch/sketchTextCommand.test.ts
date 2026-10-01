@@ -4,21 +4,21 @@
 import { rs } from "@rstest/core";
 import { Plane, PubSub, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockView, TestDocument } from "@spicy3d/core/test-utils";
-import { bsplinePointAt } from "../../src/sketch/bsplineGeometry";
 import { SketchTextCommand, textOutlineMesh } from "../../src/sketch/commands/sketchText";
-import { controlBSplineCurve } from "../../src/sketch/controlBSplineGeometry";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
-import { randomSketchIds } from "../../src/sketch/sketchIds";
+import { randomSketchIds, sequentialSketchIds } from "../../src/sketch/sketchIds";
 import { SketchSolver } from "../../src/sketch/solver";
 import { addTextGeometry, textContours } from "../../src/sketch/textGeometry";
 import "./setup";
 
 function fakeEditor() {
     return {
+        isActive: true,
         node: { plane: Plane.XY },
         solver: new SketchSolver(Plane.XY),
         solve: rs.fn((_fine: boolean) => {}),
         commit: rs.fn(() => {}),
+        annotations: { setGeometryPreview: rs.fn(() => {}) },
     };
 }
 
@@ -40,59 +40,58 @@ test.each([
     }
 });
 
-test("places exact quadratic outlines once using the configured height, angle and baseline", () => {
+test("places an editable frame only after the dialog confirms", () => {
     const editor = fakeEditor();
     const active = rs.spyOn(SketchEditor, "getActive").mockReturnValue(editor as unknown as SketchEditor);
+    const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
     try {
         const command = new SketchTextCommand();
         command.text = "o";
         command.height = 8;
         command.angle = 15;
-        const options = { value: "o", x: 3, y: 4, height: 8, angle: 15 };
-        (command as any).stepDatas = [{ point: new XYZ({ x: 3, y: 4, z: 0 }) }];
+        (command as any).stepDatas = [
+            { point: new XYZ({ x: 3, y: 4, z: 0 }) },
+            { point: new XYZ({ x: 23, y: 14, z: 0 }) },
+        ];
         (command as any).executeMainTask();
-        expect(editor.solve).toHaveBeenCalledWith(true);
+        expect(editor.commit).not.toHaveBeenCalled();
+        const call = pub.mock.calls.find((call) => call[0] === "showDialog");
+        expect(call).not.toBeUndefined();
+        const buttons = call![3] as any;
+        expect(buttons[0].shouldClose()).toBe(true);
         expect(editor.commit).toHaveBeenCalledTimes(1);
-        const contours = textContours(options);
-        expect(contours.isOk).toBe(true);
-        const segments = contours.value.flat();
-        const entities = editor.solver.toData().entities;
-        expect(entities).toHaveLength(segments.length);
-        for (const [index, segment] of segments.entries()) {
-            const entity = entities[index];
-            expect(entity.params).toEqual(segment.flat());
-            if (segment.length === 2) {
-                expect(entity.type).toBe("line");
-            } else {
-                expect(entity.type).toBe("bspline");
-                expect(entity.control).toEqual({ degree: 2, knots: [0, 1], multiplicities: [3, 3] });
-                const curve = controlBSplineCurve(entity.params, entity.control!);
-                expect(curve.isOk).toBe(true);
-                const at = bsplinePointAt(curve.value, 0.5);
-                expect(at[0]).toBeCloseTo((segment[0][0] + 2 * segment[1][0] + segment[2][0]) / 4, 12);
-                expect(at[1]).toBeCloseTo((segment[0][1] + 2 * segment[1][1] + segment[2][1]) / 4, 12);
-            }
-        }
-        expect(editor.solver.solve(true).result).toMatch(/^Ok/);
-        expect(editor.solver.toData().entities).toEqual(entities);
+        expect(editor.solver.toData().entities).toEqual([]);
+        expect(editor.solver.texts()).toHaveLength(1);
+        expect(editor.solver.texts()[0]).toMatchObject({
+            value: "o",
+            x: 3,
+            y: 4,
+            height: 8,
+            angle: 15,
+            frame: { width: 20, height: 10 },
+        });
+        expect(editor.solver.texts()[0].profileIds).toHaveLength(2);
     } finally {
         active.mockRestore();
+        pub.mockRestore();
         editor.solver.dispose();
     }
 });
 
-test.each(["", " \n ", "A中A"])("refuses %j atomically without committing", (text) => {
+test.each(["", " \n ", "A\u4e2dA"])("invalid %j stays in the dialog without mutation", (text) => {
     const editor = fakeEditor();
     const active = rs.spyOn(SketchEditor, "getActive").mockReturnValue(editor as unknown as SketchEditor);
     const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
     try {
         const command = new SketchTextCommand();
         command.text = text;
-        (command as any).stepDatas = [{ point: XYZ.zero }];
+        (command as any).stepDatas = [{ point: XYZ.zero }, { point: new XYZ({ x: 20, y: 10, z: 0 }) }];
         (command as any).executeMainTask();
+        const call = pub.mock.calls.find((call) => call[0] === "showDialog");
+        expect(call).not.toBeUndefined();
+        expect((call![3] as any)[0].shouldClose()).toBe(false);
         expect(editor.solver.toData()).toEqual({ entities: [], constraints: [] });
         expect(editor.commit).not.toHaveBeenCalled();
-        expect(pub).toHaveBeenCalledWith("displayError", expect.any(String));
     } finally {
         active.mockRestore();
         pub.mockRestore();
@@ -140,7 +139,8 @@ test("preview shows both contours on the sketch plane without changing the solve
                 .filter((_, i) => i % 3 === 2)
                 .every((z) => z === 0),
         ).toBe(true);
-        const step = command.getSteps()[0];
+        (command as any).stepDatas = [{ point: XYZ.zero }];
+        const step = command.getSteps()[1];
         (step as any).handleStepData().preview(XYZ.zero);
         expect(editor.solver.toData()).toEqual({ entities: [], constraints: [] });
         expect(editor.commit).not.toHaveBeenCalled();
@@ -182,6 +182,72 @@ test("cancelling the placement step leaves geometry and history untouched", asyn
     } finally {
         rs.restoreAllMocks();
         active.mockRestore();
+        editor.solver.dispose();
+    }
+});
+
+test("script updates keep retired contour identities through solver round trips and allocations", () => {
+    const solver = new SketchSolver(Plane.XY, undefined, undefined, sequentialSketchIds());
+    try {
+        const added = solver.addText({
+            value: "B",
+            x: 0,
+            y: 0,
+            height: 5,
+            angle: 0,
+            frame: { width: 20, height: 10 },
+        });
+        expect(added.isOk).toBe(true);
+        const original = solver.text(added.value)!;
+        expect(original.profileIds).toHaveLength(3);
+        expect(solver.updateText(added.value, { value: "H" }).isOk).toBe(true);
+        const line = solver.addLine(50, 0, 60, 0);
+        expect([original.id, ...original.profileIds]).not.toContain(line);
+        const roundTrip = new SketchSolver(Plane.XY, solver.toData(), undefined, sequentialSketchIds());
+        try {
+            expect(roundTrip.updateText(added.value, { value: "B", height: 8, angle: 25 }).isOk).toBe(true);
+            expect(roundTrip.text(added.value)!.profileIds).toEqual(original.profileIds);
+            expect(roundTrip.solve(true).result).toMatch(/^Ok/);
+            expect(roundTrip.text(added.value)).toMatchObject({ value: "B", height: 8, angle: 25 });
+            const later = roundTrip.addPoint(50, 10);
+            expect([original.id, ...original.profileIds, line]).not.toContain(later);
+        } finally {
+            roundTrip.dispose();
+        }
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("cancelled text edits clear previews and preserve content", () => {
+    const editor = fakeEditor();
+    const active = rs.spyOn(SketchEditor, "getActive").mockReturnValue(editor as unknown as SketchEditor);
+    const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
+    try {
+        const command = new SketchTextCommand();
+        (command as any).stepDatas = [{ point: XYZ.zero }, { point: new XYZ({ x: 20, y: 10, z: 0 }) }];
+        (command as any).executeMainTask();
+        const call = pub.mock.calls.find((call) => call[0] === "showDialog");
+        expect(call).not.toBeUndefined();
+        const content = call![2] as HTMLElement,
+            input = content.querySelector("textarea");
+        expect(input).not.toBeNull();
+        const dialogKey = rs.fn((_event: KeyboardEvent) => {});
+        content.addEventListener("keydown", dialogKey);
+        input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        expect(dialogKey).not.toHaveBeenCalled();
+        input!.value = "Changed";
+        input!.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(editor.annotations.setGeometryPreview).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ position: expect.any(Float32Array) })]),
+        );
+        (call![3] as any)[1].onclick();
+        expect(editor.annotations.setGeometryPreview).toHaveBeenLastCalledWith([]);
+        expect(editor.commit).not.toHaveBeenCalled();
+        expect(editor.solver.texts()).toEqual([]);
+    } finally {
+        active.mockRestore();
+        pub.mockRestore();
         editor.solver.dispose();
     }
 });

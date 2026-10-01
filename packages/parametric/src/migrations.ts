@@ -30,8 +30,9 @@ export const PARAMETRIC_FORMAT_VERSION = 13;
  * and `periodic`) and the `PointOnBSpline` / `TangentLineBSpline` constraint kinds — a build reading
  * only v1 knows neither and could not solve or build those sketches.
  * 3: optional control definition; params are control poles when present, fit points otherwise.
+ * 4: optional editable text records with frame/layout settings and stable contour identities.
  */
-export const SKETCH_FORMAT_VERSION = 3;
+export const SKETCH_FORMAT_VERSION = 4;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -59,6 +60,9 @@ registerMigration("sketch", 1, (document) => document);
 
 // sketch 2 → 3: absent control metadata retains fit-point semantics verbatim.
 registerMigration("sketch", 2, (document) => document);
+
+// sketch 3 → 4: optional editable text records; all existing geometry retains its meaning.
+registerMigration("sketch", 3, (document) => document);
 
 // parametric 5 → 6: optional associative starting faces; absent preserves old extrusions.
 registerMigration("parametric", 5, (document) => document);

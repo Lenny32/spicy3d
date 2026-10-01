@@ -118,10 +118,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 3 (control NURBS)", () => {
+describe("sketch format 4 (editable text)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(3);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(3);
+        expect(SKETCH_FORMAT_VERSION).toBe(4);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(4);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -132,7 +132,7 @@ describe("sketch format 3 (control NURBS)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 3 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 4 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -159,4 +159,14 @@ describe("sketch format 3 (control NURBS)", () => {
             [5, "centripetal", true],
         ]);
     });
+});
+
+test("sketch v3 documents open in v4 with control definitions and all stored metadata untouched", () => {
+    const { data } = fixture("v2/sketch3-control-nurbs.json");
+    const original = structuredClone(data),
+        migrated = migrateDocument(data);
+    expect(migrated.isOk).toBe(true);
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 4 });
+    expect(migrated.value["models"]).toEqual(original["models"]);
+    expect(data).toEqual(original);
 });

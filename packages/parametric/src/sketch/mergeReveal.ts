@@ -13,7 +13,10 @@ export function sketchEntitiesOfPath(node: SketchNode, segments: readonly string
     const [kind, raw] = segments;
     const id = Number(raw);
     if (raw === undefined || !Number.isFinite(id)) return [];
-    if (kind === "entity" || kind === "external") return [id];
+    if (kind === "text") return [id];
+    if (kind === "entity" || kind === "external") {
+        return [node.data.texts?.find((text) => text.profileIds.includes(id))?.id ?? id];
+    }
     if (kind === "constraint") {
         const constraint = node.data.constraints.find((c) => c.id === id);
         return [...new Set(constraint?.refs.map((r) => r.entityId) ?? [])];

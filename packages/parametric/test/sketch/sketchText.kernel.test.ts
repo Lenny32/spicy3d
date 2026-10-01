@@ -9,6 +9,7 @@ import {
     decodeDocumentFile,
     encodeDocumentFile,
     type IFace,
+    mergeDocuments,
     Plane,
     ShapeTypes,
 } from "@spicy3d/core";
@@ -18,6 +19,7 @@ import { resolveProfiles, sketchProfiles } from "../../src/features/profileBuild
 import { collectEdges } from "../../src/features/profileGeometry";
 import { captureProfileRef } from "../../src/features/profileRef";
 import "../../src/migrations";
+import "../../src/mergeRules";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { randomSketchIds } from "../../src/sketch/sketchIds";
 import { type SketchData, shapeEntityIds } from "../../src/sketch/sketchModel";
@@ -52,7 +54,16 @@ function newDocument(): TestDocument {
 function textData(value: string, extra: Partial<TextOutlineOptions> = {}): SketchData {
     const solver = new SketchSolver(Plane.XY);
     try {
-        const added = addTextGeometry(solver, { value, x: 5, y: 5, height: 10, angle: 0, ...extra });
+        const added = solver.addText({
+            value,
+            x: 5,
+            y: 5,
+            height: 10,
+            angle: 0,
+            frame: { width: 80, height: 10 },
+            verticalAlignment: "top",
+            ...extra,
+        });
         expect(added.isOk).toBe(true);
         expect(solver.solve(true).result).toMatch(/^Ok/);
         return solver.toData();
@@ -128,14 +139,14 @@ test.each(["Ao", "B", "Spicy3D", "é—€"])("%s extrudes its complete profiles
     expect(body.shape.value.volume()).toBeCloseTo(area * 2, 5);
 });
 
-test("text entities map every kernel edge to a distinct existing-format entity id", () => {
+test("text contour identities map every kernel edge without colliding with geometry", () => {
     const data = textData("ab");
     data.entities.unshift({ id: 10000, type: "circle", params: [-20, 0, 3] });
     const sketch = textSketch(newDocument(), data);
     expect(sketch.shape.isOk).toBe(true);
     const ids = shapeEntityIds(data);
     expect(ids).toHaveLength(collectEdges(sketch.shape.value).length);
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(ids).size).toBe(1 + data.texts![0].profileIds.length);
     expect(ids[0]).toBe(10000);
 });
 
@@ -151,7 +162,7 @@ test("profile references and seeds survive solving, reordering and rigid transfo
     const solver = new SketchSolver(Plane.XY, data);
     try {
         const moved = solver.applyTransform(
-            data.entities.map((e) => e.id),
+            data.texts!.map((text) => text.id),
             {
                 kind: "rotate",
                 center: [5, 5],
@@ -175,7 +186,7 @@ test("profile references and seeds survive solving, reordering and rigid transfo
 
 test("copy/paste, move and mirror retain curves, closure and holes with fresh ids", () => {
     const data = textData("Ao");
-    const ids = data.entities.map((e) => e.id);
+    const ids = data.texts!.map((text) => text.id);
     const clipboard = copySketchSelection(data, ids);
     expect(clipboard.isOk).toBe(true);
     const solver = new SketchSolver(Plane.XY, data, undefined, randomSketchIds);
@@ -199,7 +210,7 @@ test("copy/paste, move and mirror retain curves, closure and holes with fresh id
     }
 });
 
-test("a v3 spicy file reopens exact outlines and an extrusion with glyph holes", async () => {
+test("a spicy file reopens exact outlines and an extrusion with glyph holes", async () => {
     const doc = newDocument();
     const sketch = textSketch(doc, textData("O"));
     const profiles = sketchProfiles(sketch);
@@ -226,14 +237,15 @@ test("a v3 spicy file reopens exact outlines and an extrusion with glyph holes",
         moduleVersions: DocumentMigrations.moduleVersions(),
         models: doc.modelManager.serialize(),
     };
-    expect(envelope.moduleVersions["sketch"]).toBe(3);
+    expect(envelope.moduleVersions["sketch"]).toBe(4);
     const decoded = await decodeDocumentFile(await encodeDocumentFile(envelope));
     expect(decoded.isOk).toBe(true);
     const reopened = newDocument();
     await reopened.modelManager.deserialize(decoded.value["models"]);
     const restored = reopened.modelManager.findNode((node) => node.id === sketch.id) as SketchNode;
     expect(restored.data).toEqual(sketch.data);
-    expect(Object.keys(restored.data).sort()).toEqual(["constraints", "entities"]);
+    expect(Object.keys(restored.data).sort()).toEqual(["constraints", "entities", "texts"]);
+    expect(restored.data.texts![0].value).toBe("O");
     expect(restored.data.entities.every((e) => e.type === "line" || e.type === "bspline")).toBe(true);
     const restoredProfiles = sketchProfiles(restored);
     expect(restoredProfiles.isOk).toBe(true);
@@ -242,4 +254,121 @@ test("a v3 spicy file reopens exact outlines and an extrusion with glyph holes",
     expect(extrude.shape.isOk).toBe(true);
     expect(extrude.shape.value.volume()).toBeCloseTo(area * 2, 5);
     expect(reopened.modelManager.serialize()).toEqual(envelope.models);
+});
+
+test("persistent profile references survive size edits and text object reordering", () => {
+    const doc = newDocument(),
+        data = textData("Ao");
+    const solver = new SketchSolver(Plane.XY, data);
+    try {
+        const extra = solver.addText({
+            value: "B",
+            x: 100,
+            y: 0,
+            height: 10,
+            angle: 0,
+            frame: { width: 20, height: 20 },
+        });
+        expect(extra.isOk).toBe(true);
+        const sketch = textSketch(doc, solver.toData());
+        const initial = resolveProfiles(sketch);
+        expect(initial.isOk).toBe(true);
+        const refs = initial.value.map(({ face }) => captureProfileRef(face));
+        const initialWires = initial.value.map(({ face }) => wires(face));
+        expect(solver.updateText(data.texts![0].id, { height: 12, angle: 25 }).isOk).toBe(true);
+        const changed = solver.toData();
+        changed.texts!.reverse();
+        sketch.setDataEmitShapeChanged(changed);
+        const resolved = resolveProfiles(sketch, refs);
+        expect(resolved.isOk).toBe(true);
+        expect(resolved.value.map((profile) => profile.seed)).toEqual(
+            initial.value.map((profile) => profile.seed),
+        );
+        expect(resolved.value.map(({ face }) => wires(face))).toEqual(initialWires);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("exploding text creates exact solver geometry with the same holes and area", () => {
+    const data = textData("Ao"),
+        doc = newDocument();
+    const before = sketchProfiles(textSketch(doc, data));
+    expect(before.isOk).toBe(true);
+    const solver = new SketchSolver(Plane.XY, data);
+    try {
+        const result = addTextGeometry(solver, data.texts![0]);
+        expect(result.isOk).toBe(true);
+        expect(solver.removeText(data.texts![0].id)).toBe(true);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const after = sketchProfiles(textSketch(doc, solver.toData()));
+        expect(after.isOk).toBe(true);
+        expect(after.value.outer.map(wires)).toEqual([2, 2]);
+        expect(after.value.outer.reduce((sum, face) => sum + face.area(), 0)).toBeCloseTo(
+            before.value.outer.reduce((sum, face) => sum + face.area(), 0),
+            6,
+        );
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("the saved sketch v4 fixture reopens editable text and its explicit extrusion", async () => {
+    const stored = JSON.parse(
+        readFileSync(
+            resolve(import.meta.dirname, "../../../core/test/fixtures/documents/v2/sketch4-text.json"),
+            "utf8",
+        ),
+    );
+    const doc = newDocument();
+    await doc.modelManager.deserialize(stored.models);
+    const sketch = doc.modelManager.findNode((node) => node.id === "sketch-text") as SketchNode;
+    expect(sketch.data.texts![0]).toMatchObject({ value: "O", profileIds: [11, 12] });
+    const profiles = sketchProfiles(sketch);
+    expect(profiles.isOk).toBe(true);
+    expect(profiles.value.outer.map(wires)).toEqual([2]);
+    const body = doc.modelManager.findNode((node) => node.id === "body-text") as ParametricBodyNode;
+    expect(body.shape.isOk).toBe(true);
+    expect(body.shape.value.volume()).toBeCloseTo(profiles.value.outer[0].area() * 2, 5);
+});
+
+test("concurrent content and height edits retain editable records through solving and extrusion", async () => {
+    const base = JSON.parse(
+        readFileSync(
+            resolve(import.meta.dirname, "../../../core/test/fixtures/documents/v2/sketch4-text.json"),
+            "utf8",
+        ),
+    );
+    const change = (patch: object) => {
+        const copy = structuredClone(base),
+            sketch = copy.models.nodes.find((node: { id: string }) => node.id === "sketch-text");
+        const data = JSON.parse(sketch.dataJson);
+        Object.assign(data.texts[0], patch);
+        sketch.dataJson = JSON.stringify(data);
+        return copy;
+    };
+    const merged = mergeDocuments(
+        base,
+        change({ value: "B", profileIds: [11, 12, 13] }),
+        change({ height: 12 }),
+    );
+    expect(merged.isOk).toBe(true);
+    expect(merged.value.conflicts).toEqual([]);
+    const doc = newDocument();
+    await doc.modelManager.deserialize(merged.value.merged["models"]);
+    const sketch = doc.modelManager.findNode((node) => node.id === "sketch-text") as SketchNode;
+    const solver = new SketchSolver(Plane.XY, sketch.data);
+    try {
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.toData().texts![0]).toMatchObject({ value: "B", height: 12, profileIds: [11, 12, 13] });
+        sketch.setDataEmitShapeChanged(solver.toData());
+        const profiles = sketchProfiles(sketch);
+        expect(profiles.isOk).toBe(true);
+        expect(profiles.value.outer.map(wires)).toEqual([3]);
+        const body = doc.modelManager.findNode((node) => node.id === "body-text") as ParametricBodyNode;
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.volume()).toBeCloseTo(profiles.value.outer[0].area() * 2, 5);
+    } finally {
+        solver.dispose();
+    }
 });
