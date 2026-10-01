@@ -121,3 +121,27 @@ test.each([
     expect(JSON.stringify(body.features)).toBe(before);
     expect(doc.history.position()).toBe(position);
 });
+
+test.each([
+    "faceSweep",
+    "editFaceSweep",
+])("%s rejects support from another body without changing history", async (kind) => {
+    const { doc, body, op, tool } = await setup();
+    const other = new ParametricBodyNode({ document: doc, id: "other-body", features: body.features });
+    doc.modelManager.addNode(other);
+    if (kind === "editFaceSweep") await tool.handler({ ops: [op] });
+    const before = JSON.stringify(body.features);
+    const position = doc.history.position();
+    const invalid =
+        kind === "faceSweep"
+            ? { ...op, support: { ...op.support, nodeId: other.id } }
+            : {
+                  op: kind,
+                  body: body.id,
+                  featureId: body.features[1].id,
+                  support: { ...op.support, nodeId: other.id },
+              };
+    await expect(tool.handler({ ops: [invalid] })).rejects.toThrow("support must belong to the host body");
+    expect(JSON.stringify(body.features)).toBe(before);
+    expect(doc.history.position()).toBe(position);
+});

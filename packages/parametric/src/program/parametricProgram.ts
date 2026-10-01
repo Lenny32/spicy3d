@@ -1233,6 +1233,7 @@ function runEditSweepOp(state: State, op: EditSweepOp): void {
 function faceSweepSupportInput(
     state: State,
     support: FaceSweepSupportInput,
+    host: ParametricBodyNode,
 ): FaceSweepFeatureData["support"] {
     if (
         !support ||
@@ -1242,6 +1243,7 @@ function faceSweepSupportInput(
     )
         throw new Error("Face sweep support requires nodeId and nonnegative faceIndex");
     const body = resolveBody(state, support.nodeId);
+    if (body !== host) throw new Error("Face sweep support must belong to the host body");
     const captured = captureProjectionTarget(body, support.faceIndex);
     if (!captured.isOk) throw new Error(captured.error);
     return captured.value;
@@ -1261,7 +1263,7 @@ function runFaceSweepOp(state: State, op: FaceSweepOp): void {
         type: "faceSweep",
         section: sweepSectionInput(state, op.section),
         path: sweepPathInput(state, op.path),
-        support: faceSweepSupportInput(state, op.support),
+        support: faceSweepSupportInput(state, op.support, body),
         operation: op.operation,
         ...(op.roundCorner === true ? { roundCorner: true } : {}),
     };
@@ -1282,7 +1284,7 @@ function runEditFaceSweepOp(state: State, op: EditFaceSweepOp): void {
         ...rest,
         section: op.section === undefined ? feature.section : sweepSectionInput(state, op.section),
         path: op.path === undefined ? feature.path : sweepPathInput(state, op.path),
-        support: op.support === undefined ? feature.support : faceSweepSupportInput(state, op.support),
+        support: op.support === undefined ? feature.support : faceSweepSupportInput(state, op.support, body),
         operation: op.operation ?? feature.operation,
         ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
     };
