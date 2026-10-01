@@ -1076,7 +1076,7 @@ export default {
         "prompt.select.path": "Please select path",
         "prompt.select.section": "Please select section",
         "prompt.select.loftSection":
-            "Select the section profiles in loft order, one per sketch; Confirm when done",
+            "Select section profiles in loft order, one per sketch (open curves with Solid off); Confirm when done",
         "prompt.select.thickenOpenFaces":
             "Select the faces to open, none for a closed hollow or a thickened surface; Confirm when done",
         "prompt.thicken.openFacesSolidOnly":
@@ -1157,7 +1157,7 @@ export default {
             "Lofts through the picked wires, edges or points into a fixed shape that does not update.",
         "tooltip.create.revol": "Revolves the picked shapes into a fixed shape that does not update.",
         "tooltip.feature.loft":
-            "Lofts a solid or surface through one sketch profile per section, in order. Stays linked: editing a sketch re-lofts the body.",
+            "Lofts through one sketch profile per section, in order. Turn Solid off to pick open section curves and build a skin. Editing a sketch re-lofts the body.",
         "tooltip.feature.thicken":
             "Shells a solid (open faces optional) or thickens a surface into a solid. Stays linked: the wall follows the thickness and every change upstream.",
         "tooltip.create.thickSolid": "Thickens the picked faces into a fixed solid that does not update.",

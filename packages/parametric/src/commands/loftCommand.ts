@@ -10,11 +10,13 @@ import {
     command,
     Id,
     type IFace,
+    type IShape,
     Matrix4,
     PubSub,
     property,
     SelectShapeStep,
     type ShapeMeshData,
+    type ShapeType,
     ShapeTypes,
     Transaction,
     VisualConfig,
@@ -33,7 +35,7 @@ import { pickGuidedLoftPath } from "./guidedLoftPicking";
  */
 @command({ key: "feature.loft", helpText: "tooltip.feature.loft", icon: "icon-loft" })
 export class LoftFeatureCommand extends CancelableCommand {
-    private readonly sections: { section: LoftSection; sketch: SketchNode; face: IFace }[] = [];
+    private readonly sections: { section: LoftSection; sketch: SketchNode; shape: IShape }[] = [];
     private visual: number | undefined;
     private spine: NonNullable<LoftFeatureData["guided"]>["spine"] | undefined;
     private boundary: NonNullable<LoftFeatureData["guided"]>["boundary"] | undefined;
@@ -111,22 +113,36 @@ export class LoftFeatureCommand extends CancelableCommand {
         try {
             while (true) {
                 this.controller = new AsyncController();
-                const picked = await new SelectShapeStep(ShapeTypes.face, "prompt.select.loftSection", {
-                    nodeFilter: { allow: (node) => node instanceof SketchNode },
-                    shapeFilter: { allow: (shape) => (shape as IFace).surface().isPlanar() },
-                    selectedState: SELECTED_PROFILE_STATE,
-                }).execute(this.document, this.controller);
+                const picked = await new SelectShapeStep(
+                    (ShapeTypes.face | ShapeTypes.edge) as ShapeType,
+                    "prompt.select.loftSection",
+                    {
+                        nodeFilter: { allow: (node) => node instanceof SketchNode },
+                        shapeFilter: {
+                            allow: (shape) =>
+                                shape.shapeType === ShapeTypes.face
+                                    ? (shape as IFace).surface().isPlanar()
+                                    : !this.solid && !this.guided,
+                        },
+                        selectedState: SELECTED_PROFILE_STATE,
+                    },
+                ).execute(this.document, this.controller);
                 if (picked === undefined) {
                     if (this.controller.result?.status !== "success") return;
                     break;
                 }
                 const sketch = picked.nodes?.[0];
-                const face = picked.shapes[0]?.shape as IFace | undefined;
-                if (!(sketch instanceof SketchNode) || face === undefined) continue;
+                const shape = picked.shapes[0]?.shape;
+                if (!(sketch instanceof SketchNode) || shape === undefined) continue;
                 this.sections.push({
-                    section: { sketchId: sketch.id, profile: captureProfileRef(face) },
+                    section: {
+                        sketchId: sketch.id,
+                        ...(shape.shapeType === ShapeTypes.face
+                            ? { profile: captureProfileRef(shape as IFace) }
+                            : {}),
+                    },
                     sketch,
-                    face,
+                    shape,
                 });
                 this.displayPreview();
             }
@@ -192,8 +208,8 @@ export class LoftFeatureCommand extends CancelableCommand {
         // Nothing picked yet (an option set before the first pick): nothing to show.
         if (this.sections.length === 0) return;
         const meshes: ShapeMeshData[] = [];
-        for (const { face } of this.sections) {
-            const edges = face.mesh.edges;
+        for (const { shape } of this.sections) {
+            const edges = shape.mesh.edges;
             if (edges === undefined) continue;
             const highlighted: typeof edges = {
                 ...edges,

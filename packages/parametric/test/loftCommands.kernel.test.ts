@@ -85,6 +85,7 @@ function pickSections(
     command: LoftFeatureCommand,
     sketches: SketchNode[],
     onFirstPick?: () => void,
+    open = false,
 ) {
     const queue = [...sketches];
     let first = true;
@@ -98,7 +99,9 @@ function pickSections(
                 return [];
             }
             const pick = {
-                shape: profileOf(sketch),
+                shape: open
+                    ? (sketch.shape.value.findSubShapes(ShapeTypes.edge)[0] ?? sketch.shape.value)
+                    : profileOf(sketch),
                 owner: { node: sketch },
                 transform: Matrix4.identity(),
                 indexes: [0],
@@ -149,6 +152,42 @@ describe("loft command (real kernel)", () => {
         await command.execute(app);
 
         expect(bodies(doc)[0].features[0]).toMatchObject({ solid: false, ruled: true });
+    });
+
+    test("picking open curves creates a surface using the existing sketch-only section payload", async () => {
+        const { app, doc, base, top } = setup();
+        const openData: SketchData = {
+            entities: [{ id: 1, type: "line", params: [-10, 0, 10, 0] }],
+            constraints: [],
+        };
+        base.setDataEmitShapeChanged(openData);
+        top.setDataEmitShapeChanged(openData);
+        const command = new LoftFeatureCommand();
+        pickSections(
+            doc,
+            command,
+            [base, top],
+            () => {
+                command.solid = false;
+            },
+            true,
+        );
+        await command.execute(app);
+        expect(bodies(doc)).toHaveLength(1);
+        const body = bodies(doc)[0];
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.shell);
+        expect(body.features[0]).toMatchObject({
+            solid: false,
+            sections: [{ sketchId: base.id }, { sketchId: top.id }],
+        });
+        expect(
+            (body.features[0] as LoftFeatureData).sections.every((section) => section.profile === undefined),
+        ).toBe(true);
+        expect([base.visible, top.visible]).toEqual([false, false]);
+        doc.history.undo();
+        expect(bodies(doc)).toHaveLength(0);
+        expect([base.visible, top.visible]).toEqual([true, true]);
     });
 
     test("a single section creates nothing", async () => {
@@ -228,6 +267,43 @@ describe("loft edit session (real kernel)", () => {
         doc.history.undo();
         expect(body.features[0]).not.toHaveProperty("solid");
         expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
+    });
+
+    test("open-section edits reject solid output and confirm valid surface options with undo", async () => {
+        const { app, doc, base, top } = setup();
+        const data: SketchData = {
+            entities: [{ id: 1, type: "line", params: [-10, 0, 10, 0] }],
+            constraints: [],
+        };
+        base.setDataEmitShapeChanged(data);
+        top.setDataEmitShapeChanged(data);
+        const feature: LoftFeatureData = {
+            id: "l1",
+            type: "loft",
+            solid: false,
+            sections: [{ sketchId: base.id }, { sketchId: top.id }],
+        };
+        const body = new ParametricBodyNode({ document: doc, featuresJson: JSON.stringify([feature]) });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(true);
+        const done = body.editFeature("l1");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const session = app.executingCommand as LoftEditCommand;
+        expect(session.solid).toBe(false);
+        session.solid = true;
+        session.confirm();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(app.executingCommand).toBe(session);
+        expect(body.features[0]).toEqual(feature);
+        session.solid = false;
+        session.ruled = true;
+        session.confirm();
+        await done;
+        expect(body.features[0]).toMatchObject({ solid: false, ruled: true });
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.shell);
+        doc.history.undo();
+        expect(body.features[0]).toEqual(feature);
     });
 
     test("cancelling leaves the feature untouched", async () => {

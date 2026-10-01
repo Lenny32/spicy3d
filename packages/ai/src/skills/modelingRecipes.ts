@@ -44,7 +44,7 @@ Flange (base plate + boss + bolt circle):
 
 Loft through sketches:
 - run_program loft takes sketch node ids directly as sections: { method: "loft", id: "skin", args: { sections: ["<sketchA>", "<sketchB>"], isSolid: true, isRuled: false, continuity: "c2" } }. A sketch's loose edges are chained into the section wire for you — no scaffold wire ops. OPEN chains are fine (isSolid: false gives an open skin); a sketch with several separate chains (e.g. an outline plus a hole) is refused with "Section <i> has <n> separate edge chains": pick one with shape.findSubShapes + wire.
-- For CLOSED single-profile sketches the user may want to re-edit, prefer run_parametric's loft op (load_skill parametric-modeling): it follows the sketches when they change.
+- For single-profile sketches (closed, or one open wire per sketch with solid: false) the user may want to re-edit, prefer run_parametric's loft op (load_skill parametric-modeling): it follows the sketches when they change.
 
 Patterns / arrays:
 - Linear: transformedMul with translate = i * spacing per copy. Circular: transformedMul with rotate around the pattern axis. Create copies first, then one boolean op with all of them in shape2.

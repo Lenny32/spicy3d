@@ -114,7 +114,7 @@ export class LoftEditCommand extends CancelableCommand {
     @property("common.confirm")
     readonly confirm = () => {
         if (this.pickController) this.pickController.success();
-        else if (!this.guided || this.valid) this.controller?.success();
+        else if (this.valid) this.controller?.success();
     };
 
     protected override async executeAsync(): Promise<void> {

@@ -1,7 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IEdge, type IFace, type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import { type IEdge, type IFace, type IShape, type IWire, Result, ShapeTypes } from "@spicy3d/core";
+import { shapeEntityIds } from "../sketch/sketchModel";
 import type { SketchNode } from "../sketch/sketchNode";
 import { findSketch } from "./extrude";
 import {
@@ -16,14 +17,17 @@ import {
 import { evaluateGuidedLoft, guidedLoftDependencies } from "./guidedLoft";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import { resolveProfiles } from "./profileBuilder";
+import { collectEdges, groupConnected, hasBranchVertex, needsKernelSplit } from "./profileGeometry";
 import { captureProfileRef } from "./profileRef";
 import { profileEdgeSeeds } from "./profileSeeds";
 import { MATCH_TOLERANCE } from "./refGeometry";
 
-/** A section resolved for one rebuild: its profile face and the sketch-scoped seed of that face. */
-export interface ResolvedLoftSection {
+/** A section resolved for one rebuild: a closed profile or open wire, with sketch-scoped identity. */
+interface ResolvedLoftSection {
     readonly sketch: SketchNode;
-    readonly face: IFace;
+    readonly face?: IFace;
+    readonly wire: IWire;
+    readonly edgeSeeds?: string[];
     readonly seed: string;
 }
 
@@ -112,34 +116,44 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
 
     evaluate(feature, context): Result<IShape> {
         if (feature.guided !== undefined) return evaluateGuidedLoft(feature, context);
-        const sections = resolveLoftSections(feature, context);
-        if (!sections.isOk) return Result.err(sections.error);
-        const tracking = context.tracking;
-        if (tracking !== undefined && sectionsOf(feature).some((section) => section.profile !== undefined)) {
-            // Re-anchored refs for the body's write-back (see ShapeTracking).
-            tracking.resolvedProfiles = sections.value.map(({ face }) => captureProfileRef(face));
+        const owned = new Set<IShape>();
+        try {
+            const sections = resolveLoftSections(feature, context, owned);
+            if (!sections.isOk) return Result.err(sections.error);
+            const tracking = context.tracking;
+            if (
+                tracking !== undefined &&
+                sectionsOf(feature).some((section) => section.profile !== undefined)
+            ) {
+                // Only closed sections can carry picked profile refs.
+                tracking.resolvedProfiles = sections.value.map(({ face }) => captureProfileRef(face!));
+            }
+            const lofted = shapeFactory.loft(
+                sections.value.map(({ wire }) => wire),
+                feature.solid !== false,
+                feature.ruled === true,
+                feature.continuity ?? "c2",
+            );
+            if (!lofted.isOk) return Result.err(lofted.error);
+            if (tracking !== undefined) trackLoft(feature, sections.value, lofted.value, tracking);
+            return lofted;
+        } finally {
+            for (const shape of owned) shape.dispose();
         }
-        const lofted = shapeFactory.loft(
-            sections.value.map(({ face }) => face.outerWire()),
-            feature.solid !== false,
-            feature.ruled === true,
-            feature.continuity ?? "c2",
-        );
-        if (!lofted.isOk) return Result.err(lofted.error);
-        if (tracking !== undefined) trackLoft(feature, sections.value, lofted.value, tracking);
-        return lofted;
     },
 };
 
 /**
- * The profile face of every section, in loft order. Checked here rather than left to the kernel,
+ * The wire of every section, in loft order. Checked here rather than left to the kernel,
  * which raises on some degenerate inputs (fatal before -fwasm-exceptions; the checks stay for
  * clearer messages and modules built without that handling): at least two sections, each a
- * single hole-free profile, no two consecutive ones on the same plane.
+ * single hole-free profile or (surface only) simple open wire, no consecutive coplanar sections.
+ * Every temporary wire is added to `owned` for release after evaluation, including failed builds.
  */
-export function resolveLoftSections(
+function resolveLoftSections(
     feature: LoftFeatureData,
     context: Pick<FeatureContext, "document">,
+    owned: Set<IShape>,
 ): Result<ResolvedLoftSection[]> {
     const sections = sectionsOf(feature);
     if (sections.length < 2) return Result.err("A loft needs at least two sections");
@@ -151,13 +165,68 @@ export function resolveLoftSections(
             sketch,
             section.profile === undefined ? undefined : [section.profile],
         );
+        if (feature.solid === false && section.profile === undefined) {
+            const source = sketch.shape;
+            if (!source.isOk) return Result.err(source.error);
+            const edges = collectEdges(source.value);
+            const groups = groupConnected(edges);
+            const branched = hasBranchVertex(edges);
+            // Preserve closed-profile resolution (including holes and loose scaffolding).
+            // Only an unambiguous single chain can denote a new open section.
+            if (groups.length !== 1 || branched) {
+                if (!profiles.isOk)
+                    return Result.err(
+                        branched
+                            ? "An open loft section must not branch or self-intersect"
+                            : "A loft section must be a single profile or open wire",
+                    );
+            } else {
+                const built = shapeFactory.wire(edges);
+                if (!built.isOk) return Result.err(built.error);
+                owned.add(built.value);
+                if (!built.value.isClosed()) {
+                    if (needsKernelSplit(edges))
+                        return Result.err("An open loft section must not self-intersect");
+                    // The existing binding answers true when the wire is free of self-intersection.
+                    const checked = built.value.checkSelfIntersection?.();
+                    if (!checked?.isOk)
+                        return Result.err(
+                            checked?.error ?? "Open loft sections require self-intersection checking",
+                        );
+                    if (!checked.value) return Result.err("An open loft section must not self-intersect");
+                    const entities = shapeEntityIds(sketch.data);
+                    const wireEdges = collectEdges(built.value);
+                    const map = completeEdgeHistory(
+                        edges,
+                        wireEdges,
+                        wireEdges.map(() => -1),
+                    );
+                    if (map.some((index) => index < 0 || entities[index] === undefined)) {
+                        return Result.err("Open loft section lost its sketch entity ancestry");
+                    }
+                    const seed = `sketch:${sketch.id}:open`;
+                    resolved.push({
+                        sketch,
+                        wire: built.value,
+                        seed,
+                        edgeSeeds: map.map((index) => `${seed}:ent${entities[index]}`),
+                    });
+                    continue;
+                }
+            }
+        }
         if (!profiles.isOk) return Result.err(profiles.error);
         if (profiles.value.length !== 1) return Result.err("A loft section must be a single profile");
         const { face, seed } = profiles.value[0];
         if (face.findSubShapes(ShapeTypes.wire).length > 1) {
             return Result.err("A loft section cannot have holes");
         }
-        resolved.push({ sketch, face, seed: `sketch:${sketch.id}:${seed}` });
+        const wire = face.outerWire();
+        owned.add(wire);
+        resolved.push({ sketch, face, wire, seed: `sketch:${sketch.id}:${seed}` });
+    }
+    if (resolved.some(({ face }) => face === undefined) && resolved.some(({ face }) => face !== undefined)) {
+        return Result.err("Loft sections must be all open or all closed");
     }
     for (let index = 1; index < resolved.length; index++) {
         if (samePlane(resolved[index - 1].sketch, resolved[index].sketch)) {
@@ -192,14 +261,15 @@ function trackLoft(
     shape: IShape,
     tracking: ShapeTracking,
 ): void {
-    const inputFaces = sections.map(({ face }) => face);
+    const closedSections = sections.filter((section) => section.face !== undefined);
+    const inputFaces = closedSections.map(({ face }) => face!);
     const inputEdges: IEdge[] = [];
     const edgeSeeds: string[] = [];
-    for (const { face, seed } of sections) {
-        const edges = face.findSubShapes(ShapeTypes.edge) as IEdge[];
+    for (const { face, wire, seed, edgeSeeds: openSeeds } of sections) {
+        const edges = (face ?? wire).findSubShapes(ShapeTypes.edge) as IEdge[];
         inputEdges.push(...edges);
         // Entity-derived edge seeds survive wire re-enumeration (see profileEdgeSeeds).
-        edgeSeeds.push(...profileEdgeSeeds(face, seed, edges));
+        edgeSeeds.push(...(openSeeds ?? profileEdgeSeeds(face!, seed, edges)));
     }
     const outputFaces = shape.findSubShapes(ShapeTypes.face) as IFace[];
     const outputEdges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];
@@ -212,7 +282,7 @@ function trackLoft(
         // Recognize end caps by their plane and area before the bbox matcher.
         const cap = feature.solid === false ? undefined : capSection(face, sections);
         if (cap !== undefined) return cap.seed;
-        if (faceMap[index] >= 0) return sections[faceMap[index]].seed;
+        if (faceMap[index] >= 0) return closedSections[faceMap[index]].seed;
         const sectionEdge = lowestSectionEdge(face, outputEdges, edgeMap);
         return sectionEdge === undefined ? `${feature.id}:${index}` : edgeSeeds[sectionEdge];
     });
@@ -227,6 +297,7 @@ function capSection(face: IFace, sections: readonly ResolvedLoftSection[]): Reso
         const plane = sketch.plane;
         if (!normal.isParallelTo(plane.normal)) return false;
         if (Math.abs(point.sub(plane.origin).dot(plane.normal)) >= MATCH_TOLERANCE) return false;
+        if (!profile) return false;
         const profileArea = profile.area();
         return Math.abs(area - profileArea) / Math.max(Math.sqrt(profileArea), 1e-9) < MATCH_TOLERANCE;
     });

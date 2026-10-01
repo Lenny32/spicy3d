@@ -422,7 +422,7 @@ const OPS_SCHEMA = {
             type: "array",
             items: { type: "string" },
             description:
-                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
+                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, or one open non-self-intersecting wire when solid:false (ordinary lofts only). All sections must be all open or all closed; no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
         },
         guided: {
             type: ["object", "null"],
@@ -462,7 +462,8 @@ const OPS_SCHEMA = {
         },
         solid: {
             type: "boolean",
-            description: "Loft/sweep: capped ends (default true); false = an open surface",
+            description:
+                "Loft/sweep: solid output (default true); false = a surface. Ordinary lofts also accept open section wires with false",
         },
         section: {
             type: "object",

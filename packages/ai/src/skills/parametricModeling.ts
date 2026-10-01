@@ -95,7 +95,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   construction line drawn in a sketch). The two references follow their source when it changes.
   Always starts a new body — there is no join/cut revolve. angle is in degrees, default 360.
 - { op: "loft", id, sections, solid?, ruled?, continuity?, guided? }
-  sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes
+  sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes,
+  or ONE connected, non-branching, non-self-intersecting OPEN wire when solid: false. Ordinary lofts
+  accept open curves (lines, arcs, splines); guided lofts still require closed profiles. All sections
+  must be all open or all closed. Open curves produce an uncapped skin; use thicken with no
+  openFaceIndexes to make a solid wall, then boolean or extrude operation "intersect" to trim it.
   (e.g. a rectangle on XY, a circle on an offset plane); consecutive sections must not share a plane.
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
@@ -367,6 +371,13 @@ Example — the same skin as an open loft, thickened into a 1.5 mm wall driven b
  [ ...the construct and the two sketches above...,
    { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false },
    { op: "thicken", id: "b1", body: "b1", thickness: "wall_t" } ]
+
+Example — an editable skin through open section curves, then a solid wall (no closing lines or caps):
+ [ { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+   { op: "sketch", id: "s1", entities: [ { type: "bspline", points: [[-10,0],[0,3],[10,0]] } ] },
+   { op: "sketch", id: "s2", plane: { construction: "p1" }, entities: [ { type: "bspline", points: [[-8,0],[0,4],[8,0]] } ] },
+   { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+   { op: "thicken", id: "wall", body: "skin", thickness: 1 } ]
 
 Fillet/chamfer creation accepts optional index, a zero-based insertion position in the
 feature list (0..feature count; omitted appends). Edge selection resolves against the

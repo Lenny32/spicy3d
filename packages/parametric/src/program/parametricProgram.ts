@@ -224,7 +224,6 @@ export interface RevolveOp {
     angle?: ParameterValue;
 }
 
-/** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
 export interface ProjectionOp {
     op: "projection";
     id: string;
@@ -237,13 +236,14 @@ export interface ProjectionOp {
     direction: XYZLike;
 }
 
+/** A loft through one profile per sketch (open wires require solid: false), in `sections` order. Always starts a new body. */
 export interface LoftOp {
     op: "loft";
     id: string;
     name?: string;
     /** Sketch op ids or existing sketch node ids, at least two; each sketch must hold a single profile. */
     sections: string[];
-    /** Capped ends (default); false = an open surface. */
+    /** Solid output (default); false = a surface, also permitting open section wires. */
     solid?: boolean;
     /** Straight faces between consecutive sections; default smooth. */
     ruled?: boolean;

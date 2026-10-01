@@ -652,6 +652,52 @@ describe("loft", () => {
         expect(extent(body)[3]).toBeCloseTo(15, 3);
     });
 
+    test("the documented open-curve workflow lofts and thickens without adding section payload fields", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [-10, 0],
+                            [0, 3],
+                            [10, 0],
+                        ],
+                    },
+                ],
+            },
+            {
+                op: "sketch",
+                id: "s2",
+                plane: { construction: "p1" },
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [-8, 0],
+                            [0, 4],
+                            [8, 0],
+                        ],
+                    },
+                ],
+            },
+            { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+            { op: "thicken", id: "wall", body: "skin", thickness: 1 },
+        ]);
+        const body = createdBody(doc, result, "skin");
+        expectClean(body);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect(body.shape.value.volume()).toBeGreaterThan(0);
+        expect(body.features.map((feature) => feature.type)).toEqual(["loft", "thicken"]);
+        expect(body.features[0]).toMatchObject({ solid: false });
+        expect(Object.keys(body.features[0]).sort()).toEqual(["id", "sections", "solid", "type"]);
+    });
+
     test("stores the options it was given", () => {
         const doc = newDoc();
         const result = run(doc, [
