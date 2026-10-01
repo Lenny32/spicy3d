@@ -382,6 +382,83 @@ describe("feature evaluation", () => {
         expect(radius).toBe(2);
     });
 
+    test("variable fillet resolves its law and matches the rebuilt edge without using the fallback radius", () => {
+        const variable = rs.fn((_shape: unknown, _indexes: number[], _law: unknown) =>
+            Result.ok(mocks.filletedShape),
+        );
+        Object.assign(shapeFactory, { filletVariableRadius: variable });
+        const feature: FilletFeatureData = {
+            id: "law",
+            type: "fillet",
+            radius: "unusedParameter",
+            edges: [EDGE_REF],
+            radiusLaw: [
+                { position: 0, radius: "0.2 cm" },
+                { position: 1, radius: 3 },
+            ],
+        };
+        const body = bodyWith([{ id: "e1", type: "extrude", sketchId: sketch.id, depth: 5 }, feature]);
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value).toBe(mocks.filletedShape);
+        expect(variable).toHaveBeenCalledTimes(1);
+        expect(variable.mock.calls[0]).toEqual([
+            mocks.prismShape,
+            [0],
+            [
+                { position: 0, radius: 2 },
+                { position: 1, radius: 3 },
+            ],
+        ]);
+        expect(mocks.fillet).not.toHaveBeenCalled();
+    });
+
+    test("older kernels report unsupported variable fillets while constant fillets still evaluate", () => {
+        const feature: FilletFeatureData = {
+            id: "law",
+            type: "fillet",
+            radius: 2,
+            edges: [EDGE_REF],
+            radiusLaw: [
+                { position: 0, radius: 2 },
+                { position: 1, radius: 3 },
+            ],
+        };
+        const body = bodyWith([{ id: "e1", type: "extrude", sketchId: sketch.id, depth: 5 }, feature]);
+        expect(body.shape.isOk).toBe(false);
+        expect(body.shape.error).toBe("Variable-radius fillets are not available in this kernel build");
+        expect(mocks.fillet).not.toHaveBeenCalled();
+        const { radiusLaw: _removed, ...constant } = feature;
+        body.setFeaturesEmitShapeChanged([body.features[0], constant]);
+        expect(body.shape.isOk).toBe(true);
+        expect(mocks.fillet).toHaveBeenCalledTimes(1);
+    });
+
+    test("variable radius parameters edit one sample immutably and preserve its expression", () => {
+        const handler = featureHandler("fillet")!;
+        const feature: FilletFeatureData = {
+            id: "law",
+            type: "fillet",
+            radius: 2,
+            edges: [EDGE_REF],
+            radiusLaw: [
+                { position: 0, radius: 2 },
+                { position: 1, radius: "finish" },
+            ],
+        };
+        expect(handler.parameters!(feature).map((parameter) => parameter.key)).toEqual([
+            "radiusLaw.0",
+            "radiusLaw.1",
+        ]);
+        const updated = handler.setParameter!(feature, "radiusLaw.1", "finish * 2") as FilletFeatureData;
+        expect(updated.radiusLaw).toEqual([
+            { position: 0, radius: 2 },
+            { position: 1, radius: "finish * 2" },
+        ]);
+        expect(feature.radiusLaw![1].radius).toBe("finish");
+        expect(updated.edges).toBe(feature.edges);
+        expect(handler.setParameter!(feature, "radiusLaw.99", 3)).toBe(feature);
+    });
+
     test("chamfer passes matched indexes and distance to the factory", () => {
         const extrude: ExtrudeFeatureData = { id: "e1", type: "extrude", sketchId: sketch.id, depth: 5 };
         const chamfer: ChamferFeatureData = { id: "c1", type: "chamfer", distance: 1, edges: [EDGE_REF] };

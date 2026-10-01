@@ -258,9 +258,11 @@ feature by its `type`:
   axis `axis` + `axisSource` + `constructionAxisRef` at `…/param/axis`.
 - **Extents** (parametric 3): an extrude's `extent` / `secondExtent` merge by their `type`; a changed
   type is one value. A to-object extent's `face` (a `ProfileRef`) + `nodeId` are one pick, its `offset`
-  an expression of its own.
+  an expression of its own. A next extent (parametric 8) stores its automatically captured
+  candidate `nodeIds` and offset atomically, so refreshes and offsets cannot merge into an
+  unreviewed target universe. The host input remains implicit; the winning face is recomputed.
 - **References** (checked by the integrity pass): `sketchId`, `source.nodeId`, `axisSource.nodeId`,
-  `extent.nodeId`, `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id`,
+  `extent.nodeId`, `extent.nodeIds[]` / `secondExtent.nodeIds[]`, `toolIds` → nodes; `edges[].edgeId`, `axisSource.edge.edgeId`, `source.profiles[].id`,
   `extent.face.id` → tracked sub-shape ids; `profiles[].entities` → entities of the feature's sketch; `constructionAxisRef` → a
   construction ref (its `featureIndex` a timeline position).
 - A feature type this build does not know: base fields as above, every other field one value.
@@ -689,7 +691,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, thicken, extrudeTarget, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, sweep, faceSweep, projection, thicken, extrudeTarget, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -700,11 +702,14 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `depth`: expression
       - `symmetric`: scalar
       - `startOffset`: expression
+      - `startFace`: atomic { nodeId: ref → node; face: atomic }
       - `operation`: scalar
       - `profiles`: atomic of ref → profile
-      - `extent`: union on `type` (distance, toObject, throughAll, any other)
+      - `extent`: union on `type` (distance, next, toObject, throughAll, any other)
         - `type: "distance"`
           - `type`: scalar
+        - `type: "next"`
+          - atomic { type: scalar; nodeIds: atomic of ref → node; offset: expression }
         - `type: "toObject"`
           - `type`: scalar
           - `face`: ref → profile
@@ -715,9 +720,11 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
           - `type`: scalar
         - any other `type`
           - atomic
-      - `secondExtent`: union on `type` (distance, toObject, throughAll, any other)
+      - `secondExtent`: union on `type` (distance, next, toObject, throughAll, any other)
         - `type: "distance"`
           - `type`: scalar
+        - `type: "next"`
+          - atomic { type: scalar; nodeIds: atomic of ref → node; offset: expression }
         - `type: "toObject"`
           - `type`: scalar
           - `face`: ref → profile
@@ -748,7 +755,9 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `radius`: expression
+      - `radiusLaw`: atomic
       - `edges`: atomic of ref → edge
+      - `cornerSetbacks`: atomic of atomic { edges: atomic of ref → edge; distances: atomic of expression }
     - `type: "chamfer"`
       - `id`: scalar
       - `type`: scalar
@@ -770,9 +779,37 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `sections`: atomic of { sketchId: ref → node; profile: ref → profile }
+      - `guided`: atomic { spine: atomic { nodeId: ref → node; edges: atomic of ref → edge }; boundary: atomic { nodeId: ref → node; edges: atomic of ref → edge } }
       - `solid`: scalar
       - `ruled`: scalar
       - `continuity`: scalar
+    - `type: "sweep"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `section`: atomic { sketchId: ref → node; profile: ref → profile }
+      - `path`: atomic { nodeId: ref → node; edges: atomic of ref → edge }
+      - `solid`: scalar
+      - `roundCorner`: scalar
+    - `type: "faceSweep"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `section`: atomic { sketchId: ref → node; profile: ref → profile }
+      - `path`: atomic { nodeId: ref → node; edges: atomic of ref → edge }
+      - `support`: atomic { nodeId: ref → node; face: ref → profile }
+      - `operation`: scalar
+      - `roundCorner`: scalar
+    - `type: "projection"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `source`: atomic { nodeId: ref → node; edges: atomic of ref → edge }
+      - `target`: atomic { nodeId: ref → node; face: ref → profile }
+      - `direction`: atomic
     - `type: "thicken"`
       - `id`: scalar
       - `type`: scalar
@@ -806,6 +843,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
   - `type`: scalar
   - `params`: atomic
   - `construction`: scalar
+  - `control`: atomic
   - `parametrization`: scalar
   - `periodic`: scalar
 - `constraints`: list of `constraint` by `id` (stable order)

@@ -15,7 +15,7 @@ export const errorRecovery: Skill = {
 
 "Missing required parameter "x"" — the op left out a required argument; nothing ran. Add it and re-run that op (the signatures are in the modeling-api skill).
 
-"Kernel crashed (…); reload the page" — the geometry kernel (WASM) died; nothing that builds geometry works again in this tab, and get_document_state shows kernel: "crashed". Do NOT retry or work around it: stop modeling and tell the user to reload the page.
+"Kernel crashed (…); reload the page" — the main geometry kernel (WASM) died, and get_document_state shows kernel: "crashed". Stop modeling. If recover_kernel is listed, explain that it preserves committed edits but clears undo/redo, then use it to reconstruct all open documents from healthy checkpoints. Scene-backed refs re-derive; standalone refs and creation snapshot extras invalidate, so recreate them if needed. If recovery is unavailable or preparation fails, tell the user to use Reload. A post-activation view error can leave geometry healthy; inspect kernel state before retrying recovery.
 
 "The radius is too small." — the radius is at or below the kernel's minimum (1e-7 mm), i.e. effectively zero. Pass a positive radius.
 

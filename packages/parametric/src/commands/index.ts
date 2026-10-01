@@ -4,10 +4,15 @@
 import "./booleanCommand";
 import "./edgeCornerCommand";
 import "./edgeCornerEditCommand";
+import "./cornerSetbackCommand";
 import "./extrudeCommand";
 import "./extrudeEditCommand";
 import "./loftCommand";
 import "./loftEditCommand";
+import "./sweepCommand";
+import "./faceSweepCommand";
+import "./sweepEditCommand";
+import "./projectionCommand";
 import "./reselectCommand";
 import "./revolveCommand";
 import "./revolveEditCommand";

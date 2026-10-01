@@ -12,7 +12,7 @@ export function syncNodeWatches(
     document: IDocument,
     watched: Map<string, INode>,
     wantedIds: ReadonlySet<string>,
-    handler: (property: string) => void,
+    handler: (property: string, source: INode) => void,
 ): void {
     for (const [nodeId, node] of watched) {
         if (wantedIds.has(nodeId)) continue;

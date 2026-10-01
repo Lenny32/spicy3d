@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IEdge, type IFace, Matrix4, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { type IEdge, type IFace, Matrix4, Plane, Serializer, ShapeTypes, XYZ } from "@spicy3d/core";
 import { MockShape } from "@spicy3d/core/test-utils";
 import { OccTrimmedCurve } from "../src/curve";
 import type { ShapeFactory } from "../src/factory";
@@ -22,6 +22,46 @@ let factory: ShapeFactory;
 
 beforeEach(() => {
     factory = createTestFactory();
+});
+
+test("unchanged imported shapes reuse BREP exports while mutations and meshing invalidate the cache", () => {
+    const box = createBox(factory);
+    const exportBrep = rs.spyOn(wasm.Converter, "convertToBrep");
+    try {
+        const original = Serializer.serializeObject(box);
+        expect(Serializer.serializeObject(box)).toEqual(original);
+        expect(exportBrep).toHaveBeenCalledTimes(1);
+        box.matrix = Matrix4.fromTranslation(5, 0, 0);
+        const moved = Serializer.serializeObject(box);
+        expect(moved["shape"]).not.toBe(original["shape"]);
+        expect(Serializer.serializeObject(box)).toEqual(moved);
+        expect(exportBrep).toHaveBeenCalledTimes(2);
+        box.reserve();
+        const reversed = Serializer.serializeObject(box);
+        expect(reversed["shape"]).not.toBe(moved["shape"]);
+        expect(exportBrep).toHaveBeenCalledTimes(3);
+        box.setTolerance(0.01);
+        Serializer.serializeObject(box);
+        expect(exportBrep).toHaveBeenCalledTimes(4);
+        expect(box.mesh.faces?.position.length).toBeGreaterThan(0);
+        const meshed = Serializer.serializeObject(box);
+        expect(Serializer.serializeObject(box)).toEqual(meshed);
+        expect(exportBrep).toHaveBeenCalledTimes(5);
+        expect(Object.keys(meshed).sort()).toEqual(["__cla$$__", "id", "shape"]);
+        const edges = box.findSubShapes(ShapeTypes.edge);
+        try {
+            expect(edges).toHaveLength(12);
+            edges[0].setTolerance(0.02);
+            const changed = Serializer.serializeObject(box);
+            expect(changed["shape"]).not.toBe(meshed["shape"]);
+            expect(exportBrep).toHaveBeenCalledTimes(6);
+        } finally {
+            for (const edge of edges) edge.dispose();
+        }
+    } finally {
+        exportBrep.mockRestore();
+        box.dispose();
+    }
 });
 
 // ============================================================================

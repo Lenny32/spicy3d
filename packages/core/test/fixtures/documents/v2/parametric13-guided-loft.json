@@ -1,0 +1,182 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 13,
+        "sketch": 3
+    },
+    "id": "fixture-parametric13-guided-loft",
+    "name": "Fixture parametric v13: associative spine and boundary guided loft",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "visible": true,
+                "parentId": "folder-root",
+                "id": "sketch-bottom",
+                "name": "Bottom section",
+                "__cla$$__": "SketchNode",
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[-5,-3,5,-3]},{\"id\":2,\"type\":\"line\",\"params\":[5,-3,5,3]},{\"id\":3,\"type\":\"line\",\"params\":[5,3,-5,3]},{\"id\":4,\"type\":\"line\",\"params\":[-5,3,-5,-3]}],\"constraints\":[]}"
+            },
+            {
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "visible": true,
+                "parentId": "folder-root",
+                "id": "sketch-top",
+                "name": "Top section",
+                "__cla$$__": "SketchNode",
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 20,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[-5,-3,5,-3]},{\"id\":2,\"type\":\"line\",\"params\":[5,-3,5,3]},{\"id\":3,\"type\":\"line\",\"params\":[5,3,-5,3]},{\"id\":4,\"type\":\"line\",\"params\":[-5,3,-5,-3]}],\"constraints\":[]}"
+            },
+            {
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "visible": true,
+                "parentId": "folder-root",
+                "id": "sketch-spine",
+                "name": "Main spine",
+                "__cla$$__": "SketchNode",
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":11,\"type\":\"line\",\"params\":[0,0,0,-20]}],\"constraints\":[]}"
+            },
+            {
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "visible": true,
+                "parentId": "folder-root",
+                "id": "sketch-boundary",
+                "name": "Boundary guide",
+                "__cla$$__": "SketchNode",
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 3,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":11,\"type\":\"line\",\"params\":[5,0,5,-20]}],\"constraints\":[]}"
+            },
+            {
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "visible": true,
+                "parentId": "folder-root",
+                "id": "body-guided-loft",
+                "name": "Associative guided loft",
+                "__cla$$__": "ParametricBodyNode",
+                "featuresJson": "[{\"id\":\"guided-loft\",\"type\":\"loft\",\"sections\":[{\"sketchId\":\"sketch-bottom\"},{\"sketchId\":\"sketch-top\"}],\"guided\":{\"spine\":{\"nodeId\":\"sketch-spine\",\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":0},\"end\":{\"x\":0,\"y\":0,\"z\":20},\"edgeId\":\"sketch:sketch-spine:path:ent11\"}]},\"boundary\":{\"nodeId\":\"sketch-boundary\",\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":5,\"y\":3,\"z\":0},\"end\":{\"x\":5,\"y\":3,\"z\":20},\"edgeId\":\"sketch:sketch-boundary:path:ent11\"}]}}}]"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

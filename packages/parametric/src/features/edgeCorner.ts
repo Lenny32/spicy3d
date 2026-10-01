@@ -3,6 +3,7 @@
 
 import {
     type I18nKeys,
+    type IAsyncShapeOperation,
     type IShape,
     LENGTH_UNITS,
     Result,
@@ -10,7 +11,10 @@ import {
     type Scope,
     type TrackedShape,
 } from "@spicy3d/core";
+import { resolveCornerSetbacks } from "./cornerSetbacks";
+import { trackCornerSetback } from "./cornerSetbackTracking";
 import { matchEdgeIndexes, matchEdgesAnchored } from "./edgeMatcher";
+import { sameEdgeFingerprint } from "./edgeRef";
 import {
     type ChamferFeatureData,
     completeTrackedHistory,
@@ -21,6 +25,7 @@ import {
     type ShapeTracking,
     trackedIds,
 } from "./feature";
+import { resolveFilletRadiusLaw } from "./radiusLaw";
 
 interface EdgeCornerOptions<F extends FilletFeatureData | ChamferFeatureData> {
     readonly display: I18nKeys;
@@ -46,28 +51,166 @@ function edgeCornerHandler<F extends FilletFeatureData | ChamferFeatureData>(
 
         nodeIds: () => [],
 
-        parameters: (feature) => [
-            {
-                key: options.parameterKey,
-                display: options.parameterDisplay,
-                value: feature[options.parameterKey] as number | string,
-                unit: LENGTH_UNITS,
-            },
-        ],
+        parameters: (feature) =>
+            feature.type === "fillet" && feature.radiusLaw !== undefined
+                ? feature.radiusLaw.map((point, index) => ({
+                      key: `radiusLaw.${index}`,
+                      display: "fillet.lawRadius" as const,
+                      value: point.radius,
+                      unit: LENGTH_UNITS,
+                  }))
+                : [
+                      {
+                          key: options.parameterKey,
+                          display: options.parameterDisplay,
+                          value: feature[options.parameterKey] as number | string,
+                          unit: LENGTH_UNITS,
+                      },
+                      ...(feature.type === "fillet" && feature.cornerSetbacks !== undefined
+                          ? feature.cornerSetbacks.flatMap((corner, cornerIndex) =>
+                                corner.distances.map((value, index) => ({
+                                    key: `cornerSetbacks.${cornerIndex}.${index}`,
+                                    display: "fillet.cornerSetback" as const,
+                                    value,
+                                    unit: LENGTH_UNITS,
+                                })),
+                            )
+                          : []),
+                  ],
 
-        setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+        setParameter: (feature, key, value) => {
+            if (
+                feature.type === "fillet" &&
+                feature.cornerSetbacks !== undefined &&
+                key.startsWith("cornerSetbacks.")
+            ) {
+                const match = /^cornerSetbacks\.0\.([0-2])$/.exec(key);
+                if (!match || typeof value === "boolean" || feature.cornerSetbacks.length !== 1)
+                    return feature;
+                const corner = feature.cornerSetbacks[0];
+                const distances: [number | string, number | string, number | string] = [...corner.distances];
+                distances[Number(match[1])] = value;
+                return { ...feature, cornerSetbacks: [{ ...corner, distances }] };
+            }
+            if (
+                feature.type === "fillet" &&
+                feature.radiusLaw !== undefined &&
+                key.startsWith("radiusLaw.")
+            ) {
+                const index = Number(key.slice("radiusLaw.".length));
+                if (!Number.isInteger(index) || index < 0 || index >= feature.radiusLaw.length)
+                    return feature;
+                return {
+                    ...feature,
+                    radiusLaw: feature.radiusLaw.map((point, i) =>
+                        i === index ? { ...point, radius: value } : point,
+                    ),
+                };
+            }
+            return { ...feature, [key]: value };
+        },
 
-        applyResolvedRefs: (feature, { resolvedEdges }) =>
-            resolvedEdges === undefined ? feature : { ...feature, edges: resolvedEdges },
+        applyResolvedRefs: (feature, { resolvedEdges }) => {
+            if (resolvedEdges === undefined) return feature;
+            if (feature.type !== "fillet" || feature.cornerSetbacks === undefined)
+                return { ...feature, edges: resolvedEdges };
+            const corners = feature.cornerSetbacks.map((corner) => {
+                const edges = corner.edges.map((ref) => {
+                    const matches = feature.edges.flatMap((selected, index) =>
+                        (
+                            selected.edgeId && ref.edgeId
+                                ? selected.edgeId === ref.edgeId && selected.splitPiece === ref.splitPiece
+                                : sameEdgeFingerprint(selected, ref)
+                        )
+                            ? [index]
+                            : [],
+                    );
+                    return matches.length === 1 ? (resolvedEdges[matches[0]] ?? ref) : ref;
+                }) as typeof corner.edges;
+                return { ...corner, edges };
+            });
+            return { ...feature, edges: resolvedEdges, cornerSetbacks: corners };
+        },
+
+        prepareAsync(feature, context) {
+            if (feature.type !== "fillet" || feature.cornerSetbacks === undefined) return undefined;
+            const failed = (message: string): IAsyncShapeOperation<IShape> => ({
+                ready: Promise.resolve(),
+                cancel: () => {},
+                canFallback: false,
+                take: () => Result.err(message),
+            });
+            const { input, tracking } = context;
+            if (!input || !tracking)
+                return failed("Corner setbacks require a preceding shape with source ancestry");
+            const distances = resolveCornerSetbacks(feature, context.scope);
+            if (!distances.isOk) return failed(distances.error);
+            const radius = resolveUnitSpec(feature.radius, context.scope, LENGTH_UNITS);
+            if (!radius.isOk) return failed(radius.error);
+            const indexes = matchCornerEdges(input, feature, tracking);
+            if (!indexes.isOk) return failed(indexes.error);
+            const factory = shapeFactory.asyncOperations;
+            if (!factory || factory.available === false || !factory.cornerSetbackTracked)
+                return failed("Corner setbacks require the geometry worker; it is unavailable");
+            const operation = factory.cornerSetbackTracked(
+                input,
+                indexes.value,
+                radius.value,
+                distances.value,
+                {
+                    mesh: context.meshResult,
+                },
+            );
+            if (!operation) return failed("Corner setback worker preparation is unavailable");
+            return {
+                ready: operation.ready,
+                cancel: () => operation.cancel(),
+                canFallback: false,
+                take: () => {
+                    const answer = operation.take();
+                    if (!answer.isOk) return Result.err(answer.error);
+                    const { inputs, result } = answer.value;
+                    let accepted = false;
+                    try {
+                        const tracked = trackCornerSetback(feature.id, tracking, indexes.value, result);
+                        accepted = tracked.isOk;
+                        return tracked;
+                    } finally {
+                        for (const shape of inputs) shape.dispose();
+                        if (!accepted) result.shape.dispose();
+                    }
+                },
+            };
+        },
 
         evaluate(feature, context: FeatureContext): Result<IShape> {
+            if (feature.type === "fillet" && feature.cornerSetbacks !== undefined)
+                return Result.err(
+                    "Corner setbacks require explicit cancelable worker recomputation; synchronous evaluation is unavailable",
+                );
             const input = context.input;
             if (input === undefined) {
                 return Result.err(`${feature.type} requires a preceding feature`);
             }
+            const tracking = context.tracking;
+            if (feature.type === "fillet" && feature.radiusLaw !== undefined) {
+                const law = resolveFilletRadiusLaw(feature.radiusLaw, context.scope);
+                if (!law.isOk) return Result.err(law.error);
+                const indexes = matchCornerEdges(input, feature, tracking);
+                if (!indexes.isOk) return Result.err(indexes.error);
+                if (tracking !== undefined && shapeFactory.filletVariableRadiusTracked !== undefined) {
+                    const result = shapeFactory.filletVariableRadiusTracked(input, indexes.value, law.value);
+                    return result.isOk
+                        ? trackEdgeCorner(feature.id, tracking, input, result.value)
+                        : Result.err(result.error);
+                }
+                return (
+                    shapeFactory.filletVariableRadius?.(input, indexes.value, law.value) ??
+                    Result.err("Variable-radius fillets are not available in this kernel build")
+                );
+            }
             const parameter = resolveCornerParameter(feature, context.scope, options);
             if (!parameter.isOk) return Result.err(parameter.error);
-            const tracking = context.tracking;
             const indexes = matchCornerEdges(input, feature, tracking);
             if (!indexes.isOk) return Result.err(indexes.error);
             return applyEdgeCorner(feature, options, input, indexes.value, parameter.value, tracking);

@@ -1,0 +1,12 @@
+.results {
+    max-width: 480px;
+}
+
+.row {
+    padding: 5px 0;
+}
+
+.note {
+    margin-top: 12px;
+    line-height: 1.5;
+}

@@ -24,18 +24,28 @@ import {
     type UnitSpec,
     type XYZLike,
 } from "@spicy3d/core";
+import { captureNextCandidateIds } from "../commands/nextExtentCandidates";
 import { isBodyTrackingNode } from "../features/bodyTracking";
-import { captureEdgeRef } from "../features/edgeRef";
+import { matchEdgesAnchored } from "../features/edgeMatcher";
+import { captureEdgeRef, type EdgeRef } from "../features/edgeRef";
 import { captureExtentFaceRef } from "../features/extrudeExtent";
 import type {
     BooleanOperation,
     ExtrudeExtent,
     ExtrudeFeatureData,
+    FaceSweepFeatureData,
     FeatureData,
     LoftFeatureData,
+    ProjectionFeatureData,
     RevolveFeatureData,
+    SweepFeatureData,
     ThickenFeatureData,
 } from "../features/feature";
+import { capturePathReference } from "../features/pathReferences";
+import { resolveProfiles } from "../features/profileBuilder";
+import { captureProfileRef } from "../features/profileRef";
+import { captureProjectionTarget } from "../features/projectionTargetReferences";
+import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
 import { captureFaceRef, type PlaneFaceRef, sketchPlaneOfFace } from "../sketch/planeRef";
@@ -49,6 +59,13 @@ import {
     resolveConstructionPlaneRef,
     toConstructionDefinition,
 } from "./constructionProgram";
+import {
+    describeEdgeSelection,
+    type EdgeSelectionReport,
+    type EdgeSelector,
+    selectEdgeIndexes,
+    validateEdgeSelector,
+} from "./edgeSelectors";
 import {
     describeSketch,
     type SketchAction,
@@ -82,11 +99,18 @@ export type ParametricOp =
     | ExtrudeOp
     | RevolveOp
     | LoftOp
+    | EditLoftOp
+    | SweepOp
+    | EditSweepOp
+    | FaceSweepOp
+    | EditFaceSweepOp
+    | ProjectionOp
     | FilletChamferOp
     | ThickenOp
     | BooleanOp
     | EditFeatureOp
-    | FeaturesOp;
+    | FeaturesOp
+    | EdgesOp;
 
 export interface SketchOp {
     op: "sketch";
@@ -156,6 +180,7 @@ export interface ExtrudeOp {
     depth: ParameterValue;
     symmetric?: boolean;
     startOffset?: ParameterValue;
+    startFace?: { nodeId: string; faceIndex: number };
     /** Omit to create a new body; otherwise the body to append the feature to. */
     body?: string;
     operation?: BooleanOperation;
@@ -173,6 +198,8 @@ export interface ExtrudeOp {
 export type ExtrudeExtentSpec =
     | "distance"
     | "throughAll"
+    | "next"
+    | { type: "next"; offset?: ParameterValue }
     | { type: "distance" | "throughAll" }
     | { type: "toObject"; face: { nodeId: string; faceIndex: number }; offset?: ParameterValue };
 
@@ -194,6 +221,18 @@ export interface RevolveOp {
 }
 
 /** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
+export interface ProjectionOp {
+    op: "projection";
+    id: string;
+    name?: string;
+    source: string;
+    edgeIndexes?: number[];
+    edgeRefs?: PersistentEdgeReference[];
+    target: string;
+    faceIndex: number;
+    direction: XYZLike;
+}
+
 export interface LoftOp {
     op: "loft";
     id: string;
@@ -206,6 +245,83 @@ export interface LoftOp {
     ruled?: boolean;
     /** A smooth loft's surface continuity (default "c2"). */
     continuity?: Continuity;
+    /** Referenced main spine and full side-boundary curve; smooth C2 only. */
+    guided?: { spine: GuidedLoftPathInput; boundary: GuidedLoftPathInput };
+}
+
+export interface GuidedLoftPathInput {
+    nodeId: string;
+    /** Exactly one of topology indexes or JSON references returned by edges. */
+    edgeIndexes?: number[];
+    edgeRefs?: PersistentEdgeReference[];
+}
+
+export interface EditLoftOp {
+    op: "editLoft";
+    body: string;
+    featureId: string;
+    sections?: string[];
+    solid?: boolean;
+    ruled?: boolean;
+    continuity?: Continuity;
+    /** null clears the guide pair and restores ordinary lofting. */
+    guided?: LoftOp["guided"] | null;
+}
+
+export interface SweepSectionInput {
+    /** Earlier sketch op id or existing sketch node id. */
+    sketchId: string;
+    /** Omitted means the sketch's only profile; an index chooses one of several profiles. */
+    profileIndex?: number;
+}
+export interface SweepPathInput {
+    /** Earlier op id or existing shape node id. */
+    nodeId: string;
+    /** Whole edges, in authored traversal order, in findSubShapes(edge) topology positions. */
+    edgeIndexes: number[];
+}
+export interface SweepOp {
+    op: "sweep";
+    id: string;
+    name?: string;
+    section: SweepSectionInput;
+    path: SweepPathInput;
+    solid?: boolean;
+    roundCorner?: boolean;
+}
+export interface EditSweepOp {
+    op: "editSweep";
+    body: string;
+    featureId: string;
+    section?: SweepSectionInput;
+    path?: SweepPathInput;
+    solid?: boolean;
+    roundCorner?: boolean;
+}
+
+export interface FaceSweepSupportInput {
+    nodeId: string;
+    faceIndex: number;
+}
+export interface FaceSweepOp {
+    op: "faceSweep";
+    id: string;
+    body: string;
+    section: SweepSectionInput;
+    path: SweepPathInput;
+    support: FaceSweepSupportInput;
+    operation: "join" | "cut";
+    roundCorner?: boolean;
+}
+export interface EditFaceSweepOp {
+    op: "editFaceSweep";
+    body: string;
+    featureId: string;
+    section?: SweepSectionInput;
+    path?: SweepPathInput;
+    support?: FaceSweepSupportInput;
+    operation?: "join" | "cut";
+    roundCorner?: boolean;
 }
 
 export interface FilletChamferOp {
@@ -214,9 +330,37 @@ export interface FilletChamferOp {
     name?: string;
     body: string;
     /** Indexes into the body's current edge list (findSubShapes order). */
-    edgeIndexes: number[];
+    edgeIndexes?: number[];
+    /** Body-scoped persistent refs returned by the edges op; alternative to indexes. */
+    edgeRefs?: PersistentEdgeReference[];
     radius?: ParameterValue;
+    /** Fillet only: smooth radius law per edge, normalized arc length in natural curve direction. */
+    radiusLaw?: FilletRadiusPoint[];
     distance?: ParameterValue;
+}
+
+/** A portable, body-local selection; its fingerprint and tracked id use the existing EdgeRef contract. */
+export interface PersistentEdgeReference {
+    bodyId: string;
+    edge: EdgeRef;
+}
+
+export interface EdgesOp {
+    op: "edges";
+    id?: string;
+    selector?: EdgeSelector;
+    expectedCount?: number;
+    body: string;
+    /** Omit to query all edges; indexes describe only the current shape. */
+    edgeIndexes?: number[];
+}
+
+export interface EdgesReport {
+    bodyId: string;
+    selection?: EdgeSelectionReport;
+    /** Selector queries report topology with no capturable curve instead of failing the whole query. */
+    unselectableEdges?: { index: number; reason: string }[];
+    edges: { index: number; reference: PersistentEdgeReference }[];
 }
 
 /**
@@ -251,7 +395,9 @@ export interface EditFeatureOp {
     op: "editFeature";
     body: string;
     featureId: string;
-    action: "setParameter" | "rename" | "suppress" | "moveTo" | "remove";
+    action: "setParameter" | "setRadiusLaw" | "rename" | "suppress" | "moveTo" | "remove";
+    /** setRadiusLaw only; omitted clears the law and restores the stored constant radius. */
+    radiusLaw?: FilletRadiusPoint[];
     key?: string;
     value?: ParameterValue | boolean;
     index?: number;
@@ -284,11 +430,22 @@ export interface FeatureSummary {
 /** What one program produced, in the same envelope shape `run_program` uses. */
 export interface ProgramResult {
     created: { id: string; nodeId: string; name: string }[];
-    /** The feature list of every body the program touched. */
-    bodies: { nodeId: string; name: string; features: FeatureSummary[] }[];
+    /** Full lists by default; compact mode includes only directly created/edited feature rows. */
+    bodies: BodyReport[];
     /** Nodes adopted by a boolean feature — hidden children of the body, not deleted. */
     consumed: { nodeId: string; name: string; ownerId: string }[];
     results: Record<string, unknown>;
+}
+
+/** Additional fields are returned only when responseMode is compact. */
+export interface BodyReport {
+    nodeId: string;
+    name: string;
+    features: FeatureSummary[];
+    featureCount?: number;
+    removedFeatureIds?: string[];
+    status?: "ok" | "error";
+    diagnostics?: { featureId: string; error?: string; warning?: string }[];
 }
 
 interface State {
@@ -296,6 +453,7 @@ interface State {
     readonly refs: Map<string, string>;
     readonly out: ProgramResult;
     readonly touched: Set<ParametricBodyNode>;
+    readonly changed: Map<ParametricBodyNode, Set<string>>;
     /** Entity/constraint names given in this program, per sketch node id. */
     readonly sketchNames: Map<string, SketchNames>;
 }
@@ -318,6 +476,8 @@ function refsFor(document: IDocument): Map<string, string> {
 
 /** Hooks of one program run; the MCP tool passes the call's cancellation and the op timing. */
 export interface ProgramRunOptions {
+    /** Full body feature lists by default; compact reports edits and essential body diagnostics. */
+    responseMode?: "full" | "compact";
     /**
      * Checked before every op: once aborted, the program throws "cancelled …" and the caller's
      * transaction rolls it back. An op already running is never interrupted.
@@ -343,6 +503,9 @@ function evaluateProgram(
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
 ): ProgramResult {
+    if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
+        throw new Error('"responseMode" must be "full" or "compact"');
+    }
     const refs = refsFor(document);
     if (refs.size > MAX_REFS_PER_DOCUMENT) refs.clear();
     const state: State = {
@@ -350,6 +513,7 @@ function evaluateProgram(
         refs,
         out: { created: [], bodies: [], consumed: [], results: {} },
         touched: new Set(),
+        changed: new Map(),
         sketchNames: new Map(),
     };
     ops.forEach((op, index) => {
@@ -365,11 +529,11 @@ function evaluateProgram(
             options.onOpFinished?.(String(op.op), performance.now() - start);
         }
     });
-    state.out.bodies = [...state.touched].map((body) => ({
-        nodeId: body.id,
-        name: body.name,
-        features: summarizeFeatures(body),
-    }));
+    state.out.bodies = [...state.touched].map((body) =>
+        options.responseMode === "compact"
+            ? compactBodyReport(body, state.changed.get(body) ?? new Set())
+            : { nodeId: body.id, name: body.name, features: summarizeFeatures(body) },
+    );
     return state.out;
 }
 
@@ -407,6 +571,24 @@ function runOp(state: State, op: ParametricOp): void {
         case "loft":
             runLoftOp(state, op);
             break;
+        case "editLoft":
+            runEditLoftOp(state, op);
+            break;
+        case "sweep":
+            runSweepOp(state, op);
+            break;
+        case "faceSweep":
+            runFaceSweepOp(state, op);
+            break;
+        case "editFaceSweep":
+            runEditFaceSweepOp(state, op);
+            break;
+        case "editSweep":
+            runEditSweepOp(state, op);
+            break;
+        case "projection":
+            runProjectionOp(state, op);
+            break;
         case "fillet":
         case "chamfer":
             runEdgeCornerOp(state, op);
@@ -419,6 +601,9 @@ function runOp(state: State, op: ParametricOp): void {
             break;
         case "editFeature":
             runEditFeatureOp(state, op);
+            break;
+        case "edges":
+            runEdgesOp(state, op);
             break;
         case "features":
             runFeaturesOp(state, op);
@@ -643,6 +828,8 @@ function describeConstruction(node: ConstructionNode) {
 // ------------------------------------------------------------------ Features
 
 function runExtrudeOp(state: State, op: ExtrudeOp): void {
+    if (op.operation !== undefined && !["fuse", "cut", "common"].includes(op.operation))
+        throw new Error("Extrude operation must be fuse, cut or common");
     const sketch = resolveSketch(state, op.sketch);
     const scope = state.document.variables.evaluate().scope;
     ensureUnit(op.depth, scope, LENGTH_UNITS, "depth");
@@ -655,11 +842,30 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
             '"secondExtent" is the second side of a two-sided extrude: it needs "symmetric": true',
         );
     }
-    const extent = op.extent === undefined ? undefined : resolveExtent(state, op.extent, "extent", scope);
+    const extent =
+        op.extent === undefined
+            ? undefined
+            : resolveExtent(
+                  state,
+                  op.extent,
+                  "extent",
+                  scope,
+                  op.body === undefined ? undefined : resolveNode(state, op.body, "body").id,
+              );
+    const from =
+        op.startFace === undefined
+            ? undefined
+            : resolveExtent(state, { type: "toObject", face: op.startFace }, "startFace", scope);
     const secondExtent =
         op.secondExtent === undefined
             ? undefined
-            : resolveExtent(state, op.secondExtent, "secondExtent", scope);
+            : resolveExtent(
+                  state,
+                  op.secondExtent,
+                  "secondExtent",
+                  scope,
+                  op.body === undefined ? undefined : resolveNode(state, op.body, "body").id,
+              );
     const feature: ExtrudeFeatureData = {
         id: Id.generate(),
         type: "extrude",
@@ -667,6 +873,7 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         depth: op.depth,
         ...(op.symmetric === true ? { symmetric: true } : {}),
         ...(op.startOffset !== undefined ? { startOffset: op.startOffset } : {}),
+        ...(from?.type === "toObject" ? { startFace: { nodeId: from.nodeId, face: from.face } } : {}),
         ...(extent === undefined || extent.type === "distance" ? {} : { extent }),
         ...(secondExtent === undefined ? {} : { secondExtent }),
     };
@@ -680,19 +887,43 @@ function runExtrudeOp(state: State, op: ExtrudeOp): void {
         throw new Error('appending an extrude to an existing body requires "operation" (fuse/cut/common)');
     }
     const body = resolveBody(state, op.body);
-    appendFeature(state, body, { ...feature, operation: op.operation });
+    appendFeature(state, body, {
+        ...feature,
+        operation: op.operation,
+        ...(op.name !== undefined ? { name: op.name } : {}),
+    });
     // An op that edits a body is registered as another name for it, so a later op can
     // reference the result of this one the same way it references a freshly built body.
     state.refs.set(op.id, body.id);
 }
 
 /** A program's extent spec as feature data: a to-object face captured like the interactive pick. */
-function resolveExtent(state: State, given: ExtrudeExtentSpec, what: string, scope: Scope): ExtrudeExtent {
+function resolveExtent(
+    state: State,
+    given: ExtrudeExtentSpec,
+    what: string,
+    scope: Scope,
+    hostId?: string,
+): ExtrudeExtent {
     const type = typeof given === "string" ? given : given?.type;
+    if (type === "next") {
+        const spec =
+            typeof given === "object" ? (given as Extract<ExtrudeExtentSpec, { type: "next" }>) : undefined;
+        if (spec && "nodeIds" in spec)
+            throw new Error("Next-face candidate bodies are discovered automatically");
+        if (spec?.offset !== undefined) ensureUnit(spec.offset, scope, LENGTH_UNITS, `${what}.offset`);
+        const ids = captureNextCandidateIds(state.document, hostId);
+        if (!ids.isOk) throw new Error(ids.error);
+        return {
+            type: "next",
+            nodeIds: ids.value,
+            ...(spec?.offset === undefined ? {} : { offset: spec.offset }),
+        };
+    }
     if (type === "distance" || type === "throughAll") return { type };
     if (type !== "toObject" || typeof given !== "object") {
         throw new Error(
-            `"${what}" must be "distance", "throughAll" or { type: "toObject", face: { nodeId, faceIndex } }`,
+            `"${what}" must be "distance", "throughAll", "next", { type: "next", offset? } or { type: "toObject", face: { nodeId, faceIndex } }`,
         );
     }
     const spec = given as Extract<ExtrudeExtentSpec, { type: "toObject" }>;
@@ -746,6 +977,48 @@ function runRevolveOp(state: State, op: RevolveOp): void {
     });
 }
 
+function runProjectionOp(state: State, op: ProjectionOp): void {
+    const source = resolveNode(state, op.source, "projection source");
+    if (!(source instanceof ShapeNode) || !source.shape.isOk)
+        throw new Error("Projection source geometry is unavailable");
+    if (
+        !op.direction ||
+        ![op.direction.x, op.direction.y, op.direction.z].every(Number.isFinite) ||
+        Math.hypot(op.direction.x, op.direction.y, op.direction.z) === 0
+    )
+        throw new Error("Projection direction must be finite and nonzero in world coordinates");
+    if ((op.edgeIndexes !== undefined) === (op.edgeRefs !== undefined))
+        throw new Error('Projection requires exactly one of "edgeIndexes" or "edgeRefs"');
+    let edges: EdgeRef[];
+    if (op.edgeRefs !== undefined) {
+        if (!(source instanceof ParametricBodyNode))
+            throw new Error("Persistent edge references require a parametric source body");
+        edges = persistentEdges(op.edgeRefs, source);
+    } else {
+        if (!Array.isArray(op.edgeIndexes) || op.edgeIndexes.length === 0 || op.edgeIndexes.length > 256)
+            throw new Error("Projection requires 1 to 256 source edge indexes");
+        const count = source.shape.value.findSubShapes(ShapeTypes.edge).length;
+        if (op.edgeIndexes.some((index) => !Number.isInteger(index) || index < 0 || index >= count))
+            throw new Error("Projection edge index is out of bounds or not a nonnegative integer");
+        edges = op.edgeIndexes.map((index) => {
+            const ref = capturePathReference(source, index);
+            if (!ref.isOk) throw new Error(ref.error);
+            return ref.value;
+        });
+    }
+    const target = resolveBody(state, op.target);
+    const captured = captureProjectionTarget(target, op.faceIndex);
+    if (!captured.isOk) throw new Error(captured.error);
+    const feature: ProjectionFeatureData = {
+        id: Id.generate(),
+        type: "projection",
+        source: { nodeId: source.id, edges },
+        target: captured.value,
+        direction: { x: op.direction.x, y: op.direction.y, z: op.direction.z },
+    };
+    createBody(state, op.id, op.name, [feature], () => {});
+}
+
 function runLoftOp(state: State, op: LoftOp): void {
     if (!Array.isArray(op.sections) || op.sections.length < 2) {
         throw new Error('"sections" must list at least two sketches, in loft order');
@@ -754,6 +1027,8 @@ function runLoftOp(state: State, op: LoftOp): void {
         throw new Error(`"continuity" must be one of ${Continuities.join(", ")}`);
     }
     const sketches = op.sections.map((section) => resolveSketch(state, section));
+    const guided = op.guided === undefined ? undefined : guidedLoftInput(state, op.guided);
+    validateLoftOptions(op, guided !== undefined);
     const feature: LoftFeatureData = {
         id: Id.generate(),
         type: "loft",
@@ -763,10 +1038,264 @@ function runLoftOp(state: State, op: LoftOp): void {
         ...(op.ruled === true || op.continuity === undefined || op.continuity === "c2"
             ? {}
             : { continuity: op.continuity }),
+        ...(guided ? { guided } : {}),
     };
     createBody(state, op.id, op.name, [feature], () => {
         for (const sketch of sketches) sketch.visible = false;
     });
+}
+
+function validateLoftOptions(
+    op: { solid?: boolean; ruled?: boolean; continuity?: Continuity },
+    guided: boolean,
+): void {
+    for (const key of ["solid", "ruled"] as const) {
+        if (op[key] !== undefined && typeof op[key] !== "boolean")
+            throw new Error(`Loft ${key} must be boolean`);
+    }
+    if (op.continuity !== undefined && !(Continuities as readonly string[]).includes(op.continuity))
+        throw new Error(`Loft continuity must be one of ${Continuities.join(", ")}`);
+    if (guided && (op.ruled || (op.continuity !== undefined && op.continuity !== "c2")))
+        throw new Error("Guided loft supports smooth C2 only; ruled, C0 and C1 are unsupported");
+}
+
+function guidedLoftInput(
+    state: State,
+    input: NonNullable<LoftOp["guided"]>,
+): NonNullable<LoftFeatureData["guided"]> {
+    if (!input?.spine || !input.boundary) throw new Error("Guided loft requires both spine and boundary");
+    const path = (given: GuidedLoftPathInput) => {
+        if (!given || typeof given.nodeId !== "string") throw new Error("Guided loft path requires nodeId");
+        if ((given.edgeIndexes !== undefined) === (given.edgeRefs !== undefined))
+            throw new Error("Guided loft path requires exactly one of edgeIndexes or edgeRefs");
+        const node = resolveNode(state, given.nodeId, "guided loft path");
+        if (!(node instanceof ShapeNode) || !node.shape.isOk)
+            throw new Error("Guided loft path source is unavailable");
+        if (given.edgeRefs !== undefined) {
+            if (!(node instanceof ParametricBodyNode))
+                throw new Error("Persistent guide references require a parametric source body");
+            if (!Array.isArray(given.edgeRefs) || !given.edgeRefs.length || given.edgeRefs.length > 128)
+                throw new Error("Guided loft requires 1–128 edge references per path");
+            return { nodeId: node.id, edges: persistentEdges(given.edgeRefs, node) };
+        }
+        const indexes = given.edgeIndexes;
+        const pathEdges = node.shape.value.findSubShapes(ShapeTypes.edge);
+        const count = pathEdges.length;
+        for (const edge of pathEdges) edge.dispose();
+        if (
+            !Array.isArray(indexes) ||
+            !indexes.length ||
+            indexes.length > 128 ||
+            new Set(indexes).size !== indexes.length ||
+            indexes.some((index) => !Number.isInteger(index) || index < 0 || index >= count)
+        )
+            throw new Error("Guided loft requires 1–128 distinct valid edge indexes per path");
+        return {
+            nodeId: node.id,
+            edges: indexes.map((index) => {
+                const captured = capturePathReference(node, index);
+                if (!captured.isOk) throw new Error(captured.error);
+                return captured.value;
+            }),
+        };
+    };
+    return { spine: path(input.spine), boundary: path(input.boundary) };
+}
+
+function runEditLoftOp(state: State, op: EditLoftOp): void {
+    if ([op.sections, op.solid, op.ruled, op.continuity, op.guided].every((value) => value === undefined))
+        throw new Error("editLoft requires sections, a guide pair or an option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "loft") throw new Error("editLoft requires a loft feature");
+    if (op.sections !== undefined && (!Array.isArray(op.sections) || op.sections.length < 2))
+        throw new Error("Loft requires at least two section sketches");
+    const guided =
+        op.guided === null
+            ? undefined
+            : op.guided !== undefined
+              ? guidedLoftInput(state, op.guided)
+              : feature.guided;
+    const options = {
+        solid: op.solid ?? feature.solid,
+        ruled: op.ruled ?? feature.ruled,
+        continuity: op.continuity ?? feature.continuity,
+    };
+    validateLoftOptions(options, guided !== undefined);
+    const { solid: _solid, ruled: _ruled, continuity: _continuity, guided: _guided, ...rest } = feature;
+    const edited: LoftFeatureData = {
+        ...rest,
+        sections:
+            op.sections === undefined
+                ? feature.sections
+                : op.sections.map((id) => ({ sketchId: resolveSketch(state, id).id })),
+        ...(options.solid === false ? { solid: false } : {}),
+        ...(options.ruled === true ? { ruled: true } : {}),
+        ...(options.continuity !== undefined && options.continuity !== "c2"
+            ? { continuity: options.continuity }
+            : {}),
+        ...(guided ? { guided } : {}),
+    };
+    const before = erroredFeatureIds(body);
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
+}
+
+function sweepSectionInput(state: State, input: SweepSectionInput): SweepFeatureData["section"] {
+    if (!input || typeof input.sketchId !== "string") throw new Error("Sweep section requires sketchId");
+    const sketch = resolveSketch(state, input.sketchId);
+    if (input.profileIndex === undefined) return { sketchId: sketch.id };
+    const profiles = resolveProfiles(sketch);
+    if (!profiles.isOk) throw new Error(profiles.error);
+    const index = input.profileIndex;
+    if (!Number.isInteger(index) || index < 0 || index >= profiles.value.length)
+        throw new Error("Sweep profileIndex is outside the sketch's profile list");
+    return { sketchId: sketch.id, profile: captureProfileRef(profiles.value[index].face) };
+}
+
+function sweepPathInput(
+    state: State,
+    input: SweepPathInput,
+    host?: ParametricBodyNode,
+): SweepFeatureData["path"] {
+    if (
+        !input ||
+        typeof input.nodeId !== "string" ||
+        !Array.isArray(input.edgeIndexes) ||
+        !input.edgeIndexes.length ||
+        input.edgeIndexes.length > 256
+    ) {
+        throw new Error("Sweep path requires nodeId and 1–256 ordered edgeIndexes");
+    }
+    const node = resolveNode(state, input.nodeId, "path source");
+    if (node === host) throw new Error("Sweep path must belong to a different body");
+    if (!(node instanceof ShapeNode) || !node.shape.isOk)
+        throw new Error("Sweep path source has no valid shape");
+    const topology = node.shape.value.findSubShapes(ShapeTypes.edge);
+    const count = topology.length;
+    for (const edge of topology) edge.dispose();
+    const used = new Set<number>();
+    const edges = input.edgeIndexes.map((index) => {
+        if (!Number.isInteger(index) || index < 0 || index >= count || used.has(index))
+            throw new Error("Sweep path edge index is invalid or repeated");
+        used.add(index);
+        const ref = capturePathReference(node, index);
+        if (!ref.isOk) throw new Error(ref.error);
+        return ref.value;
+    });
+    return { nodeId: node.id, edges };
+}
+
+function sweepOptions(op: { solid?: boolean; roundCorner?: boolean }): void {
+    for (const key of ["solid", "roundCorner"] as const) {
+        if (op[key] !== undefined && typeof op[key] !== "boolean")
+            throw new Error(`Sweep ${key} must be boolean`);
+    }
+}
+function runSweepOp(state: State, op: SweepOp): void {
+    sweepOptions(op);
+    const section = sweepSectionInput(state, op.section);
+    const path = sweepPathInput(state, op.path);
+    const feature: SweepFeatureData = {
+        id: Id.generate(),
+        type: "sweep",
+        section,
+        path,
+        ...(op.solid === false ? { solid: false } : {}),
+        ...(op.roundCorner === true ? { roundCorner: true } : {}),
+    };
+    createBody(state, op.id, op.name, [feature], () => {
+        resolveSketch(state, section.sketchId).visible = false;
+    });
+}
+function runEditSweepOp(state: State, op: EditSweepOp): void {
+    sweepOptions(op);
+    if (
+        op.section === undefined &&
+        op.path === undefined &&
+        op.solid === undefined &&
+        op.roundCorner === undefined
+    )
+        throw new Error("editSweep requires a section, path or option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "sweep") throw new Error("editSweep requires a sweep feature");
+    const before = erroredFeatureIds(body);
+    const { solid: _solid, roundCorner: _round, ...rest } = feature;
+    const edited: SweepFeatureData = {
+        ...rest,
+        section: op.section !== undefined ? sweepSectionInput(state, op.section) : feature.section,
+        path: op.path !== undefined ? sweepPathInput(state, op.path, body) : feature.path,
+        ...((op.solid ?? feature.solid) === false ? { solid: false } : {}),
+        ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
+    };
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
+}
+
+function faceSweepSupportInput(
+    state: State,
+    support: FaceSweepSupportInput,
+    host: ParametricBodyNode,
+): FaceSweepFeatureData["support"] {
+    if (
+        !support ||
+        typeof support.nodeId !== "string" ||
+        !Number.isInteger(support.faceIndex) ||
+        support.faceIndex < 0
+    )
+        throw new Error("Face sweep support requires nodeId and nonnegative faceIndex");
+    const body = resolveBody(state, support.nodeId);
+    if (body !== host) throw new Error("Face sweep support must belong to the host body");
+    const captured = captureProjectionTarget(body, support.faceIndex);
+    if (!captured.isOk) throw new Error(captured.error);
+    return captured.value;
+}
+function faceSweepOptions(op: { operation?: string; roundCorner?: boolean }): void {
+    if (op.operation !== undefined && op.operation !== "join" && op.operation !== "cut")
+        throw new Error("Face sweep operation must be join or cut");
+    sweepOptions(op);
+}
+function runFaceSweepOp(state: State, op: FaceSweepOp): void {
+    if (typeof op.id !== "string" || !op.id) throw new Error("Face sweep requires a result id");
+    faceSweepOptions(op);
+    if (op.operation === undefined) throw new Error("Face sweep requires join or cut operation");
+    const body = resolveBody(state, op.body);
+    const feature: FaceSweepFeatureData = {
+        id: Id.generate(),
+        type: "faceSweep",
+        section: sweepSectionInput(state, op.section),
+        path: sweepPathInput(state, op.path, body),
+        support: faceSweepSupportInput(state, op.support, body),
+        operation: op.operation,
+        ...(op.roundCorner === true ? { roundCorner: true } : {}),
+    };
+    appendFeature(state, body, feature);
+    resolveSketch(state, feature.section.sketchId).visible = false;
+    state.refs.set(op.id, body.id);
+}
+function runEditFaceSweepOp(state: State, op: EditFaceSweepOp): void {
+    faceSweepOptions(op);
+    if ([op.section, op.path, op.support, op.operation, op.roundCorner].every((value) => value === undefined))
+        throw new Error("editFaceSweep requires a pick or option change");
+    const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature?.type !== "faceSweep") throw new Error("editFaceSweep requires a face sweep feature");
+    const before = erroredFeatureIds(body);
+    const { roundCorner: _round, ...rest } = feature;
+    const edited: FaceSweepFeatureData = {
+        ...rest,
+        section: op.section === undefined ? feature.section : sweepSectionInput(state, op.section),
+        path: op.path === undefined ? feature.path : sweepPathInput(state, op.path, body),
+        support: op.support === undefined ? feature.support : faceSweepSupportInput(state, op.support, body),
+        operation: op.operation ?? feature.operation,
+        ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
+    };
+    body.setFeaturesEmitShapeChanged(body.features.map((item) => (item.id === feature.id ? edited : item)));
+    checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
 }
 
 function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
@@ -774,17 +1303,60 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     const shape = body.shape;
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
     const scope = state.document.variables.evaluate().scope;
-    const value = op.op === "fillet" ? op.radius : op.distance;
+    if (op.op === "chamfer" && op.radiusLaw !== undefined)
+        throw new Error("Radius laws apply only to fillets");
+    if (op.radiusLaw !== undefined) {
+        const resolved = resolveFilletRadiusLaw(op.radiusLaw, scope);
+        if (!resolved.isOk) throw new Error(resolved.error);
+    }
+    const value = op.op === "fillet" ? (op.radius ?? op.radiusLaw?.[0]?.radius) : op.distance;
     if (value === undefined)
         throw new Error(`"${op.op}" requires "${op.op === "fillet" ? "radius" : "distance"}"`);
     ensureUnit(value, scope, LENGTH_UNITS, op.op === "fillet" ? "radius" : "distance");
 
     const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
-    const refs = op.edgeIndexes.map((index) => {
-        const edge = edges[index];
+    if ((op.edgeIndexes !== undefined) === (op.edgeRefs !== undefined)) {
+        throw new Error('provide exactly one of "edgeIndexes" or "edgeRefs"');
+    }
+    const refs =
+        op.edgeRefs !== undefined
+            ? persistentEdges(op.edgeRefs, body)
+            : captureIndexes(body, edges, op.edgeIndexes!);
+    if (refs.length === 0) throw new Error("select at least one edge");
+    if (op.edgeRefs !== undefined) {
+        const matched = matchEdgesAnchored(
+            shape.value,
+            refs,
+            edges.map((_, index) => body.edgeIdAt(index) ?? ""),
+        );
+        if (!matched.isOk) {
+            throw new Error(`persistent edge selection is missing or ambiguous: ${matched.error}`);
+        }
+    }
+
+    const feature: FeatureData =
+        op.op === "fillet"
+            ? {
+                  id: Id.generate(),
+                  type: "fillet",
+                  radius: value,
+                  edges: refs,
+                  ...(op.radiusLaw === undefined
+                      ? {}
+                      : { radiusLaw: op.radiusLaw.map(({ position, radius }) => ({ position, radius })) }),
+              }
+            : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
+    appendFeature(state, body, feature);
+    state.refs.set(op.id, body.id);
+}
+
+function captureIndexes(body: ParametricBodyNode, edges: IEdge[], indexes: number[]): EdgeRef[] {
+    if (!Array.isArray(indexes)) throw new Error('"edgeIndexes" must be an array');
+    return indexes.map((index) => {
+        const edge = Number.isInteger(index) ? edges[index] : undefined;
         if (edge === undefined) {
             throw new Error(
-                `edgeIndex ${index} is out of range on body "${op.body}" (0..${edges.length - 1})`,
+                `edgeIndex ${index} is out of range on body "${body.id}" (0..${edges.length - 1})`,
             );
         }
         // Same capture the interactive fillet uses: the tracked id is what makes the
@@ -792,13 +1364,108 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
         const id = body.edgeIdAt(index);
         return captureEdgeRef(edge, id, body.edgeIdIsShared(id));
     });
+}
 
-    const feature: FeatureData =
-        op.op === "fillet"
-            ? { id: Id.generate(), type: "fillet", radius: value, edges: refs }
-            : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
-    appendFeature(state, body, feature);
-    state.refs.set(op.id, body.id);
+/** Validate untrusted MCP data without extending the saved EdgeRef payload. */
+function persistentEdges(given: PersistentEdgeReference[], body: ParametricBodyNode): EdgeRef[] {
+    if (!Array.isArray(given)) throw new Error('"edgeRefs" must be an array');
+    const vector = (value: unknown): boolean => {
+        if (value === null || typeof value !== "object") return false;
+        const v = value as XYZLike;
+        return [v.x, v.y, v.z].every((n) => typeof n === "number" && Number.isFinite(n));
+    };
+    const plain = (v: XYZLike): XYZLike => ({ x: v.x, y: v.y, z: v.z });
+    return given.map((reference) => {
+        if (reference?.bodyId !== body.id) throw new Error("edge reference belongs to a different body");
+        const edge = reference.edge;
+        if (
+            !edge ||
+            (edge.edgeId !== undefined && (typeof edge.edgeId !== "string" || edge.edgeId.length > 4096)) ||
+            (edge.splitPiece !== undefined && typeof edge.splitPiece !== "boolean")
+        ) {
+            throw new Error("invalid persistent edge reference");
+        }
+        const valid =
+            edge.kind === "line"
+                ? vector(edge.start) && vector(edge.end)
+                : edge.kind === "circle"
+                  ? vector(edge.center) &&
+                    vector(edge.axis) &&
+                    Number.isFinite(edge.radius) &&
+                    edge.radius > 0
+                  : edge.kind === "other" &&
+                    vector(edge.mid) &&
+                    Number.isFinite(edge.length) &&
+                    edge.length > 0;
+        if (!valid) throw new Error("invalid persistent edge fingerprint");
+        // Drop unknown caller fields: only the existing saved ref fields cross into a feature.
+        const ref: EdgeRef =
+            edge.kind === "line"
+                ? { kind: "line", start: plain(edge.start), end: plain(edge.end) }
+                : edge.kind === "circle"
+                  ? {
+                        kind: "circle",
+                        center: plain(edge.center),
+                        axis: plain(edge.axis),
+                        radius: edge.radius,
+                    }
+                  : { kind: "other", mid: plain(edge.mid), length: edge.length };
+        if (edge.edgeId !== undefined) ref.edgeId = edge.edgeId;
+        if (edge.splitPiece === true) ref.splitPiece = true;
+        return ref;
+    });
+}
+
+function runEdgesOp(state: State, op: EdgesOp): void {
+    const body = resolveBody(state, op.body);
+    const shape = body.shape;
+    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    if (op.selector !== undefined && op.edgeIndexes !== undefined)
+        throw new Error("use selector or edgeIndexes, not both");
+    if (op.selector !== undefined) validateEdgeSelector(op.selector);
+    const allIndexes = edges.map((_, index) => index);
+    const unselectableEdges: NonNullable<EdgesReport["unselectableEdges"]> = [];
+    const allRefs =
+        op.selector === undefined
+            ? undefined
+            : allIndexes.map((index) => {
+                  try {
+                      return captureIndexes(body, edges, [index])[0];
+                  } catch (error) {
+                      unselectableEdges.push({
+                          index,
+                          reason: error instanceof Error ? error.message : String(error),
+                      });
+                      return undefined;
+                  }
+              });
+    const indexes =
+        op.selector === undefined
+            ? (op.edgeIndexes ?? allIndexes)
+            : selectEdgeIndexes(
+                  body,
+                  edges,
+                  allRefs!,
+                  op.selector,
+                  op.selector.curves === undefined ? undefined : persistentEdges(op.selector.curves, body),
+              );
+    const refs =
+        allRefs === undefined
+            ? captureIndexes(body, edges, indexes)
+            : indexes.map((index) => {
+                  const ref = allRefs[index];
+                  if (ref === undefined) throw new Error(`selected edge ${index} has no capturable curve`);
+                  return ref;
+              });
+    const report: EdgesReport = {
+        bodyId: body.id,
+        edges: refs.map((edge, i) => ({ index: indexes[i], reference: { bodyId: body.id, edge } })),
+    };
+    if (op.selector !== undefined || op.expectedCount !== undefined)
+        report.selection = describeEdgeSelection(refs.length, op.expectedCount);
+    if (unselectableEdges.length > 0) report.unselectableEdges = unselectableEdges;
+    state.out.results[op.id ?? "edges"] = report;
 }
 
 /** The stored join type / mode names (the command panel offers them as the i18n keys `THICKEN_JOIN_TYPES` / `THICKEN_MODES`). */
@@ -845,6 +1512,8 @@ function runThickenOp(state: State, op: ThickenOp): void {
 }
 
 function runBooleanOp(state: State, op: BooleanOp): void {
+    if (!["fuse", "cut", "common"].includes(op.operation))
+        throw new Error("Boolean operation must be fuse, cut or common");
     const body = resolveBody(state, op.body);
     const tools = op.tools.map((tool) => resolveNode(state, tool, "boolean tool"));
     for (const tool of tools) {
@@ -871,13 +1540,40 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
     const body = resolveBody(state, op.body);
     const before = erroredFeatureIds(body);
     switch (op.action) {
+        case "setRadiusLaw": {
+            const feature = body.features.find((item) => item.id === op.featureId);
+            if (feature?.type !== "fillet") throw new Error("Radius laws apply only to fillet features");
+            if (op.radiusLaw !== undefined) {
+                const law = resolveFilletRadiusLaw(op.radiusLaw, state.document.variables.evaluate().scope);
+                if (!law.isOk) throw new Error(law.error);
+            }
+            const { radiusLaw: _oldLaw, ...constant } = feature;
+            const edited = {
+                ...constant,
+                ...(op.radiusLaw === undefined
+                    ? {}
+                    : { radiusLaw: op.radiusLaw.map(({ position, radius }) => ({ position, radius })) }),
+            };
+            body.setFeaturesEmitShapeChanged(
+                body.features.map((item) => (item.id === feature.id ? edited : item)),
+            );
+            break;
+        }
         case "setParameter":
             if (op.key === undefined) throw new Error('"setParameter" requires "key"');
             if (op.value === undefined) throw new Error('"setParameter" requires "value"');
+            if (
+                body.features.find((feature) => feature.id === op.featureId)?.type === "projection" &&
+                (!["directionX", "directionY", "directionZ"].includes(op.key) ||
+                    typeof op.value !== "number" ||
+                    !Number.isFinite(op.value))
+            )
+                throw new Error("Projection direction parameters require finite numeric components");
             body.setFeatureParameter(op.featureId, op.key, op.value);
             break;
         case "rename":
             body.renameFeature(op.featureId, typeof op.value === "string" ? op.value : "");
+            markChanged(state, body, [op.featureId]);
             return;
         case "suppress":
             body.setFeatureSuppressed(op.featureId, op.value === true);
@@ -893,6 +1589,7 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             throw new Error(`unknown editFeature action "${(op as { action: string }).action}"`);
     }
     checkBody(state, body, before);
+    markChanged(state, body, [op.featureId]);
 }
 
 function runFeaturesOp(state: State, op: FeaturesOp): void {
@@ -931,6 +1628,45 @@ function featureSummary(item: FeatureItem, type: string | undefined): FeatureSum
     return summary;
 }
 
+/** Summarize only requested rows; untouched rows contribute diagnostics without their parameters/refs. */
+function compactBodyReport(body: ParametricBodyNode, changed: Set<string>): BodyReport {
+    const items = body.featureItems();
+    const types = body.features.map((feature) => feature.type);
+    const features: FeatureSummary[] = [];
+    const diagnostics: NonNullable<BodyReport["diagnostics"]> = [];
+    const surviving = new Set<string>();
+    items.forEach((item, index) => {
+        surviving.add(item.id);
+        if (changed.has(item.id)) features.push(featureSummary(item, types[index]));
+        if (item.error !== undefined || item.warning !== undefined) {
+            diagnostics.push({
+                featureId: item.id,
+                ...(item.error === undefined ? {} : { error: item.error }),
+                ...(item.warning === undefined ? {} : { warning: item.warning }),
+            });
+        }
+    });
+    return {
+        nodeId: body.id,
+        name: body.name,
+        features,
+        featureCount: items.length,
+        removedFeatureIds: [...changed].filter((id) => !surviving.has(id)),
+        status: diagnostics.some((item) => item.error !== undefined) ? "error" : "ok",
+        diagnostics,
+    };
+}
+
+function markChanged(state: State, body: ParametricBodyNode, ids: Iterable<string>): void {
+    state.touched.add(body);
+    let changed = state.changed.get(body);
+    if (changed === undefined) {
+        changed = new Set();
+        state.changed.set(body, changed);
+    }
+    for (const id of ids) changed.add(id);
+}
+
 // ------------------------------------------------------------------ Feature plumbing
 
 function createBody(
@@ -945,6 +1681,11 @@ function createBody(
     if (name !== undefined) body.name = name;
     afterAdd?.();
     checkBody(state, body, undefined);
+    markChanged(
+        state,
+        body,
+        features.map((feature) => feature.id),
+    );
     state.refs.set(id, body.id);
     state.out.created.push({ id, nodeId: body.id, name: body.name });
 }
@@ -960,6 +1701,7 @@ function appendFeature(state: State, body: ParametricBodyNode, feature: FeatureD
     const before = erroredFeatureIds(body);
     body.setFeaturesEmitShapeChanged([...body.features, feature]);
     checkBody(state, body, before);
+    markChanged(state, body, [feature.id]);
 }
 
 function checkBody(state: State, body: ParametricBodyNode, before: Set<string> | undefined): void {

@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 5 (thicken)", () => {
+describe("parametric format 13 (guided loft)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(5);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(5);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(13);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(13);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -24,6 +24,15 @@ describe("parametric format 5 (thicken)", () => {
         ["v1/parametric3-extrude-extents.json", 3],
         ["v1/parametric4-loft.json", 4],
         ["v2/construction-expressions.json", 4],
+        ["v2/parametric5-thicken.json", 5],
+        ["v2/parametric6-from-face.json", 6],
+        ["v2/parametric7-variable-fillet.json", 7],
+        ["v2/parametric8-next.json", 8],
+        ["v2/parametric9-sweep.json", 9],
+        ["v2/parametric10-projection.json", 10],
+        ["v2/parametric11-face-sweep.json", 11],
+        ["v2/parametric12-corner-setback.json", 12],
+        ["v2/parametric13-guided-loft.json", 13],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -32,7 +41,7 @@ describe("parametric format 5 (thicken)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 5 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 13 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
@@ -82,7 +91,7 @@ describe("parametric format 5 (thicken)", () => {
         ]);
     });
 
-    test("a parametric 5 document with thickens needs no migration", () => {
+    test("a parametric 5 document keeps its thickens unchanged", () => {
         const { data } = fixture("v2/parametric5-thicken.json");
         expect(data["moduleVersions"]).toMatchObject({ parametric: 5 });
 
@@ -109,10 +118,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 2 (bspline)", () => {
+describe("sketch format 3 (control NURBS)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(2);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(2);
+        expect(SKETCH_FORMAT_VERSION).toBe(3);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(3);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -123,7 +132,7 @@ describe("sketch format 2 (bspline)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 2 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 3 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -132,7 +141,7 @@ describe("sketch format 2 (bspline)", () => {
         expect(sketchV1Fixtures().length).toBeGreaterThan(0);
     });
 
-    test("a sketch 2 document with bsplines needs no migration and keeps them as stored", () => {
+    test("a sketch 2 document migrates with fit bsplines unchanged", () => {
         const { data } = fixture("v2/sketch2-bspline.json");
         expect(data["moduleVersions"]).toMatchObject({ sketch: 2 });
 

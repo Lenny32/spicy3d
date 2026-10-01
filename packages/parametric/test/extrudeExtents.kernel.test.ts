@@ -11,10 +11,20 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IFace, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
+import {
+    type IEdge,
+    type IFace,
+    type IVertex,
+    Matrix4,
+    Plane,
+    ShapeTypes,
+    Transaction,
+    XYZ,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { applyExtrudeToTargets } from "../src/commands/extrudeCommand";
+import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
 import type { ExtrudeExtent, ExtrudeFeatureData } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
@@ -565,4 +575,445 @@ describe("a target face that goes away fails the feature", () => {
 
         expect(errors(body)[1]).toBe("Extent face: Face not found after rebuild");
     });
+});
+
+describe("associative starting faces", () => {
+    test("curved caps follow a cylinder radius rebuild and preserve bottom-edge identities", () => {
+        const doc = newDocument();
+        const circle = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { entities: [{ id: 1, type: "circle", params: [0, 0, 10] }], constraints: [] },
+        });
+        doc.modelManager.addNode(circle);
+        const cylinder = new ParametricBodyNode({
+            document: doc,
+            id: "start-cylinder",
+            features: [{ id: "cylinder-base", type: "extrude", sketchId: circle.id, depth: 20 }],
+        });
+        doc.modelManager.addNode(cylinder);
+        expect(volume(cylinder)).toBeCloseTo(Math.PI * 100 * 20, 2);
+        const index = faceIndex(cylinder, (face) => !face.surface().isPlanar());
+        const extent = toFace(cylinder, index);
+        expect(extent.type).toBe("toObject");
+        if (extent.type !== "toObject") throw new Error("Expected face reference");
+        const plane = new Plane({
+            origin: new XYZ({ x: 15, y: 0, z: 0 }),
+            normal: XYZ.unitX,
+            xvec: XYZ.unitY,
+        });
+        const square = new SketchNode({ document: doc, plane, data: rect(-2, 8, 2, 12) });
+        doc.modelManager.addNode(square);
+        const boss = new ParametricBodyNode({
+            document: doc,
+            id: "curved-boss",
+            features: [
+                {
+                    id: "boss",
+                    type: "extrude",
+                    sketchId: square.id,
+                    depth: 5,
+                    startFace: { nodeId: cylinder.id, face: extent.face },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(80, 3);
+        const curved = (boss.shape.value.findSubShapes(ShapeTypes.face) as IFace[]).filter(
+            (face) => !face.surface().isPlanar(),
+        );
+        // The cylindrical seam splits each exact curved cap into two pieces.
+        expect(curved).toHaveLength(4);
+        const vertices = boss.shape.value.findSubShapes(ShapeTypes.vertex);
+        const xs = vertices.map((vertex) => (vertex as IVertex).point().x);
+        expect(Math.min(...xs)).toBeCloseTo(Math.sqrt(96), 4);
+        expect(Math.max(...xs)).toBeCloseTo(15, 4);
+        const edgeIds = boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i));
+        expect(edgeIds.filter((id) => id !== undefined).length).toBeGreaterThan(0);
+        Transaction.execute(
+            doc,
+            "resize cylinder",
+            () =>
+                (circle.dataJson = JSON.stringify({
+                    entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+                    constraints: [],
+                })),
+        );
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(80, 3);
+        const rebuiltIds = boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i));
+        expect(new Set(rebuiltIds)).toEqual(new Set(edgeIds));
+        const rebuiltXs = boss.shape.value
+            .findSubShapes(ShapeTypes.vertex)
+            .map((vertex) => (vertex as IVertex).point().x);
+        expect(Math.min(...rebuiltXs)).toBeCloseTo(Math.sqrt(140), 4);
+        doc.history.undo();
+        expect(volume(boss)).toBeCloseTo(80, 3);
+        expect(
+            Math.min(
+                ...boss.shape.value
+                    .findSubShapes(ShapeTypes.vertex)
+                    .map((vertex) => (vertex as IVertex).point().x),
+            ),
+        ).toBeCloseTo(Math.sqrt(96), 4);
+        const edges = boss.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        const picked = edges.findIndex((edge) => Math.abs(edge.length() - 5) < 1e-6);
+        expect(picked).toBeGreaterThanOrEqual(0);
+        const ref = captureEdgeRef(edges[picked], boss.edgeIdAt(picked));
+        expect(ref.edgeId).not.toBeUndefined();
+        append(boss, { id: "round-curved-boss", type: "fillet", radius: 0.2, edges: [ref] } as never);
+        expect(boss.shape.isOk).toBe(true);
+        circle.setDataEmitShapeChanged({
+            entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+            constraints: [],
+        });
+        expect(boss.shape.isOk).toBe(true);
+        expect(errors(boss)).toEqual([undefined, undefined]);
+        expect(
+            (boss.features[1] as import("../src/features/feature").FilletFeatureData).edges[0].edgeId,
+        ).toBe(ref.edgeId);
+    });
+});
+
+describe("from-face boundary validation and directions", () => {
+    test.each([
+        [5, 2, 12, 17],
+        [-5, 2, 7, 12],
+        [5, -2, 8, 13],
+    ] as const)("depth %i and offset %i are measured from the selected surface", (depth, offset, low, high) => {
+        const doc = newDocument();
+        const target = block(doc, "starting-box", 10);
+        const extent = toFace(target, faceIndex(target, facing(XYZ.unitZ)));
+        expect(extent.type).toBe("toObject");
+        if (extent.type !== "toObject") throw new Error("Expected face");
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth,
+                    startOffset: offset,
+                    startFace: { nodeId: target.id, face: extent.face },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(125, 4);
+        const zs = boss.shape.value
+            .findSubShapes(ShapeTypes.vertex)
+            .map((vertex) => (vertex as IVertex).point().z);
+        expect(Math.min(...zs)).toBeCloseTo(low, 4);
+        expect(Math.max(...zs)).toBeCloseTo(high, 4);
+    });
+    test("a downstream fillet follows a starting face height change using its captured edge", () => {
+        const doc = newDocument();
+        const target = block(doc, "starting-box", 10);
+        const extent = toFace(target, faceIndex(target, facing(XYZ.unitZ)));
+        if (extent.type !== "toObject") throw new Error("Expected face");
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 5,
+                    startFace: { nodeId: target.id, face: extent.face },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(volume(boss)).toBeCloseTo(125, 4);
+        const edges = boss.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        const picked = edges.findIndex((edge) => Math.abs(edge.startPoint().z - edge.endPoint().z) > 4.9);
+        expect(picked).toBeGreaterThanOrEqual(0);
+        const ref = captureEdgeRef(edges[picked], boss.edgeIdAt(picked));
+        expect(ref.edgeId).not.toBeUndefined();
+        append(boss, { id: "round", type: "fillet", radius: 0.5, edges: [ref] } as never);
+        expect(errors(boss)).toEqual([undefined, undefined]);
+        const rounded = volume(boss);
+        target.setFeaturesEmitShapeChanged([{ ...target.features[0], depth: 14 } as ExtrudeFeatureData]);
+        expect(errors(boss)).toEqual([undefined, undefined]);
+        expect(volume(boss)).toBeCloseTo(rounded, 4);
+        expect((boss.features[1] as any).edges[0].edgeId).toBe(ref.edgeId);
+    });
+    test.each([
+        [30, 30, 35, 35],
+        [18, 5, 23, 10],
+    ])("a profile with uncovered starting surface %j fails explicitly", (x0, y0, x1, y1) => {
+        const doc = newDocument();
+        const target = block(doc, "starting-box", 10);
+        const extent = toFace(target, faceIndex(target, facing(XYZ.unitZ)));
+        if (extent.type !== "toObject") throw new Error("Expected face");
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(x0, y0, x1, y1) });
+        doc.modelManager.addNode(sketch);
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 5,
+                    startFace: { nodeId: target.id, face: extent.face },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(boss.shape.isOk).toBe(false);
+        expect(errors(boss)[0]).toMatch(/starting and ending faces|intersection|bound/);
+    });
+});
+
+describe("starting-face extents and coordinate spaces", () => {
+    test.each([
+        "toObject",
+        "throughAll",
+        "symmetric",
+    ] as const)("supports %s after the face start", (mode) => {
+        const doc = newDocument();
+        const target = block(doc, "boundary-box", 20);
+        const start = toFace(target, faceIndex(target, facing(XYZ.unitZ.multiply(-1))));
+        if (start.type !== "toObject") throw new Error("Expected starting face");
+        const end = toFace(target, faceIndex(target, facing(XYZ.unitZ)));
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const feature: ExtrudeFeatureData = {
+            id: "from",
+            type: "extrude",
+            sketchId: sketch.id,
+            depth: 5,
+            startFace: { nodeId: target.id, face: start.face },
+            ...(mode === "toObject"
+                ? { extent: end }
+                : mode === "throughAll"
+                  ? { extent: { type: "throughAll" }, operation: "cut" }
+                  : { symmetric: true }),
+        };
+        const body =
+            mode === "throughAll" ? target : new ParametricBodyNode({ document: doc, features: [feature] });
+        if (mode === "throughAll") append(body, feature);
+        else doc.modelManager.addNode(body);
+        expect(errors(body).every((error) => error === undefined)).toBe(true);
+        expect(volume(body)).toBeCloseTo(mode === "toObject" ? 500 : mode === "throughAll" ? 7500 : 250, 3);
+    });
+    test("an externally transformed starting face resolves in the tool host space", () => {
+        const doc = newDocument();
+        const target = block(doc, "placed-boundary", 10);
+        target.transform = Matrix4.fromTranslation(0, 0, 20);
+        const index = faceIndex(target, facing(XYZ.unitZ));
+        const local = (target.shape.value.findSubShapes(ShapeTypes.face) as IFace[])[index];
+        const world = local.transformedMul(target.worldTransform()) as IFace;
+        const ref = captureExtentFaceRef(world, target.faceIdAt(index));
+        world.dispose();
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 5,
+                    startFace: { nodeId: target.id, face: ref },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(125, 4);
+        const zs = boss.shape.value
+            .findSubShapes(ShapeTypes.vertex)
+            .map((vertex) => (vertex as IVertex).point().z);
+        expect(Math.min(...zs)).toBeCloseTo(30, 4);
+        expect(Math.max(...zs)).toBeCloseTo(35, 4);
+    });
+});
+
+test("linked extrusion targets resolve the starting face before their own entry", () => {
+    const doc = newDocument();
+    const host = block(doc, "host", 10);
+    const target = block(doc, "target", 20);
+    const ref = toFace(host, faceIndex(host, facing(XYZ.unitZ)));
+    if (ref.type !== "toObject") throw new Error("Expected starting face");
+    const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+    doc.modelManager.addNode(sketch);
+    Transaction.execute(doc, "linked face-start cut", () =>
+        applyExtrudeToTargets(
+            {
+                id: "slot",
+                type: "extrude",
+                sketchId: sketch.id,
+                depth: -5,
+                operation: "cut",
+                startFace: { nodeId: host.id, face: ref.face },
+            },
+            [host, target],
+        ),
+    );
+    expect(volume(host)).toBeCloseTo(3875, 3);
+    expect(volume(target)).toBeCloseTo(7875, 3);
+    expect(errors(host)).toEqual([undefined, undefined]);
+    expect(errors(target)).toEqual([undefined, undefined]);
+    host.setFeatureParameter("host-base", "depth", 12);
+    expect(volume(host)).toBeCloseTo(4675, 3);
+    expect(volume(target)).toBeCloseTo(7875, 3);
+    expect(errors(host)).toEqual([undefined, undefined]);
+    expect(errors(target)).toEqual([undefined, undefined]);
+});
+
+describe("automatic next-face extents", () => {
+    test("captures candidates once and retargets after an upstream placement edit", () => {
+        const doc = newDocument();
+        const near = block(doc, "near-next", 5, 0, 10);
+        const far = block(doc, "far-next", 5, 0, 30);
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(5, 5, 10, 10) });
+        doc.modelManager.addNode(sketch);
+        const candidateIds = [near.id, far.id];
+        const boss = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "next-boss",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 1,
+                    extent: { type: "next", nodeIds: candidateIds },
+                },
+            ],
+        });
+        doc.modelManager.addNode(boss);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(250, 4);
+        block(doc, "later-next", 5, 0, 5);
+        expect(volume(boss)).toBeCloseTo(250, 4);
+        near.transform = Matrix4.fromTranslation(0, 0, 25);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
+        expect(boss.features[0]).toMatchObject({ extent: { type: "next", nodeIds: candidateIds } });
+        Transaction.execute(doc, "delete unused candidate", () => near.parent!.remove(near));
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
+        doc.history.undo();
+        expect(doc.modelManager.findNode((node) => node.id === near.id)).toBe(near);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
+    });
+
+    test("same-host next cuts resolve against the state entering the feature", () => {
+        const doc = newDocument();
+        const body = block(doc, "next-host", 10);
+        const sketch = topSketch(doc, body);
+        append(body, {
+            id: "next-cut",
+            type: "extrude",
+            sketchId: sketch.id,
+            depth: -1,
+            operation: "cut",
+            extent: { type: "next", nodeIds: [] },
+        });
+        expect(errors(body)).toEqual([undefined, undefined]);
+        expect(volume(body)).toBeCloseTo(3750, 4);
+        body.setFeatureParameter("next-host-base", "depth", 20);
+        expect(errors(body)).toEqual([undefined, undefined]);
+        expect(volume(body)).toBeCloseTo(7500, 4);
+    });
+
+    test("a missing captured candidate fails explicitly", () => {
+        const doc = newDocument();
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rect(0, 0, 4, 4) });
+        doc.modelManager.addNode(sketch);
+        const body = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "missing-next",
+                    type: "extrude",
+                    sketchId: sketch.id,
+                    depth: 1,
+                    extent: { type: "next", nodeIds: ["deleted-candidate"] },
+                },
+            ],
+        });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(false);
+        expect(errors(body)[0]).toContain("Next-face extent has no valid candidates");
+    });
+});
+
+test("automatic next curved caps follow cylinder radius and preserve downstream edge references", () => {
+    const doc = newDocument();
+    const circle = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: { entities: [{ id: 1, type: "circle", params: [0, 0, 10] }], constraints: [] },
+    });
+    doc.modelManager.addNode(circle);
+    const cylinder = new ParametricBodyNode({
+        document: doc,
+        id: "next-cylinder",
+        features: [{ id: "next-cylinder-base", type: "extrude", sketchId: circle.id, depth: 20 }],
+    });
+    doc.modelManager.addNode(cylinder);
+    const square = new SketchNode({
+        document: doc,
+        plane: new Plane({ origin: new XYZ({ x: 15, y: 0, z: 0 }), normal: XYZ.unitX, xvec: XYZ.unitY }),
+        data: rect(-2, 8, 2, 12),
+    });
+    doc.modelManager.addNode(square);
+    const boss = new ParametricBodyNode({
+        document: doc,
+        features: [
+            {
+                id: "next-curved-boss",
+                type: "extrude",
+                sketchId: square.id,
+                depth: -1,
+                extent: { type: "next", nodeIds: [cylinder.id] },
+            },
+        ],
+    });
+    doc.modelManager.addNode(boss);
+    expect(errors(boss)).toEqual([undefined]);
+    const expected = (radius: number) =>
+        240 - 4 * (2 * Math.sqrt(radius * radius - 4) + radius * radius * Math.asin(2 / radius));
+    expect(volume(boss)).toBeCloseTo(expected(10), 3);
+    const ids = boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i));
+    const edges = boss.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    const picked = edges.findIndex((edge) =>
+        edge
+            .findSubShapes(ShapeTypes.vertex)
+            .every((vertex) => Math.abs((vertex as IVertex).point().x - 15) < 1e-6),
+    );
+    expect(picked).toBeGreaterThanOrEqual(0);
+    const ref = captureEdgeRef(edges[picked], boss.edgeIdAt(picked));
+    expect(ref.edgeId).not.toBeUndefined();
+    circle.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+        constraints: [],
+    });
+    expect(errors(boss)).toEqual([undefined]);
+    expect(volume(boss)).toBeCloseTo(expected(12), 3);
+    expect(new Set(boss.shape.value.findSubShapes(ShapeTypes.edge).map((_, i) => boss.edgeIdAt(i)))).toEqual(
+        new Set(ids),
+    );
+    append(boss, { id: "next-cap-fillet", type: "fillet", radius: 0.2, edges: [ref] } as never);
+    expect(errors(boss)).toEqual([undefined, undefined]);
+    circle.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 11] }],
+        constraints: [],
+    });
+    expect(errors(boss)).toEqual([undefined, undefined]);
+    expect((boss.features[1] as import("../src/features/feature").FilletFeatureData).edges[0].edgeId).toBe(
+        ref.edgeId,
+    );
 });

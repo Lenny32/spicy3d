@@ -1,10 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { mergeDocuments, migrateDocument, type Serialized } from "@spicy3d/core";
+import {
+    assembleManifest,
+    mergeDocuments,
+    migrateDocument,
+    type Serialized,
+    splitManifest,
+} from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
 import "@spicy3d/parametric";
+import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric/src/migrations";
 import "@spicy3d/wasm";
 
 // The merge rule of an extrude's extents (parametric format 3, docs/merge.md "Features"). Base: the
@@ -149,4 +156,129 @@ describe("merging extrude extents", () => {
         expect(dangling).toHaveLength(1);
         expect(dangling[0].path).toContain("feature-hole");
     });
+});
+
+describe("merging associative extrusion starts", () => {
+    const withStart = () =>
+        editFeature(base(), "feature-hole", (x) => ({
+            ...x,
+            startFace: { nodeId: "body-block", face: x.extent.face },
+        }));
+    test("the body and face are one atomic pick", () => {
+        const b = withStart();
+        const ours = editFeature(b, "feature-hole", (x) => ({
+            ...x,
+            startFace: { ...x.startFace, nodeId: "sketch-hole" },
+        }));
+        const theirs = editFeature(b, "feature-hole", (x) => ({
+            ...x,
+            startFace: { ...x.startFace, face: { ...x.startFace.face, id: "different" } },
+        }));
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts.map((conflict) => conflict.kind)).toEqual(["property"]);
+        expect(feature(result.merged, "feature-hole").startFace).toEqual(
+            feature(ours, "feature-hole").startFace,
+        );
+    });
+    test("a start offset edit and a depth edit merge independently", () => {
+        const b = withStart();
+        const ours = editFeature(b, "feature-hole", (x) => ({ ...x, startOffset: "gap" }));
+        const theirs = editFeature(b, "feature-hole", (x) => ({ ...x, depth: 4 }));
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts).toEqual([]);
+        expect(feature(result.merged, "feature-hole")).toMatchObject({ startOffset: "gap", depth: 4 });
+    });
+});
+
+test("the parametric-6 starting-face fixture survives cloud manifest/blob assembly", async () => {
+    const fixture = loadDocumentFixtures().find(
+        (fixture) => fixture.name === "v2/parametric6-from-face.json",
+    );
+    expect(fixture).not.toBeUndefined();
+    if (fixture === undefined) throw new Error("Missing approved format fixture");
+    const { manifest, blobs } = await splitManifest(fixture.data, { minStringLength: 1 });
+    expect(blobs.size).toBeGreaterThan(0);
+    const assembled = assembleManifest(JSON.parse(JSON.stringify(manifest)), (sha) => blobs.get(sha));
+    expect(assembled.isOk).toBe(true);
+    expect(assembled.value).toEqual(fixture.data);
+    const merged = merge(fixture.data, assembled.value, fixture.data);
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.merged["moduleVersions"]).toMatchObject({
+        parametric: PARAMETRIC_FORMAT_VERSION,
+        sketch: 3,
+    });
+});
+
+describe("merging automatic next extents", () => {
+    const withNext = () =>
+        editFeature(base(), "feature-hole", (x) => ({
+            ...x,
+            extent: { type: "next", nodeIds: ["body-block"], offset: 0 },
+        }));
+    test("candidate snapshot and offset conflict atomically instead of being mixed", () => {
+        const b = withNext();
+        const ours = editFeature(
+            b,
+            "feature-hole",
+            withExtent((extent) => ({ ...extent, nodeIds: ["sketch-hole"] })),
+        );
+        const theirs = editFeature(
+            b,
+            "feature-hole",
+            withExtent((extent) => ({ ...extent, offset: 2 })),
+        );
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts.map((conflict) => conflict.kind)).toEqual(["property"]);
+        expect(feature(result.merged, "feature-hole").extent).toEqual(feature(ours, "feature-hole").extent);
+    });
+    test("a next offset and an independent depth edit merge", () => {
+        const b = withNext();
+        const ours = editFeature(
+            b,
+            "feature-hole",
+            withExtent((extent) => ({ ...extent, offset: -2 })),
+        );
+        const theirs = editFeature(b, "feature-hole", (x) => ({ ...x, depth: -5 }));
+        const result = merge(b, ours, theirs);
+        expect(result.conflicts).toEqual([]);
+        expect(feature(result.merged, "feature-hole")).toMatchObject({
+            depth: -5,
+            extent: { type: "next", offset: -2 },
+        });
+    });
+});
+
+test("the parametric-8 next fixture survives exact cloud manifest/blob assembly", async () => {
+    const fixture = loadDocumentFixtures().find((item) => item.name === "v2/parametric8-next.json");
+    expect(fixture).not.toBeUndefined();
+    if (fixture === undefined) throw new Error("Missing approved next fixture");
+    const { manifest, blobs } = await splitManifest(fixture.data, { minStringLength: 1 });
+    expect(blobs.size).toBeGreaterThan(0);
+    const assembled = assembleManifest(JSON.parse(JSON.stringify(manifest)), (sha) => blobs.get(sha));
+    expect(assembled.isOk).toBe(true);
+    expect(assembled.value).toEqual(fixture.data);
+    const result = merge(fixture.data, assembled.value, fixture.data);
+    expect(result.conflicts).toEqual([]);
+    expect(result.merged["moduleVersions"]).toMatchObject({
+        parametric: PARAMETRIC_FORMAT_VERSION,
+        sketch: 3,
+    });
+});
+
+test("next candidate snapshots retain node reference validation during a concurrent deletion", () => {
+    const b = structuredClone(base());
+    b["models"].nodes.push({ ...structuredClone(node(b, "body-block")), id: "next-plate" });
+    const withNext = editFeature(b, "feature-hole", (x) => ({
+        ...x,
+        extent: { type: "next", nodeIds: ["next-plate"], offset: 0 },
+    }));
+    const ours = editFeature(
+        withNext,
+        "feature-hole",
+        withExtent((extent) => ({ ...extent, offset: 1 })),
+    );
+    const theirs = structuredClone(withNext);
+    theirs["models"].nodes = theirs["models"].nodes.filter((item: Json) => item.id !== "next-plate");
+    const result = merge(withNext, ours, theirs);
+    expect(result.conflicts.filter((conflict) => conflict.kind === "dangling-ref")).toHaveLength(1);
 });

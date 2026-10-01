@@ -57,7 +57,11 @@ const revolveHandler: FeatureHandler<RevolveFeatureData> = {
         { key: "angle", display: "common.angle", value: feature.angle, unit: ANGLE_UNITS },
     ],
 
-    setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+    setParameter: (feature, key, value) =>
+        key === "angle" &&
+        (typeof value === "string" || (typeof value === "number" && Number.isFinite(value)))
+            ? { ...feature, [key]: value }
+            : feature,
 
     applyResolvedRefs: (feature, { resolvedProfiles, resolvedEdges }) => {
         let next = feature;

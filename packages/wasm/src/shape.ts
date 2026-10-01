@@ -99,7 +99,7 @@ export interface OccShapeOptions {
 
 function occShapeSerialize(target: OccShape): SerializedData {
     return {
-        shape: wasm.Converter.convertToBrep(target.shape),
+        shape: target.serializedBrep(),
         id: target.id,
     };
 }
@@ -116,6 +116,24 @@ function occShapeDeserialize(properties: Serialized) {
     serialize: occShapeSerialize,
 })
 export class OccShape implements IShape {
+    // Tolerances are stored on shared native subshapes, so changing one invalidates parent exports too.
+    private static toleranceRevision = 0;
+    private serializedToleranceRevision = -1;
+    private _serializedBrep?: string;
+
+    /** Runtime-only export cache; document payloads keep exactly the existing BREP/id shape. */
+    serializedBrep(): string {
+        if (this.serializedToleranceRevision !== OccShape.toleranceRevision) this.invalidateSerializedBrep();
+        this._serializedBrep ??= wasm.Converter.convertToBrep(this.shape);
+        this.serializedToleranceRevision = OccShape.toleranceRevision;
+        return this._serializedBrep;
+    }
+
+    /** Native geometry mutations and display triangulation changes invalidate the export. */
+    invalidateSerializedBrep(): void {
+        this._serializedBrep = undefined;
+    }
+
     private _boundingBox: BoundingBox | undefined;
     protected _geometryBoundingBox: BoundingBox | undefined;
     private _orientedBoundingBox: OrientedBoundingBox | undefined;
@@ -146,6 +164,7 @@ export class OccShape implements IShape {
     }
 
     protected invalidateReplicas(): void {
+        this.invalidateSerializedBrep();
         if (this.replicaInvalidations) for (const handler of this.replicaInvalidations) handler();
     }
 
@@ -479,6 +498,7 @@ export class OccShape implements IShape {
 
     setTolerance(tolerance: number): void {
         this.invalidateReplicas();
+        OccShape.toleranceRevision++;
         wasm.Shape.setTolerance(this.shape, tolerance);
         this._geometryBoundingBox = undefined;
     }
@@ -1103,6 +1123,7 @@ export class Mesher implements IShapeMeshData, IDisposable {
             return;
         }
         this._isMeshed = true;
+        this.shape.invalidateSerializedBrep();
 
         gc((c) => {
             const span = PerformanceTrace.enabled

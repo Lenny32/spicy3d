@@ -62,7 +62,11 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
         },
     ],
 
-    setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+    setParameter: (feature, key, value) =>
+        key === "thickness" &&
+        (typeof value === "string" || (typeof value === "number" && Number.isFinite(value)))
+            ? { ...feature, [key]: value }
+            : feature,
 
     applyResolvedRefs: (feature, { resolvedProfiles }) =>
         resolvedProfiles === undefined || (feature.openFaces ?? []).length === 0

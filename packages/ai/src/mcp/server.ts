@@ -21,7 +21,8 @@ import { agentCloudLink, onAgentCloudChanged } from "../tools/cloudLink";
 import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tools/cloudTools";
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { takeSlowOpWarnings } from "../tools/opBudget";
-import { documentSnapshot } from "../tools/readTools";
+import { forgetProgramJobs, isProgramJobTool } from "../tools/programJobs";
+import { documentSnapshot, hasDocumentReadSnapshot, isMetadataReadTool } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
 
@@ -210,7 +211,10 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             stopWatching?.();
             stopWatching = undefined;
             // The sessions of this connection are gone: their open questions close.
-            for (const caller of callers) forgetCloudCaller(caller);
+            for (const caller of callers) {
+                forgetCloudCaller(caller);
+                forgetProgramJobs(caller);
+            }
             callers.clear();
             closed?.();
         };
@@ -230,14 +234,19 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         if (!tool) throw new McpError(ErrorCode.InvalidParams, `unknown tool "${name}"`);
         const caller = callerOf(request.params._meta as Record<string, unknown> | undefined);
         callers.add(caller);
-        return queue.run(async () => {
+        const invoke = async () => {
             if (extra.signal.aborted) throw new McpError(ErrorCode.RequestTimeout, "cancelled");
             let result: CallToolResult;
             try {
                 const budget = options.imageByteBudget?.();
                 result = toCallToolResult(
                     await withImageByteBudget(budget, () =>
-                        tool.handler(args ?? {}, extra.signal, { caller }),
+                        tool.handler(args ?? {}, extra.signal, {
+                            caller,
+                            ...(isProgramJobTool(tool) && {
+                                scheduleMutation: (task: () => Promise<void>) => queue.run(task),
+                            }),
+                        }),
                     ),
                 );
             } catch (err) {
@@ -247,7 +256,11 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             // A cancelled call's answer is never sent: its warnings wait for the next result.
             if (!extra.signal.aborted) withSlowOpWarnings(result);
             return result;
-        });
+        };
+        // These built-ins read only the committed metadata snapshot while mutations stay FIFO.
+        return (isMetadataReadTool(tool) && hasDocumentReadSnapshot()) || isProgramJobTool(tool)
+            ? invoke()
+            : queue.run(invoke);
     });
 
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({

@@ -12,9 +12,13 @@ import type {
 } from "../lib/spicy-wasm";
 import { replicaTopology, sameReplicaTopology } from "./replicaTopology";
 import type {
+    BoundedReplicaRequest,
+    CornerReplica,
     KernelHandle,
+    KernelOperations,
     KernelRequest,
     KernelResult,
+    ShapeReplica,
     WorkerMesh,
     WorkerNativeEvent,
     WorkerTracking,
@@ -65,6 +69,10 @@ export class WorkerKernel {
             for (const handle of referenced) this.replicaLeases.delete(handle);
         }
         switch (request.operation) {
+            case "cornerSetbackReplica":
+                return this.cornerSetbackReplica(request.args);
+            case "boundedReplica":
+                return this.boundedReplica(request.args);
             case "ready":
                 return { ok: true, value: undefined };
             case "stats":
@@ -242,6 +250,273 @@ export class WorkerKernel {
                 );
             }
         }
+    }
+
+    private cornerSetbackReplica(
+        request: KernelOperations["cornerSetbackReplica"]["args"],
+    ): KernelResult<CornerReplica> {
+        const m = this.module;
+        const owned: TopoDS_Shape[] = [];
+        const invalid = (message: string): KernelResult<CornerReplica> => ({
+            ok: false,
+            error: { code: "invalid", message },
+        });
+        if (
+            request.edges.length !== 3 ||
+            request.distances.length !== 3 ||
+            new Set(request.edges).size !== 3 ||
+            !Number.isFinite(request.radius) ||
+            request.radius <= 0 ||
+            request.edges.some(
+                (index) =>
+                    !Number.isSafeInteger(index) || index < 0 || index >= request.shape.topology.edges.length,
+            ) ||
+            request.distances.some(
+                (distance) => !Number.isFinite(distance) || distance <= request.radius + 1e-4,
+            )
+        )
+            return invalid("Invalid corner setback edges, radius or distances");
+        type NativeCorner = {
+            shape: TopoDS_Shape;
+            isOk: boolean;
+            error: string;
+            g0Error: number;
+            g1Error: number;
+            fitDistanceError: number;
+            fitAngleError: number;
+            faceMap: IntVector;
+            edgeMap: IntVector;
+            faceEdgeMap: IntVector;
+            faceAncestors: IntVector;
+            edgeAncestors: IntVector;
+            cornerFaces: IntVector;
+        };
+        const binding = (
+            m.ShapeFactory as unknown as {
+                filletCornerSetbackTracked?: (
+                    shape: TopoDS_Shape,
+                    edges: number[],
+                    radius: number,
+                    distances: number[],
+                ) => NativeCorner;
+            }
+        ).filletCornerSetbackTracked;
+        if (!binding)
+            return {
+                ok: false,
+                error: {
+                    code: "unavailable",
+                    message: "Corner setbacks are not available in this worker kernel",
+                },
+            };
+        return this.native(
+            () => {
+                const input = m.Converter.convertFromBrep(request.shape.brep);
+                owned.push(input);
+                if (input.isNull() || !sameReplicaTopology(request.shape.topology, replicaTopology(m, input)))
+                    return invalid("Input BREP topology order changed");
+                const result = this.measure(
+                    "worker.kernel.operation",
+                    () => binding(input, request.edges, request.radius, request.distances),
+                    "filletCornerSetback",
+                );
+                owned.push(result.shape); // Value-object shape is owning, unlike ShapeResult's borrowed getter.
+                const vectors = {
+                    faceMap: result.faceMap,
+                    edgeMap: result.edgeMap,
+                    faceEdgeMap: result.faceEdgeMap,
+                    faceAncestors: result.faceAncestors,
+                    edgeAncestors: result.edgeAncestors,
+                    cornerFaces: result.cornerFaces,
+                };
+                return this.native(
+                    () => {
+                        if (!result.isOk) return invalid(result.error);
+                        const arrays = Object.fromEntries(
+                            Object.entries(vectors).map(([key, vector]) => [key, Int32Array.from(vector)]),
+                        ) as Record<keyof typeof vectors, Int32Array>;
+                        return {
+                            ok: true,
+                            value: {
+                                ...this.exportReplica(result.shape),
+                                tracking: { ...arrays, capFaces: new Int32Array() },
+                                cornerFaces: arrays.cornerFaces,
+                                g0Error: result.g0Error,
+                                g1Error: result.g1Error,
+                                fitDistanceError: result.fitDistanceError,
+                                fitAngleError: result.fitAngleError,
+                                nativeMs: this.nativeMs,
+                                mesh: request.mesh ? this.mesh(result.shape, true) : undefined,
+                            },
+                        };
+                    },
+                    () => {
+                        for (const vector of Object.values(vectors)) vector.delete();
+                    },
+                );
+            },
+            () => {
+                for (const shape of owned.reverse()) shape.delete();
+            },
+        );
+    }
+
+    private boundedReplica(request: BoundedReplicaRequest): KernelResult<ShapeReplica> {
+        const m = this.module;
+        const owned: TopoDS_Shape[] = [];
+        const snapshot = (replica: ShapeReplica): TopoDS_Shape => {
+            const shape = m.Converter.convertFromBrep(replica.brep);
+            owned.push(shape);
+            if (shape.isNull() || !sameReplicaTopology(replica.topology, replicaTopology(m, shape))) {
+                throw new Error("Input BREP topology order changed");
+            }
+            return shape;
+        };
+        const invoke = (): ShapeResult => {
+            switch (request.method) {
+                case "booleanFuse":
+                case "booleanCut":
+                case "booleanCommon":
+                    if (!request.left.length || !request.right.length)
+                        throw new Error("Boolean operands are empty");
+                    return m.ShapeFactory[request.method](
+                        request.left.map(snapshot),
+                        request.right.map(snapshot),
+                    );
+                case "fillet":
+                case "chamfer": {
+                    const shape = snapshot(request.shape);
+                    if (
+                        !Number.isFinite(request.value) ||
+                        request.value < 1e-7 ||
+                        !request.edges.length ||
+                        request.edges.some(
+                            (i) =>
+                                !Number.isSafeInteger(i) || i < 0 || i >= request.shape.topology.edges.length,
+                        )
+                    ) {
+                        throw new Error("Invalid corner radius/distance or edge indexes");
+                    }
+                    return m.ShapeFactory[request.method](shape, request.edges, request.value);
+                }
+                case "loft": {
+                    const continuity = {
+                        c0: m.GeomAbs_Shape.GeomAbs_C0,
+                        g1: m.GeomAbs_Shape.GeomAbs_G1,
+                        c1: m.GeomAbs_Shape.GeomAbs_C1,
+                        g2: m.GeomAbs_Shape.GeomAbs_G2,
+                        c2: m.GeomAbs_Shape.GeomAbs_C2,
+                        c3: m.GeomAbs_Shape.GeomAbs_C3,
+                        cn: m.GeomAbs_Shape.GeomAbs_CN,
+                    };
+                    return m.ShapeFactory.loft(
+                        request.sections.map(snapshot),
+                        request.isSolid,
+                        request.isRuled,
+                        continuity[request.continuity],
+                    );
+                }
+                case "makeThickSolidBySimple":
+                    if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
+                    return m.ShapeFactory.makeThickSolidBySimple(snapshot(request.shape), request.thickness);
+                case "makeThickSolidByJoin": {
+                    if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
+                    const shape = snapshot(request.shape);
+                    const faces = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_FACE);
+                    owned.push(...faces);
+                    if (
+                        request.closingFaces.some(
+                            (i) => !Number.isSafeInteger(i) || i < 0 || i >= faces.length,
+                        )
+                    )
+                        throw new Error("Opening face is not part of the input replica");
+                    const joins = {
+                        arc: m.GeomAbs_JoinType.GeomAbs_Arc,
+                        tangent: m.GeomAbs_JoinType.GeomAbs_Tangent,
+                        intersection: m.GeomAbs_JoinType.GeomAbs_Intersection,
+                    };
+                    const modes = {
+                        skin: m.BRepOffset_Mode.BRepOffset_Skin,
+                        pipe: m.BRepOffset_Mode.BRepOffset_Pipe,
+                        rectoVerso: m.BRepOffset_Mode.BRepOffset_RectoVerso,
+                    };
+                    return m.ShapeFactory.makeThickSolidByJoin(
+                        shape,
+                        request.closingFaces.map((i) => faces[i]),
+                        request.thickness,
+                        joins[request.joinType],
+                        modes[request.mode],
+                        request.intersection,
+                    );
+                }
+            }
+        };
+        return this.native(
+            () => {
+                let result: ShapeResult;
+                try {
+                    result = this.measure("worker.kernel.operation", invoke, request.method);
+                } catch (error) {
+                    if (error instanceof WebAssembly.RuntimeError) throw error;
+                    return {
+                        ok: false,
+                        error: {
+                            code: "invalid",
+                            message: error instanceof Error ? error.message : "Invalid bounded operation",
+                        },
+                    };
+                }
+                return this.native(
+                    () => {
+                        if (!result.isOk)
+                            return { ok: false, error: { code: "invalid", message: result.error } };
+                        let shape = this.copyResultShape(result);
+                        owned.push(shape);
+                        if (request.method === "booleanFuse" && request.simplifyShape) {
+                            const simplified = m.ShapeFactory.simplifyShape(
+                                shape,
+                                true,
+                                true,
+                                [],
+                                1e-5,
+                                1e-6,
+                            );
+                            this.native(
+                                () => {
+                                    if (simplified.isOk) {
+                                        shape = this.copyResultShape(simplified);
+                                        owned.push(shape);
+                                    }
+                                },
+                                () => simplified.delete(),
+                            );
+                        }
+                        if (!m.Shape.check(shape))
+                            return {
+                                ok: false,
+                                error: { code: "invalid", message: "Kernel returned an invalid shape" },
+                            };
+                        if (
+                            request.method === "makeThickSolidBySimple" ||
+                            request.method === "makeThickSolidByJoin"
+                        ) {
+                            const solids = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_SOLID);
+                            owned.push(...solids);
+                            if (!solids.length)
+                                return {
+                                    ok: false,
+                                    error: { code: "invalid", message: "Thick solid result is not a solid" },
+                                };
+                        }
+                        return { ok: true, value: this.exportReplica(shape) };
+                    },
+                    () => result.delete(),
+                );
+            },
+            () => {
+                for (const shape of owned.reverse()) shape.delete();
+            },
+        );
     }
 
     private exportReplica(shape: TopoDS_Shape) {
@@ -434,7 +709,7 @@ export class WorkerKernel {
                 workerId: this.session,
                 requestId: this.requestId,
                 eventId: ++this.eventId,
-                boolean: stage === "worker.kernel.operation",
+                boolean: stage === "worker.kernel.operation" && operation?.startsWith("boolean") === true,
                 operation,
             },
         });

@@ -21,6 +21,7 @@ import {
     showPreviewProblem,
 } from "./featureEditPreview";
 import { registerFeatureEditor } from "./featureEditRegistry";
+import { pickGuidedLoftPath } from "./guidedLoftPicking";
 
 /**
  * Reopens a loft with its options (solid, ruled, continuity) in the command panel and the body
@@ -33,6 +34,10 @@ export class LoftEditCommand extends CancelableCommand {
     private preview: FeatureChainPreview | undefined;
     private previewIds: number[] = [];
     private hidden: INode[] = [];
+    private spine: NonNullable<LoftFeatureData["guided"]>["spine"] | undefined;
+    private boundary: NonNullable<LoftFeatureData["guided"]>["boundary"] | undefined;
+    private pickController: AsyncController | undefined;
+    private valid = false;
 
     constructor(
         private readonly body?: ParametricBodyNode,
@@ -73,9 +78,43 @@ export class LoftEditCommand extends CancelableCommand {
         this.setProperty("continuity", value, () => this.refreshPreview());
     }
 
+    @property("loft.guided")
+    get guided() {
+        return this.getPrivateValue("guided", false);
+    }
+    set guided(value: boolean) {
+        this.setProperty("guided", value, () => this.refreshPreview());
+    }
+
+    @property("loft.pickSpine", { dependencies: [{ property: "guided", value: true }] })
+    readonly pickSpine = () => this.repick("spine");
+    @property("loft.pickBoundary", { dependencies: [{ property: "guided", value: true }] })
+    readonly pickBoundary = () => this.repick("boundary");
+
+    private async repick(role: "spine" | "boundary"): Promise<void> {
+        if (this.pickController || this.controller?.result !== undefined) return;
+        const controller = new AsyncController();
+        this.pickController = controller;
+        try {
+            const result = await pickGuidedLoftPath(
+                this.document,
+                controller,
+                role === "spine" ? "loft.spine" : "loft.boundary",
+            );
+            if (result?.isOk) {
+                if (role === "spine") this.spine = result.value;
+                else this.boundary = result.value;
+            } else if (result) showPreviewProblem(result.error);
+        } finally {
+            this.pickController = undefined;
+            if (this.controller?.result === undefined) this.refreshPreview();
+        }
+    }
+
     @property("common.confirm")
     readonly confirm = () => {
-        this.controller?.success();
+        if (this.pickController) this.pickController.success();
+        else if (!this.guided || this.valid) this.controller?.success();
     };
 
     protected override async executeAsync(): Promise<void> {
@@ -89,11 +128,15 @@ export class LoftEditCommand extends CancelableCommand {
         this.setProperty("solid", feature.solid !== false);
         this.setProperty("ruled", feature.ruled === true);
         this.setProperty("continuity", feature.continuity ?? "c2");
+        this.setProperty("guided", feature.guided !== undefined);
+        this.spine = feature.guided?.spine;
+        this.boundary = feature.guided?.boundary;
         this.feature = feature;
         this.preview = new FeatureChainPreview(body, index);
 
         const controller = new AsyncController();
         this.controller = controller;
+        controller.onCancelled(() => this.pickController?.cancel());
         const closeSession = openFeatureEditSession(body);
         let confirmed = false;
         try {
@@ -108,17 +151,22 @@ export class LoftEditCommand extends CancelableCommand {
             showPreviewProblem(undefined);
             closeSession();
         }
-        if (confirmed) commitFeatureEdit(body, this.edited(feature));
+        const edited = this.edited(feature);
+        if (confirmed && edited) commitFeatureEdit(body, edited);
     }
 
     /** The feature with the panel's options, absent fields for the defaults (as the creation writes them). */
-    private edited(feature: LoftFeatureData): LoftFeatureData {
-        const { solid: _solid, ruled: _ruled, continuity: _continuity, ...rest } = feature;
+    private edited(feature: LoftFeatureData): LoftFeatureData | undefined {
+        if (this.guided && (!this.spine || !this.boundary)) return undefined;
+        const { solid: _solid, ruled: _ruled, continuity: _continuity, guided: _guided, ...rest } = feature;
         return {
             ...rest,
             ...(this.solid ? {} : { solid: false }),
             ...(this.ruled ? { ruled: true } : {}),
             ...(this.ruled || this.continuity === "c2" ? {} : { continuity: this.continuity }),
+            ...(this.guided && this.spine && this.boundary
+                ? { guided: { spine: this.spine, boundary: this.boundary } }
+                : {}),
         };
     }
 
@@ -126,7 +174,14 @@ export class LoftEditCommand extends CancelableCommand {
         const body = this.body;
         if (body === undefined || this.feature === undefined || this.preview === undefined) return;
         this.clearPreview();
-        const result = this.preview.evaluate(this.edited(this.feature), false);
+        this.valid = false;
+        const edited = this.edited(this.feature);
+        if (!edited) {
+            showPreviewProblem("Select a main spine and boundary guide for the guided loft");
+            return;
+        }
+        const result = this.preview.evaluate(edited, false);
+        this.valid = result.shape !== undefined && result.error === undefined;
         showPreviewProblem(result.error);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);
         const context = this.document.visual.context;

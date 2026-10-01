@@ -31,6 +31,8 @@ export function sameTransform(left: Matrix4 | undefined, right: Matrix4 | undefi
 export interface FeatureCacheEntry {
     /** Serialized feature at evaluation time. */
     readonly json: string;
+    /** Runtime-only names read from the evaluated scope; undefined means the entire scope was read. */
+    readonly variableDependencies?: readonly string[];
     /** Input shape identity at evaluation time. */
     readonly input: IShape | undefined;
     /** Referenced node states (e.g. the sketch) at evaluation time, by node id. */

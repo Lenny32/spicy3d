@@ -40,6 +40,7 @@ import {
 } from "../sketchModel";
 import { constraintTargetEntities } from "../solverEntities";
 import { sampleSpline } from "../splineGeometry";
+import { promptControlBSpline } from "./controlBSplinePrompt";
 import { applyConstraintIcon, type BadgeSymbol, badgeSymbol, isBadgeEventTarget } from "./sketchAnnotations";
 import style from "./sketchAnnotations.module.css";
 import type { SketchEditor, SketchEntityTypeFilter } from "./sketchEditor";
@@ -425,6 +426,16 @@ export class SketchEventHandler implements IEventHandler {
     }
 
     keyDown(view: IView, event: KeyboardEvent): void {
+        if (
+            event.key === "Enter" &&
+            !this.editor.isPicking &&
+            this.selectedEntityIds.length === 1 &&
+            this.editor.solver.entity(this.selectedEntityIds[0])?.control
+        ) {
+            event.stopImmediatePropagation();
+            promptControlBSpline(this.editor, this.selectedEntityIds[0]);
+            return;
+        }
         if (event.key === "Escape") {
             this.handleEscape(view);
             return;
@@ -761,7 +772,25 @@ export class SketchEventHandler implements IEventHandler {
 }
 
 export function sketchEntityMeshes(editor: SketchEditor): ShapeMeshData[] {
-    return editor.solver.entities().map((entity) => sketchEntityMesh(editor, entity));
+    return editor.solver.entities().flatMap((entity) => {
+        const meshes = [sketchEntityMesh(editor, entity)];
+        if (entity.control) {
+            const count = entity.params.length / 2;
+            for (let i = 1; i < count + (entity.periodic ? 1 : 0); i++) {
+                const a = (i - 1) % count,
+                    b = i % count;
+                meshes.push(
+                    MeshDataUtils.createEdgeMesh(
+                        toWorld(editor.node.plane, entity.params[2 * a], entity.params[2 * a + 1]),
+                        toWorld(editor.node.plane, entity.params[2 * b], entity.params[2 * b + 1]),
+                        ENTITY_POINT_COLOR,
+                        "dash",
+                    ),
+                );
+            }
+        }
+        return meshes;
+    });
 }
 
 /** Vertex meshes at every entity point of the constraint targets — see `showEntityPoints`. */
@@ -887,6 +916,7 @@ function arcSegmentMesh(
 function curvePolyline(entity: SketchEntityData): [number, number][] {
     if (entity.type === "spline") return sampleSpline(entity.params);
     return bsplinePolyline(entity.params, {
+        control: entity.control,
         parametrization: entity.parametrization,
         periodic: entity.periodic,
     });

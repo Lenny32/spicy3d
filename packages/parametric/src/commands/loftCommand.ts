@@ -25,6 +25,7 @@ import { ParametricBodyNode } from "../parametricBodyNode";
 import { SketchNode } from "../sketch/sketchNode";
 import { SELECTED_PROFILE_STATE } from "./extrudeDragStep";
 import { showPreviewProblem } from "./featureEditPreview";
+import { pickGuidedLoftPath } from "./guidedLoftPicking";
 
 /**
  * Creates a parametric body lofted through sketch profiles: the user picks one profile per
@@ -34,6 +35,11 @@ import { showPreviewProblem } from "./featureEditPreview";
 export class LoftFeatureCommand extends CancelableCommand {
     private readonly sections: { section: LoftSection; sketch: SketchNode; face: IFace }[] = [];
     private visual: number | undefined;
+    private spine: NonNullable<LoftFeatureData["guided"]>["spine"] | undefined;
+    private boundary: NonNullable<LoftFeatureData["guided"]>["boundary"] | undefined;
+    private pickController: AsyncController | undefined;
+    private choosingGuides = false;
+    private valid = false;
 
     @property("option.command.isSolid")
     get solid() {
@@ -62,9 +68,43 @@ export class LoftFeatureCommand extends CancelableCommand {
         this.setProperty("continuity", value, () => this.displayPreview());
     }
 
+    @property("loft.guided")
+    get guided() {
+        return this.getPrivateValue("guided", false);
+    }
+    set guided(value: boolean) {
+        this.setProperty("guided", value, () => this.displayPreview());
+    }
+
+    @property("loft.pickSpine", { dependencies: [{ property: "guided", value: true }] })
+    readonly pickSpine = () => this.repick("spine");
+    @property("loft.pickBoundary", { dependencies: [{ property: "guided", value: true }] })
+    readonly pickBoundary = () => this.repick("boundary");
+
+    private async repick(role: "spine" | "boundary"): Promise<void> {
+        if (!this.choosingGuides || this.pickController || this.controller?.result !== undefined) return;
+        const controller = new AsyncController();
+        this.pickController = controller;
+        try {
+            const result = await pickGuidedLoftPath(
+                this.document,
+                controller,
+                role === "spine" ? "loft.spine" : "loft.boundary",
+            );
+            if (result?.isOk) {
+                if (role === "spine") this.spine = result.value;
+                else this.boundary = result.value;
+            } else if (result) showPreviewProblem(result.error);
+        } finally {
+            this.pickController = undefined;
+            if (this.controller?.result === undefined) this.displayPreview();
+        }
+    }
+
     @property("common.confirm")
     readonly confirm = () => {
-        this.controller?.success();
+        if (this.pickController) this.pickController.success();
+        else if (!this.choosingGuides || !this.guided || this.valid) this.controller?.success();
     };
 
     protected override async executeAsync(): Promise<void> {
@@ -91,6 +131,21 @@ export class LoftFeatureCommand extends CancelableCommand {
                 this.displayPreview();
             }
             if (this.sections.length < 2) return;
+            if (this.guided) {
+                this.choosingGuides = true;
+                const controller = new AsyncController();
+                this.controller = controller;
+                controller.onCancelled(() => this.pickController?.cancel());
+                const completion = new Promise<boolean>((resolve) => {
+                    controller.onCompleted(() => resolve(true));
+                    controller.onCancelled(() => resolve(false));
+                    controller.onFailed(() => resolve(false));
+                });
+                await this.repick("spine");
+                if (controller.result === undefined) await this.repick("boundary");
+                this.displayPreview();
+                if (!(await completion)) return;
+            }
             this.commit();
         } finally {
             showPreviewProblem(undefined);
@@ -108,11 +163,15 @@ export class LoftFeatureCommand extends CancelableCommand {
             ...(this.solid ? {} : { solid: false }),
             ...(this.ruled ? { ruled: true } : {}),
             ...(this.ruled || this.continuity === "c2" ? {} : { continuity: this.continuity }),
+            ...(this.guided && this.spine && this.boundary
+                ? { guided: { spine: this.spine, boundary: this.boundary } }
+                : {}),
         };
     }
 
     /** Adds the body and hides the section sketches it consumes, as one undo step. */
     private commit(): void {
+        if (this.guided && (!this.spine || !this.boundary || !this.valid)) return;
         const node = new ParametricBodyNode({ document: this.document, features: [this.feature()] });
         const shape = node.shape;
         if (!shape.isOk) {
@@ -129,24 +188,31 @@ export class LoftFeatureCommand extends CancelableCommand {
     /** The picked sections outlined, and the loft through them once there are two. */
     private displayPreview(): void {
         this.removePreview();
+        this.valid = false;
         // Nothing picked yet (an option set before the first pick): nothing to show.
         if (this.sections.length === 0) return;
         const meshes: ShapeMeshData[] = [];
         for (const { face } of this.sections) {
             const edges = face.mesh.edges;
             if (edges === undefined) continue;
-            edges.color = VisualConfig.selectedEdgeColor;
-            edges.lineWidth = 3;
-            meshes.push(edges);
+            const highlighted: typeof edges = {
+                ...edges,
+                color: VisualConfig.selectedEdgeColor,
+                lineWidth: 3,
+            };
+            meshes.push(highlighted);
         }
         let problem: string | undefined;
-        if (this.sections.length >= 2) {
+        if (this.guided && (!this.spine || !this.boundary)) {
+            problem = "Select a main spine and boundary guide for the guided loft";
+        } else if (this.sections.length >= 2) {
             const shape = evaluateFeature(this.feature(), {
                 document: this.document,
                 host: { id: "", worldTransform: () => Matrix4.identity() },
                 scope: this.document.variables.evaluate().scope,
             });
             if (shape.isOk) {
+                this.valid = true;
                 const faces = shape.value.mesh.faces;
                 if (faces !== undefined) meshes.push(faces);
                 shape.value.dispose();

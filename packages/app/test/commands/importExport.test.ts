@@ -5,6 +5,7 @@ import { describe, expect, rs, test } from "@rstest/core";
 import {
     CancelableCommand,
     ConstructionNode,
+    type DataExportOptions,
     getCurrentApplication,
     type INode,
     PropertyUtils,
@@ -343,6 +344,71 @@ describe("Export", () => {
         });
     });
 
+    describe("STL tessellation controls", () => {
+        test.each([
+            true,
+            false,
+        ])("passes opt-in tolerances to merged=%s exports and hides them on STEP", async (merge) => {
+            const ctx = setupExportContext();
+            const exportSpy = rs.spyOn(ctx.app.dataExchange, "export");
+            try {
+                const cmd = new Export();
+                cmd.format = ".stl binary";
+                cmd.merge = merge;
+                cmd.customTessellation = true;
+                cmd.linearTolerance = 0.03;
+                cmd.angularTolerance = 4;
+                (cmd as any)._application = ctx.app;
+                (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
+                await confirmExport(cmd);
+                expect(ctx.permanentCallback).not.toBeUndefined();
+                await ctx.permanentCallback!();
+                expect(exportSpy).toHaveBeenCalledTimes(merge ? 1 : 2);
+                for (const call of exportSpy.mock.calls) {
+                    expect(call[0]).toBe(".stl binary");
+                    expect(call[2]).toEqual({
+                        lengthUnit: "mm",
+                        stl: { linearTolerance: 0.03, angularTolerance: 4 },
+                    });
+                }
+                cmd.format = ".step";
+                expect(cmd.isStl).toBe(false);
+                expect((cmd as any).exportOptions).toEqual({ lengthUnit: "mm" });
+                expect(PropertyUtils.getProperty(Export.prototype, "linearTolerance")?.quantity).toBe(
+                    "length",
+                );
+            } finally {
+                exportSpy.mockRestore();
+                ctx.restore();
+            }
+        });
+
+        test("refuses invalid custom settings before scheduling export", async () => {
+            const ctx = setupExportContext();
+            const exportSpy = rs.spyOn(ctx.app.dataExchange, "export");
+            const pubSpy = rs.spyOn(PubSub.default, "pub");
+            try {
+                const cmd = new Export();
+                cmd.format = ".stl";
+                cmd.customTessellation = true;
+                cmd.angularTolerance = 0;
+                (cmd as any)._application = ctx.app;
+                await (cmd as any).executeAsync();
+                expect(ctx.permanentCallback).toBeUndefined();
+                expect(exportSpy).not.toHaveBeenCalled();
+                expect(pubSpy).toHaveBeenCalledWith(
+                    "showToast",
+                    "error.default:{0}",
+                    expect.stringContaining("angularTolerance"),
+                );
+            } finally {
+                pubSpy.mockRestore();
+                exportSpy.mockRestore();
+                ctx.restore();
+            }
+        });
+    });
+
     describe("merge option", () => {
         test("merge should default to true", () => {
             const cmd = new Export();
@@ -478,7 +544,7 @@ function setupExportContext() {
         app: {
             activeView: { document: createMockDocument() },
             dataExchange: {
-                export: (format: string, nodes: { name: string }[], options?: { lengthUnit?: unknown }) => {
+                export: (format: string, nodes: { name: string }[], options?: DataExportOptions) => {
                     ctx.exportedOptions.push({ format, lengthUnit: options?.lengthUnit });
                     ctx.exportedNames.push(nodes.map((n) => n.name).join(","));
                     return Promise.resolve([new ArrayBuffer(8)]);

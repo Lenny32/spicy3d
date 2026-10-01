@@ -3,15 +3,22 @@
 
 import {
     ANGLE_UNITS,
+    AutosaveHolds,
+    type BoundedShapeRequest,
+    DocumentMutations,
+    DocumentRebuilds,
     EditableShapeNode,
     evaluateExpression,
     I18n,
     type IDocument,
+    type IDocumentMutationScope,
     type IEdge,
     type IFace,
     type INode,
     type IShape,
+    type IShapeFactory,
     type IWire,
+    KernelRecovery,
     LENGTH_UNITS,
     Line,
     Matrix4,
@@ -35,7 +42,8 @@ import {
     type ShapeParamUnit,
     shapeCapabilities,
 } from "./capabilities.generated";
-import { throwIfCancelled, timeOp } from "./opBudget";
+import { throwIfCancelled, timeOpAsync } from "./opBudget";
+import { holdDocumentReadSnapshot } from "./readTools";
 import { buildTransformMatrix } from "./transformMatrix";
 
 interface Op {
@@ -87,6 +95,8 @@ interface LocalRef {
     args?: unknown[];
     /** Index into a list-valued member (sub-shape refs like `q1#2`). */
     index?: number;
+    /** A whole query list occupies one registry slot; its indexed refs resolve lazily. */
+    listCount?: number;
 }
 
 /**
@@ -95,7 +105,39 @@ interface LocalRef {
  * against the live scene, so edits to a source node are reflected automatically.
  */
 const refsByDocument = new WeakMap<IDocument, Map<string, LocalRef>>();
+/** Stable scene-backed refs re-derive; standalone native geometry is explicitly invalidated. */
+export function recoverDocumentRefs(document: IDocument): void {
+    const refs = refsByDocument.get(document);
+    if (!refs) return;
+    const anchored = (entry: LocalRef, visited = new Set<LocalRef>()): boolean => {
+        if (visited.has(entry)) return false;
+        visited.add(entry);
+        if (entry.parent) return entry.name !== undefined && anchored(entry.parent, visited);
+        return (
+            entry.nodeId !== undefined &&
+            document.modelManager.findNode((node) => node.id === entry.nodeId) instanceof ShapeNode
+        );
+    };
+    for (const [id, entry] of [...refs]) {
+        if (!anchored(entry)) {
+            refs.delete(id);
+            continue;
+        }
+        try {
+            refreshEntry(id, entry, document, refs, new Set(), new Set());
+        } catch {
+            refs.delete(id);
+        }
+    }
+}
+KernelRecovery.current.addRecovered((documents) => {
+    for (const document of documents) recoverDocumentRefs(document);
+});
+
 const MAX_REFS = 256;
+// Creation extras cannot be re-derived, so bound their retained snapshot geometry too.
+const MAX_SNAPSHOT_REFS = 4096;
+const programRefIds = new WeakMap<Map<string, LocalRef>, Set<string>>();
 
 function sessionRefs(doc: IDocument): Map<string, LocalRef> {
     let refs = refsByDocument.get(doc);
@@ -109,9 +151,15 @@ function sessionRefs(doc: IDocument): Map<string, LocalRef> {
 function setRef(refs: Map<string, LocalRef>, id: string, entry: LocalRef): void {
     refs.delete(id);
     refs.set(id, entry);
+    const protectedIds = programRefIds.get(refs);
+    protectedIds?.add(id);
     while (refs.size > MAX_REFS) {
-        const oldest = refs.keys().next().value;
-        if (oldest === undefined) break;
+        const oldest = [...refs.keys()].find((key) => !protectedIds?.has(key));
+        if (oldest === undefined) {
+            throw new Error(
+                `A program can retain at most ${MAX_REFS} refs or list queries; split it across calls`,
+            );
+        }
         refs.delete(oldest);
     }
 }
@@ -131,6 +179,12 @@ function sessionNullRefs(doc: IDocument): Set<string> {
 /** Register a real ref; the id is no longer considered null-valued. */
 function registerRef(doc: IDocument, refs: Map<string, LocalRef>, id: string, entry: LocalRef): void {
     sessionNullRefs(doc).delete(id);
+    if (entry.listCount !== undefined) {
+        // A re-run replaces the family, including individually mutated members.
+        for (const key of refs.keys()) {
+            if (key === id || (key.startsWith(id) && /^\d+$/.test(key.slice(id.length)))) refs.delete(key);
+        }
+    }
     setRef(refs, id, entry);
 }
 
@@ -161,7 +215,11 @@ function bucketRefIdsByPrefix(refs: Map<string, LocalRef>): {
 } {
     const groups = new Map<string, number[]>();
     const tokens: string[] = [];
-    for (const id of refs.keys()) {
+    for (const [id, entry] of refs) {
+        if (entry?.listCount !== undefined) {
+            if (entry.listCount > 0) tokens.push(`${id}0..${id}${entry.listCount - 1}`);
+            continue;
+        }
         const m = /^(.*?)(\d+)$/.exec(id);
         if (!m) {
             tokens.push(id);
@@ -270,7 +328,8 @@ function resolveRefEntry(
     consumed: Set<string>,
 ): LocalRef {
     const id = String(v);
-    const hit = localRefs.get(id);
+    const direct = localRefs.get(id);
+    const hit = direct?.listCount === undefined ? (direct ?? indexedRef(id, localRefs)) : undefined;
     if (hit) return refreshEntry(id, hit, doc, localRefs, consumed, new Set());
     if (sessionNullRefs(doc).has(id)) {
         throw new Error(I18n.translate("ai.error.nullRef", id));
@@ -281,6 +340,24 @@ function resolveRefEntry(
         return { nodeId: node.id, kind: "shape", value: node.shape.value };
     }
     throw new Error(I18n.translate("ai.error.unknownRef", id, summarizeRefIds(localRefs)));
+}
+
+/** Resolve an indexed list member without retaining one geometry wrapper per sub-shape. */
+function indexedRef(id: string, refs: Map<string, LocalRef>): LocalRef | undefined {
+    const match = /^(.*#)(0|[1-9]\d*)$/.exec(id);
+    if (!match) return undefined;
+    const list = refs.get(match[1]);
+    const index = Number(match[2]);
+    if (list?.listCount === undefined || index >= list.listCount) return undefined;
+    return {
+        nodeId: list.nodeId,
+        kind: "shape",
+        value: list.name === undefined ? (list.value as unknown[])[index] : undefined,
+        parent: list.parent,
+        name: list.name,
+        args: list.args,
+        index: list.name === undefined ? undefined : index,
+    };
 }
 
 /**
@@ -864,7 +941,7 @@ function recordGeometryRef(
     results[opId] = { ref: opId, kind };
 }
 
-/** Sub-shape lists register one ref per element (`q1#0`, `q1#1`, ...) for later ops. */
+/** Sub-shape lists retain one derivation; each indexed ref (`q1#0`, ...) resolves on demand. */
 function recordSubShapeRefs(
     cap: QueryCapability,
     opId: string,
@@ -875,25 +952,37 @@ function recordSubShapeRefs(
     localRefs: Map<string, LocalRef>,
     results: Record<string, unknown>,
 ): void {
-    const refs = (raw as IShape[]).map((shape, i) => {
-        const ref = `${opId}#${i}`;
-        registerRef(doc, localRefs, ref, {
-            nodeId: entry.nodeId,
-            kind: "shape",
-            value: shape,
-            parent: entry,
-            name: cap.name,
-            args,
-            index: i,
-        });
-        return ref;
+    const count = (raw as IShape[]).length;
+    registerRef(doc, localRefs, `${opId}#`, {
+        nodeId: entry.nodeId,
+        kind: "shape",
+        value: undefined,
+        parent: entry,
+        name: cap.name,
+        args,
+        listCount: count,
     });
+    const refs = Array.from({ length: count }, (_, i) => `${opId}#${i}`);
     results[opId] = { count: refs.length, refs, kind: "shape" };
 }
 
-async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
+export type ProgramProgress = { completed: number; total: number; method?: string };
+
+async function runProgram(
+    ops: Op[],
+    signal?: AbortSignal,
+    progress?: (value: ProgramProgress) => void,
+): Promise<string> {
     const doc = activeDocument();
     const factory = globalThis.app.shapeProvider.factory;
+    const assertIdle = () => {
+        if (globalThis.app.executingCommand || Transaction.isActive(doc))
+            throw new Error("Finish the active command or transaction before running a modeling program");
+    };
+    assertIdle();
+    // An earlier legitimate parametric job must finish before external writes are locked out.
+    await DocumentRebuilds.settled(doc);
+    assertIdle();
     const localRefs = sessionRefs(doc);
     const created: CreatedNode[] = [];
     const removed: RemovedNode[] = [];
@@ -910,17 +999,50 @@ async function runProgram(ops: Op[], signal?: AbortSignal): Promise<string> {
     // would dangle (pointing at rolled-back nodes), and refs deleted mid-program belong to
     // nodes the rollback restored — so reset the registries to their pre-program state.
     const nullRefs = sessionNullRefs(doc);
-    const refSnapshot = new Map(localRefs);
+    const refSnapshot = snapshotRefs(localRefs);
     const nullSnapshot = new Set(nullRefs);
+    const releaseSnapshot = holdDocumentReadSnapshot(doc);
+    let owner: IDocumentMutationScope;
     try {
-        Transaction.execute(doc, "AI program", () => {
-            runOps(ops, doc, factory, localRefs, { created, removed, results, resolved }, variables, signal);
-            doc.selection.clearSelection();
-            doc.visual.update();
-        });
+        owner = DocumentMutations.hold(doc);
+    } catch (error) {
+        releaseSnapshot();
+        throw error;
+    }
+    const releaseAutosave = AutosaveHolds.hold("AI program");
+    programRefIds.set(localRefs, new Set());
+    try {
+        await Transaction.executeAsync(
+            doc,
+            "AI program",
+            async () => {
+                await runOps(
+                    ops,
+                    doc,
+                    factory,
+                    localRefs,
+                    { created, removed, results, resolved },
+                    variables,
+                    signal,
+                    owner,
+                    progress,
+                );
+                throwIfCancelled(signal, ops.length, "commit");
+                owner.run(() => {
+                    doc.selection.clearSelection();
+                    doc.visual.update();
+                });
+            },
+            owner,
+        );
     } catch (e) {
         restoreRefRegistries(localRefs, nullRefs, refSnapshot, nullSnapshot);
         throw e;
+    } finally {
+        programRefIds.delete(localRefs);
+        releaseSnapshot();
+        owner.release();
+        releaseAutosave();
     }
 
     return JSON.stringify(
@@ -957,7 +1079,7 @@ interface ProgramOutput {
  * call stops before the next op (the caller's transaction rolls everything back); an op that
  * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
  */
-function runOps(
+async function runOps(
     ops: Op[],
     doc: IDocument,
     factory: unknown,
@@ -965,18 +1087,25 @@ function runOps(
     output: ProgramOutput,
     variables: ProgramVariables,
     signal: AbortSignal | undefined,
-): void {
+    owner: IDocumentMutationScope,
+    progress?: (value: ProgramProgress) => void,
+): Promise<void> {
     const { created, removed, results } = output;
     for (const [index, op] of ops.entries()) {
         throwIfCancelled(signal, index, String(op.method));
+        progress?.({ completed: index, total: ops.length, method: String(op.method) });
         const numeric: NumericArgs = { ...variables, resolved: {} };
         try {
-            timeOp(String(op.method), () =>
-                runOp(op, doc, factory, localRefs, created, removed, results, numeric),
+            await timeOpAsync(
+                String(op.method),
+                () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner, signal),
+                (factory as IShapeFactory).boundedOperations !== undefined &&
+                    boundedRequest(op.method, []) !== undefined,
             );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
             }
+            progress?.({ completed: index + 1, total: ops.length });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             const where = op.target !== undefined ? `target "${String(op.target)}"` : `id "${op.id ?? ""}"`;
@@ -985,24 +1114,30 @@ function runOps(
     }
 }
 
+/** Preserve entries and their shared derivation graph without retaining mutable registry objects. */
+function snapshotRefs(refs: Map<string, LocalRef>): Map<string, LocalRef> {
+    const copies = new Map<LocalRef, LocalRef>();
+    const copy = (entry: LocalRef): LocalRef => {
+        const previous = copies.get(entry);
+        if (previous) return previous;
+        const value = { ...entry };
+        copies.set(entry, value);
+        if (entry.parent) value.parent = copy(entry.parent);
+        return value;
+    };
+    return new Map([...refs].map(([key, entry]) => [key, copy(entry)]));
+}
+
 function restoreRefRegistries(
     localRefs: Map<string, LocalRef>,
     nullRefs: Set<string>,
     refSnapshot: Map<string, LocalRef>,
     nullSnapshot: Set<string>,
 ): void {
-    for (const key of [...localRefs.keys()]) {
-        if (!refSnapshot.has(key)) localRefs.delete(key);
-    }
-    for (const [key, entry] of refSnapshot) {
-        if (!localRefs.has(key)) localRefs.set(key, entry);
-    }
-    for (const key of [...nullRefs]) {
-        if (!nullSnapshot.has(key)) nullRefs.delete(key);
-    }
-    for (const key of nullSnapshot) {
-        if (!localRefs.has(key)) nullRefs.add(key);
-    }
+    localRefs.clear();
+    for (const [key, entry] of refSnapshot) localRefs.set(key, entry);
+    nullRefs.clear();
+    for (const key of nullSnapshot) nullRefs.add(key);
 }
 
 /**
@@ -1079,7 +1214,7 @@ function runClone(
     results[op.id] = { ref: op.id, kind: "shape", nodeId: node.id };
 }
 
-function runOp(
+async function runOp(
     op: Op,
     doc: IDocument,
     factory: unknown,
@@ -1088,17 +1223,19 @@ function runOp(
     removed: RemovedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
-): void {
+    owner: IDocumentMutationScope,
+    signal?: AbortSignal,
+): Promise<void> {
     if (op.method === "transformedMul") {
-        runTransformedMul(op, doc, localRefs, created);
+        owner.run(() => runTransformedMul(op, doc, localRefs, created));
         return;
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
     if (!cap) {
-        runQueryOp(op, doc, localRefs, created, results, numeric);
+        owner.run(() => runQueryOp(op, doc, localRefs, created, results, numeric));
         return;
     }
-    runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric);
+    await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner, signal);
 }
 
 function runQueryOp(
@@ -1156,7 +1293,7 @@ function closeProfileParam(cap: ShapeCapability, op: Op, params: unknown[], fact
     if (face.isOk) params[index] = face.value;
 }
 
-function runShapeOp(
+async function runShapeOp(
     cap: ShapeCapability,
     op: Op,
     doc: IDocument,
@@ -1166,23 +1303,88 @@ function runShapeOp(
     removed: RemovedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
-): void {
+    owner: IDocumentMutationScope,
+    signal?: AbortSignal,
+): Promise<void> {
     const consumed = new Set<string>();
-    const params = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
-    closeProfileParam(cap, op, params, factory);
-    const raw = (factory as unknown as Record<string, (...a: unknown[]) => unknown>)[op.method](...params);
+    const params = owner.run(() => {
+        const values = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
+        closeProfileParam(cap, op, values, factory);
+        return values;
+    });
+    const bounded = (factory as IShapeFactory).boundedOperations;
+    const request = boundedRequest(op.method, params);
+    let raw: unknown;
+    if (bounded && request) {
+        const pending = owner.run(() => bounded.shapeOperation(request, signal));
+        try {
+            await pending.ready;
+            raw = owner.run(() => pending.take());
+        } finally {
+            pending.cancel();
+        }
+    } else {
+        raw = owner.run(() =>
+            (factory as unknown as Record<string, (...a: unknown[]) => unknown>)[op.method](...params),
+        );
+    }
     const result = raw instanceof Result ? raw : Result.ok(raw);
     if (!result.isOk) throw new Error(result.error);
 
-    consumeEditInputs(op.method, doc, localRefs, consumed, removed);
-    if (cap.returnKind === "shapeWithData") {
-        // { shape, ...extras } — node from .shape; array extras (e.g. newEdges) become refs.
-        const { shape, ...extras } = result.value as { shape: IShape } & Record<string, unknown>;
-        addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, Result.ok(shape));
-        recordExtras(op, doc, localRefs, extras, results);
-        return;
+    owner.run(() => {
+        consumeEditInputs(op.method, doc, localRefs, consumed, removed);
+        if (cap.returnKind === "shapeWithData") {
+            // { shape, ...extras } — node from .shape; array extras (e.g. newEdges) become refs.
+            const { shape, ...extras } = result.value as { shape: IShape } & Record<string, unknown>;
+            addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, Result.ok(shape));
+            recordExtras(op, doc, localRefs, extras, results);
+            return;
+        }
+        addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, result);
+    });
+}
+
+function boundedRequest(method: string, args: unknown[]): BoundedShapeRequest | undefined {
+    switch (method) {
+        case "booleanFuse":
+        case "booleanCut":
+        case "booleanCommon":
+            return {
+                method,
+                left: args[0] as IShape[],
+                right: args[1] as IShape[],
+                simplifyShape: method === "booleanFuse" ? (args[2] as boolean) : undefined,
+            };
+        case "fillet":
+        case "chamfer":
+            return { method, shape: args[0] as IShape, edges: args[1] as number[], value: args[2] as number };
+        case "loft":
+            return {
+                method,
+                sections: args[0] as IShape[],
+                isSolid: args[1] as boolean,
+                isRuled: args[2] as boolean,
+                continuity: args[3] as Extract<BoundedShapeRequest, { method: "loft" }>["continuity"],
+            };
+        case "makeThickSolidBySimple":
+            return { method, shape: args[0] as IShape, thickness: args[1] as number };
+        case "makeThickSolidByJoin":
+            return {
+                method,
+                shape: args[0] as IShape,
+                closingFaces: args[1] as IShape[],
+                thickness: args[2] as number,
+                joinType: args[3] as Extract<
+                    BoundedShapeRequest,
+                    { method: "makeThickSolidByJoin" }
+                >["joinType"],
+                mode: (args[4] ?? "skin") as Extract<
+                    BoundedShapeRequest,
+                    { method: "makeThickSolidByJoin" }
+                >["mode"],
+                intersection: (args[5] ?? false) as boolean,
+            };
     }
-    addCreatedNode(op, doc, localRefs, created, op.name ?? cap.method, result);
 }
 
 /**
@@ -1202,11 +1404,17 @@ function recordExtras(
     if (!parent) return;
     for (const [key, value] of Object.entries(extras)) {
         if (!Array.isArray(value)) continue;
-        const refs = value.map((item, i) => {
-            const ref = `${op.id}#${key}#${i}`;
-            registerRef(doc, localRefs, ref, { nodeId: parent.nodeId, kind: "shape", value: item, parent });
-            return ref;
+        if (value.length > MAX_SNAPSHOT_REFS) {
+            throw new Error(`Extra output "${key}" exceeds the ${MAX_SNAPSHOT_REFS} snapshot-ref limit`);
+        }
+        registerRef(doc, localRefs, `${op.id}#${key}#`, {
+            nodeId: parent.nodeId,
+            kind: "shape",
+            value,
+            parent,
+            listCount: value.length,
         });
+        const refs = value.map((_, i) => `${op.id}#${key}#${i}`);
         results[`${op.id}.${key}`] = { count: refs.length, refs, kind: "shape" };
     }
 }
@@ -1242,11 +1450,11 @@ function buildModelingTool(): Tool {
         description:
             'Run a sequence of modeling and query operations in one call — load_skill("modeling-api") first for the creation-method signatures and the argument encoding. The single argument is an object { "ops": [...] } where ops run in order. Creation ops have "method" (a modeling capability), "args", optional "id" (referenced by later ops) and optional "name"; they return created nodes. Query ops have "method" (a query like "face.area" or "shape.volume"), "target" (a ref) and "id"; their values come back in "results" (shape.clone also adds its copy as a new node, listed in "created", so edit ops on the clone never consume the source). The response is { created, removed, results }: "created" lists new nodes, "removed" lists input nodes consumed by edit-style ops (booleanCut/booleanFuse/fillet/...) — removed nodes no longer exist, do not hide, delete or reference them. Use load_skill("shape-query") for the full query reference. A ref arg takes an op id, a sub-shape/curve/surface ref, or an existing node id; refs stay valid across run_program calls on the same document and re-resolve against the live scene, so an edited node is seen through its current shape (a ref whose source node was deleted fails with a clear error — re-run the query that produced it). Numeric args take a number or an expression string over the document variables ("wall_t / 2"; lengths in mm and angles in degrees are unit-checked), evaluated ONCE when the op runs — the nodes are not linked to the variables, so use run_parametric for dimensions that must follow them; the values expressions resolved to come back in "resolved" (per op id).',
         parameters: runProgramParameters(),
-        handler: handleRunProgram,
+        handler: (args, signal) => handleRunProgram(args, signal),
     };
 }
 
-function runProgramParameters(): JsonSchema {
+export function runProgramParameters(): JsonSchema {
     return {
         type: "object",
         properties: {
@@ -1299,7 +1507,11 @@ function allOpMethods(): string[] {
     ];
 }
 
-function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+export function handleRunProgram(
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    progress?: (value: ProgramProgress) => void,
+): Promise<string> {
     const ops = Array.isArray(args) ? args : (args as { ops?: unknown }).ops;
     if (!Array.isArray(ops)) {
         return Promise.resolve(
@@ -1308,7 +1520,7 @@ function handleRunProgram(args: Record<string, unknown>, signal?: AbortSignal): 
             }),
         );
     }
-    return runProgram(ops as Op[], signal);
+    return runProgram(ops as Op[], signal, progress);
 }
 
 export function buildCapabilityTools(): Tool[] {

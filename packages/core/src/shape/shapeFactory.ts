@@ -4,6 +4,7 @@
 import type { Result } from "../foundation";
 import type { Line, Plane, XYZ, XYZLike } from "../math";
 import type { Continuity, ICurve } from "./curve";
+import type { FilletRadiusSample } from "./filletRadiusLaw";
 import type {
     ICompound,
     IEdge,
@@ -16,6 +17,12 @@ import type {
     JoinType,
     OffsetMode,
 } from "./shape";
+
+/** Ending boundary of an exact from-face prism; runtime options, never a saved payload. */
+export type PrismFromEnd =
+    | { kind: "distance"; depth: number }
+    | { kind: "toObject"; face: IFace; offset?: number }
+    | { kind: "throughAll"; bounds: IShape[]; flush?: boolean };
 
 export interface TrackedShape {
     shape: IShape;
@@ -52,12 +59,25 @@ export interface TrackedShape {
      * channel — callers then fall back to the history-less-face heuristic.
      */
     capFaces?: number[];
+    /** Runtime-only automatic next-face selection, relative to the supplied candidate shapes. */
+    nextTarget?: { candidateIndex: number; faceIndex: number };
+    /** Runtime pipe-shell history. Inputs enumerate section then path, separately by topology type. */
+    pipeHistory?: {
+        faceEdges: number[];
+        faceVertices: number[];
+        edgeVertices: number[];
+        startEdges: number[];
+        endEdges: number[];
+        startFaces: number[];
+    };
 }
 
 export interface IShapeFactory {
     readonly kernelName: string;
     /** Optional hybrid backend. Existing synchronous methods always remain available. */
     readonly asyncOperations?: IAsyncShapeFactory;
+    /** Runtime-only strict worker path for potentially long direct modeling operations. */
+    readonly boundedOperations?: IBoundedShapeFactory;
     edge(curve: ICurve): IEdge;
     face(wire: IWire[]): Result<IFace>;
     faceFromSurface(wires: IWire[], sourceFace: IFace): Result<IFace>;
@@ -137,6 +157,15 @@ export interface IShapeFactory {
     pushPull(shape: IShape, face: IShape, vec: XYZ): Result<IShape>;
     fuse(bottom: IShape, top: IShape): Result<IShape>;
     sweep(profile: IShape[], path: IWire, isRoundCorner: boolean): Result<IShape>;
+    /** A single section swept along a path, retaining both profile and path ancestry. */
+    sweepTracked?(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape>;
+    /** A solid swept with a real support-normal frame; every path edge must lie on the trimmed face. */
+    faceSweepTracked?(
+        section: IWire,
+        path: IWire,
+        support: IFace,
+        roundCorner: boolean,
+    ): Result<TrackedShape>;
     /** @unit angle angle */
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape>;
     booleanCommon(shape1: IShape[], shape2: IShape[]): Result<IShape>;
@@ -144,6 +173,8 @@ export interface IShapeFactory {
     booleanFuse(shape1: IShape[], shape2: IShape[], simplifyShape: boolean): Result<IShape>;
     sewing(shapes: IShape[]): Result<IShape>;
     combine(shapes: IShape[]): Result<ICompound>;
+    /** Deep copy with explicit native ModifiedShape face/edge ancestry. */
+    copyTracked?(shape: IShape): Result<TrackedShape>;
     /** @unit length thickness */
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape>;
     /**
@@ -162,9 +193,44 @@ export interface IShapeFactory {
     ): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
+    /** OCCT smooth radius interpolation per selected edge; normalized arc length, natural curve direction.
+     * Tangent edges propagate automatically. Select one edge per tangent contour; closed contours require equal endpoint radii.
+     * Optional for older kernels: callers must report unavailable support rather than substitute a constant radius.
+     */
+    filletVariableRadius?(shape: IShape, edges: number[], law: readonly FilletRadiusSample[]): Result<IShape>;
+    filletVariableRadiusTracked?(
+        shape: IShape,
+        edges: number[],
+        law: readonly FilletRadiusSample[],
+    ): Result<TrackedShape>;
+    /**
+     * Three independent arc-length setbacks at one trihedral corner, constant radius only.
+     * Expensive synchronous entry for deliberate kernel evaluation; live features use the
+     * strict cancelable worker capability and never fall back to this main-thread method.
+     * Distances are supplied in millimetres, one per selected edge.
+     * @unit length radius
+     */
+    filletCornerSetbackTracked?(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { synchronousProof?: true },
+    ): Result<TrackedCornerResult>;
     /** @unit length distance */
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape>;
     prismTracked?(shape: IShape, vec: XYZ): Result<TrackedShape>;
+    /**
+     * Exact curved starting cap, with profile-relative history; offset is along direction.
+     * @unit length offset
+     */
+    prismFromTracked?(
+        profile: IShape,
+        direction: XYZ,
+        fromFace: IFace,
+        offset: number,
+        end: PrismFromEnd,
+    ): Result<TrackedShape>;
     /**
      * Tool prism of the planar `profile` face(s) along `direction` (only its sense counts),
      * ending on `untilFace` moved by `offset` along the direction — any surface: planar,
@@ -184,6 +250,17 @@ export interface IShapeFactory {
         direction: XYZ,
         untilFace: IFace,
         offset?: number,
+    ): Result<TrackedShape>;
+    /**
+     * Exact nearest complete candidate cap; never reverses direction or extends a trimmed target.
+     * @unit length offset
+     */
+    prismNextTracked?(
+        profile: IShape,
+        direction: XYZ,
+        candidates: IShape[],
+        offset?: number,
+        start?: { face: IFace; offset: number },
     ): Result<TrackedShape>;
     /**
      * Tool prism of `profile` along `direction` through everything in `bounds`: it ends on
@@ -221,6 +298,16 @@ export interface IShapeFactory {
      * chains are an error naming the section. Open chains are valid sections.
      */
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
+    /**
+     * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
+     * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
+     */
+    loftGuidedTracked?(
+        sections: IWire[],
+        spine: IWire,
+        boundary: IWire,
+        solid: boolean,
+    ): Result<TrackedShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(
         shape: IShape,
@@ -262,6 +349,20 @@ export interface AsyncTrackedBoolean {
     readonly inputs: IShape[];
 }
 
+/** Kernel construction roles and measured quality, never stored in a document. */
+export interface TrackedCornerResult extends TrackedShape {
+    cornerFaces: number[];
+    g0Error: number;
+    g1Error: number;
+    fitDistanceError: number;
+    fitAngleError: number;
+}
+
+export interface AsyncTrackedCorner {
+    readonly result: TrackedCornerResult;
+    readonly inputs: IShape[];
+}
+
 export interface IAsyncShapeFactory {
     readonly available?: boolean;
     /** Persistent native failure. Synchronous compatibility paths must not bypass this quarantine. */
@@ -273,4 +374,37 @@ export interface IAsyncShapeFactory {
         tools: IShape[],
         options?: { mesh?: boolean },
     ): IAsyncShapeOperation<AsyncTrackedBoolean> | undefined;
+    /** Strict worker path; absent/unavailable must produce a useful feature error, no sync fallback. */
+    cornerSetbackTracked?(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { mesh?: boolean },
+    ): IAsyncShapeOperation<AsyncTrackedCorner> | undefined;
+}
+
+/** Whitelisted factory operations. Native handles never leave their owning realm. */
+export type BoundedShapeRequest =
+    | {
+          method: "booleanFuse" | "booleanCut" | "booleanCommon";
+          left: IShape[];
+          right: IShape[];
+          simplifyShape?: boolean;
+      }
+    | { method: "fillet" | "chamfer"; shape: IShape; edges: number[]; value: number }
+    | { method: "loft"; sections: IShape[]; isSolid: boolean; isRuled: boolean; continuity: Continuity }
+    | { method: "makeThickSolidBySimple"; shape: IShape; thickness: number }
+    | {
+          method: "makeThickSolidByJoin";
+          shape: IShape;
+          closingFaces: IShape[];
+          thickness: number;
+          joinType: JoinType;
+          mode: OffsetMode;
+          intersection: boolean;
+      };
+
+export interface IBoundedShapeFactory {
+    shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape>;
 }

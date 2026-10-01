@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type ICameraController, Plane, Result, XYZ } from "@spicy3d/core";
+import { type ICameraController, Plane, Result, XY, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
@@ -370,4 +370,44 @@ describe("arc entity hit testing", () => {
             restoreFactory();
         }
     });
+});
+
+test("control curve picking follows rational curve while pointer drag edits the pole independently", () => {
+    const { doc, view, restoreFactory } = setup();
+    view.worldToScreen = (point) => new XY({ x: point.x + 400, y: 300 - point.y });
+    (shapeFactory as any).supportsBSplineEdges = true;
+    (shapeFactory as any).bspline = () => Result.ok({ isEqual: () => false });
+    try {
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [
+                    {
+                        id: 1,
+                        type: "bspline",
+                        params: [20, 20, 40, 60, 60, 20],
+                        control: { degree: 2, knots: [0, 1], multiplicities: [3, 3] },
+                    },
+                ],
+                constraints: [],
+            },
+        });
+        const editor = SketchEditor.enter(node);
+        const handler = doc.visual.eventHandler as SketchEventHandler;
+        expect(handler.hitTestEntity(view, pointerEvent(440, 260), "bspline")).toBe(1);
+        expect(handler.hitTestEntity(view, pointerEvent(440, 240), "bspline")).toBeUndefined();
+        const count = doc.history.undoCount();
+        handler.pointerDown(view, pointerEvent(440, 240));
+        handler.pointerMove(view, pointerEvent(445, 235));
+        handler.pointerUp(view, pointerEvent(445, 235));
+        expect(node.data.entities[0].params).toEqual([20, 20, 45, 65, 60, 20]);
+        expect(node.data.entities[0].control?.degree).toBe(2);
+        expect(doc.history.undoCount()).toBe(count + 1);
+        doc.history.undo();
+        expect(editor.solver.entity(1)?.params).toEqual([20, 20, 40, 60, 60, 20]);
+    } finally {
+        SketchEditor.exit();
+        restoreFactory();
+    }
 });

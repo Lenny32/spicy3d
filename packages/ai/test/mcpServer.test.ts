@@ -4,19 +4,25 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import type { Tool } from "../src/llm/types";
 import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/server";
 import { SKILLS } from "../src/skills";
 import { buildAskUserTool } from "../src/tools/askUser";
 import { imageByteBudget } from "../src/tools/imageEncoding";
 import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
+import { buildReadTools } from "../src/tools/readTools";
 
 function tool(name: string, handler: Tool["handler"]): Tool {
     return { name, description: `${name} tool.`, parameters: { type: "object", properties: {} }, handler };
 }
 
-async function connect(tools: Tool[], capabilities: ConstructorParameters<typeof Client>[1] = {}) {
-    const server = createMcpServer({ tools, instructions: "be careful" });
+async function connect(
+    tools: Tool[],
+    capabilities: ConstructorParameters<typeof Client>[1] = {},
+    queue?: SerialQueue,
+) {
+    const server = createMcpServer({ tools, instructions: "be careful", queue });
     const client = new Client({ name: "test", version: "1" }, capabilities);
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -255,4 +261,52 @@ describe("slow-op warnings", () => {
 
         expect((result.content as { text: string }[]).map((c) => c.text)).toEqual(["{}"]);
     });
+});
+
+test("metadata reads wait for a yielded mutation when no committed snapshot is held", async () => {
+    const doc = createMockDocument({ name: "before" });
+    const app = createMockApplication();
+    app.activeView = { document: doc } as typeof app.activeView;
+    rs.stubGlobal("app", app);
+    let release!: () => void;
+    let start!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+        start = resolve;
+    });
+    const read = buildReadTools().find((entry) => entry.name === "get_document_state")!;
+    const called = rs.spyOn(read, "handler");
+    const queue = new SerialQueue();
+    const queued = rs.spyOn(queue, "run");
+    const mutation = tool("mutation", async () => {
+        doc.name = "partial";
+        start();
+        await gate;
+        doc.name = "committed";
+        return "{}";
+    });
+    const { client } = await connect([mutation, read], {}, queue);
+    const changing = client.callTool({ name: "mutation", arguments: {} });
+    let reading: ReturnType<typeof client.callTool> | undefined;
+    try {
+        await started;
+        reading = client.callTool({ name: "get_document_state", arguments: {} });
+        // Prove the server received and queued the read before checking that it is held.
+        await rs.waitFor(() => expect(queued).toHaveBeenCalledTimes(2));
+        expect(called).not.toHaveBeenCalled();
+        release();
+        const result = await reading;
+        expect(JSON.parse((result.content as { text: string }[])[0].text).name).toBe("committed");
+        await changing;
+    } finally {
+        release();
+        await changing;
+        await reading;
+        await client.close();
+        called.mockRestore();
+        queued.mockRestore();
+        rs.unstubAllGlobals();
+    }
 });

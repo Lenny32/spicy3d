@@ -6,7 +6,9 @@ import type { IDocument } from "./document";
 /** Runtime-only geometry work. Synchronous consumers use flush; load/save await settled. */
 export interface IDocumentRebuild {
     readonly settled: Promise<void>;
-    /** Must finish synchronously: an RPC-backed job cancels/takes over locally, never waits or spins. */
+    /** Last yielded feature index, when the implementation knows it; never a fabricated percentage. */
+    readonly featureIndex?: number;
+    /** Finish synchronously when a local fallback exists; worker-only work stays parked. */
     flush(): void;
 }
 
@@ -27,6 +29,14 @@ export class DocumentRebuilds {
         return (DocumentRebuilds.jobs.get(document)?.size ?? 0) > 0;
     }
 
+    static status(document: IDocument): { pending: number; featureIndexes: number[] } {
+        const jobs = [...(DocumentRebuilds.jobs.get(document) ?? [])];
+        return {
+            pending: jobs.length,
+            featureIndexes: jobs.flatMap((job) => (job.featureIndex === undefined ? [] : [job.featureIndex])),
+        };
+    }
+
     static add(document: IDocument, job: IDocumentRebuild): () => void {
         let jobs = DocumentRebuilds.jobs.get(document);
         if (!jobs) {
@@ -41,7 +51,9 @@ export class DocumentRebuilds {
         // Completing a source can enqueue its dependents.
         const jobs = DocumentRebuilds.jobs.get(document);
         while (jobs?.size) {
-            for (const job of [...jobs]) job.flush();
+            const batch = [...jobs];
+            for (const job of batch) job.flush();
+            if (batch.every((job) => jobs.has(job))) break;
         }
     }
 

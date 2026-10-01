@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { CommandData, CommandKeys, IApplication, ICommand, IDocument, IView } from "@spicy3d/core";
-import { CommandStore, PubSub } from "@spicy3d/core";
+import { CommandStore, DocumentMutations, PubSub } from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import { CommandService } from "../../src/services/commandService";
 import "../../src/commands/commandSearch";
@@ -115,6 +115,29 @@ describe("CommandService", () => {
         unregisterCommand("test.error2");
         PubSub.default.removeAll("executeCommand");
         PubSub.default.removeAll("activeViewChanged");
+    });
+
+    test("new commands are blocked while an async program owns the active document", async () => {
+        registerCommand("test.box");
+        service.register(app);
+        service.start();
+        const scope = DocumentMutations.hold(doc);
+        const execute = rs.spyOn(TestCommand.prototype, "execute");
+        try {
+            PubSub.default.pub("executeCommand", "test.box" as CommandKeys);
+            // Finish the command service's eligibility check before asserting no launch.
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(execute).not.toHaveBeenCalled();
+            expect(app.executingCommand).toBeUndefined();
+            scope.release();
+            PubSub.default.pub("executeCommand", "test.box" as CommandKeys);
+            await waitForCommandCompleted(app, "test.box");
+            expect(execute).toHaveBeenCalledTimes(1);
+        } finally {
+            scope.release();
+            execute.mockRestore();
+        }
     });
 
     // ── lifecycle ──────────────────────────────────────────────────

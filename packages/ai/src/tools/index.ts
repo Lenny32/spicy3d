@@ -5,12 +5,15 @@ import type { Tool } from "../llm/types";
 import { buildSkillTool } from "../skills";
 import { buildAskUserTool } from "./askUser";
 import { buildCapabilityTools } from "./capabilityEngine";
-import { buildFileTools } from "./fileTools";
+import { buildFileTools, buildReferenceMeshImportTool } from "./fileTools";
 import { guardKernelTool } from "./kernelTools";
 import { buildNodeTools } from "./nodeTools";
 import { buildParametricTools } from "./parametricTools";
+import { buildCornerJobTools, buildProgramJobTools } from "./programJobs";
 import { buildPropertyTools } from "./propertyTools";
 import { buildReadTools } from "./readTools";
+import { buildRecoveryTools } from "./recoveryTools";
+import { buildReferenceDeviationTool } from "./referenceDeviation";
 import { buildRibbonTools } from "./ribbonTools";
 import { buildSelectionTools } from "./selectionTools";
 import { buildVariableTools } from "./variableTools";
@@ -34,6 +37,11 @@ export function buildTools(): Tool[] {
         ...buildParametricTools(),
         ...buildVariableTools(),
         buildAskUserTool(),
+        buildReferenceMeshImportTool(),
+        buildReferenceDeviationTool(),
+        ...buildProgramJobTools(),
+        ...buildRecoveryTools(),
+        ...buildCornerJobTools(),
     ];
     return tools.map(guardKernelTool);
 }

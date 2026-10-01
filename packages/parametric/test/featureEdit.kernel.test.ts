@@ -28,6 +28,7 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import type { FilletEditCommand } from "../src/commands/edgeCornerEditCommand";
 import type { ExtrudeEditCommand } from "../src/commands/extrudeEditCommand";
 import { FeatureChainPreview, LIVE_PREVIEW_BUDGET_MS } from "../src/commands/featureEditPreview";
 import type { RevolveEditCommand } from "../src/commands/revolveEditCommand";
@@ -423,5 +424,51 @@ describe("feature edit sessions", () => {
         expect(body.shape.isOk).toBe(true);
         doc.history.undo();
         expect((body.features[1] as FilletFeatureData).radius).toBe(2);
+    });
+
+    test("variable fillet editing loads the law, cancels unchanged, and clears it as one undo step", async () => {
+        const { doc, app, drive } = setup();
+        const sketch = addSketch(doc, "sk-law", Plane.XY, rect(-20, -20, 20, 20));
+        const body = new ParametricBodyNode({
+            document: doc,
+            features: [{ id: "e-law", type: "extrude", sketchId: sketch.id, depth: 30 }],
+        });
+        doc.modelManager.addNode(body);
+        const edges = body.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        const ref = captureEdgeRef(edges[0], body.edgeIdAt(0), false);
+        for (const edge of edges) edge.dispose();
+        const law = [
+            { position: 0, radius: 1 },
+            { position: 1, radius: "2 mm" },
+        ];
+        body.setFeaturesEmitShapeChanged([
+            ...body.features,
+            { id: "f-law", type: "fillet", radius: 1, edges: [ref], radiusLaw: law },
+        ]);
+        expect(body.shape.isOk).toBe(true);
+        const original = body.featuresJson;
+        const undoCount = doc.history.undoCount();
+        let loadedVariable = false;
+        drive((_handler, controller) => {
+            const command = app.executingCommand as FilletEditCommand;
+            loadedVariable = command.variableRadius;
+            command.variableRadius = false;
+            controller.cancel();
+        });
+        await body.editFeature("f-law");
+        expect(loadedVariable).toBe(true);
+        expect(body.featuresJson).toBe(original);
+        expect(doc.history.undoCount()).toBe(undoCount);
+        drive((_handler, controller) => {
+            (app.executingCommand as FilletEditCommand).variableRadius = false;
+            controller.success();
+        });
+        await body.editFeature("f-law");
+        expect(body.shape.isOk).toBe(true);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toBeUndefined();
+        expect(doc.history.undoCount()).toBe(undoCount + 1);
+        doc.history.undo();
+        expect(body.shape.isOk).toBe(true);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual(law);
     });
 });

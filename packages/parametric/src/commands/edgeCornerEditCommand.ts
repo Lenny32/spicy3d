@@ -17,7 +17,9 @@ import {
 } from "@spicy3d/core";
 import type { EdgeRef } from "../features/edgeRef";
 import type { ChamferFeatureData, FilletFeatureData } from "../features/feature";
+import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
 import type { ParametricBodyNode } from "../parametricBodyNode";
+import { CornerSetbackCommand } from "./cornerSetbackCommand";
 import { edgeCornerArrowData } from "./edgeCornerCommand";
 import { EdgeCornerPickHandler } from "./edgeCornerPickStep";
 import {
@@ -28,6 +30,7 @@ import {
     showPreviewProblem,
 } from "./featureEditPreview";
 import { registerFeatureEditor } from "./featureEditRegistry";
+import { showRadiusLawEditor } from "./radiusLawEditor";
 import { captureBodyEdgeRef, selectFeatureEdges } from "./reselectSession";
 
 type EdgeCornerFeature = FilletFeatureData | ChamferFeatureData;
@@ -44,6 +47,10 @@ abstract class EdgeCornerEditCommand extends CancelableCommand {
 
     protected abstract get value(): ParameterValue;
     protected abstract set value(value: ParameterValue);
+    protected get radiusLaw(): FilletRadiusPoint[] | undefined {
+        return undefined;
+    }
+    protected loadRadiusLaw(_law: FilletRadiusPoint[] | undefined): void {}
 
     private _handler: EdgeCornerPickHandler | undefined;
     private _session: EditSession | undefined;
@@ -70,6 +77,7 @@ abstract class EdgeCornerEditCommand extends CancelableCommand {
 
         // No session yet, so this sets the value without previewing.
         this.value = edgeFeature.type === "fillet" ? edgeFeature.radius : edgeFeature.distance;
+        this.loadRadiusLaw(edgeFeature.type === "fillet" ? edgeFeature.radiusLaw : undefined);
         // Before the rollback: the preview evaluates on the chain state entering the feature,
         // read from the full timeline.
         const preview = new FeatureChainPreview(body, index);
@@ -100,7 +108,10 @@ abstract class EdgeCornerEditCommand extends CancelableCommand {
             controller,
             { allow: (node) => node === body },
             {
-                arrowData: () => edgeCornerArrowData(this.bodyEdges(body).at(0), this.valueNumber),
+                arrowData: () =>
+                    this.radiusLaw === undefined
+                        ? edgeCornerArrowData(this.bodyEdges(body).at(0), this.valueNumber)
+                        : undefined,
                 setValue: (value) => {
                     this.value = value;
                 },
@@ -148,22 +159,30 @@ abstract class EdgeCornerEditCommand extends CancelableCommand {
         this._handler?.refreshArrow();
         const value = this.valueNumber;
         const edges = this.bodyEdges(body).map((x) => captureBodyEdgeRef(body, x));
-        if (value === undefined || value <= 0 || edges.length === 0) {
+        if ((this.radiusLaw === undefined && (value === undefined || value <= 0)) || edges.length === 0) {
             session.show(undefined);
             return;
         }
-        session.show(this.edited(session.feature, value, edges), this._handler?.dragging === true);
+        session.show(this.edited(session.feature, this.value, edges), this._handler?.dragging === true);
     };
 
     private edited(feature: EdgeCornerFeature, value: ParameterValue, edges: EdgeRef[]): EdgeCornerFeature {
-        return feature.type === "fillet"
-            ? { ...feature, radius: value, edges }
-            : { ...feature, distance: value, edges };
+        if (feature.type !== "fillet") return { ...feature, distance: value, edges };
+        const { radiusLaw: _oldLaw, ...constant } = feature;
+        return {
+            ...constant,
+            radius: value,
+            edges,
+            ...(this.radiusLaw === undefined ? {} : { radiusLaw: this.radiusLaw }),
+        };
     }
 
     private commit(body: ParametricBodyNode, feature: EdgeCornerFeature, edges: EdgeRef[]) {
         // The same refusal the create command makes (see `EdgeCornerFeatureCommand`).
-        const resolved = this.resolveParameter(this.value, LENGTH_UNITS);
+        const resolved =
+            this.radiusLaw === undefined
+                ? this.resolveParameter(this.value, LENGTH_UNITS)
+                : resolveFilletRadiusLaw(this.radiusLaw, this.document.variables.evaluate().scope);
         if (!resolved.isOk) {
             PubSub.default.pub("showToast", "error.default:{0}", resolved.error);
             return;
@@ -246,8 +265,39 @@ class EditSession {
 @command({ key: "feature.editFillet", icon: "icon-fillet" })
 export class FilletEditCommand extends EdgeCornerEditCommand {
     protected readonly featureType = "fillet" as const;
+    private lawDraft: FilletRadiusPoint[] | undefined;
+    @property("fillet.variableRadius")
+    get variableRadius(): boolean {
+        return this.getPrivateValue("variableRadius", false);
+    }
+    set variableRadius(value: boolean) {
+        this.setProperty("variableRadius", value, () => this.updatePreview());
+    }
+    protected override get radiusLaw(): FilletRadiusPoint[] | undefined {
+        return this.variableRadius
+            ? (this.lawDraft ?? [
+                  { position: 0, radius: this.value },
+                  { position: 1, radius: this.value },
+              ])
+            : undefined;
+    }
+    protected override loadRadiusLaw(law: FilletRadiusPoint[] | undefined): void {
+        this.lawDraft = law?.map((point) => ({ ...point }));
+        this.variableRadius = law !== undefined;
+    }
+    @property("fillet.editRadiusLaw", { dependencies: [{ property: "variableRadius", value: true }] })
+    editRadiusLaw(): void {
+        showRadiusLawEditor(this.document, this.radiusLaw ?? [], (law) => {
+            if (this.checkCanceled()) return;
+            this.lawDraft = law;
+            this.updatePreview();
+        });
+    }
 
-    @property("circle.radius", { unit: LENGTH_UNITS })
+    @property("circle.radius", {
+        unit: LENGTH_UNITS,
+        dependencies: [{ property: "variableRadius", value: false }],
+    })
     get value(): ParameterValue {
         return this.getPrivateValue("value", 2);
     }
@@ -269,5 +319,10 @@ export class ChamferEditCommand extends EdgeCornerEditCommand {
     }
 }
 
-registerFeatureEditor("fillet", (body, featureId) => new FilletEditCommand(body, featureId));
+registerFeatureEditor("fillet", (body, featureId) => {
+    const feature = body.features.find((item) => item.id === featureId);
+    return feature?.type === "fillet" && feature.cornerSetbacks !== undefined
+        ? new CornerSetbackCommand(body, featureId)
+        : new FilletEditCommand(body, featureId);
+});
 registerFeatureEditor("chamfer", (body, featureId) => new ChamferEditCommand(body, featureId));

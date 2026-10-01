@@ -12,11 +12,32 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DocumentRebuilds, FolderNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
-import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
+import { rs } from "@rstest/core";
+import {
+    DocumentRebuilds,
+    FolderNode,
+    I18n,
+    type IEdge,
+    type IFace,
+    ShapeTypes,
+    Transaction,
+} from "@spicy3d/core";
+import {
+    createMockApplication,
+    createMockSelection,
+    createMockVisualWithDocument,
+    TestDocument,
+} from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
+import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
-import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
+import {
+    type EdgesReport,
+    type ParametricOp,
+    type ProgramRunOptions,
+    runParametricProgram,
+} from "../../src/program/parametricProgram";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -50,13 +71,122 @@ function rect(x0: number, y0: number, x1: number, y1: number) {
 }
 
 /** Runs a program inside a transaction — the way the AI tool drives it. */
-function run(doc: TestDocument, ops: ParametricOp[]): ReturnType<typeof runParametricProgram> {
+function run(
+    doc: TestDocument,
+    ops: ParametricOp[],
+    options: ProgramRunOptions = {},
+): ReturnType<typeof runParametricProgram> {
     let result: ReturnType<typeof runParametricProgram> | undefined;
     Transaction.execute(doc, "test program", () => {
-        result = runParametricProgram(doc, ops);
+        result = runParametricProgram(doc, ops, options);
     });
     return result!;
 }
+
+describe("sweep program operations", () => {
+    test("the published MCP tool accepts plain JSON sweep creation and editing", async () => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        rs.stubGlobal("app", app);
+        try {
+            const tool = buildParametricTools()[0];
+            const response = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [
+                        { op: "sketch", id: "section", entities: rect(-1, -1, 1, 1) },
+                        {
+                            op: "sketch",
+                            id: "path",
+                            plane: "ZX",
+                            entities: [{ type: "line", params: [0, 0, 10, 0] }],
+                        },
+                        {
+                            op: "sweep",
+                            id: "sweep",
+                            section: { sketchId: "section" },
+                            path: { nodeId: "path", edgeIndexes: [0] },
+                        },
+                    ],
+                })) as string,
+            );
+            const bodyId = response.created.find((entry: { id: string }) => entry.id === "sweep").nodeId;
+            const body = doc.modelManager.findNode((node) => node.id === bodyId) as ParametricBodyNode;
+            expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+            const edited = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [{ op: "editSweep", body: body.id, featureId: body.features[0].id, solid: false }],
+                })) as string,
+            );
+            expect(edited.bodies[0].status).toBe("ok");
+            expect(body.features[0]).toMatchObject({ solid: false });
+            doc.history.undo();
+            expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+    function sweepProgram(doc: TestDocument) {
+        const result = run(doc, [
+            { op: "sketch", id: "section", entities: rect(-1, -1, 1, 1) },
+            { op: "sketch", id: "path", plane: "ZX", entities: [{ type: "line", params: [0, 0, 10, 0] }] },
+            {
+                op: "sweep",
+                id: "sweep",
+                section: { sketchId: "section", profileIndex: 0 },
+                path: { nodeId: "path", edgeIndexes: [0] },
+            },
+        ]);
+        const bodyId = result.created.find((entry) => entry.id === "sweep")?.nodeId;
+        const body = doc.modelManager.findNode((node) => node.id === bodyId) as ParametricBodyNode;
+        expect(body).toBeInstanceOf(ParametricBodyNode);
+        expect(body.shape.isOk).toBe(true);
+        return { result, body };
+    }
+
+    test("JSON creation captures source ancestry and edits options in one undo step", () => {
+        const doc = newDoc();
+        const { body } = sweepProgram(doc);
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+        const feature = body.features[0];
+        expect(feature).toMatchObject({
+            type: "sweep",
+            path: { edges: [{ edgeId: expect.stringMatching(/^sketch:.*:path:ent/) }] },
+        });
+        const result = run(doc, [{ op: "editSweep", body: body.id, featureId: feature.id, solid: false }]);
+        expect(result.bodies[0].features.map((item) => item.error)).toEqual([undefined]);
+        expect(body.features[0]).toMatchObject({ solid: false });
+        expect(body.shape.value.findSubShapes(ShapeTypes.face)).toHaveLength(4);
+        doc.history.undo();
+        expect(body.features[0]).not.toHaveProperty("solid");
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+    });
+
+    test("a failed path repick rolls back the program and keeps its previous undo position", () => {
+        const doc = newDoc();
+        const { result, body } = sweepProgram(doc);
+        const pathId = result.created.find((entry) => entry.id === "path")?.nodeId;
+        expect(pathId).not.toBeUndefined();
+        const before = JSON.stringify(body.features);
+        const position = doc.history.position();
+        expect(() =>
+            run(doc, [
+                {
+                    op: "editSweep",
+                    body: body.id,
+                    featureId: body.features[0].id,
+                    path: { nodeId: pathId as string, edgeIndexes: [0, 0] },
+                },
+            ]),
+        ).toThrow(/repeated/);
+        expect(JSON.stringify(body.features)).toBe(before);
+        expect(doc.history.position()).toBe(position);
+        expect(body.shape.value.volume()).toBeCloseTo(40, 5);
+    });
+});
 
 /** Runs a program expected to fail; returns the thrown message after the rollback. */
 function runExpectingFailure(doc: TestDocument, ops: ParametricOp[]): string {
@@ -258,6 +388,64 @@ describe("sketch and extrude", () => {
         expect(sketch.visible).toBe(false);
     });
 
+    test.each([
+        "fuse",
+        "cut",
+    ] as const)("an appended %s extrusion uses its supplied feature name and keeps the body's name", (operation) => {
+        const doc = newDoc();
+        try {
+            const result = run(doc, [
+                { op: "sketch", id: "s1", plane: "XY", entities: rect(0, 0, 40, 30) },
+                { op: "extrude", id: "b1", sketch: "s1", depth: 20, name: "Plate" },
+            ]);
+            const body = createdBody(doc, result, "b1");
+            const name = operation === "fuse" ? "Raised boss" : "Pocket";
+            const depth = operation === "fuse" ? 30 : 10;
+            const appended = run(doc, [
+                { op: "sketch", id: "s2", plane: "XY", entities: rect(10, 10, 20, 20) },
+                { op: "extrude", id: "e2", sketch: "s2", depth, body: body.id, operation, name },
+                { op: "features", id: "read", body: "e2" },
+            ]);
+
+            expectClean(body);
+            expect(body.name).toBe("Plate");
+            expect(body.features).toHaveLength(2);
+            expect(body.features[0].name).toBeUndefined();
+            expect(body.features[1]).toMatchObject({ type: "extrude", operation, name });
+            expect((appended.results["read"] as { name?: string }[]).map((item) => item.name)).toEqual([
+                undefined,
+                name,
+            ]);
+            expect(appended.created.map((entry) => entry.id)).toEqual(["s2"]);
+            expect(body.shape.value.volume()).toBeCloseTo(
+                40 * 30 * 20 + (operation === "fuse" ? 100 * 10 : -100 * 10),
+                3,
+            );
+        } finally {
+            doc.dispose();
+        }
+    });
+
+    test("unnamed extrusions preserve the default body and feature names", () => {
+        const doc = newDoc();
+        try {
+            const body = createdBody(doc, run(doc, plate(20)), "b1");
+            const defaultBodyName = body.name;
+            const defaultDisplay = body.featureItems()[0].display;
+            expect(defaultBodyName).toBe(`${I18n.translate(body.display())}1`);
+            run(doc, [
+                { op: "sketch", id: "s2", plane: "XY", entities: rect(10, 10, 20, 20) },
+                { op: "extrude", id: "e2", sketch: "s2", depth: 30, body: body.id, operation: "fuse" },
+            ]);
+
+            expectClean(body);
+            expect(body.name).toBe(defaultBodyName);
+            expect(body.features.map((feature) => feature.name)).toEqual([undefined, undefined]);
+            expect(body.featureItems().map((item) => item.display)).toEqual([defaultDisplay, defaultDisplay]);
+        } finally {
+            doc.dispose();
+        }
+    });
     test("an unclosed profile is rejected and the transaction leaves no node behind", () => {
         const doc = newDoc();
         const message = runExpectingFailure(doc, [
@@ -596,7 +784,7 @@ describe("feature list editing", () => {
         );
 
         const json = JSON.stringify(result);
-        const items = JSON.parse(json).results.read as { references: { nodeId: string }[] }[];
+        const items = JSON.parse(json).results["read"] as { references: { nodeId: string }[] }[];
         expect(items[0].references[0].nodeId).toBeTruthy();
     });
 
@@ -649,6 +837,98 @@ describe("feature list editing", () => {
 });
 
 describe("fillet and boolean", () => {
+    test("variable radius laws create persistent picks, survive an upstream edit, and undo as one change", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        const originalEdges = body.shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        const index = originalEdges.findIndex(
+            (edge) => Math.abs(edge.endPoint().z - edge.startPoint().z) > 39,
+        );
+        expect(index).toBeGreaterThanOrEqual(0);
+        for (const edge of originalEdges) edge.dispose();
+        const law = [
+            { position: 0, radius: "1 mm" },
+            { position: 0.5, radius: "2 mm" },
+            { position: 1, radius: "3 mm" },
+        ];
+        run(doc, [{ op: "fillet", id: "variable", body: body.id, edgeIndexes: [index], radiusLaw: law }]);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        const feature = body.features[1] as FilletFeatureData;
+        expect(feature.radiusLaw).toEqual(law);
+        expect(feature.edges[0].edgeId).not.toBeUndefined();
+        const selectedId = feature.edges[0].edgeId;
+        const volume = body.shape.value.volume();
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: body.features[0].id,
+                action: "setParameter",
+                key: "depth",
+                value: 50,
+            },
+        ]);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect(body.shape.value.volume()).toBeGreaterThan(volume);
+        expect((body.features[1] as FilletFeatureData).edges[0].edgeId).toBe(selectedId);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual(law);
+        doc.history.undo();
+        expectClean(body);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.undo();
+        expect(body.features).toHaveLength(1);
+        expect(body.shape.value.volume()).toBeCloseTo(48000, 5);
+        doc.history.redo();
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual(law);
+    });
+
+    test("a whole-law edit can be cleared and invalid replacement rolls back", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        run(doc, [{ op: "fillet", id: "constant", body: body.id, edgeIndexes: [0], radius: 1 }]);
+        const id = body.features[1].id;
+        const constantVolume = body.shape.value.volume();
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: id,
+                action: "setRadiusLaw",
+                radiusLaw: [
+                    { position: 0, radius: 1 },
+                    { position: 1, radius: 2 },
+                ],
+            },
+        ]);
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toHaveLength(2);
+        expect(body.shape.value.volume()).toBeLessThan(constantVolume);
+        const before = body.features;
+        expect(
+            runExpectingFailure(doc, [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: id,
+                    action: "setRadiusLaw",
+                    radiusLaw: [
+                        { position: 0, radius: -1 },
+                        { position: 1, radius: 2 },
+                    ],
+                },
+            ]),
+        ).toContain("positive finite");
+        expect(body.features).toEqual(before);
+        expectClean(body);
+        run(doc, [{ op: "editFeature", body: body.id, featureId: id, action: "setRadiusLaw" }]);
+        expectClean(body);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toBeUndefined();
+        expect(body.shape.value.volume()).toBeCloseTo(constantVolume, 5);
+    });
+
     test("a fillet takes edge indexes and reports an out-of-range index", () => {
         const doc = newDoc();
         const result = run(doc, plate(20));
@@ -830,4 +1110,758 @@ describe("cancellation and op timing", () => {
         ).toThrow('op 2 ("features") failed');
         expect(finished).toEqual(["sketch", "extrude", "features"]);
     });
+});
+
+describe("compact parametric responses", () => {
+    test("a small edit on a hundred-feature body omits untouched rows and preserves explicit reads", () => {
+        const doc = newDoc();
+        try {
+            const created = run(doc, plate(20), { responseMode: "compact" });
+            const body = createdBody(doc, created, "b1");
+            expect(created.bodies[0].features.map((feature) => feature.id)).toEqual([body.features[0].id]);
+            const base = body.features[0];
+            body.setFeaturesEmitShapeChanged([
+                base,
+                ...Array.from({ length: 99 }, (_, index) => ({
+                    ...base,
+                    id: `quiet-${index}`,
+                    suppressed: true,
+                })),
+            ]);
+            const ops: ParametricOp[] = [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: base.id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+            ];
+            const compact = run(doc, ops, { responseMode: "compact" });
+            expect(compact.bodies[0].features.map((feature) => feature.id)).toEqual([base.id]);
+            expect(compact.bodies[0].featureCount).toBe(100);
+            expect(compact.bodies[0].status).toBe("ok");
+            expect(compact.bodies[0].diagnostics).toEqual([]);
+            expect(compact.bodies[0].removedFeatureIds).toEqual([]);
+            expect(JSON.stringify(compact)).not.toContain("quiet-0");
+            const full = run(doc, ops);
+            expect(full.bodies[0].features).toHaveLength(100);
+            expect(full.bodies[0]).not.toHaveProperty("featureCount");
+            expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length / 10);
+            const read = run(doc, [{ op: "features", body: body.id, id: "all" }], {
+                responseMode: "compact",
+            });
+            expect(read.results["all"]).toHaveLength(100);
+            expect(read.bodies).toEqual([]);
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact edits report renames, suppression, moves, removals and appended feature ids", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const id = body.features[1].id;
+            const compact = { responseMode: "compact" as const };
+            const renamed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "rename", value: "Renamed" }],
+                compact,
+            );
+            expect(renamed.bodies[0].features).toHaveLength(1);
+            expect(renamed.bodies[0].features[0].name).toBe("Renamed");
+            const moved = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "moveTo", index: 3 }],
+                compact,
+            );
+            expect(moved.bodies[0].features.map((feature) => feature.id)).toEqual([id]);
+            const suppressed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "suppress", value: true }],
+                compact,
+            );
+            expect(suppressed.bodies[0].features[0].suppressed).toBe(true);
+            const removed = run(
+                doc,
+                [{ op: "editFeature", body: body.id, featureId: id, action: "remove" }],
+                compact,
+            );
+            expect(removed.bodies[0].features).toEqual([]);
+            expect(removed.bodies[0].removedFeatureIds).toEqual([id]);
+            expect(removed.bodies[0].featureCount).toBe(10);
+            const added = run(
+                doc,
+                [{ op: "extrude", id: "joined", body: body.id, sketch: "s1", depth: 25, operation: "fuse" }],
+                compact,
+            );
+            const latest = body.features.at(-1)!;
+            expect(added.bodies[0].features.map((feature) => feature.id)).toEqual([latest.id]);
+            expect(added.bodies[0].featureCount).toBe(11);
+            expect(
+                added.bodies[0].features[0].parameters.find((parameter) => parameter.key === "depth")?.value,
+            ).toBe(25);
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact responses retain untouched error/warning diagnostics", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const realItems = body.featureItems.bind(body);
+            const staleId = body.features[1].id;
+            body.featureItems = () =>
+                realItems().map((item) =>
+                    item.id === staleId
+                        ? { ...item, error: "Existing rebuild failure", warning: "Reselect reference" }
+                        : item,
+                );
+            try {
+                const result = run(
+                    doc,
+                    [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "rename",
+                            value: "Base",
+                        },
+                    ],
+                    { responseMode: "compact" },
+                );
+                expect(result.bodies[0].features.map((feature) => feature.id)).toEqual([body.features[0].id]);
+                expect(result.bodies[0].status).toBe("error");
+                expect(result.bodies[0].diagnostics).toEqual([
+                    { featureId: staleId, error: "Existing rebuild failure", warning: "Reselect reference" },
+                ]);
+            } finally {
+                body.featureItems = realItems;
+            }
+        } finally {
+            doc.close();
+        }
+    });
+
+    test("compact mode preserves rollback errors and validates the mode", () => {
+        const doc = newDoc();
+        try {
+            const body = elevenFeaturePlate(doc);
+            const before = body.featuresJson;
+            expect(() =>
+                run(
+                    doc,
+                    [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "setParameter",
+                            key: "depth",
+                            value: 0,
+                        },
+                    ],
+                    { responseMode: "compact" },
+                ),
+            ).toThrow(/op 0.*failed/);
+            expect(body.featuresJson).toBe(before);
+            expect(() => run(doc, plate(10), { responseMode: "quiet" as "compact" })).toThrow(/responseMode/);
+        } finally {
+            doc.close();
+        }
+    });
+});
+
+test("the MCP handler accepts variable radius laws and retains only approved sample fields", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    (app as any).activeView = { document: doc };
+    doc.selection = createMockSelection();
+    rs.stubGlobal("app", app);
+    try {
+        const body = createdBody(doc, run(doc, plate(40)), "b1");
+        const tool = buildParametricTools()[0];
+        const response = await tool.handler({
+            responseMode: "compact",
+            ops: [
+                {
+                    op: "fillet",
+                    id: "law",
+                    body: body.id,
+                    edgeIndexes: [0],
+                    radiusLaw: [
+                        { position: 0, radius: "1 mm", extra: "ignored" },
+                        { position: 1, radius: "2 mm", extra: "ignored" },
+                    ],
+                },
+            ],
+        });
+        const result = JSON.parse(response as string);
+        expect(result.bodies[0].status).toBe("ok");
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect((body.features[1] as FilletFeatureData).radiusLaw).toEqual([
+            { position: 0, radius: "1 mm" },
+            { position: 1, radius: "2 mm" },
+        ]);
+    } finally {
+        rs.unstubAllGlobals();
+        doc.close();
+    }
+});
+
+test("the MCP compact handler returns only the edited feature from a large body", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    (app as any).activeView = { document: doc };
+    doc.selection = createMockSelection();
+    const clearSelection = rs.spyOn(doc.selection, "clearSelection");
+    rs.stubGlobal("app", app);
+    try {
+        const body = elevenFeaturePlate(doc);
+        const tool = buildParametricTools()[0];
+        const response = await tool.handler({
+            responseMode: "compact",
+            ops: [
+                {
+                    op: "editFeature",
+                    body: body.id,
+                    featureId: body.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+            ],
+        });
+        const result = JSON.parse(response as string);
+        expect(result.bodies[0].features.map((feature: { id: string }) => feature.id)).toEqual([
+            body.features[0].id,
+        ]);
+        expect(result.bodies[0].featureCount).toBe(11);
+        expect(result.bodies[0].status).toBe("ok");
+        expect(clearSelection).toHaveBeenCalledOnce();
+    } finally {
+        clearSelection.mockRestore();
+        rs.unstubAllGlobals();
+        doc.close();
+    }
+});
+
+describe("persistent program edge references (real kernel)", () => {
+    test.each([
+        "fillet",
+        "chamfer",
+    ] as const)("%s reuses JSON reference after upstream edge reorder", async (op) => {
+        const doc = newDoc();
+        (doc as any).selection = createMockSelection();
+        const created = run(doc, [
+            { op: "sketch", id: "stableSketch", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "stableBody", sketch: "stableSketch", depth: 20 },
+        ]);
+        const bodyId = created.created.find((entry) => entry.id === "stableBody")!.nodeId;
+        const body = bodyOf(doc, bodyId);
+        const app = createMockApplication();
+        (app as any).activeView = { document: doc };
+        rs.stubGlobal("app", app);
+        try {
+            const tool = buildParametricTools()[0];
+            const response = JSON.parse(
+                (await tool.handler({ ops: [{ op: "edges", body: bodyId, id: "picks" }] })) as string,
+            );
+            const picks = response.results.picks as EdgesReport;
+            expect(picks.bodyId).toBe(bodyId);
+            expect(picks.edges).toHaveLength(12);
+            // Retain the complete response as an external caller would, before rebuilding.
+            const portablePicks = JSON.parse(JSON.stringify(picks)) as EdgesReport;
+            // Change the source extrusion and cut an upstream hole before applying the saved pick.
+            run(doc, [
+                {
+                    op: "editFeature",
+                    body: bodyId,
+                    featureId: body.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 25,
+                },
+                { op: "sketch", id: "hole", entities: [{ type: "circle", params: [20, 15, 3] }] },
+                { op: "extrude", id: "cut", body: bodyId, sketch: "hole", depth: 25, operation: "cut" },
+            ]);
+            const current = run(doc, [{ op: "edges", body: bodyId }]).results["edges"] as EdgesReport;
+            const selected = portablePicks.edges.find((row) => {
+                const edge = row.reference.edge;
+                return (
+                    edge.kind === "line" &&
+                    edge.start.z === 20 &&
+                    edge.end.z === 20 &&
+                    current.edges.some(
+                        (now) => now.reference.edge.edgeId === edge.edgeId && now.index !== row.index,
+                    )
+                );
+            });
+            expect(selected).not.toBeUndefined();
+            if (!selected) throw new Error("test requires reordered top edge");
+            expect(selected.reference.edge.edgeId).toEqual(expect.any(String));
+            const portable = selected.reference;
+            const moved = current.edges.find((row) => row.reference.edge.edgeId === portable.edge.edgeId)!;
+            expect(moved).not.toBeUndefined();
+            expect(moved.index).not.toBe(selected.index);
+            expect(moved.reference.edge).not.toEqual(portable.edge);
+            const applied = JSON.parse(
+                (await tool.handler({
+                    ops: [
+                        {
+                            op,
+                            id: "rounded",
+                            body: bodyId,
+                            edgeRefs: [portable],
+                            ...(op === "fillet" ? { radius: 1 } : { distance: 1 }),
+                        },
+                    ],
+                })) as string,
+            );
+            expect(applied.bodies[0].features).toHaveLength(3);
+            expect(body.shape.isOk).toBe(true);
+            expect(body.featureItems()[2].error).toBeUndefined();
+            const feature = body.features[2];
+            expect(feature.type).toBe(op);
+            if (feature.type !== "fillet" && feature.type !== "chamfer") throw new Error("wrong feature");
+            expect(feature.edges[0].edgeId).toBe(portable.edge.edgeId);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("invalid queries and selections fail without changing body features", () => {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "s", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "b", sketch: "s", depth: 20 },
+        ]);
+        const body = bodyOf(doc, created.created[1].nodeId);
+        const picks = run(doc, [{ op: "edges", body: "b", edgeIndexes: [0] }]).results[
+            "edges"
+        ] as EdgesReport;
+        const before = body.featuresJson;
+        for (const index of [-1, 12, 0.5]) {
+            expect(() => run(doc, [{ op: "edges", body: "b", edgeIndexes: [0, index] }])).toThrow(
+                /out of range/,
+            );
+        }
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [{ ...picks.edges[0].reference, bodyId: "another" }],
+                },
+            ]),
+        ).toThrow(/different body/);
+        expect(() =>
+            run(doc, [{ op: "fillet", id: "f", body: "b", radius: 1, edgeRefs: [], edgeIndexes: [0] }]),
+        ).toThrow(/exactly one/);
+        expect(() => run(doc, [{ op: "fillet", id: "f", body: "b", radius: 1, edgeRefs: [] }])).toThrow(
+            /at least one/,
+        );
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: { kind: "other", mid: { x: 900, y: 900, z: 900 }, length: 3 },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/Edge not found/);
+        expect(() =>
+            run(doc, [
+                {
+                    op: "chamfer",
+                    id: "c",
+                    body: "b",
+                    distance: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "line",
+                                start: { x: 0, y: 15, z: 20 },
+                                end: { x: 40, y: 15, z: 20 },
+                            },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/ambiguous/i);
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: "b",
+                    radius: 1,
+                    edgeRefs: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "circle",
+                                center: { x: 0, y: 0, z: 0 },
+                                axis: { x: 0, y: 0, z: 1 },
+                                radius: -1,
+                            },
+                        },
+                    ],
+                },
+            ]),
+        ).toThrow(/invalid persistent edge fingerprint/);
+        expect(body.featuresJson).toBe(before);
+    });
+});
+
+describe("rule-based edge queries (real kernel)", () => {
+    function plateWithBore() {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "outline", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "plate", sketch: "outline", depth: 20 },
+            { op: "sketch", id: "bore", entities: [{ type: "circle", params: [20, 15, 3] }] },
+            { op: "extrude", id: "cut", body: "plate", sketch: "bore", depth: 20, operation: "cut" },
+        ]);
+        const body = bodyOf(doc, created.created.find((node) => node.id === "plate")!.nodeId);
+        return { doc, body };
+    }
+    const query = (doc: TestDocument, op: Omit<Extract<ParametricOp, { op: "edges" }>, "op" | "body">) =>
+        run(doc, [{ op: "edges", body: "plate", ...op }]).results["edges"] as EdgesReport;
+
+    test("analytic circle/cylinder radius and elevation yield a usable top bore rim", () => {
+        const { doc, body } = plateWithBore();
+        expect(query(doc, { selector: { geometry: { kind: "circle", radius: 3 } } }).edges).toHaveLength(2);
+        expect(query(doc, { selector: { geometry: { cylinderRadius: 3 } } }).edges).toHaveLength(3);
+        const picked = query(doc, {
+            selector: { geometry: { kind: "circle", cylinderRadius: 3, elevation: { value: 20 } } },
+            expectedCount: 1,
+        });
+        expect(picked.selection).toMatchObject({ status: "matched", count: 1 });
+        expect(picked.edges).toHaveLength(1);
+        expect(picked.edges[0].reference.edge).toMatchObject({
+            kind: "circle",
+            center: { z: 20 },
+            radius: 3,
+        });
+        run(doc, [
+            {
+                op: "chamfer",
+                id: "bevel",
+                body: "plate",
+                edgeRefs: [JSON.parse(JSON.stringify(picked.edges[0].reference))],
+                distance: 0.5,
+            },
+        ]);
+        expect(body.featureItems()[2].error).toBeUndefined();
+        expect(body.shape.isOk).toBe(true);
+    });
+
+    test("a toroidal surface's circular edge does not qualify as a cylinder", () => {
+        const doc = newDoc();
+        run(doc, [
+            { op: "sketch", id: "tube", entities: [{ type: "circle", params: [10, 0, 3] }] },
+            {
+                op: "revolve",
+                id: "plate",
+                sketch: "tube",
+                axis: { point: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } },
+            },
+        ]);
+        expect(
+            query(doc, { selector: { geometry: { kind: "circle", radius: 3 } } }).edges.length,
+        ).toBeGreaterThan(0);
+        const selected = query(doc, { selector: { geometry: { cylinderRadius: 3 } } });
+        expect(selected.edges).toHaveLength(0);
+        expect(selected.selection?.status).toBe("empty");
+    });
+
+    test("sphere surfaces are excluded and degenerate pole edges are explained", () => {
+        const doc = newDoc();
+        run(doc, [
+            {
+                op: "sketch",
+                id: "half",
+                entities: [
+                    { type: "arc", params: [0, 0, 0, -5, 0, 5] },
+                    { type: "line", params: [0, 5, 0, -5] },
+                ],
+            },
+            {
+                op: "revolve",
+                id: "plate",
+                sketch: "half",
+                axis: { point: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } },
+            },
+        ]);
+        const selected = query(doc, { selector: { geometry: { cylinderRadius: 5 } } });
+        expect(selected.edges).toHaveLength(0);
+        expect(selected.selection?.status).toBe("empty");
+        expect(selected.unselectableEdges?.length).toBeGreaterThan(0);
+        expect(selected.unselectableEdges?.[0].reason).toMatch(/degenerate/i);
+    });
+
+    test("adjoining face sets accept tracked ids, and outlines exclude the hole", () => {
+        const { doc, body } = plateWithBore();
+        const faces = body.shape.unchecked()!.findSubShapes(ShapeTypes.face) as IFace[];
+        try {
+            const top = faces.findIndex((face) => {
+                const box = face.geometryBoundingBox();
+                return Math.abs(box.min.z - 20) < 1e-5 && Math.abs(box.max.z - 20) < 1e-5;
+            });
+            const cylinder = faces.findIndex((face) => {
+                const s = face.surface();
+                try {
+                    return "radius" in s && s.radius === 3;
+                } finally {
+                    s.dispose();
+                }
+            });
+            expect(top).toBeGreaterThanOrEqual(0);
+            expect(cylinder).toBeGreaterThanOrEqual(0);
+            expect(query(doc, { selector: { adjoiningFaces: { all: [top] } } }).edges).toHaveLength(5);
+            expect(query(doc, { selector: { outlineOfFaces: [top] } }).edges).toHaveLength(4);
+            const topId = body.faceIdAt(top)!;
+            const cylinderId = body.faceIdAt(cylinder)!;
+            expect(topId).toEqual(expect.any(String));
+            expect(cylinderId).toEqual(expect.any(String));
+            const selected = query(doc, { selector: { adjoiningFaces: { exact: [topId, cylinderId] } } });
+            expect(selected.edges).toHaveLength(1);
+            expect(selected.edges[0].reference.edge).toMatchObject({ kind: "circle", center: { z: 20 } });
+            expect(query(doc, { selector: { adjoiningFaces: { any: [top, cylinder] } } }).edges).toHaveLength(
+                7,
+            );
+        } finally {
+            for (const face of faces) face.dispose();
+        }
+    });
+
+    test("origin and supporting-curve picks retain split boolean ancestry", () => {
+        const doc = newDoc();
+        const created = run(doc, [
+            { op: "sketch", id: "outline", entities: rect(0, 0, 40, 30) },
+            { op: "extrude", id: "plate", sketch: "outline", depth: 20 },
+        ]);
+        const body = bodyOf(doc, created.created[1].nodeId);
+        const before = query(doc, {});
+        const topFront = before.edges.find(
+            ({ reference: { edge } }) =>
+                edge.kind === "line" &&
+                edge.start.y === 0 &&
+                edge.end.y === 0 &&
+                edge.start.z === 20 &&
+                edge.end.z === 20,
+        )!;
+        expect(topFront).not.toBeUndefined();
+        const origin = body.features[0].id;
+        run(doc, [
+            { op: "sketch", id: "notch", entities: rect(15, -5, 25, 5) },
+            { op: "extrude", id: "notchCut", body: "plate", sketch: "notch", depth: 20, operation: "cut" },
+        ]);
+        const selected = query(doc, {
+            selector: { featureIds: [origin], curves: [topFront.reference] },
+            expectedCount: 2,
+        });
+        expect(selected.selection).toMatchObject({ status: "matched", count: 2 });
+        expect(selected.edges).toHaveLength(2);
+        for (const row of selected.edges) {
+            expect(row.reference.edge.edgeId).toBe(topFront.reference.edge.edgeId);
+            expect(row.reference.edge.splitPiece).toBe(true);
+        }
+        const cutEdges = query(doc, { selector: { featureIds: [body.features[1].id] } });
+        expect(cutEdges.edges.length).toBeGreaterThan(0);
+        expect(
+            cutEdges.edges.every((row) => row.reference.edge.edgeId !== topFront.reference.edge.edgeId),
+        ).toBe(true);
+    });
+
+    test("empty and ambiguous counts explain candidates without changing the body", () => {
+        const { doc, body } = plateWithBore();
+        const before = body.featuresJson;
+        const empty = query(doc, { selector: { geometry: { radius: 99 } }, expectedCount: 1 });
+        expect(empty.edges).toHaveLength(0);
+        expect(empty.selection).toMatchObject({ status: "empty", count: 0 });
+        expect(empty.selection?.message).toMatch(/No edges match/);
+        const ambiguous = query(doc, { selector: { geometry: { radius: 3 } }, expectedCount: 1 });
+        expect(ambiguous.edges).toHaveLength(2);
+        expect(ambiguous.selection).toMatchObject({ status: "ambiguous", count: 2 });
+        expect(ambiguous.selection?.message).toMatch(/refine the selector/);
+        expect(body.featuresJson).toBe(before);
+    });
+
+    test("malformed predicates and missing curve/face/origin references fail explicitly", () => {
+        const { doc, body } = plateWithBore();
+        const before = body.featuresJson;
+        expect(() => query(doc, { selector: { featureIds: ["missing"] } })).toThrow(/unknown feature origin/);
+        expect(() => query(doc, { selector: { outlineOfFaces: [99] } })).toThrow(/out of range/);
+        expect(() => query(doc, { selector: { adjoiningFaces: { all: ["missing"] } } })).toThrow(
+            /face id.*missing/,
+        );
+        expect(() => query(doc, { selector: { geometry: { radius: -1 } } })).toThrow(/positive and finite/);
+        expect(() => query(doc, { selector: { tolerance: 0 } })).toThrow(/positive finite/);
+        expect(() => query(doc, { selector: { geometry: { elevation: { value: NaN } } } })).toThrow(
+            /finite value/,
+        );
+        expect(() => query(doc, { selector: { geometry: {} }, edgeIndexes: [0] })).toThrow(/not both/);
+        expect(() =>
+            query(doc, {
+                selector: {
+                    curves: [
+                        {
+                            bodyId: body.id,
+                            edge: { kind: "other", mid: { x: 900, y: 900, z: 900 }, length: 1 },
+                        },
+                    ],
+                },
+            }),
+        ).toThrow(/curve selection is missing or ambiguous/);
+        expect(() => query(doc, { expectedCount: 0 })).toThrow(/positive integer/);
+        expect(() => query(doc, { selector: { featureIds: [] } })).toThrow(/non-empty array/);
+        expect(() => query(doc, { selector: JSON.parse('{"geometery":{"radius":3}}') })).toThrow(
+            /unknown selector field/,
+        );
+        expect(() => query(doc, { selector: { adjoiningFaces: {} } })).toThrow(/requires all, any or exact/);
+        expect(() =>
+            query(doc, {
+                selector: {
+                    curves: [
+                        {
+                            bodyId: body.id,
+                            edge: {
+                                kind: "line",
+                                start: { x: 0, y: 15, z: 20 },
+                                end: { x: 40, y: 15, z: 20 },
+                            },
+                        },
+                    ],
+                },
+            }),
+        ).toThrow(/curve selection is missing or ambiguous/);
+        expect(body.featuresJson).toBe(before);
+    });
+});
+
+test("run_parametric captures a JSON starting-face pick and rebuilds it after an upstream edit", () => {
+    const doc = newDoc();
+    const body = createdBody(doc, run(doc, plate(20)), "b1");
+    const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const top = faces.findIndex((face) => face.surface().isPlanar() && face.normal(0, 0)[1].z > 0.99);
+    expect(top).toBeGreaterThanOrEqual(0);
+    const result = run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "boss-sketch", plane: "XY", entities: rect(5, 5, 10, 10) },
+                {
+                    op: "extrude",
+                    id: "boss",
+                    sketch: "boss-sketch",
+                    depth: 5,
+                    startFace: { nodeId: body.id, faceIndex: top },
+                },
+            ]),
+        ),
+    );
+    const boss = createdBody(doc, result, "boss");
+    expectClean(boss);
+    expect(boss.features[0]).toMatchObject({ startFace: { nodeId: body.id } });
+    expect(extent(boss)).toEqual([5, 5, 20, 10, 10, 25]);
+    run(doc, [
+        {
+            op: "editFeature",
+            body: body.id,
+            featureId: body.features[0].id,
+            action: "setParameter",
+            key: "depth",
+            value: 30,
+        },
+    ]);
+    expectClean(boss);
+    expect(extent(boss)).toEqual([5, 5, 30, 10, 10, 35]);
+});
+
+test("run_parametric discovers next candidates across JSON calls and tracks upstream height", () => {
+    const doc = newDoc();
+    const boundary = createdBody(doc, run(doc, plate(20)), "b1");
+    const result = run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "next-profile", plane: "XY", entities: rect(5, 5, 10, 10) },
+                { op: "extrude", id: "next-boss", sketch: "next-profile", depth: 1, extent: "next" },
+            ]),
+        ),
+    );
+    const boss = createdBody(doc, result, "next-boss");
+    expectClean(boss);
+    expect(boss.features[0]).toMatchObject({ extent: { type: "next", nodeIds: [boundary.id] } });
+    expect(extent(boss)).toEqual([5, 5, 0, 10, 10, 20]);
+    run(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                {
+                    op: "editFeature",
+                    body: boundary.id,
+                    featureId: boundary.features[0].id,
+                    action: "setParameter",
+                    key: "depth",
+                    value: 30,
+                },
+            ]),
+        ),
+    );
+    expectClean(boss);
+    expect(extent(boss)).toEqual([5, 5, 0, 10, 10, 30]);
+    expect(boss.features[0]).toMatchObject({ extent: { nodeIds: [boundary.id] } });
+});
+
+test("run_parametric rejects caller-provided next candidates rather than manual target selection", () => {
+    const doc = newDoc();
+    const boundary = createdBody(doc, run(doc, plate(20)), "b1");
+    const message = runExpectingFailure(
+        doc,
+        JSON.parse(
+            JSON.stringify([
+                { op: "sketch", id: "bad-next-profile", plane: "XY", entities: rect(5, 5, 10, 10) },
+                {
+                    op: "extrude",
+                    id: "bad-next",
+                    sketch: "bad-next-profile",
+                    depth: 1,
+                    extent: { type: "next", nodeIds: [boundary.id] },
+                },
+            ]),
+        ),
+    );
+    expect(message).toContain("automatically");
+    expect(doc.modelManager.findNodes((node) => node instanceof ParametricBodyNode)).toHaveLength(1);
+});
+
+test.each(["extrude", "boolean"])("%s rejects join before resolving or changing the document", (op) => {
+    const doc = newDoc();
+    const position = doc.history.position();
+    try {
+        expect(() => run(doc, [{ op, id: "invalid", operation: "join" } as unknown as ParametricOp])).toThrow(
+            /operation must be fuse, cut or common/,
+        );
+        expect(doc.history.position()).toBe(position);
+        expect(doc.modelManager.findNode((node) => node instanceof ParametricBodyNode)).toBeUndefined();
+    } finally {
+        doc.dispose();
+    }
 });

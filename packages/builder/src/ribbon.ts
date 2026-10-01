@@ -118,13 +118,14 @@ export const DefaultRibbon: RibbonTabProfile[] = [
                     "measure.length",
                     "measure.angle",
                     "measure.select",
+                    "measure.referenceDeviation",
                     "create.section",
                     "modify.checkShape",
                 ],
             },
             {
                 groupName: "ribbon.group.insert",
-                items: ["file.import"],
+                items: ["file.import", "file.importReferenceMesh"],
                 collapsedItems: ["convert.curveProjection"],
             },
         ],
@@ -201,12 +202,20 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
         groups: [
             {
                 groupName: "ribbon.group.create",
-                items: ["feature.extrude", "feature.revolve", "feature.loft"],
+                items: [
+                    "feature.extrude",
+                    "feature.revolve",
+                    "feature.loft",
+                    "feature.sweep",
+                    "feature.faceSweep",
+                    "feature.projection",
+                ],
             },
             {
                 groupName: "ribbon.group.modify",
                 items: [
                     "feature.fillet",
+                    "feature.cornerSetback",
                     "feature.chamfer",
                     "feature.thicken",
                     { type: "split", items: ["feature.fuse", "feature.cut", "feature.common"] },

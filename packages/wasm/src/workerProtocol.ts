@@ -6,7 +6,7 @@ import type { BoundingBox, Vector3 } from "../lib/spicy-wasm";
 /** Session-scoped, never serialized into a document. Not an IShape. */
 export type KernelHandle = string;
 export type KernelFailure = {
-    code: "cancelled" | "closed" | "kernel" | "invalid" | "unavailable";
+    code: "cancelled" | "closed" | "kernel" | "invalid" | "unavailable" | "timeout";
     message: string;
 };
 export type KernelResult<T> = { ok: true; value: T } | { ok: false; error: KernelFailure };
@@ -45,7 +45,46 @@ export type BooleanReplica = ShapeReplica & {
     nativeMs?: number;
 };
 
+export type CornerReplica = BooleanReplica & {
+    cornerFaces: Int32Array;
+    g0Error: number;
+    g1Error: number;
+    fitDistanceError: number;
+    fitAngleError: number;
+};
+
+export type BoundedReplicaRequest =
+    | {
+          method: "booleanFuse" | "booleanCut" | "booleanCommon";
+          left: ShapeReplica[];
+          right: ShapeReplica[];
+          simplifyShape?: boolean;
+      }
+    | { method: "fillet" | "chamfer"; shape: ShapeReplica; edges: number[]; value: number }
+    | {
+          method: "loft";
+          sections: ShapeReplica[];
+          isSolid: boolean;
+          isRuled: boolean;
+          continuity: "c0" | "g1" | "c1" | "g2" | "c2" | "c3" | "cn";
+      }
+    | { method: "makeThickSolidBySimple"; shape: ShapeReplica; thickness: number }
+    | {
+          method: "makeThickSolidByJoin";
+          shape: ShapeReplica;
+          closingFaces: number[];
+          thickness: number;
+          joinType: "arc" | "tangent" | "intersection";
+          mode: "skin" | "pipe" | "rectoVerso";
+          intersection: boolean;
+      };
+
 export type KernelOperations = {
+    cornerSetbackReplica: {
+        args: { shape: ShapeReplica; edges: number[]; radius: number; distances: number[]; mesh?: boolean };
+        result: CornerReplica;
+    };
+    boundedReplica: { args: BoundedReplicaRequest; result: ShapeReplica };
     ready: { args: undefined; result: undefined };
     box: { args: { origin: Vector3; size: Vector3 }; result: KernelHandle };
     importBrep: { args: { brep: string }; result: KernelHandle };

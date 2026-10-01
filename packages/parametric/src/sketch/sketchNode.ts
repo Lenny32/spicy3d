@@ -54,7 +54,11 @@ import { splineParams, splinePoints, splineSegments } from "./splineGeometry";
 const NOT_A_PLANE = "Construction source is not a plane";
 
 function bsplineOptionsOf(entity: SketchEntityData): BSplineOptions {
-    return { parametrization: entity.parametrization, periodic: entity.periodic === true };
+    return {
+        parametrization: entity.parametrization,
+        periodic: entity.periodic === true,
+        control: entity.control,
+    };
 }
 
 export interface SketchNodeOptions {

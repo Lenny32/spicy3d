@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "../document";
+import { DocumentMutations } from "../documentMutations";
 import type { IDisposable } from "./disposable";
 import type { IEqualityComparer } from "./equalityComparer";
 import { PropertyHistoryRecord } from "./history";
@@ -138,6 +139,7 @@ export abstract class HistoryObservable extends Observable {
         onPropertyChanged?: (property: K, oldValue: this[K]) => void,
         equals?: IEqualityComparer<this[K]>,
     ): boolean {
+        DocumentMutations.assertWritable(this.document);
         return super.setProperty(
             property,
             newValue,

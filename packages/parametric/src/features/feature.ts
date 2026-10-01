@@ -19,9 +19,11 @@ import {
     type TrackedShape,
     type XYZLike,
 } from "@spicy3d/core";
+import type { FilletCornerSetback } from "./cornerSetbacks";
 import type { EdgeRef } from "./edgeRef";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
 import type { ProfileRef } from "./profileRef";
+import type { FilletRadiusPoint } from "./radiusLaw";
 
 export interface FeatureBase {
     readonly id: string;
@@ -41,7 +43,28 @@ export type FeatureData =
     | BooleanFeatureData
     | ExtrudeTargetFeatureData
     | LoftFeatureData
+    | ProjectionFeatureData
+    | SweepFeatureData
+    | FaceSweepFeatureData
     | ThickenFeatureData;
+
+/** Associative whole-curve projection along positive rays of a fixed world-space vector. */
+export interface ProjectionFeatureData extends FeatureBase {
+    readonly type: "projection";
+    readonly source: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    readonly target: { readonly nodeId: string; readonly face: ProfileRef };
+    readonly direction: XYZLike;
+}
+
+/** A solid section swept in a support-normal frame and joined to or cut from the entering body. */
+export interface FaceSweepFeatureData extends FeatureBase {
+    readonly type: "faceSweep";
+    readonly section: LoftSection;
+    readonly path: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    readonly support: { readonly nodeId: string; readonly face: ProfileRef };
+    readonly operation: "join" | "cut";
+    readonly roundCorner?: boolean;
+}
 
 export interface ExtrudeFeatureData extends FeatureBase {
     readonly type: "extrude";
@@ -62,6 +85,8 @@ export interface ExtrudeFeatureData extends FeatureBase {
      * on the profile plane.
      */
     readonly startOffset?: ParameterValue;
+    /** Starting surface, matched on its body's pre-feature timeline; absent starts on the profile. */
+    readonly startFace?: { readonly nodeId?: string; readonly face: ProfileRef };
     /**
      * How the prism combines with the preceding feature's shape on the host body —
      * Fusion-style join (fuse) / cut / intersect (common). Undefined creates standalone
@@ -99,6 +124,7 @@ export interface ExtrudeFeatureData extends FeatureBase {
  *   `depth`'s sign.
  */
 export type ExtrudeExtent =
+    | { readonly type: "next"; readonly nodeIds: string[]; readonly offset?: ParameterValue }
     | { readonly type: "distance" }
     | {
           readonly type: "toObject";
@@ -156,6 +182,22 @@ export interface LoftFeatureData extends FeatureBase {
     readonly ruled?: boolean;
     /** Continuity of a smooth loft's surfaces; absent = C2. Ignored when `ruled`. */
     readonly continuity?: Continuity;
+    /** Optional associative C2 guidance (format 13); absent retains the ordinary loft. */
+    readonly guided?: {
+        readonly spine: { readonly nodeId: string; readonly edges: EdgeRef[] };
+        readonly boundary: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    };
+}
+
+/** A sweep with one sketch section and an authored, ordered chain of whole 3D edges (format 9). */
+export interface SweepFeatureData extends FeatureBase {
+    readonly type: "sweep";
+    readonly section: LoftSection;
+    readonly path: { readonly nodeId: string; readonly edges: EdgeRef[] };
+    /** A capped solid by default; false leaves a shell. */
+    readonly solid?: boolean;
+    /** Default right corners; true requests OCCT round-corner transitions. */
+    readonly roundCorner?: boolean;
 }
 
 /**
@@ -186,6 +228,10 @@ export interface ThickenFeatureData extends FeatureBase {
 export interface FilletFeatureData extends FeatureBase {
     readonly type: "fillet";
     readonly radius: ParameterValue;
+    /** Optional smooth law, normalized arc length along each selected edge's natural curve direction. */
+    readonly radiusLaw?: FilletRadiusPoint[];
+    /** Optional independently controlled setbacks at one three-edge corner (constant radius only). */
+    readonly cornerSetbacks?: FilletCornerSetback[];
     readonly edges: EdgeRef[];
 }
 

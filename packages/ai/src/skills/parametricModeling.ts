@@ -6,7 +6,7 @@ import type { Skill } from "./types";
 export const parametricModeling: Skill = {
     name: "parametric-modeling",
     description:
-        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
+        "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/sweep/projection/faceSweep/editFaceSweep/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
     content: `Parametric modeling. run_parametric builds a feature TREE the user can re-edit; run_program builds throwaway geometry.
 
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
@@ -16,6 +16,13 @@ chamfer, boolean) also registers its own id as another name for that body, so an
 reference afterwards. Anywhere a reference is expected you may also pass the real node id of an existing
 sketch, body or construction. One call is one undo step, and ANY failure rolls the whole program back —
 nothing is left half-built.
+
+For small edits on large bodies, pass { responseMode: "compact", ops: [...] }. The default "full"
+returns every touched body's feature list. Compact bodies.features includes only feature rows created
+or directly edited in this call (final state, with reusable feature ids); removedFeatureIds reports
+removed rows. featureCount gives the total, status is "ok" or "error", and diagnostics retains ALL
+current feature errors/warnings, including untouched rows. created, consumed and results remain
+available; explicit features, sketchInfo and constructionInfo ops always return their full reads.
 
 - { op: "sketch", id, plane?, entities?, constraints?, actions?, name? }
   plane: "XY" (default) | "YZ" | "ZX"
@@ -45,7 +52,14 @@ nothing is left half-built.
                                                     Tangent [line, bspline] = the line along its end tangent
   Any entity may carry construction: true (constrainable helper geometry, never part of a profile) and
   name: "..." (a name later refs in this call can use instead of the id).
-  A closed profile of lines/arcs needs its segments in perimeter order, each starting where the previous
+  Control-mode bspline uses poles:[[u,v],...] instead of points/params/parametrization. Optional
+  degree defaults to min(3,poleCount-1); distinct strictly increasing knots and multiplicities must
+  be supplied together (or use generated defaults). Open ends are clamped (degree+1); initial
+  periodic support uses uniform knots and multiplicity one. Optional weights are one positive
+  finite value per pole. The curve generally does not pass through interior poles. movePoint point
+  indices address poles in this mode. Weighted curves require the native B-spline kernel binding;
+  older kernels report an explicit error. Fit-point bsplines are unchanged.
+  A closed profile of lines/arcs needs segments in perimeter order, each starting where the previous
   one ends (the last one ending on the first one's start); a periodic bspline closes on its own.
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
@@ -53,7 +67,7 @@ nothing is left half-built.
   their datums (display units), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
   a sketch you did not build in this call.
-- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, body?, operation?, extent?, secondExtent? }
+- { op: "extrude", id, sketch, depth, symmetric?, startOffset?, startFace?, body?, operation?, extent?, secondExtent? }
   Without "body" it starts a new body. With "body" + "operation" (fuse/cut/common) the new prism
   combines with that body's shape. All closed profiles of the sketch are extruded.
   extent: "distance" (default, by depth) | "throughAll" (through the whole body; direction = sign of
@@ -62,18 +76,61 @@ nothing is left half-built.
   it follows the face on rebuild — a hole cut to a block's bottom face stays through when the block
   grows). With symmetric, extent applies to both sides; secondExtent gives the second side its own
   (a to-object extent cannot be mirrored).
+  "next" | {type:"next",offset?} automatically chooses the nearest full-coverage face in eligible
+  candidate bodies captured when authored. Rebuilds may select another candidate after upstream edits.
+  Candidate IDs are a fixed search universe; hide unrelated bodies before authoring. Editing can
+  refresh that snapshot. Depth sign chooses direction; Next never reverses itself. Offset translates
+  the selected end along that direction after selection. Tied, crossing, partial/piecewise or absent
+  boundaries fail explicitly. One complete face per profile is the initial supported boundary.
+  startFace: {nodeId, faceIndex} selects an associative starting surface, including curved walls.
+  startOffset moves that surface along the sketch normal; expressions are supported. With distance,
+  depth separates the surface and its exact translated end cap. Upstream edits rebuild both caps.
+  The profile must project completely onto the selected surface; incomplete or ambiguous boundaries
+  fail explicitly. Omit startFace to retain the sketch-plane start.
 - { op: "revolve", id, sketch, axis, angle? }
   axis: { point: {x,y,z}, direction: {x,y,z} } (world) | { construction, member? } (a construction axis;
   for a UCS member "X"/"Y"/"Z", default Z) | { nodeId, edgeIndex } (a linear edge of a node, e.g. a
   construction line drawn in a sketch). The two references follow their source when it changes.
   Always starts a new body — there is no join/cut revolve. angle is in degrees, default 360.
-- { op: "loft", id, sections, solid?, ruled?, continuity? }
+- { op: "loft", id, sections, solid?, ruled?, continuity?, guided? }
   sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes
   (e.g. a rectangle on XY, a circle on an offset plane); consecutive sections must not share a plane.
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
-- { op: "fillet", id, body, edgeIndexes, radius }  /  { op: "chamfer", id, body, edgeIndexes, distance }
+  guided: { spine: { nodeId, edgeIndexes? , edgeRefs? }, boundary: { nodeId, edgeIndexes?, edgeRefs? } }
+  references an open main spine and one curve that genuinely controls the side boundary. Each path
+  uses exactly one of whole-edge indexes or persistent references returned by edges, with 1–128
+  pieces. Guided lofts support 2–16 closed planar sections and smooth C2 only; ruled/C0/C1 fail.
+  Keep sections in their authored planes: both paths must meet them once in strict station order,
+  and the complete boundary must lie on generated side faces. Interior guides are rejected.
+- { op: "editLoft", body, featureId, sections?, solid?, ruled?, continuity?, guided? }
+  changes the loft inputs/options as one undo step. guided:null clears both paths and restores
+  ordinary lofting; replacing the guided group must supply both spine and boundary.
+- { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
+  Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at
+  the path start, perpendicular to its tangent; this operation does not relocate a misplaced profile.
+  Every ordered whole path edge must lie on the full trimmed support face. Uses the true support-normal
+  Darboux frame, not a free-space sweep. Nearby/off-surface paths and paths crossing holes are refused.
+  Section/path/support transforms are resolved into the host's local coordinates at the feature timeline.
+  Requires actual reusable path and support ancestry: untracked/path-ref logical tokens are unsupported.
+  The result must attach/intersect, change material, and form one valid connected solid. Curved walls
+  are supported. Upstream edits follow actual tracked ancestry; moved starts require compatible authored
+  section placement. The source sketches stay separate; the profile is hidden when creation succeeds.
+- { op: "editFaceSweep", body, featureId, section?, path?, support?, operation?, roundCorner? }
+  Re-picks or changes a face-sweep feature. Omitted fields keep their previous value. Invalid picks fail
+  the whole call and leave the previous committed model and undo position intact.
+
+- { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
+  Fillets also accept radiusLaw: [{position:0,radius:"noseRadius"}, {position:1,radius:"tailRadius"}].
+  Use 2–64 increasing samples with endpoints 0 and 1; radii are positive lengths/expressions.
+  Positions are normalized selected-edge arc length in its natural curve direction, not world-space
+  anchors: upstream parameterization reversal can exchange the physical ends. OCCT interpolates
+  smoothly and propagates along tangent contours; select one edge per contour, and use equal law
+  endpoint radii on a closed contour. BREP validation can reject a law that cannot fit the shape.
+  editFeature action "setRadiusLaw" replaces the whole law; omit radiusLaw to restore the saved
+  constant radius. setParameter keys radiusLaw.0, radiusLaw.1, ... edit individual radius expressions.
 - { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
@@ -87,7 +144,7 @@ nothing is left half-built.
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.
 - { op: "editFeature", body, featureId, action, ... }
-  action: "setParameter" (key, value) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
+  action: "setParameter" (key, value) | "setRadiusLaw" (radiusLaw?, fillet only) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
 - { op: "features", body }   // reads the feature list: ids, names, parameters, errors
 - { op: "construct", id, definition, name?, displaySize? }   // construction plane / axis / point / UCS
 - { op: "editConstruction", node, definition?, name?, displaySize? }
@@ -136,6 +193,9 @@ sketch re-solves after each action and a failing one rolls everything back):
     external (projected) entities are removed the same way
 - { action: "setDatum", constraint, value, index? }        change a dimension (display units or expression)
 - { action: "setConstruction", entities, value? = true }   toggle construction geometry
+- { action: "setBSpline", entity, poles?, degree?, knots?, multiplicities?, weights?, periodic? }
+  edits a control-mode B-spline atomically, preserving entity id and pole-index references. Degree
+  changes generate default knots unless knots/multiplicities are explicitly supplied together.
 - { action: "movePoint", entity, point, to: [u, v] }       drag a point; constraints stay satisfied
 - { action: "trim", entity, at: [u, v] }                   removes the piece of the line/arc/circle around
     "at" between its neighbouring intersections (a circle needs two)
@@ -209,10 +269,44 @@ every feature that names it rebuilds. Reach for a variable when a dimension is o
 likely to come back to, and a plain number when it is incidental. run_program's numeric args accept
 the same expressions, but evaluate them ONCE: its nodes keep the number and do not follow the variable.
 
-Selecting edges for fillet/chamfer: "edgeIndexes" index the body's current edge list (findSubShapes
-order). Get them with a run_program query on the body node first — shape.findSubShapes(target: "b1",
-args: { subshapeType: "edge" }) returns refs like e#3, and that number IS the index to pass.
-Identify the edges you want by geometry (edge.ends, edge.length) before picking.
+Selecting edges for fillet/chamfer: query run_parametric [{ op: "edges", body: "b1", id: "picks" }].
+results.picks = { bodyId, edges: [{ index, reference: { bodyId, edge } }, ...] }. The edge fingerprint
+contains local line endpoints, circle center/axis/radius, or other curve midpoint/length, plus its
+tracked edgeId when available. Select by geometry and retain each whole reference object. A later
+call accepts [{ op: "fillet", id: "f1", body: "b1", edgeRefs: [<reference>], radius: 3 }].
+Use exactly one of edgeRefs or edgeIndexes, with at least one selection. References belong to one
+body: another body is refused. Existing tracked-id/fingerprint matching follows upstream rebuilds,
+including edge reordering; a removed or ambiguous edge fails. Already split pieces remain narrow.
+References are plain JSON and may be reused across calls; query again when intentionally selecting
+new topology. These differ from run_program's subshape refs (including grouped refs): those identify
+positions in a current shape, not persistent parametric selections. edgeIndexes remain supported
+for immediate picks, but must be queried again after upstream edits.
+
+Rule-based picks: edges accepts selector instead of edgeIndexes; every supplied field intersects.
+- featureIds: [featureId, ...] selects edges first born at those features, including surviving split/
+  merged descendants through boolean ancestry. Use feature ids from features, not feature names.
+- adjoiningFaces: { all?: [face, ...], any?: [face, ...], exact?: [face, ...] } selects incident face
+  sets. A face is a current face index or its tracked face id; all requires every selected face,
+  any requires at least one, exact requires the complete adjacent set. Shared face ids expand to
+  all current pieces. Unknown face ids/indexes fail instead of returning a misleading empty set.
+- outlineOfFaces: [face, ...] selects any given face's outer-wire edges, excluding hole loops.
+- curves: [<persistent reference>, ...] first resolves each saved pick against the current body.
+  Selects edges sharing its supporting infinite line or circle; free-form curves use tracked
+  ancestry. Missing/ambiguous saved curves fail. Already split picks choose the current supporting
+  curve, so several collinear pieces may intentionally be returned.
+- geometry: { kind?: "line"|"circle"|"other", radius?: number, cylinderRadius?: number,
+  elevation?: { axis?: "x"|"y"|"z", value } }. radius is a circular EDGE radius; cylinderRadius
+  requires an adjacent analytic CYLINDER of that radius (a sphere/torus does not qualify). elevation
+  requires the ENTIRE edge at that coordinate, default axis z. Coordinates are body-local mm.
+- tolerance?: positive mm, default 0.000001, governs geometry equality.
+Example: { op: "edges", body: "b1", selector: { geometry: { kind: "circle", cylinderRadius: 3,
+  elevation: { value: 20 } } }, expectedCount: 1 } selects a radius-3 bore's top rim.
+A selector query returns selection { status, count, message } alongside candidate stable refs.
+No matches = empty. expectedCount (positive integer) requires that many matches; a nonzero mismatch
+is ambiguous. Without expectedCount, multiple matches are an intentional set. Inspect/refine an
+ambiguous query before using its references; the query itself applies no feature or selection edit.
+Selector queries skip edges with no capturable curve (e.g. sphere poles) and list their indexes/reasons
+in unselectableEdges. An explicit raw index still fails if its curve cannot be captured.
 
 Example — a 40x30 plate, 20 tall, then round one top edge R3:
  [ { op: "sketch", id: "s1", plane: "XY", name: "Plate outline", entities: [
@@ -223,6 +317,18 @@ Example — a 40x30 plate, 20 tall, then round one top edge R3:
    { op: "extrude", id: "b1", sketch: "s1", depth: 20, name: "Plate" } ]
 Then run a run_program query on "b1" to find which edge index is the top front edge, and:
  [ { op: "fillet", id: "f1", body: "b1", edgeIndexes: [<that index>], radius: 3 } ]
+
+Sweep along a connected 3D path:
+- { op: "sweep", id, section: { sketchId, profileIndex? },
+    path: { nodeId, edgeIndexes: [ ...ordered whole-edge topology indexes ] }, solid?, roundCorner? }
+  creates a new body from one hole-free sketch profile. Omit profileIndex only for a sole profile.
+  Keep the authored profile at the path start, perpendicular to its initial tangent. solid defaults
+  true; roundCorner defaults false. Connected lines and curves, including closed paths, are supported.
+  Stable sketch/entity or tracked-body ancestry follows upstream edits. Untracked source picks use
+  authored logical tokens with geometric matching; missing, ambiguous or incompatible edits fail.
+- { op: "editSweep", body, featureId, section?, path?, solid?, roundCorner? } replaces these inputs
+  atomically and rolls back on an invalid rebuild. The interactive feature editor previews and re-picks
+  the same inputs; Cancel leaves the feature untouched, and Confirm produces one undo step.
 
 Example — a fully dimensioned slot plate driven by a variable:
  [ { op: "sketch", id: "s1", actions: [

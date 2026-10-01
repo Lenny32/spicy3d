@@ -48,6 +48,28 @@ const ENTITY_SCHEMA = {
             description:
                 "spline / bspline, instead of params: the points [[u,v], ...] in curve order (a bspline's fit points)",
         },
+        poles: {
+            type: "array",
+            items: { type: "array", items: { type: "number" } },
+            description:
+                "Control B-spline poles [[u,v], ...]; replaces fit points. Point indices address poles.",
+        },
+        degree: { type: "integer", description: "Control B-spline degree, default min(3, poles.length-1)" },
+        knots: {
+            type: "array",
+            items: { type: "number" },
+            description: "Strictly increasing distinct knots; specify multiplicities together",
+        },
+        multiplicities: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Clamped open ends degree+1; periodic uniform knots/multiplicity1",
+        },
+        weights: {
+            type: "array",
+            items: { type: "number" },
+            description: "One positive finite rational weight per pole, default one",
+        },
         parametrization: {
             type: "string",
             enum: ["chord", "centripetal", "uniform"],
@@ -117,6 +139,7 @@ const ACTION_SCHEMA = {
                 "setDatum",
                 "setConstruction",
                 "movePoint",
+                "setBSpline",
                 "trim",
                 "split",
                 "extend",
@@ -137,6 +160,29 @@ const ACTION_SCHEMA = {
         },
         constraints: { type: "array", description: "add: constraint specs; remove: constraint ids/names" },
         entity: { description: "Entity id or name (movePoint/trim/split/extend/offset)" },
+        poles: {
+            type: "array",
+            items: { type: "array", items: { type: "number" } },
+            description:
+                "Control B-spline poles [[u,v], ...]; replaces fit points. Point indices address poles.",
+        },
+        degree: { type: "integer", description: "Control B-spline degree, default min(3, poles.length-1)" },
+        knots: {
+            type: "array",
+            items: { type: "number" },
+            description: "Strictly increasing distinct knots; specify multiplicities together",
+        },
+        multiplicities: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Clamped open ends degree+1; periodic uniform knots/multiplicity1",
+        },
+        weights: {
+            type: "array",
+            items: { type: "number" },
+            description: "One positive finite rational weight per pole, default one",
+        },
+        periodic: { type: "boolean", description: "setBSpline: periodic closure" },
         point: { type: "number", description: "movePoint: point index" },
         to: { description: "movePoint: target [u, v]; extend: the boundary entity" },
         at: {
@@ -186,6 +232,74 @@ const ACTION_SCHEMA = {
     required: ["action"],
 };
 
+const FACE_SELECTION_SCHEMA = { anyOf: [{ type: "integer", minimum: 0 }, { type: "string" }] };
+const FACE_SET_SCHEMA = { type: "array", items: FACE_SELECTION_SCHEMA, minItems: 1 };
+const EDGE_SELECTOR_SCHEMA = {
+    type: "object",
+    description:
+        "edges query: intersect predicates to select stable edge references. Geometry is body-local in mm. Load parametric-modeling for semantics.",
+    additionalProperties: false,
+    properties: {
+        featureIds: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            description: "Edges born at these feature ids (union); includes surviving boolean descendants.",
+        },
+        adjoiningFaces: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                all: FACE_SET_SCHEMA,
+                any: FACE_SET_SCHEMA,
+                exact: FACE_SET_SCHEMA,
+            },
+            description:
+                "Incident face sets: use current face indexes or tracked face ids. all=every given face, any=at least one, exact=the whole adjacent set.",
+        },
+        outlineOfFaces: {
+            ...FACE_SET_SCHEMA,
+            description: "Edges on the outer wire of any listed face (holes excluded).",
+        },
+        curves: {
+            type: "array",
+            minItems: 1,
+            items: { type: "object" },
+            description:
+                "Persistent reference objects returned by edges. Resolve to current topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
+        },
+        geometry: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                kind: { type: "string", enum: ["line", "circle", "other"] },
+                radius: { type: "number", exclusiveMinimum: 0, description: "Circle-edge radius." },
+                cylinderRadius: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description:
+                        "Radius of at least one adjacent analytic cylindrical face (includes circular rims and linear seams).",
+                },
+                elevation: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        axis: { type: "string", enum: ["x", "y", "z"] },
+                        value: { type: "number" },
+                    },
+                    required: ["value"],
+                    description: "Entire edge lies at this coordinate, axis z by default.",
+                },
+            },
+        },
+        tolerance: {
+            type: "number",
+            exclusiveMinimum: 0,
+            description: "Absolute geometry tolerance in mm (default 0.000001).",
+        },
+    },
+};
+
 const OPS_SCHEMA = {
     type: "object",
     properties: {
@@ -196,12 +310,19 @@ const OPS_SCHEMA = {
                 "extrude",
                 "revolve",
                 "loft",
+                "editLoft",
+                "sweep",
+                "editSweep",
+                "faceSweep",
+                "editFaceSweep",
+                "projection",
                 "fillet",
                 "chamfer",
                 "thicken",
                 "boolean",
                 "editFeature",
                 "features",
+                "edges",
                 "editSketch",
                 "sketchInfo",
                 "construct",
@@ -213,7 +334,7 @@ const OPS_SCHEMA = {
         id: {
             type: "string",
             description:
-                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/construct.",
+                "Name for this op's result; later ops reference it. Required for sketch/extrude/revolve/loft/sweep/projection/construct.",
         },
         name: { type: "string", description: "Optional display name for the resulting node" },
         plane: {
@@ -239,12 +360,37 @@ const OPS_SCHEMA = {
                 "sketch: edits applied after entities/constraints; editSketch: the edits to apply — every sketch tool (rectangle, polygon, trim, split, extend, offset, move, rotate, mirror, paste, project edges, construction toggle, auto-constrain, auto-dimension, ...)",
         },
         sketch: { type: "string", description: "The sketch op id (or an existing sketch's node id)" },
+        source: {
+            type: "string",
+            description: "Projection: sketch or body node whose ordered whole edges are projected",
+        },
+        target: {
+            type: "string",
+            description: "Projection: parametric body holding the target trimmed face",
+        },
+        faceIndex: {
+            type: "integer",
+            minimum: 0,
+            description: "Projection target face index, captured as an associative reference",
+        },
+        direction: {
+            ...XYZ_SCHEMA,
+            description:
+                "Projection: fixed finite nonzero WORLD direction; positive rays only. Reverse explicitly. Partial or multiple branches fail.",
+        },
         depth: { description: "Extrude distance in mm (a number or an expression)" },
         symmetric: { type: "boolean", description: "Extrude by `depth` in both directions" },
+        startFace: {
+            type: "object",
+            properties: { nodeId: { type: "string" }, faceIndex: { type: "integer", minimum: 0 } },
+            required: ["nodeId", "faceIndex"],
+            description:
+                "Associative starting surface, including curved walls. startOffset offsets this surface axially; distance depth separates exact translated caps.",
+        },
         startOffset: { description: "Distance the extrusion starts away from the profile plane" },
         extent: {
             description:
-                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
+                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), "next" or {type:"next", offset?} (automatically find the uniformly nearest complete face in an authoring-time candidate body snapshot; curved caps are exact, missing/tied/crossing/piecewise targets fail; no automatic direction reversal), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
         },
         secondExtent: {
             description:
@@ -270,9 +416,82 @@ const OPS_SCHEMA = {
             description:
                 "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
         },
+        guided: {
+            type: ["object", "null"],
+            properties: {
+                spine: {
+                    type: "object",
+                    properties: {
+                        nodeId: { type: "string" },
+                        edgeIndexes: {
+                            type: "array",
+                            items: { type: "integer", minimum: 0 },
+                            minItems: 1,
+                            maxItems: 128,
+                        },
+                        edgeRefs: { type: "array", items: { type: "object" }, minItems: 1, maxItems: 128 },
+                    },
+                    required: ["nodeId"],
+                },
+                boundary: {
+                    type: "object",
+                    properties: {
+                        nodeId: { type: "string" },
+                        edgeIndexes: {
+                            type: "array",
+                            items: { type: "integer", minimum: 0 },
+                            minItems: 1,
+                            maxItems: 128,
+                        },
+                        edgeRefs: { type: "array", items: { type: "object" }, minItems: 1, maxItems: 128 },
+                    },
+                    required: ["nodeId"],
+                },
+            },
+            required: ["spine", "boundary"],
+            description:
+                "Loft/editLoft: optional associative main spine and full side-boundary guide, each an open connected path from one node. Each path requires exactly one of ordered edgeIndexes or persistent edgeRefs returned by edges. Supports 2–16 planar sections and smooth C2 only; ruled/C0/C1 fail. Sections keep their authored placement and must meet both paths in strict station order. The entire boundary must lie on generated sides. editLoft guided:null clears both guides.",
+        },
         solid: {
             type: "boolean",
-            description: "Loft only: capped ends (default true); false = an open surface",
+            description: "Loft/sweep: capped ends (default true); false = an open surface",
+        },
+        section: {
+            type: "object",
+            properties: {
+                sketchId: { type: "string" },
+                profileIndex: { type: "integer", minimum: 0 },
+            },
+            required: ["sketchId"],
+            description:
+                "Sweep/editSweep/faceSweep/editFaceSweep: section sketch op id or node id. Omit profileIndex only when it has one profile. Holes are unsupported.",
+        },
+        path: {
+            type: "object",
+            properties: {
+                nodeId: { type: "string" },
+                edgeIndexes: {
+                    type: "array",
+                    items: { type: "integer", minimum: 0 },
+                    minItems: 1,
+                    maxItems: 256,
+                },
+            },
+            required: ["nodeId", "edgeIndexes"],
+            description:
+                "Sweep/editSweep/faceSweep/editFaceSweep: path source op id or node id and connected whole-edge topology indexes in traversal order. Captures stable source ancestry when available. Sweep alone can re-match untracked sources geometrically. FaceSweep requires proven reusable source ancestry.",
+        },
+        roundCorner: {
+            type: "boolean",
+            description: "Sweep/editSweep/faceSweep/editFaceSweep: round path junctions (default false).",
+        },
+        support: {
+            type: "object",
+            properties: { nodeId: { type: "string" }, faceIndex: { type: "integer", minimum: 0 } },
+            required: ["nodeId", "faceIndex"],
+            additionalProperties: false,
+            description:
+                "FaceSweep/editFaceSweep: trimmed support face on a parametric body. The entire path must lie on this face; nearby curves are rejected.",
         },
         ruled: {
             type: "boolean",
@@ -286,17 +505,67 @@ const OPS_SCHEMA = {
         body: { type: "string", description: "The body op id (or an existing body's node id)" },
         operation: {
             type: "string",
-            enum: ["fuse", "cut", "common"],
+            enum: ["fuse", "cut", "common", "join"],
             description:
-                "Extrude only: how the new geometry combines with the target body's shape. Omit to start a new body. (Revolve and loft have no join/cut form.)",
+                "Extrude/boolean: fuse, cut or common. FaceSweep/editFaceSweep: join or cut into the named body; requires an authored section at the path start and a proven support reference.",
+        },
+        selector: EDGE_SELECTOR_SCHEMA,
+        expectedCount: {
+            type: "integer",
+            minimum: 1,
+            description:
+                "edges query: require this many candidates; empty/ambiguous selection status explains mismatches without applying an edit.",
+        },
+        edgeRefs: {
+            type: "array",
+            description:
+                "fillet/chamfer/projection: persistent reference objects returned by the edges op; use instead of edgeIndexes. Body-scoped, follows tracked topology through upstream rebuilds.",
+            items: {
+                type: "object",
+                properties: {
+                    bodyId: { type: "string" },
+                    edge: {
+                        type: "object",
+                        properties: {
+                            kind: { type: "string", enum: ["line", "circle", "other"] },
+                            edgeId: { type: "string", maxLength: 4096 },
+                            splitPiece: { type: "boolean" },
+                            start: XYZ_SCHEMA,
+                            end: XYZ_SCHEMA,
+                            center: XYZ_SCHEMA,
+                            axis: XYZ_SCHEMA,
+                            mid: XYZ_SCHEMA,
+                            radius: { type: "number" },
+                            length: { type: "number" },
+                        },
+                        required: ["kind"],
+                    },
+                },
+                required: ["bodyId", "edge"],
+            },
         },
         edgeIndexes: {
             type: "array",
             items: { type: "number" },
             description:
-                "Indexes into the body's current edge list (findSubShapes order). Query them with run_program first: shape.findSubShapes on the body gives refs like e#3, whose number is the index.",
+                "fillet/chamfer/projection: indexes into the current source edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
         },
         radius: { description: "Fillet radius in mm" },
+        radiusLaw: {
+            type: "array",
+            minItems: 2,
+            maxItems: 64,
+            items: {
+                type: "object",
+                properties: {
+                    position: { type: "number", minimum: 0, maximum: 1 },
+                    radius: { description: "Positive radius in millimetres, or a length expression" },
+                },
+                required: ["position", "radius"],
+            },
+            description:
+                "Fillet only: smooth law along each selected edge's normalized arc length in natural curve direction. Strictly increasing positions, endpoints 0/1. One edge per tangent contour; closed contours need equal resolved endpoint radii. editFeature action setRadiusLaw replaces the law; omit it to restore constant radius.",
+        },
         distance: { description: "Chamfer distance in mm" },
         thickness: {
             description:
@@ -327,7 +596,7 @@ const OPS_SCHEMA = {
         consumeTools: { type: "boolean", description: "Defaults to true" },
         action: {
             type: "string",
-            enum: ["setParameter", "rename", "suppress", "moveTo", "remove"],
+            enum: ["setParameter", "setRadiusLaw", "rename", "suppress", "moveTo", "remove"],
             description: "editFeature: what to do with the feature",
         },
         featureId: { type: "string", description: "The feature's id, as reported by the `features` op" },
@@ -352,6 +621,12 @@ const RUN_PARAMETRIC_PARAMETERS = {
     type: "object",
     properties: {
         ops: { type: "array", items: OPS_SCHEMA, description: "Operations, run in order" },
+        responseMode: {
+            type: "string",
+            enum: ["full", "compact"],
+            description:
+                "full (default): every touched body's feature list. compact: only created/edited feature rows, removed ids, feature count and error/warning status. Explicit features/sketchInfo/edges reads remain full.",
+        },
     },
     required: ["ops"],
 };
@@ -361,7 +636,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, fillet, chamfer, thicken, boolean, editFeature, features, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: runParametric,
         },
@@ -375,6 +650,11 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
     const ops = (args as { ops?: unknown }).ops;
     if (!Array.isArray(ops) || ops.length === 0) {
         throw new Error('run_parametric requires a non-empty "ops" array');
+    }
+
+    const responseMode = args["responseMode"];
+    if (responseMode !== undefined && responseMode !== "full" && responseMode !== "compact") {
+        throw new Error('"responseMode" must be "full" or "compact"');
     }
 
     const parametric = await loadParametric();
@@ -392,6 +672,7 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
         // Cancellation is checked between ops; a running op is timed for the slow-op warning.
         result = parametric.runParametricProgram(document, ops as ParametricOp[], {
             signal,
+            responseMode,
             onOpFinished: noteOpDuration,
         });
         document.selection.clearSelection();

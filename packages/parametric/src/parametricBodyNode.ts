@@ -4,6 +4,7 @@
 import {
     type AsyncController,
     ConstructionNode,
+    DocumentMutations,
     DocumentRebuilds,
     type FeatureItem,
     type FeatureReference,
@@ -24,6 +25,7 @@ import {
     ParameterShapeNode,
     PerformanceTrace,
     PubSub,
+    type RebuildOptions,
     Result,
     type Scope,
     ShapeNode,
@@ -54,6 +56,7 @@ import type { ProfileRef } from "./features/profileRef";
 import { syncNodeWatches } from "./nodeWatch";
 import { RebuildJob, type RebuildSteps } from "./rebuildJob";
 import { danglingProfileRefs, SketchNode } from "./sketch/sketchNode";
+import { trackVariableScope } from "./variableScope";
 import { ensureVariableSync } from "./variableSync";
 
 /**
@@ -72,7 +75,7 @@ import { ensureVariableSync } from "./variableSync";
  *    matched; `refreshAnchoredRefs` writes those back into the feature JSON, so the next edit
  *    measures drift from the latest match rather than from the original pick.
  * 3. Per-feature results are cached (`BodyTimeline`) keyed on the feature JSON, the variable
- *    scope, and the identity of the input and referenced shapes — so editing one feature only
+ *    variable dependencies, and the identity of the input and referenced shapes — so editing one feature only
  *    re-evaluates from that feature on.
  *
  * Where to look:
@@ -192,6 +195,25 @@ export class ParametricBodyNode
     private _job?: RebuildJob;
     private _run?: RebuildRun;
     private _forceSynchronous = false;
+    private _preparedCorner?: {
+        json: string;
+        input: IShape;
+        tracking: ShapeTracking;
+        take(): Result<IShape>;
+    };
+
+    /** Runtime-only, single-use candidate; exact input identity is checked at consumption. */
+    installPreparedCorner(candidate: NonNullable<ParametricBodyNode["_preparedCorner"]>): () => void {
+        if (this._preparedCorner) throw new Error("A corner candidate is already installed");
+        this._preparedCorner = candidate;
+        return () => {
+            if (this._preparedCorner === candidate) this._preparedCorner = undefined;
+        };
+    }
+
+    cancelCornerEditRebuild(): void {
+        this.cancelRebuild("corner-edit-cancelled");
+    }
     private _replayCancelled = false;
     private _lastRebuildSucceeded = true;
     /** Nested consumers must finish against the caller's in-flight timeline, without yielding. */
@@ -360,6 +382,28 @@ export class ParametricBodyNode
     }
 
     /** The merge's validation pass (`IRebuildStatusSource`): the body's shape and each feature's error. */
+    async prepareRebuildStatus(options: RebuildOptions = {}): Promise<void> {
+        if (
+            !this.features.some(
+                (feature) =>
+                    feature.type === "fillet" && !feature.suppressed && feature.cornerSetbacks !== undefined,
+            )
+        )
+            return;
+        const cancel = () => this.cancelRebuild("validation-cancelled");
+        if (options.signal?.aborted) {
+            cancel();
+            return;
+        }
+        options.signal?.addEventListener("abort", cancel, { once: true });
+        try {
+            void this.shape;
+            await this.whenRebuilt();
+        } finally {
+            options.signal?.removeEventListener("abort", cancel);
+        }
+    }
+
     rebuildStatus(): NodeRebuildStatus {
         void this.shape;
         this._job?.flush();
@@ -524,6 +568,11 @@ export class ParametricBodyNode
      * re-enabling the history) always completes before the new command runs.
      */
     async reselectShapes(featureId: string): Promise<void> {
+        const type = this.features.find((feature) => feature.id === featureId)?.type;
+        if (type === "sweep" || type === "faceSweep") {
+            await this.editFeature(featureId);
+            return;
+        }
         await ReselectFeatureCommand.start(this, featureId);
     }
 
@@ -644,7 +693,13 @@ export class ParametricBodyNode
             !this._forceSynchronous &&
             !ParametricBodyNode.synchronousDocuments.has(this.document) &&
             ParametricBodyNode.evaluationDepth === 0 &&
-            this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD;
+            (this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD ||
+                this.features.some(
+                    (feature) =>
+                        feature.type === "fillet" &&
+                        !feature.suppressed &&
+                        feature.cornerSetbacks !== undefined,
+                ));
         const revision = DocumentRebuilds.revision(this.document);
         const featuresJson = this.featuresJson;
         const scopeJson = JSON.stringify([...this.document.variables.evaluate().scope]);
@@ -660,6 +715,8 @@ export class ParametricBodyNode
         };
         this._run = run;
         const steps = this.evaluateChain(asynchronous, run);
+        const mutationScope = DocumentMutations.captureScope(this.document);
+        const owned = <T>(action: () => T): T => (mutationScope ? mutationScope.run(action) : action());
         const advance = () => {
             const batchTrace = PerformanceTrace.enabled
                 ? PerformanceTrace.begin("body.batch", { nodeId: this.id })
@@ -667,7 +724,7 @@ export class ParametricBodyNode
             this._evaluating = true;
             ParametricBodyNode.evaluationDepth++;
             try {
-                return steps.next();
+                return owned(() => steps.next());
             } finally {
                 this._timeline.endRun();
                 ParametricBodyNode.evaluationDepth--;
@@ -686,37 +743,40 @@ export class ParametricBodyNode
                 this.document,
                 steps,
                 advance,
-                (result) => {
-                    if (this._job !== job || this._isDisposed) return;
-                    this._job = undefined;
-                    if (run.outcome === "cancelled") {
+                (result) =>
+                    owned(() => {
+                        if (this._job !== job || this._isDisposed) return;
+                        this._job = undefined;
+                        if (run.outcome === "cancelled") {
+                            const result = this.generateShape("superseded");
+                            if (result.isOk) this.shape = result;
+                            return;
+                        }
+                        this._lastRebuildSucceeded = result.isOk;
+                        this.reportRebuildProgress(undefined);
+                        if (result.isOk) this.shape = result;
+                        else if (!this._shape.isOk) this._shape = result;
+                        this.emitPropertyChanged("featuresJson", this.featuresJson);
+                        this.document.visual.update();
+                    }),
+                (index) => this.reportRebuildProgress(index),
+                (error) =>
+                    owned(() => {
+                        if (this._job !== job) return;
+                        this._job = undefined;
+                        this._lastRebuildSucceeded = false;
+                        this.reportRebuildProgress(undefined);
+                        this._featureErrors.set(this.features[0]?.id ?? "", String(error));
+                        this.emitPropertyChanged("featuresJson", this.featuresJson);
+                    }),
+                run.current,
+                () =>
+                    owned(() => {
+                        if (this._job !== job || this._isDisposed) return;
+                        this._job = undefined;
                         const result = this.generateShape("superseded");
                         if (result.isOk) this.shape = result;
-                        return;
-                    }
-                    this._lastRebuildSucceeded = result.isOk;
-                    this.reportRebuildProgress(undefined);
-                    if (result.isOk) this.shape = result;
-                    else if (!this._shape.isOk) this._shape = result;
-                    this.emitPropertyChanged("featuresJson", this.featuresJson);
-                    this.document.visual.update();
-                },
-                (index) => this.reportRebuildProgress(index),
-                (error) => {
-                    if (this._job !== job) return;
-                    this._job = undefined;
-                    this._lastRebuildSucceeded = false;
-                    this.reportRebuildProgress(undefined);
-                    this._featureErrors.set(this.features[0]?.id ?? "", String(error));
-                    this.emitPropertyChanged("featuresJson", this.featuresJson);
-                },
-                run.current,
-                () => {
-                    if (this._job !== job || this._isDisposed) return;
-                    this._job = undefined;
-                    const result = this.generateShape("superseded");
-                    if (result.isOk) this.shape = result;
-                },
+                    }),
                 () => {
                     run.synchronous = true;
                 },
@@ -740,6 +800,11 @@ export class ParametricBodyNode
                 ? undefined
                 : { completed: index, total: this._rollbackIndex ?? this.featureCount },
         );
+    }
+
+    /** Recovery cancels ephemeral old-generation work without changing saved features. */
+    cancelForKernelRecovery(): void {
+        this.cancelRebuild("kernel-recovery");
     }
 
     private cancelRebuild(reason = "superseded"): void {
@@ -836,15 +901,28 @@ export class ParametricBodyNode
         return this._timeline.stateAt(index);
     }
 
+    /** Includes the final output when a new corner is appended, without changing timeline lookup semantics. */
+    cornerEditStateAt(index: number): FeatureTimelineState | undefined {
+        if (index < this.features.length) return this.timelineStateAt(index);
+        if (index !== this.features.length) return undefined;
+        const count = this.features.filter((feature) => !feature.suppressed).length;
+        const entry = this._timeline.entryAt(count - 1);
+        return entry && { shape: entry.shape, faceIds: entry.faceIds, edgeIds: entry.edgeIds };
+    }
+
     /**
-     * The first boolean taking `nodeId` as a tool — where this body swallowed that node's
-     * geometry. `consumeTools: false` still counts: it only keeps the tool in the tree, the
-     * fused shape (and so the circularity) is the same.
+     * The first boolean using this tool, or face sweep using this path. Referenced curves
+     * may themselves depend on this body, so they must see the state entering their consumer.
+     * This timeline anchor does not change tree adoption; consumeTools only controls that.
      */
     consumingFeatureIndex(nodeId: string): number | undefined {
         const index = this.features.findIndex(
-            (feature): feature is BooleanFeatureData =>
-                feature.type === "boolean" && feature.toolIds.includes(nodeId),
+            (feature) =>
+                (feature.type === "boolean" && feature.toolIds.includes(nodeId)) ||
+                (feature.type === "faceSweep" && feature.path.nodeId === nodeId) ||
+                (feature.type === "loft" &&
+                    (feature.guided?.spine?.nodeId === nodeId ||
+                        feature.guided?.boundary?.nodeId === nodeId)),
         );
         return index < 0 ? undefined : index;
     }
@@ -853,7 +931,7 @@ export class ParametricBodyNode
 
     /**
      * Replays the feature list, reusing cached per-feature results while the feature
-     * data, the document's variable scope, its input shape, and its referenced node
+     * data, the variables it reads, its input shape, and its referenced node
      * shapes are all unchanged — so editing one feature only re-evaluates from that
      * feature on.
      * A session rollback (`_rollbackIndex`) stops the replay early; the truncation
@@ -871,9 +949,8 @@ export class ParametricBodyNode
         let input: IShape | undefined;
         let faceIds: string[] | undefined;
         let edgeIds: string[] | undefined;
-        // The document's parameter table, not a per-body one: every body in the
-        // document resolves the same names, and a variable edit invalidates every
-        // body's cache through `cacheKey` below.
+        // Resolved values carry transitive expression changes. Each feature records
+        // which names it reads, so unrelated table edits keep its geometry cached.
         const scope = this.document.variables.evaluate().scope;
         const nextCache: FeatureCacheEntry[] = [];
         const resolvedProfiles = new Map<string, ProfileRef[]>();
@@ -902,7 +979,11 @@ export class ParametricBodyNode
                     this.followReferencedSketches(feature, followedSketches);
                     this.refreshConsumedTools(feature);
                 });
-                const key = this.cacheKey(feature, scope);
+                const key = this.cacheKey(
+                    feature,
+                    scope,
+                    this._timeline.entryAt(nextCache.length)?.variableDependencies,
+                );
                 const cached = invalidSuffix ? undefined : this.validCacheEntry(key, input, nextCache.length);
                 let step: Result<FeatureStepOutput>;
                 if (cached) {
@@ -936,20 +1017,22 @@ export class ParametricBodyNode
                             index,
                             () => {
                                 // The cache probe preceded a yield. Refresh dependencies and capture
-                                // the evaluation key again inside this batch's in-flight timeline.
+                                // variable reads inside this batch's in-flight timeline.
                                 if (asynchronous) {
                                     this.followReferencedSketches(feature, followedSketches);
                                     this.refreshConsumedTools(feature);
                                 }
                                 return this.prepareEvaluation(
                                     feature,
-                                    this.cacheKey(feature, scope),
                                     scope,
                                     input,
                                     faceIds,
                                     edgeIds,
                                     nextCache,
-                                    asynchronous && !run.synchronous,
+                                    asynchronous &&
+                                        (!run.synchronous ||
+                                            (feature.type === "fillet" &&
+                                                feature.cornerSetbacks !== undefined)),
                                     features.slice(index + 1, stop).every((feature) => feature.suppressed),
                                 );
                             },
@@ -1011,7 +1094,10 @@ export class ParametricBodyNode
             for (const feature of this.features.slice(0, stop)) {
                 if (feature.suppressed) continue;
                 const entry = nextCache[cacheIndex];
-                nextCache[cacheIndex++] = { ...entry, json: this.cacheKey(feature, scope) };
+                nextCache[cacheIndex++] = {
+                    ...entry,
+                    json: this.cacheKey(feature, scope, entry.variableDependencies),
+                };
             }
             this.markUnresolvedExternalRefs(features);
             run.outcome = "success";
@@ -1062,8 +1148,17 @@ export class ParametricBodyNode
      * and hands back a new one, hundreds of rounds of kernel work per edit.
      */
     private refreshConsumedTools(feature: FeatureData): void {
-        if (feature.type !== "boolean") return;
-        for (const toolId of feature.toolIds) {
+        const tools =
+            feature.type === "boolean"
+                ? feature.toolIds
+                : feature.type === "faceSweep"
+                  ? [feature.path.nodeId]
+                  : feature.type === "loft" && feature.guided
+                    ? [feature.guided.spine?.nodeId, feature.guided.boundary?.nodeId].filter(
+                          (id): id is string => typeof id === "string",
+                      )
+                    : [];
+        for (const toolId of tools) {
             const node = this.document.modelManager.findNode((n) => n.id === toolId);
             if (node === this || !(node instanceof ParametricBodyNode)) continue;
             if (!node.references(this.id)) continue;
@@ -1111,10 +1206,14 @@ export class ParametricBodyNode
         this.emitPropertyChanged("featuresJson", this.featuresJson);
     };
 
-    /** True when a body this node watches takes it as a boolean tool (see `refreshConsumedTools`). */
-    private isConsumedByWatched(): boolean {
+    /** A consumer refreshes its producers at their anchors, including variable-table updates. */
+    private isConsumedByWatched(source?: INode): boolean {
         for (const node of this._watched.values()) {
-            if (node instanceof ParametricBodyNode && node.consumingFeatureIndex(this.id) !== undefined) {
+            if (
+                (source === undefined || node === source) &&
+                node instanceof ParametricBodyNode &&
+                node.consumingFeatureIndex(this.id) !== undefined
+            ) {
                 return true;
             }
         }
@@ -1236,7 +1335,6 @@ export class ParametricBodyNode
     /** Cache-miss path of `evaluateFeatureStep`: evaluates the feature and stores the result. */
     private prepareEvaluation(
         feature: FeatureData,
-        key: string,
         scope: Scope,
         input: IShape | undefined,
         faceIds: string[] | undefined,
@@ -1251,11 +1349,12 @@ export class ParametricBodyNode
             inputEdgeIds: edgeIds ?? [],
             outputEdgeIds: [],
         };
+        const variables = trackVariableScope(scope);
         const context = {
             document: this.document,
             host: this,
             input,
-            scope,
+            scope: variables.scope,
             tracking,
             meshResult,
         };
@@ -1263,12 +1362,31 @@ export class ParametricBodyNode
         // An async evaluation's cost is its wall time up to the answer: the worker's kernel
         // time is what a later rebuild of this step pays too.
         const started = performance.now();
-        const pending = asynchronous
-            ? featureHandler(feature.type)?.prepareAsync?.(feature, context)
+        const prepared =
+            feature.type === "fillet" && feature.cornerSetbacks !== undefined
+                ? this._preparedCorner
+                : undefined;
+        const preparedOperation: IAsyncShapeOperation<IShape> | undefined = prepared
+            ? {
+                  ready: Promise.resolve(),
+                  cancel: () => {},
+                  canFallback: false,
+                  take: () => {
+                      this._preparedCorner = undefined;
+                      if (prepared.json !== JSON.stringify(feature) || prepared.input !== input)
+                          return Result.err("Corner preview is stale; recompute before confirming");
+                      Object.assign(tracking, prepared.tracking);
+                      return prepared.take();
+                  },
+              }
             : undefined;
+        const pending =
+            preparedOperation ??
+            (asynchronous ? featureHandler(feature.type)?.prepareAsync?.(feature, context) : undefined);
         return {
             pending,
             finish: (synchronous) => {
+                if (pending?.canFallback === false) synchronous = false;
                 if (synchronous) pending?.cancel();
                 const parked = pending !== undefined && !synchronous;
                 const evaluationStart = parked ? started : performance.now();
@@ -1285,8 +1403,10 @@ export class ParametricBodyNode
                     resolvedEdges: tracking.resolvedEdges,
                     resolvedFaces: tracking.resolvedFaces,
                 };
+                const variableDependencies = variables.dependencies();
                 nextCache.push({
-                    json: key,
+                    json: this.cacheKey(feature, scope, variableDependencies),
+                    variableDependencies,
                     input,
                     refs: parked ? refs : this.snapshotNodeRefs(feature),
                     shape: output.shape,
@@ -1299,11 +1419,13 @@ export class ParametricBodyNode
         };
     }
 
-    /** Cache keys include the scope snapshot so a variable change invalidates dependents. */
-    private cacheKey(feature: FeatureData, scope: Scope): string {
+    /** Cache only names read by evaluation; missing names and their units are significant too. */
+    private cacheKey(feature: FeatureData, scope: Scope, dependencies?: readonly string[]): string {
         const extra = featureHandler(feature.type)?.cacheKey?.(feature, this.document);
         const own = extra === undefined ? feature : [feature, extra];
-        return scope.size === 0 ? JSON.stringify(own) : JSON.stringify([own, [...scope]]);
+        const variables =
+            dependencies === undefined ? [...scope] : dependencies.map((name) => [name, scope.get(name)]);
+        return JSON.stringify([own, variables]);
     }
 
     /** The cached entry for `index`, when the feature data, the input and the refs all still match. */
@@ -1436,9 +1558,9 @@ export class ParametricBodyNode
     // re-evaluate. A failed rebuild (e.g. the sketch is mid-edit with an open profile)
     // keeps the last good shape silently — the feature panel shows the error — instead
     // of toasting per change.
-    private readonly handleWatchedNodeChanged = (property: string) => {
+    private readonly handleWatchedNodeChanged = (property: string, source: INode) => {
         if (property !== "shape" && property !== "transform" && property !== "geometry") return;
-        this.rebuildFromUpstream();
+        this.rebuildFromUpstream("upstream", source);
     };
 
     /**
@@ -1447,7 +1569,7 @@ export class ParametricBodyNode
      * `variableSync.ts`). A failed rebuild keeps the last good shape silently; the
      * feature panel carries the error.
      */
-    private rebuildFromUpstream(trigger = "upstream"): void {
+    private rebuildFromUpstream(trigger = "upstream", source?: INode): void {
         // Skip while evaluating: a referenced node (e.g. the sketch) may generate its
         // shape lazily mid-evaluation and notify — the in-flight pass reads it fresh.
         if (this._evaluating) return;
@@ -1462,13 +1584,14 @@ export class ParametricBodyNode
                 return;
             }
         }
-        // A watched body that CONSUMES this one owns this rebuild instead: it re-solves us
+        // A notification from our consumer, or a variable-table notification with no source,
+        // is suppressed while a watched body CONSUMES this one: it re-solves us
         // right before its boolean, against the chain state we actually anchor to
         // (`refreshConsumedTools`). Reacting here as well would make the two trade revisions
         // forever — its shape is rebuilt from ours, so every round invalidates the other's
         // cached evaluation. The consumed body's placement of its own features still
         // rebuilds it directly, and so does the consumer once it stops consuming us.
-        if (this.isConsumedByWatched()) return;
+        if (this.isConsumedByWatched(source)) return;
 
         const result = this.generateShape(trigger);
         if (result.isOk) {

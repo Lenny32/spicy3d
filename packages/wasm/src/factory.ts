@@ -2,8 +2,11 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    CORNER_SETBACK_ANGLE_TOLERANCE,
+    CORNER_SETBACK_DISTANCE_TOLERANCE,
     Config,
     type Continuity,
+    type FilletRadiusSample,
     GeometryUtils,
     type ICompound,
     type ICurve,
@@ -22,10 +25,14 @@ import {
     PerformanceTrace,
     type Plane,
     Precision,
+    type PrismFromEnd,
     Result,
     ShapeTypes,
     ShapeTypeUtils,
+    type TrackedCornerResult,
     type TrackedShape,
+    validateFilletCornerSetback,
+    validateFilletRadiusLaw,
     type XYZ,
     type XYZLike,
 } from "@spicy3d/core";
@@ -212,7 +219,7 @@ function containsSolid(shape: IShape): boolean {
  * pairwise; on a shell of many narrow faces it may never finish, and a kernel call on the main
  * thread cannot be interrupted, so the tab hangs. Arc joins and simple offsets do not.
  */
-function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
+export function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
     if (joinType !== "intersection") return undefined;
     const limit = Config.instance.thickSolidIntersectionMaxFaces;
     const faces = shape.findSubShapes(ShapeTypes.face);
@@ -288,6 +295,15 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
             faceAncestors: toIntArray(result.faceAncestors),
             edgeAncestors: toIntArray(result.edgeAncestors),
             capFaces: toIntArray(result.capFaces),
+            ...convertPipeHistory(result),
+            ...(((result as unknown as { nextTargetIndex?: number }).nextTargetIndex ?? -1) < 0
+                ? {}
+                : {
+                      nextTarget: {
+                          candidateIndex: (result as unknown as { nextTargetIndex: number }).nextTargetIndex,
+                          faceIndex: (result as unknown as { nextFaceIndex: number }).nextFaceIndex,
+                      },
+                  }),
         });
     }
 
@@ -303,6 +319,39 @@ function toIntArray(vector: IntVector): number[] {
     }
     vector.delete();
     return array;
+}
+
+function convertPipeHistory(result: TrackedShapeResult): Pick<TrackedShape, "pipeHistory"> {
+    const pipe = result as unknown as Partial<
+        Record<
+            | "pipeFaceEdges"
+            | "pipeFaceVertices"
+            | "pipeEdgeVertices"
+            | "pipeStartEdges"
+            | "pipeEndEdges"
+            | "pipeStartFaces",
+            IntVector
+        >
+    >;
+    const faceEdges = pipe.pipeFaceEdges;
+    if (!faceEdges) return {};
+    const faceVertices = pipe.pipeFaceVertices;
+    const edgeVertices = pipe.pipeEdgeVertices;
+    const startEdges = pipe.pipeStartEdges;
+    const endEdges = pipe.pipeEndEdges;
+    const startFaces = pipe.pipeStartFaces;
+    const pipeHistory = {
+        faceEdges: toIntArray(faceEdges),
+        faceVertices: faceVertices ? toIntArray(faceVertices) : [],
+        edgeVertices: edgeVertices ? toIntArray(edgeVertices) : [],
+        startEdges: startEdges ? toIntArray(startEdges) : [],
+        endEdges: endEdges ? toIntArray(endEdges) : [],
+        startFaces: startFaces ? toIntArray(startFaces) : [],
+    };
+    if (Object.values(pipeHistory).every((values) => values.length === 0)) return {};
+    return {
+        pipeHistory,
+    };
 }
 
 /** The edges a fillet removal produced, skipping nulls, non-edges and already-seen handles. */
@@ -322,7 +371,10 @@ function filletResultEdges(edges: TopoDS_Shape[]): OccEdge[] {
 export class ShapeFactory implements IShapeFactory {
     readonly kernelName = "opencascade";
 
-    constructor(readonly asyncOperations?: import("@spicy3d/core").IAsyncShapeFactory) {
+    constructor(
+        readonly asyncOperations?: import("@spicy3d/core").IAsyncShapeFactory,
+        readonly boundedOperations?: import("@spicy3d/core").IBoundedShapeFactory,
+    ) {
         // Once the kernel crashed, every call answers `Result.err` with the same message; `edge`
         // returns a plain edge, so it throws that message instead.
         // biome-ignore lint/correctness/noConstructorReturn: the guarded facade replaces the instance
@@ -349,6 +401,137 @@ export class ShapeFactory implements IShapeFactory {
             return convertShapeResult(wasm.ShapeFactory.fillet, [shape.shape, edges, radius], "Fillet");
         }
         return Result.err("Not OccShape");
+    }
+
+    filletVariableRadius(shape: IShape, edges: number[], law: readonly FilletRadiusSample[]): Result<IShape> {
+        const error = validateFilletRadiusLaw(law);
+        if (error) return Result.err(error);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        const binding = wasm.ShapeFactory.filletVariableRadius;
+        if (!binding) return Result.err("Variable-radius fillets are not available in this kernel build");
+        return convertShapeResult(
+            binding,
+            [shape.shape, edges, law.flatMap((sample) => [sample.position, sample.radius])],
+            "Variable-radius fillet",
+        );
+    }
+
+    filletVariableRadiusTracked(
+        shape: IShape,
+        edges: number[],
+        law: readonly FilletRadiusSample[],
+    ): Result<TrackedShape> {
+        const error = validateFilletRadiusLaw(law);
+        if (error) return Result.err(error);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        const binding = wasm.ShapeFactory.filletVariableRadiusTracked;
+        if (!binding) return Result.err("Variable-radius fillets are not available in this kernel build");
+        return convertTrackedShapeResult(
+            binding,
+            [shape.shape, edges, law.flatMap((sample) => [sample.position, sample.radius])],
+            "Variable-radius fillet",
+        );
+    }
+
+    filletCornerSetbackTracked(
+        shape: IShape,
+        edges: number[],
+        radius: number,
+        distances: number[],
+        options?: { synchronousProof?: true },
+    ): Result<TrackedCornerResult> {
+        if (typeof window !== "undefined" && options?.synchronousProof !== true)
+            return Result.err("Corner setbacks require cancelable worker evaluation in the browser");
+        const validation = validateFilletCornerSetback(edges, radius, distances);
+        if (validation) return Result.err(validation);
+        if (!(shape instanceof OccShape)) return Result.err("Not OccShape");
+        type NativeCorner = {
+            shape: TopoDS_Shape;
+            isOk: boolean;
+            error: string;
+            g0Error: number;
+            g1Error: number;
+            fitDistanceError: number;
+            fitAngleError: number;
+            faceMap: IntVector;
+            edgeMap: IntVector;
+            faceEdgeMap: IntVector;
+            faceAncestors: IntVector;
+            edgeAncestors: IntVector;
+            cornerFaces: IntVector;
+        };
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                filletCornerSetbackTracked?: (
+                    shape: TopoDS_Shape,
+                    edges: number[],
+                    radius: number,
+                    distances: number[],
+                ) => NativeCorner;
+            }
+        ).filletCornerSetbackTracked;
+        if (!binding) return Result.err("Corner setbacks are not available in this kernel build");
+        let native: NativeCorner;
+        try {
+            native = binding(shape.shape, edges, radius, distances);
+        } catch (error) {
+            return Result.err(kernelCallFailure("Corner setback fillet", error));
+        }
+        // Value-object vector fields are owning wrappers. Cache and delete each exactly once,
+        // including failed results; the plain value object itself has no delete() method.
+        const vectors = {
+            faceMap: native.faceMap,
+            edgeMap: native.edgeMap,
+            faceEdgeMap: native.faceEdgeMap,
+            faceAncestors: native.faceAncestors,
+            edgeAncestors: native.edgeAncestors,
+            cornerFaces: native.cornerFaces,
+        };
+        const nativeShape = native.shape;
+        let accepted = false;
+        try {
+            if (!native.isOk) return Result.err(native.error);
+            const arrays = Object.fromEntries(
+                Object.entries(vectors).map(([key, vector]) => [
+                    key,
+                    Array.from({ length: vector.size() }, (_, index) => vector.get(index)!),
+                ]),
+            ) as Record<keyof typeof vectors, number[]>;
+            if (
+                arrays.cornerFaces.length !== 1 ||
+                arrays.cornerFaces.some(
+                    (index) => !Number.isInteger(index) || index < 0 || index >= arrays.faceMap.length,
+                ) ||
+                !Number.isFinite(native.g0Error) ||
+                native.g0Error < 0 ||
+                native.g0Error > CORNER_SETBACK_DISTANCE_TOLERANCE ||
+                !Number.isFinite(native.g1Error) ||
+                native.g1Error < 0 ||
+                native.g1Error > CORNER_SETBACK_ANGLE_TOLERANCE ||
+                !Number.isFinite(native.fitDistanceError) ||
+                native.fitDistanceError < 0 ||
+                native.fitDistanceError > CORNER_SETBACK_DISTANCE_TOLERANCE ||
+                !Number.isFinite(native.fitAngleError) ||
+                native.fitAngleError < 0 ||
+                native.fitAngleError > CORNER_SETBACK_ANGLE_TOLERANCE
+            )
+                return Result.err(
+                    "Corner setback kernel returned invalid construction history or continuity",
+                );
+            const result: TrackedCornerResult = {
+                shape: OccShape.wrap(nativeShape),
+                ...arrays,
+                g0Error: native.g0Error,
+                g1Error: native.g1Error,
+                fitDistanceError: native.fitDistanceError,
+                fitAngleError: native.fitAngleError,
+            };
+            accepted = true;
+            return Result.ok(result);
+        } finally {
+            for (const vector of Object.values(vectors)) vector.delete();
+            if (!accepted) nativeShape.delete();
+        }
     }
 
     chamfer(shape: IShape, edges: number[], distance: number): Result<IShape> {
@@ -761,6 +944,63 @@ export class ShapeFactory implements IShapeFactory {
         );
     }
 
+    prismFromTracked(
+        profile: IShape,
+        direction: XYZ,
+        fromFace: IFace,
+        offset: number,
+        end: PrismFromEnd,
+    ): Result<TrackedShape> {
+        const binding = wasm.ShapeFactory.prismFromTracked;
+        if (typeof binding !== "function")
+            return Result.err("This kernel cannot start an extrusion from a face");
+        return convertTrackedShapeResult(
+            binding,
+            [
+                ensureOccShape(profile)[0],
+                direction,
+                ensureOccShape(fromFace)[0],
+                offset,
+                end.kind === "distance" ? 0 : end.kind === "toObject" ? 1 : 2,
+                end.kind === "distance" ? end.depth : 0,
+                ensureOccShape(end.kind === "toObject" ? end.face : fromFace)[0],
+                end.kind === "toObject" ? (end.offset ?? 0) : 0,
+                ensureOccShape(end.kind === "throughAll" ? end.bounds : []),
+                end.kind === "throughAll" && end.flush === true,
+            ],
+            "Prism",
+        );
+    }
+
+    prismNextTracked(
+        profile: IShape,
+        direction: XYZ,
+        candidates: IShape[],
+        offset = 0,
+        start?: { face: IFace; offset: number },
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                prismNextTracked?: (...args: unknown[]) => TrackedShapeResult;
+            }
+        ).prismNextTracked;
+        if (typeof binding !== "function")
+            return Result.err("This kernel cannot find the next extrusion face");
+        return convertTrackedShapeResult(
+            binding,
+            [
+                ensureOccShape(profile)[0],
+                direction,
+                ensureOccShape(candidates),
+                offset,
+                start !== undefined,
+                ensureOccShape(start?.face ?? profile)[0],
+                start?.offset ?? 0,
+            ],
+            "Prism next",
+        );
+    }
+
     prismUntilTracked(profile: IShape, direction: XYZ, untilFace: IFace, offset = 0): Result<TrackedShape> {
         return convertTrackedShapeResult(
             wasm.ShapeFactory.prismUntilTracked,
@@ -806,6 +1046,40 @@ export class ShapeFactory implements IShapeFactory {
             [ensureOccShape(profile), ensureOccShape(path)[0], true, isRound],
             "Sweep",
         );
+    }
+    sweepTracked(section: IWire, path: IWire, solid: boolean, roundCorner: boolean): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { sweepTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).sweepTracked;
+        if (!binding) return Result.err("Tracked path sweep requires a newer geometry kernel");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(section)[0], ensureOccShape(path)[0], solid, roundCorner],
+            "Sweep",
+        );
+    }
+    faceSweepTracked(
+        section: IWire,
+        path: IWire,
+        support: IFace,
+        roundCorner: boolean,
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { faceSweepTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).faceSweepTracked;
+        if (!binding) return Result.err("Support-normal face sweep requires a newer geometry kernel");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(section)[0], ensureOccShape(path)[0], ensureOccShape(support)[0], roundCorner],
+            "Face sweep",
+        );
+    }
+    copyTracked(shape: IShape): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as { copyTracked?: (...args: unknown[]) => TrackedShapeResult }
+        ).copyTracked;
+        if (!binding) return Result.err("Tracked deep copy requires a newer geometry kernel");
+        return convertTrackedShapeResult(binding, [ensureOccShape(shape)[0]], "Copy");
     }
     revolve(profile: IShape, axis: Line, angle: number): Result<IShape> {
         return convertShapeResult(
@@ -972,6 +1246,26 @@ export class ShapeFactory implements IShapeFactory {
         } finally {
             for (const shape of created) shape.dispose();
         }
+    }
+    loftGuidedTracked(
+        sections: IWire[],
+        spine: IWire,
+        boundary: IWire,
+        solid: boolean,
+    ): Result<TrackedShape> {
+        const binding = (
+            wasm.ShapeFactory as unknown as {
+                loftGuidedTracked?: (...args: unknown[]) => TrackedShapeResult;
+            }
+        ).loftGuidedTracked;
+        if (!binding) return Result.err("Guided loft requires a newer geometry kernel");
+        if (sections.length < 2 || sections.length > 16)
+            return Result.err("Guided loft requires 2 to 16 sections");
+        return convertTrackedShapeResult(
+            binding,
+            [ensureOccShape(sections), ensureOccShape(spine)[0], ensureOccShape(boundary)[0], solid],
+            "GuidedLoft",
+        );
     }
     curveProjection(curve: IEdge | IWire, targetFace: IFace, vec: XYZ): Result<IShape> {
         return convertShapeResult(

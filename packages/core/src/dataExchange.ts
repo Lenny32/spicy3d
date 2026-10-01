@@ -2,7 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "./document";
-import type { VisualNode } from "./model";
+import type { Result } from "./foundation/result";
+import type { Matrix4 } from "./math";
+import type { MeshNode, VisualNode } from "./model";
+import type { StlTessellationOptions } from "./shape/shapeConverter";
 import type { LengthUnit } from "./units/lengthUnit";
 
 /**
@@ -25,6 +28,17 @@ export interface DataExportOptions {
      * `fixed` format. Models are millimetres internally, so any other unit is a conversion.
      */
     readonly lengthUnit?: LengthUnit;
+    /** STL only. Linear tolerance is in millimetres, independent of the file's output unit. */
+    readonly stl?: StlTessellationOptions;
+}
+
+/** Runtime options only; reference scans use the existing MeshNode payload. */
+export interface ReferenceMeshImportOptions {
+    readonly lengthUnit?: LengthUnit;
+    /** Placement in millimetres, after converting the file coordinates. */
+    readonly transform?: Matrix4;
+    readonly opacity?: number;
+    readonly visible?: boolean;
 }
 
 export interface IDataExchange {
@@ -33,6 +47,13 @@ export interface IDataExchange {
     /** How `type` handles units; see `ExportUnitHandling`. */
     exportUnitHandling(type: string): ExportUnitHandling;
     import(document: IDocument, files: FileList | File[]): Promise<void>;
+    referenceMeshFormats?(): string[];
+    /** Adds a display mesh without converting any triangles to kernel topology. */
+    importReferenceMesh?(
+        document: IDocument,
+        file: File,
+        options?: ReferenceMeshImportOptions,
+    ): Promise<Result<MeshNode>>;
     export(type: string, nodes: VisualNode[], options?: DataExportOptions): Promise<BlobPart[] | undefined>;
 }
 

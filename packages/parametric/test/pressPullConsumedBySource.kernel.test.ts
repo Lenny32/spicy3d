@@ -25,7 +25,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IFace, Plane, ShapeTypes } from "@spicy3d/core";
+import { type IFace, type IShape, Plane, type Result, ShapeTypes } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import type { ExtrudeFeatureData } from "../src/features/feature";
@@ -186,6 +186,32 @@ describe("a press-pulled body its source later consumes", () => {
         expect(errors(host)).toEqual([undefined, undefined]);
         expect(xExtent(tool)).toEqual([40, 70]);
         expect(xExtent(host)).toEqual([0, 70]);
+    });
+
+    test("a variable edit on the consumed producer still drives its host", () => {
+        const { host, tool } = buildConsumedPressPull("fuse", 20);
+        const document = tool.document;
+        document.variables.setItems([{ id: "depth", name: "pressDepth", type: "length", expression: "20" }]);
+        tool.setFeaturesEmitShapeChanged([
+            { ...tool.features[0], depth: "pressDepth" } as ExtrudeFeatureData,
+        ]);
+        expect(xExtent(host)).toEqual([0, 60]);
+        const rebuild = rs.spyOn(
+            tool as unknown as { generateShape(trigger?: string): Result<IShape> },
+            "generateShape",
+        );
+        try {
+            document.variables.setItems([
+                { id: "depth", name: "pressDepth", type: "length", expression: "30" },
+            ]);
+            expect(errors(tool)).toEqual([undefined]);
+            expect(errors(host)).toEqual([undefined, undefined]);
+            expect(xExtent(tool)).toEqual([40, 70]);
+            expect(xExtent(host)).toEqual([0, 70]);
+            expect(rebuild.mock.calls.map(([trigger]) => trigger)).toEqual(["consumer"]);
+        } finally {
+            rebuild.mockRestore();
+        }
     });
 
     test("dropping the boolean releases the pressed body back to its own shape", () => {

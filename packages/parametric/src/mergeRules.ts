@@ -30,6 +30,11 @@ const extrudeExtent: MergeValueRule = {
     tag: "type",
     variants: {
         distance: { kind: "object", fields: { type: scalar } },
+        next: {
+            kind: "object",
+            atomic: true,
+            fields: { type: scalar, nodeIds: { kind: "atomic", of: nodeRef }, offset: expression },
+        },
         toObject: {
             kind: "object",
             fields: {
@@ -114,6 +119,11 @@ registerMergePayload("parametric.features", {
                         depth: expression,
                         symmetric: scalar,
                         startOffset: expression,
+                        startFace: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, face: atomic },
+                        },
                         operation: scalar,
                         profiles,
                         // where each side ends (parametric 3)
@@ -145,7 +155,26 @@ registerMergePayload("parametric.features", {
                         axis: ["axis", "axisSource", "constructionAxisRef"],
                     },
                 },
-                fillet: { kind: "object", fields: { ...featureBase, radius: expression, edges } },
+                // A radius law is one interpolation function: merging individual knots could make
+                // their order or endpoint values invalid, so resolve the whole law atomically.
+                fillet: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        radius: expression,
+                        radiusLaw: atomic,
+                        edges,
+                        // A triplet's references and their associated distances must remain coherent.
+                        cornerSetbacks: {
+                            kind: "atomic",
+                            of: {
+                                kind: "object",
+                                atomic: true,
+                                fields: { edges, distances: { kind: "atomic", of: expression } },
+                            },
+                        },
+                    },
+                },
                 chamfer: { kind: "object", fields: { ...featureBase, distance: expression, edges } },
                 boolean: {
                     kind: "object",
@@ -169,9 +198,68 @@ registerMergePayload("parametric.features", {
                                 fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
                             },
                         },
+                        guided: {
+                            kind: "object",
+                            atomic: true,
+                            fields: {
+                                spine: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                                boundary: {
+                                    kind: "object",
+                                    atomic: true,
+                                    fields: { nodeId: nodeRef, edges },
+                                },
+                            },
+                        },
                         solid: scalar,
                         ruled: scalar,
                         continuity: scalar,
+                    },
+                },
+                // Each sweep input is an atomic pick: neither its node nor its anchors can merge separately.
+                sweep: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        section: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
+                        },
+                        path: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                        solid: scalar,
+                        roundCorner: scalar,
+                    },
+                },
+                faceSweep: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        section: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { sketchId: nodeRef, profile: { kind: "ref", target: "profile" } },
+                        },
+                        path: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                        support: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, face: { kind: "ref", target: "profile" } },
+                        },
+                        operation: scalar,
+                        roundCorner: scalar,
+                    },
+                },
+                projection: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        source: { kind: "object", atomic: true, fields: { nodeId: nodeRef, edges } },
+                        target: {
+                            kind: "object",
+                            atomic: true,
+                            fields: { nodeId: nodeRef, face: { kind: "ref", target: "profile" } },
+                        },
+                        direction: atomic,
                     },
                 },
                 // a thicken (parametric 5): the thickness is a parameter; the open faces are one pick
@@ -219,6 +307,7 @@ registerMergePayload("sketch.data", {
                         type: scalar,
                         params: atomic,
                         construction: scalar,
+                        control: atomic,
                         parametrization: scalar,
                         periodic: scalar,
                     },

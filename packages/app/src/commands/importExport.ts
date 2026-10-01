@@ -8,6 +8,7 @@ import {
     Combobox,
     ConstructionNode,
     command,
+    type DataExportOptions,
     documentLengthUnit,
     download,
     exportLengthUnit,
@@ -22,7 +23,9 @@ import {
     property,
     Result,
     readFilesAsync,
+    Transaction,
     VisualNode,
+    validateStlTessellation,
 } from "@spicy3d/core";
 import { importFiles } from "../utils";
 
@@ -42,6 +45,27 @@ export class Import implements ICommand {
     }
 }
 
+@command({ key: "file.importReferenceMesh", icon: "icon-import" })
+export class ImportReferenceMesh implements ICommand {
+    async execute(application: IApplication): Promise<void> {
+        const importer = application.dataExchange.importReferenceMesh;
+        if (!importer) return;
+        const files = await readFilesAsync(
+            application.dataExchange.referenceMeshFormats?.().join(",") ?? ".stl",
+            true,
+        );
+        if (!files.isOk || files.value.length === 0) return;
+        const document = application.activeView?.document ?? (await application.newDocument("Untitled"));
+        await Transaction.executeAsync(document, "import reference mesh", async () => {
+            for (const file of files.value) {
+                const result = await importer.call(application.dataExchange, document, file);
+                if (!result.isOk) PubSub.default.pub("showToast", "error.default:{0}", result.error);
+            }
+        });
+        application.activeView?.cameraController.fitContent();
+    }
+}
+
 @command({
     key: "file.export",
     icon: "icon-export",
@@ -54,7 +78,59 @@ export class Export extends CancelableCommand {
         return this.getPrivateValue("format", ".step");
     }
     public set format(value: string) {
-        this.setProperty("format", value, () => this.emitUnitChanged());
+        this.setProperty("format", value, () => {
+            this.emitUnitChanged();
+            this.emitPropertyChanged("isStl", this.isStl);
+        });
+    }
+
+    public get isStl(): boolean {
+        return this.format === ".stl" || this.format === ".stl binary";
+    }
+
+    @property("file.stl.customTessellation", { dependencies: [{ property: "isStl", value: true }] })
+    public get customTessellation(): boolean {
+        return this.getPrivateValue("customTessellation", false);
+    }
+    public set customTessellation(value: boolean) {
+        this.setProperty("customTessellation", value);
+    }
+
+    @property("file.stl.linearTolerance", {
+        quantity: "length",
+        dependencies: [
+            { property: "isStl", value: true },
+            { property: "customTessellation", value: true },
+        ],
+    })
+    public get linearTolerance(): number {
+        return this.getPrivateValue("linearTolerance", 0.1);
+    }
+    public set linearTolerance(value: number) {
+        this.setProperty("linearTolerance", value);
+    }
+
+    @property("file.stl.angularTolerance", {
+        dependencies: [
+            { property: "isStl", value: true },
+            { property: "customTessellation", value: true },
+        ],
+    })
+    public get angularTolerance(): number {
+        return this.getPrivateValue("angularTolerance", 10);
+    }
+    public set angularTolerance(value: number) {
+        this.setProperty("angularTolerance", value);
+    }
+
+    private get exportOptions(): DataExportOptions {
+        return {
+            lengthUnit: this.outputUnit,
+            ...(this.isStl &&
+                this.customTessellation && {
+                    stl: { linearTolerance: this.linearTolerance, angularTolerance: this.angularTolerance },
+                }),
+        };
     }
 
     /**
@@ -131,6 +207,11 @@ export class Export extends CancelableCommand {
     }
 
     protected async executeAsync() {
+        const error = validateStlTessellation(this.exportOptions.stl);
+        if (error) {
+            PubSub.default.pub("showToast", "error.default:{0}", error);
+            return;
+        }
         const nodes = await this.selectNodesAsync();
         if (this.checkCanceled()) return;
         if (!nodes || nodes.length === 0) {
@@ -170,9 +251,7 @@ export class Export extends CancelableCommand {
     }
 
     private async exportMergedAsync(nodes: VisualNode[]) {
-        const data = await this.application.dataExchange.export(this.format, nodes, {
-            lengthUnit: this.outputUnit,
-        });
+        const data = await this.application.dataExchange.export(this.format, nodes, this.exportOptions);
         if (!data) return;
         download(data, `${this.fileBaseName ?? nodes[0].name}${this.suffix}`);
     }
@@ -184,9 +263,7 @@ export class Export extends CancelableCommand {
         const usedNames = new Set<string>();
 
         for (const node of nodes) {
-            const data = await this.application.dataExchange.export(this.format, [node], {
-                lengthUnit: this.outputUnit,
-            });
+            const data = await this.application.dataExchange.export(this.format, [node], this.exportOptions);
             if (!data) continue;
             zip.file(this.uniqueFileName(node.name, usedNames), new Blob(data));
         }

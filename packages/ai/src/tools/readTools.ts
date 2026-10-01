@@ -6,6 +6,32 @@ import type { Tool } from "../llm/types";
 import { getDocument } from "./documentContext";
 import { kernelStateInfo } from "./kernelTools";
 
+const metadataTools = new WeakSet<Tool>();
+/** Only actual metadata built-ins, never plugin tools or caller-provided name/flags. */
+export function isMetadataReadTool(tool: Tool): boolean {
+    return metadataTools.has(tool);
+}
+
+const committed = new WeakMap<
+    IDocument,
+    { summary: ReturnType<typeof documentSummary>; selected: ReturnType<typeof summarizeNode>[] }
+>();
+
+export function hasDocumentReadSnapshot(): boolean {
+    const doc = getDocument();
+    return doc !== undefined && committed.has(doc);
+}
+
+/** Metadata-only snapshot; holds no geometry wrappers and is released after commit/rollback. */
+export function holdDocumentReadSnapshot(doc: IDocument): () => void {
+    if (committed.has(doc)) throw new Error("A modeling program is already running");
+    committed.set(doc, {
+        summary: documentSummary(doc),
+        selected: doc.selection.getSelectedNodes().map(summarizeNode),
+    });
+    return () => committed.delete(doc);
+}
+
 function summarizeNode(node: INode) {
     // parentId is what makes the tree legible: a FolderNode's children share its id, and a
     // node moved by create_folder/move_nodes stays present here with its parent changed.
@@ -21,13 +47,13 @@ function documentSummary(doc: IDocument) {
 async function readDocumentState(): Promise<string> {
     const doc = getDocument();
     if (!doc) return JSON.stringify({ hasActiveDocument: false, ...kernelStateInfo() });
-    return JSON.stringify(documentSummary(doc));
+    return JSON.stringify(committed.get(doc)?.summary ?? documentSummary(doc));
 }
 
 async function readSelection(): Promise<string> {
     const doc = getDocument();
     if (!doc) return JSON.stringify({ hasActiveDocument: false });
-    const selected = doc.selection.getSelectedNodes().map(summarizeNode);
+    const selected = committed.get(doc)?.selected ?? doc.selection.getSelectedNodes().map(summarizeNode);
     return JSON.stringify({ hasActiveDocument: true, selected });
 }
 
@@ -38,16 +64,16 @@ async function readSelection(): Promise<string> {
 export function documentSnapshot(): string {
     const doc = getDocument();
     if (!doc) return JSON.stringify({ hasActiveDocument: false, ...kernelStateInfo() });
-    const selected = doc.selection.getSelectedNodes().map(summarizeNode);
-    return JSON.stringify({ ...documentSummary(doc), selected });
+    const selected = committed.get(doc)?.selected ?? doc.selection.getSelectedNodes().map(summarizeNode);
+    return JSON.stringify({ ...(committed.get(doc)?.summary ?? documentSummary(doc)), selected });
 }
 
 export function buildReadTools(): Tool[] {
-    return [
+    const tools: Tool[] = [
         {
             name: "get_document_state",
             description:
-                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until the user reloads the page.",
+                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until recover_kernel succeeds or the user reloads the page. Successful recovery preserves committed edits but clears undo/redo.",
             parameters: { type: "object", properties: {} },
             handler: readDocumentState,
         },
@@ -58,4 +84,6 @@ export function buildReadTools(): Tool[] {
             handler: readSelection,
         },
     ];
+    for (const tool of tools) metadataTools.add(tool);
+    return tools;
 }

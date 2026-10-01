@@ -15,7 +15,7 @@ import {
     ShapeTypes,
 } from "@spicy3d/core";
 import { createMockApplication, createMockDocument, TestDocument } from "@spicy3d/core/test-utils";
-import { buildCapabilityTools, summarizeRefIds } from "../src/tools/capabilityEngine";
+import { buildCapabilityTools, recoverDocumentRefs, summarizeRefIds } from "../src/tools/capabilityEngine";
 import { takeSlowOpWarnings } from "../src/tools/opBudget";
 
 describe("capabilityEngine", () => {
@@ -517,12 +517,15 @@ describe("capabilityEngine", () => {
             }
         });
 
-        test("removeFillet consumes its input and reports newEdges as refs", async () => {
+        test.each([1, 600, 4096])("removeFillet reports %i usable snapshot refs", async (count) => {
             const length = rs.fn(() => 3);
             const newEdge = { shapeType: ShapeTypes.edge, length };
             const newSolid = { shapeType: ShapeTypes.solid };
             const removeFillet = rs.fn(() =>
-                Result.ok({ shape: newSolid as unknown as IShape, newEdges: [newEdge] }),
+                Result.ok({
+                    shape: newSolid as unknown as IShape,
+                    newEdges: Array.from({ length: count }, () => newEdge),
+                }),
             );
             const solid = { shapeType: ShapeTypes.solid };
             const box = rs.fn(() => Result.ok(solid as unknown as IShape));
@@ -540,11 +543,74 @@ describe("capabilityEngine", () => {
                 // The consumed source node is reported so the model knows it no longer exists.
                 expect(result.removed).toEqual([{ nodeId: result.created[0].nodeId, name: "box" }]);
                 expect(result.results["rf.newEdges"]).toEqual({
-                    count: 1,
-                    refs: ["rf#newEdges#0"],
+                    count,
+                    refs: Array.from({ length: count }, (_, i) => `rf#newEdges#${i}`),
                     kind: "shape",
                 });
                 expect(result.results.l).toBe(3);
+                const tool = buildCapabilityTools()[0];
+                const later = JSON.parse(
+                    (await tool.handler({
+                        ops: result.results["rf.newEdges"].refs.map((target: string, i: number) => ({
+                            id: `l${i}`,
+                            method: "edge.length",
+                            target,
+                        })),
+                    })) as string,
+                );
+                expect(Object.values(later.results)).toEqual(Array.from({ length: count }, () => 3));
+            } finally {
+                rs.unstubAllGlobals();
+            }
+        });
+
+        test("recovery invalidates creation snapshot extras without entering their old native handles", async () => {
+            const length = rs.fn(() => 3);
+            const box = rs.fn(() => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape));
+            const removeFillet = rs.fn(() =>
+                Result.ok({
+                    shape: { shapeType: ShapeTypes.solid } as unknown as IShape,
+                    newEdges: [{ shapeType: ShapeTypes.edge, length }],
+                }),
+            );
+            const { nodes } = setup({ box, removeFillet });
+            try {
+                await run([
+                    { id: "b", method: "box", args: { dx: 10, dy: 20, dz: 5 } },
+                    { id: "rf", method: "removeFillet", args: { shape: "b", faces: [] } },
+                ]);
+                const document = (nodes[1] as EditableShapeNode).document;
+                rs.spyOn(document.modelManager, "findNode").mockImplementation(
+                    (predicate) => nodes.find((node) => predicate(node as EditableShapeNode)) as never,
+                );
+                recoverDocumentRefs(document);
+                await expect(
+                    run([{ id: "length", method: "edge.length", target: "rf#newEdges#0" }]),
+                ).rejects.toThrow("rf#newEdges#0");
+                expect(length).not.toHaveBeenCalled();
+            } finally {
+                rs.restoreAllMocks();
+                rs.unstubAllGlobals();
+            }
+        });
+
+        test("oversized snapshot extras fail before returning unusable refs", async () => {
+            const edge = { shapeType: ShapeTypes.edge, length: () => 1 };
+            const box = rs.fn(() => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape));
+            const removeFillet = rs.fn(() =>
+                Result.ok({
+                    shape: { shapeType: ShapeTypes.solid } as unknown as IShape,
+                    newEdges: Array.from({ length: 4097 }, () => edge),
+                }),
+            );
+            setup({ box, removeFillet });
+            try {
+                await expect(
+                    run([
+                        { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                        { id: "rf", method: "removeFillet", args: { shape: "b", faces: [] } },
+                    ]),
+                ).rejects.toThrow('Extra output "newEdges" exceeds the 4096 snapshot-ref limit');
             } finally {
                 rs.unstubAllGlobals();
             }
@@ -1302,6 +1368,179 @@ describe("capabilityEngine", () => {
                 }
             });
 
+            test.each([
+                600, 5000,
+            ])("every ref in a %i-subshape result resolves in later calls", async (count) => {
+                const faces = Array.from({ length: count }, (_, i) => ({
+                    shapeType: ShapeTypes.face,
+                    area: () => i + 1,
+                }));
+                const box = rs.fn(() =>
+                    Result.ok({
+                        shapeType: ShapeTypes.solid,
+                        findSubShapes: () => faces,
+                    } as unknown as IShape),
+                );
+                setup({ box });
+                try {
+                    const tool = buildCapabilityTools()[0];
+                    const first = JSON.parse(
+                        (await tool.handler({
+                            ops: [
+                                { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                                {
+                                    id: "faces",
+                                    method: "shape.findSubShapes",
+                                    target: "b",
+                                    args: { subshapeType: "face" },
+                                },
+                            ],
+                        })) as string,
+                    );
+                    expect(first.results.faces.count).toBe(count);
+                    expect(first.results.faces.refs).toHaveLength(count);
+                    const second = JSON.parse(
+                        (await tool.handler({
+                            ops: first.results.faces.refs.map((target: string, i: number) => ({
+                                id: `area${i}`,
+                                method: "face.area",
+                                target,
+                            })),
+                        })) as string,
+                    );
+                    expect(Object.values(second.results)).toEqual(
+                        Array.from({ length: count }, (_, i) => i + 1),
+                    );
+                } finally {
+                    rs.unstubAllGlobals();
+                }
+            });
+
+            test("reusing a list id replaces the family and its index bounds", async () => {
+                let faces = [
+                    { shapeType: ShapeTypes.face, area: () => 1 },
+                    { shapeType: ShapeTypes.face, area: () => 2 },
+                ];
+                const box = rs.fn(() =>
+                    Result.ok({
+                        shapeType: ShapeTypes.solid,
+                        findSubShapes: () => faces,
+                    } as unknown as IShape),
+                );
+                setup({ box });
+                try {
+                    const tool = buildCapabilityTools()[0];
+                    const query = {
+                        id: "f",
+                        method: "shape.findSubShapes",
+                        target: "b",
+                        args: { subshapeType: "face" },
+                    };
+                    await tool.handler({
+                        ops: [
+                            { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                            query,
+                            { ...query, id: "f#sibling" },
+                        ],
+                    });
+                    faces = [{ shapeType: ShapeTypes.face, area: () => 42 }];
+                    const result = JSON.parse(
+                        (await tool.handler({
+                            ops: [
+                                query,
+                                { id: "a", method: "face.area", target: "f#0" },
+                                { id: "sibling", method: "face.area", target: "f#sibling#0" },
+                            ],
+                        })) as string,
+                    );
+                    expect(result.results.f).toEqual({ count: 1, refs: ["f#0"], kind: "shape" });
+                    expect(result.results.a).toBe(42);
+                    expect(result.results.sibling).toBe(42);
+                    await expect(
+                        tool.handler({ ops: [{ id: "a", method: "face.area", target: "f#1" }] }),
+                    ).rejects.toThrow("ai.error.unknownRef");
+                } finally {
+                    rs.unstubAllGlobals();
+                }
+            });
+
+            test("list families expire together while the newest large result remains usable", async () => {
+                const faces = Array.from({ length: 600 }, (_, i) => ({
+                    shapeType: ShapeTypes.face,
+                    area: () => i,
+                }));
+                const box = rs.fn(() =>
+                    Result.ok({
+                        shapeType: ShapeTypes.solid,
+                        findSubShapes: () => faces,
+                    } as unknown as IShape),
+                );
+                const { nodes } = setup({ box });
+                try {
+                    const tool = buildCapabilityTools()[0];
+                    await tool.handler({ ops: [{ id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } }] });
+                    const target = nodes[0].id;
+                    for (let i = 0; i <= 256; i++) {
+                        await tool.handler({
+                            ops: [
+                                {
+                                    id: `f${i}`,
+                                    method: "shape.findSubShapes",
+                                    target,
+                                    args: { subshapeType: "face" },
+                                },
+                            ],
+                        });
+                    }
+                    for (const target of ["f0#0", "f0#599"]) {
+                        await expect(
+                            tool.handler({ ops: [{ id: "a", method: "face.area", target }] }),
+                        ).rejects.toThrow("ai.error.unknownRef");
+                    }
+                    const result = JSON.parse(
+                        (await tool.handler({
+                            ops: [
+                                { id: "first", method: "face.area", target: "f256#0" },
+                                { id: "last", method: "face.area", target: "f256#599" },
+                            ],
+                        })) as string,
+                    );
+                    expect(result.results).toEqual({ first: 0, last: 599 });
+                } finally {
+                    rs.unstubAllGlobals();
+                }
+            });
+
+            test("a program exceeding the descriptor budget fails instead of returning expired refs", async () => {
+                const box = rs.fn(() =>
+                    Result.ok({ shapeType: ShapeTypes.solid, findSubShapes: () => [] } as unknown as IShape),
+                );
+                const { nodes } = setup({ box });
+                try {
+                    const tool = buildCapabilityTools()[0];
+                    await tool.handler({ ops: [{ id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } }] });
+                    const target = nodes[0].id;
+                    await expect(
+                        tool.handler({
+                            ops: Array.from({ length: 257 }, (_, i) => ({
+                                id: `f${i}`,
+                                method: "shape.findSubShapes",
+                                target,
+                                args: { subshapeType: "face" },
+                            })),
+                        }),
+                    ).rejects.toThrow("split it across calls");
+                    const result = JSON.parse(
+                        (await tool.handler({
+                            ops: [{ id: "t", method: "shape.shapeType", target: "b" }],
+                        })) as string,
+                    );
+                    expect(result.results.t).toBe("solid");
+                } finally {
+                    rs.unstubAllGlobals();
+                }
+            });
+
             test("a ref whose source node was removed fails with a clear error", async () => {
                 const box = rs.fn(() => Result.ok({ shapeType: ShapeTypes.solid } as unknown as IShape));
                 const { nodes } = setup({ box });
@@ -1486,7 +1725,10 @@ describe("capabilityEngine", () => {
 
         function setup(factory: Record<string, unknown>) {
             const doc = new TestDocument();
-            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            (doc as { selection: unknown }).selection = {
+                clearSelection: () => {},
+                getSelectedNodes: () => [],
+            };
             const folder = new FolderNode({ document: doc, name: "Parts" });
             doc.modelManager.addNode(folder);
             const skin = new EditableShapeNode({
@@ -1601,7 +1843,10 @@ describe("capabilityEngine", () => {
     describe("cancellation and slow ops", () => {
         function setup(factory: Record<string, unknown>) {
             const doc = new TestDocument();
-            (doc as { selection: unknown }).selection = { clearSelection: () => {} };
+            (doc as { selection: unknown }).selection = {
+                clearSelection: () => {},
+                getSelectedNodes: () => [],
+            };
             const app = createMockApplication({ shapeProvider: { factory } as any });
             (app as any).activeView = { document: doc };
             rs.stubGlobal("app", app);

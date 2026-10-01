@@ -4,11 +4,15 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include "cornerSetback.hpp"
 #include "guard.hpp"
+#include "guidedLoftValidation.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BOPAlgo_BuilderFace.hxx>
 #include <BOPAlgo_Splitter.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -28,11 +32,14 @@
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepFeat_MakePrism.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
+#include <BRepLib_CheckCurveOnSurface.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
@@ -50,6 +57,7 @@
 #include <BRepProj_Projection.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ReShape.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -58,6 +66,7 @@
 #include <ChFi2d_FilletAPI.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GeomProjLib.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_ConicalSurface.hxx>
@@ -68,10 +77,12 @@
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <HelixBRep_BuilderHelix.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <Precision.hxx>
 #include <ShapeAnalysis_Edge.hxx>
+#include <ShapeFix_Edge.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_FixSmallFace.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -94,8 +105,13 @@
 #include <gp.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
+#include <iomanip>
+#include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 
 using namespace emscripten;
@@ -152,9 +168,25 @@ struct TrackedShapeResult {
     // bottom/start face). Empty for non-sweeps and for a full 360° revolve, where the
     // first and last shapes coincide and there is no distinct cap.
     std::vector<int> capFaces = { };
+    int nextTargetIndex = -1;
+    int nextFaceIndex = -1;
+    // Pipe-shell ancestry uses section inputs first, then spine inputs,
+    // separately for edges and vertices. These runtime channels retain BOTH
+    // source roles.
+    std::vector<int> pipeFaceEdges = { };
+    std::vector<int> pipeFaceVertices = { };
+    std::vector<int> pipeEdgeVertices = { };
+    std::vector<int> pipeStartEdges = { };
+    std::vector<int> pipeEndEdges = { };
+    std::vector<int> pipeStartFaces = { };
 };
 
 // Error results of a raise caught by guardedEntry (guard.hpp).
+CornerSetbackResult failedResult(GuardTag<CornerSetbackResult>, const std::string& error)
+{
+    return CornerSetback::failure(error);
+}
+
 ShapeResult failedResult(GuardTag<ShapeResult>, const std::string& error)
 {
     return ShapeResult { TopoDS_Shape(), false, error };
@@ -598,6 +630,297 @@ static TrackedShapeResult trackedError(const std::string& error)
     return TrackedShapeResult { TopoDS_Shape(), false, error, { }, { } };
 }
 
+// A witness selects a split cell; the complete bounding faces, never this point, make its caps.
+static bool profileWitness(const TopoDS_Face& profile, gp_Pnt& witness)
+{
+    Handle(Geom_Surface) surface = BRep_Tool::Surface(profile);
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(profile, u0, u1, v0, v1);
+    for (int i = 0; i < 121; i++) {
+        double u = i == 0 ? (u0 + u1) / 2 : u0 + (u1 - u0) * ((i - 1) % 11 + 0.5) / 11;
+        double v = i == 0 ? (v0 + v1) / 2 : v0 + (v1 - v0) * ((i - 1) / 11 + 0.5) / 11;
+        BRepClass_FaceClassifier classifier(profile, gp_Pnt2d(u, v), Precision::Confusion());
+        if (classifier.State() == TopAbs_IN) {
+            witness = surface->Value(u, v);
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::vector<double> rayParameters(const TopoDS_Face& face, const gp_Pnt& origin, const gp_Dir& dir, double reach)
+{
+    IntCurvesFace_ShapeIntersector intersections;
+    intersections.Load(face, Precision::Confusion());
+    intersections.Perform(gp_Lin(origin, dir), -reach, reach);
+    std::vector<double> values;
+    if (!intersections.IsDone())
+        return values;
+    for (int i = 1; i <= intersections.NbPnt(); i++)
+        values.push_back(intersections.WParameter(i));
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end(), [](double a, double b) {
+        return std::abs(a - b) <= Precision::Confusion();
+    }),
+        values.end());
+    return values;
+}
+
+// Split a generous planar-profile prism by BOTH limiting surfaces. Its projected footprint
+// stays the sketch's; the cell containing the selected branch witness has exact curved caps.
+static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp_Dir& dir,
+    const TopoDS_Face& from, const TopoDS_Face& until, double exactDepth = 0, bool strictEnd = false)
+{
+    Bnd_Box scene;
+    double profileLow, profileHigh, fromLow, fromHigh, untilLow, untilHigh;
+    if (!boxOf(profile, scene) || !boxOf(from, scene) || !boxOf(until, scene)
+        || !projectedRange(profile, dir, profileLow, profileHigh)
+        || !projectedRange(from, dir, fromLow, fromHigh) || !projectedRange(until, dir, untilLow, untilHigh))
+        return trackedError("The starting face or profile has no extent");
+    double margin = 2 * std::sqrt(scene.SquareExtent()) + 1;
+    gp_Pnt origin;
+    if (!profileWitness(profile, origin))
+        return trackedError("The profile has no interior witness");
+    double low = std::min({ profileLow, fromLow, untilLow }) - margin;
+    double high = std::max({ profileHigh, fromHigh, untilHigh }) + margin;
+    gp_Trsf shift;
+    shift.SetTranslation(gp_Vec(dir) * (low - profileLow));
+    TopoDS_Shape proxy = profile.Moved(TopLoc_Location(shift));
+    BRepPrimAPI_MakePrism prism(proxy, gp_Vec(dir) * (high - low));
+    if (!prism.IsDone())
+        return trackedError("Failed to create the from-face prism");
+    const TopoDS_Shape swept = prism.Shape();
+
+    for (int pass = 0; pass < (strictEnd ? 1 : 2); pass++) {
+        // The picked starting patch must cover the profile; extending it could silently
+        // create a boss outside the selected face. Only an up-to ending surface may extend.
+        TopoDS_Face start = from;
+        TopoDS_Face end = pass == 0 || strictEnd || exactDepth > 0 ? until : extendedFace(until, margin);
+        if (start.IsNull() || end.IsNull())
+            continue;
+        auto starts = rayParameters(start, origin, dir, 2 * (high - low));
+        auto ends = rayParameters(end, origin, dir, 2 * (high - low));
+        if (starts.empty() || ends.empty())
+            continue;
+        // Prefer the first forward hit; when the sketch lies beyond the surface, the nearest
+        // backward hit selects the wall. Equal geometric hits were deduplicated above.
+        auto forward = std::find_if(starts.begin(), starts.end(), [](double t) { return t >= -Precision::Confusion(); });
+        double fromT = forward == starts.end() ? starts.back() : *forward;
+        double endT = 0;
+        if (exactDepth > 0)
+            endT = fromT + exactDepth;
+        else {
+            auto beyond = std::find_if(ends.begin(), ends.end(), [fromT](double t) { return t > fromT + Precision::Confusion(); });
+            if (beyond == ends.end())
+                continue;
+            endT = *beyond;
+        }
+        gp_Pnt witness = origin.Translated(gp_Vec(dir) * ((fromT + endT) / 2));
+        BRepAlgoAPI_Splitter splitter;
+        NCollection_List<TopoDS_Shape> arguments, tools;
+        arguments.Append(swept);
+        tools.Append(start);
+        tools.Append(end);
+        splitter.SetArguments(arguments);
+        splitter.SetTools(tools);
+        splitter.SetNonDestructive(true);
+        splitter.Build();
+        if (!splitter.IsDone() || splitter.HasErrors() || splitter.Shape().IsNull())
+            continue;
+        ShapeIndexMap splitFaces;
+        TopExp::MapShapes(splitter.Shape(), TopAbs_FACE, splitFaces);
+        auto fromImages = faceImagesOf(splitter, start, splitFaces);
+        auto untilImages = faceImagesOf(splitter, end, splitFaces);
+        auto originalStart = faceImagesOf(splitter, prism.FirstShape(), splitFaces);
+        auto originalEnd = faceImagesOf(splitter, prism.LastShape(), splitFaces);
+        std::vector<TopoDS_Shape> kept;
+        for (TopExp_Explorer it(splitter.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+            const TopoDS_Shape& solid = it.Current();
+            if (!solidHasAny(solid, splitFaces, fromImages) || !solidHasAny(solid, splitFaces, untilImages)
+                || solidHasAny(solid, splitFaces, originalStart) || solidHasAny(solid, splitFaces, originalEnd))
+                continue;
+            BRepClass3d_SolidClassifier classifier(solid, witness, Precision::Confusion());
+            if (classifier.State() == TopAbs_IN || classifier.State() == TopAbs_ON)
+                kept.push_back(solid);
+        }
+        if (kept.size() > 1)
+            return trackedError("The starting face has ambiguous extrusion intersections");
+        if (kept.empty())
+            continue;
+        const TopoDS_Shape output = kept.front();
+        if (!BRepCheck_Analyzer(output).IsValid())
+            continue;
+        // For translated bounding surfaces the exact volume is projected profile area * depth.
+        // This rejects a cap that only intercepted part of the profile without approximating it.
+        if (exactDepth > 0) {
+            GProp_GProps area, volume;
+            BRepGProp::SurfaceProperties(profile, area);
+            BRepGProp::VolumeProperties(output, volume);
+            Handle(Geom_Plane) profilePlane = Handle(Geom_Plane)::DownCast(
+                untrimmedSurface(BRep_Tool::Surface(profile)));
+            double expected = area.Mass() * std::abs(profilePlane->Pln().Axis().Direction().Dot(dir)) * exactDepth;
+            if (std::abs(std::abs(volume.Mass()) - expected) > 1e-6 * std::max(1.0, expected))
+                continue;
+        }
+        TrackedShapeResult result { output, true, "",
+            composeHistory(splitter, swept, faceHistory(prism, proxy, swept), output, TopAbs_FACE),
+            composeHistory(splitter, swept, edgeHistory(prism, proxy, swept), output, TopAbs_EDGE),
+            composeHistory(splitter, swept, faceFromEdgeHistory(prism, proxy, swept), output, TopAbs_FACE) };
+        ShapeIndexMap faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        auto bottom = faceImagesOf(splitter, start, faces);
+        for (int index : bottom)
+            result.faceMap[index] = 0;
+        for (int index : faceImagesOf(splitter, end, faces))
+            result.capFaces.push_back(index);
+        // Intersection edges no longer contain the proxy's original edges. Recover each curved
+        // bottom edge from its uniquely seeded side face, retaining the sketch entity's identity.
+        for (int e = 1; e <= edges.Extent(); e++) {
+            bool onBottom = false;
+            std::set<int> origins;
+            for (int f = 1; f <= faces.Extent(); f++) {
+                bool adjacent = false;
+                for (TopExp_Explorer it(faces.FindKey(f), TopAbs_EDGE); it.More(); it.Next())
+                    if (it.Current().IsSame(edges.FindKey(e))) {
+                        adjacent = true;
+                        break;
+                    }
+                if (!adjacent)
+                    continue;
+                if (bottom.count(f - 1))
+                    onBottom = true;
+                if (result.faceEdgeMap[f - 1] >= 0)
+                    origins.insert(result.faceEdgeMap[f - 1]);
+            }
+            if (onBottom && origins.size() == 1)
+                result.edgeMap[e - 1] = *origins.begin();
+        }
+        return result;
+    }
+    return trackedError("The starting and ending faces do not fully bound the extrusion, or their intersections are ambiguous");
+}
+
+// Project exact cap boundary curves along the extrusion axis onto the profile plane. This
+// proves full footprint coverage even when two curved caps have no common axial section.
+static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& profile, const gp_Dir& dir, std::string& failure)
+{
+    Handle(Geom_Plane) plane = Handle(Geom_Plane)::DownCast(untrimmedSurface(BRep_Tool::Surface(profile)));
+    auto fail = [&](const char* reason) { failure = reason; return false; };
+    if (plane.IsNull())
+        return fail("Profile projection plane is unavailable");
+    ShapeIndexMap faces;
+    TopExp::MapShapes(tool.shape, TopAbs_FACE, faces);
+    TopoDS_Shape shadow;
+    double piecesArea = 0;
+    for (int index : tool.capFaces) {
+        const TopoDS_Face cap = TopoDS::Face(faces.FindKey(index + 1));
+        const TopoDS_Wire outer = BRepTools::OuterWire(cap);
+
+        auto projectWire = [&](const TopoDS_Wire& wire) -> TopoDS_Wire {
+            BRepBuilderAPI_MakeWire makeWire;
+            for (BRepTools_WireExplorer edges(wire, cap); edges.More(); edges.Next()) {
+                const TopoDS_Edge edge = edges.Current();
+                double first, last;
+                Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+                if (curve.IsNull())
+                    continue;
+                // Bound the curve before projection: parameter-preserving tilted lines otherwise
+                // become splines over an infinite domain and lose endpoint precision.
+                Handle(Geom_TrimmedCurve) bounded = new Geom_TrimmedCurve(curve, first, last);
+                Handle(Geom_Curve) projected = GeomProjLib::ProjectOnPlane(bounded, plane, dir, true);
+                if (projected.IsNull()) {
+                    failure = "Cap curve projection failed";
+                    return TopoDS_Wire();
+                }
+                BRepBuilderAPI_MakeEdge makeEdge(projected);
+                if (!makeEdge.IsDone()) {
+                    failure = "Projected cap edge is invalid";
+                    return TopoDS_Wire();
+                }
+                TopoDS_Edge next = makeEdge.Edge();
+                GProp_GProps length;
+                BRepGProp::LinearProperties(next, length);
+                if (length.Mass() <= Precision::Confusion())
+                    continue;
+                next.Orientation(edge.Orientation());
+                makeWire.Add(next);
+                if (!makeWire.IsDone()) {
+                    failure = "Projected cap edges do not connect";
+                    return TopoDS_Wire();
+                }
+            }
+            return makeWire.IsDone() ? makeWire.Wire() : TopoDS_Wire();
+        };
+        TopoDS_Wire projectedOuter = projectWire(outer);
+        if (projectedOuter.IsNull())
+            return fail(failure.empty() ? "Projected cap outer wire is empty" : failure.c_str());
+        BRepBuilderAPI_MakeFace makeFace(plane->Pln(), projectedOuter, true);
+        for (TopExp_Explorer wires(cap, TopAbs_WIRE); wires.More(); wires.Next()) {
+            if (wires.Current().IsSame(outer))
+                continue;
+            TopoDS_Wire inner = projectWire(TopoDS::Wire(wires.Current()));
+            if (inner.IsNull())
+                return fail("Projected cap inner wire is invalid");
+            makeFace.Add(inner);
+        }
+        if (!makeFace.IsDone() || !BRepCheck_Analyzer(makeFace.Face()).IsValid())
+            return fail("Projected cap face is invalid");
+        GProp_GProps area;
+        BRepGProp::SurfaceProperties(makeFace.Face(), area);
+        piecesArea += std::abs(area.Mass());
+        if (shadow.IsNull())
+            shadow = makeFace.Face();
+        else {
+            BRepAlgoAPI_Fuse merge(shadow, makeFace.Face());
+            merge.SetNonDestructive(true);
+            merge.Build();
+            if (!merge.IsDone() || merge.HasErrors())
+                return fail("Projected cap union failed");
+            shadow = merge.Shape();
+        }
+    }
+    if (shadow.IsNull())
+        return fail("The bounded tool has no ending cap history");
+    GProp_GProps footprint, unionArea, commonArea;
+    BRepGProp::SurfaceProperties(profile, footprint);
+    BRepGProp::SurfaceProperties(shadow, unionArea);
+    const double tolerance = 1e-6 * std::max(1.0, std::abs(footprint.Mass()));
+    // Folded caps can project multiple layers onto the same footprint: explicitly unsupported.
+    if (std::abs(piecesArea - std::abs(unionArea.Mass())) > tolerance)
+        return fail("The ending cap folds across its projected footprint");
+    BRepAlgoAPI_Common common(shadow, profile);
+    common.SetNonDestructive(true);
+    common.Build();
+    if (!common.IsDone() || common.HasErrors())
+        return fail("Projected footprint intersection failed");
+    BRepGProp::SurfaceProperties(common.Shape(), commonArea);
+    if (std::abs(std::abs(commonArea.Mass()) - std::abs(footprint.Mass())) > tolerance)
+        return fail("The ending cap does not cover the full profile footprint");
+    return true;
+}
+
+// Conservative bounds pruning in the extrusion's transverse plane, preserving candidate order.
+static bool intersectsProfileRayBounds(const TopoDS_Shape& profile, const TopoDS_Shape& target,
+    const gp_Dir& dir, double startLow)
+{
+    gp_Ax2 axes(gp_Pnt(0, 0, 0), dir);
+    auto range = [](const TopoDS_Shape& shape, const gp_Dir& axis, double& low, double& high) {
+        return projectedRange(shape, axis, low, high);
+    };
+    double low, high;
+    if (!range(target, dir, low, high) || high <= startLow + Precision::Confusion())
+        return false;
+    for (const gp_Dir& axis : { axes.XDirection(), axes.YDirection() }) {
+        double profileLow, profileHigh;
+        if (!range(profile, axis, profileLow, profileHigh) || !range(target, axis, low, high))
+            return false;
+        if (high < profileLow - Precision::Confusion() || low > profileHigh + Precision::Confusion())
+            return false;
+    }
+    return true;
+}
+
 // Compute the plane formed by two edges at their shared vertex from their tangent vectors.
 static std::optional<gp_Dir> computeNormal(const TopoDS_Edge& edge1, const TopoDS_Edge& edge2, const TopoDS_Vertex& vertex)
 {
@@ -888,8 +1211,179 @@ static RegionsResult boundedAreas(const TopoDS_Face& baseFace, const NCollection
     return RegionsResult { ShapeArray(faces), sourceCounts, sourceIds, true, "" };
 }
 
+static std::string cornerSize(double amount, const char* dimension)
+{
+    std::ostringstream message;
+    message << dimension << "=" << std::setprecision(12) << amount;
+    return message.str();
+}
+
+static std::string cornerInputFailure(const TopoDS_Shape& shape, const NumberArray& edges,
+    double amount, const char* operation, const char* dimension,
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& edgeMap)
+{
+    const std::string prefix = std::string("Failed to ") + operation + ": ";
+    if (shape.IsNull())
+        return prefix + "input shape is null";
+    if (!std::isfinite(amount) || amount <= 0)
+        return prefix + dimension + " must be positive and finite";
+    const int count = edges["length"].as<int>();
+    if (count == 0)
+        return prefix + "select at least one edge";
+    TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    for (int i = 0; i < count; ++i) {
+        const double index = edges[i].as<double>();
+        if (!std::isfinite(index) || std::floor(index) != index || index < 0 || index >= edgeMap.Extent())
+            return prefix + "edge indexes must be integers in the current shape's edge range";
+        if (BRep_Tool::Degenerated(TopoDS::Edge(edgeMap.FindKey(static_cast<int>(index) + 1))))
+            return prefix + "selected edge " + std::to_string(static_cast<int>(index))
+                + " is degenerate; select a non-degenerate edge";
+    }
+    return "";
+}
+
+static std::string cornerContourFailure(const TopoDS_Shape& shape, const TopoDS_Edge& edge,
+    int index, const char* operation, double amount, const char* dimension)
+{
+    std::string message = std::string("Failed to ") + operation + ": selected edge "
+        + std::to_string(index) + " was not accepted into an OCCT contour (" + cornerSize(amount, dimension) + ")";
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> mapEF;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, mapEF);
+    if (mapEF.Contains(edge)) {
+        const auto& faces = mapEF.FindFromKey(edge);
+        if (faces.Size() == 2 && !faces.First().IsSame(faces.Last())) {
+            const auto first = TopoDS::Face(faces.First());
+            const auto last = TopoDS::Face(faces.Last());
+            if (BRep_Tool::HasContinuity(edge, first, last)
+                && BRep_Tool::Continuity(edge, first, last) >= GeomAbs_G1)
+                return message + "; adjoining faces are marked tangent (G1 or higher). Select a sharp edge instead";
+        } else if (faces.Size() < 2) {
+            return message + "; edge has fewer than two adjoining faces. Select an edge shared by suitable faces";
+        }
+    }
+    return message + "; inspect adjoining faces and tangency, or choose a different edge. No specific cause was reported";
+}
+
+static std::string filletBuildFailure(BRepFilletAPI_MakeFillet& builder, double radius)
+{
+    std::string message = "Failed to fillet: OCCT build failed (" + cornerSize(radius, "radius")
+        + ", contours=" + std::to_string(builder.NbContours()) + ")";
+    const int faulty = builder.NbFaultyContours();
+    for (int i = 1; i <= std::min(faulty, 8); ++i) {
+        const int contour = builder.FaultyContour(i);
+        message += "; contour " + std::to_string(contour) + ": ";
+        switch (builder.StripeStatus(contour)) {
+        case ChFiDS_StartsolFailure:
+            message += "start solution failed; radius may be too large or incompatible with the local geometry";
+            break;
+        case ChFiDS_TwistedSurface:
+            message += "twisted surface; inspect adjoining face geometry and tangency";
+            break;
+        case ChFiDS_WalkingFailure:
+            message += "surface walking failed; inspect the contour, radius and face transitions";
+            break;
+        case ChFiDS_Ok:
+            message += "stripe reports OK; final topology or corner construction failed";
+            break;
+        default:
+            message += "unspecified OCCT stripe error";
+            break;
+        }
+    }
+    if (faulty > 8)
+        message += "; additional faulty contours=" + std::to_string(faulty - 8);
+    const int vertices = builder.NbFaultyVertices();
+    if (vertices > 0)
+        message += "; faulty corner vertices=" + std::to_string(vertices);
+    if (faulty == 0 && vertices == 0)
+        message += "; no detailed failure status was reported. Try a smaller radius or another edge selection";
+    return message;
+}
+
+static std::string chamferBuildFailure(BRepFilletAPI_MakeChamfer& builder, double distance)
+{
+    return "Failed to chamfer: OCCT build failed (" + cornerSize(distance, "distance")
+        + ", contours=" + std::to_string(builder.NbContours())
+        + "). The chamfer builder provides no specific failure status; try a smaller distance or another edge selection";
+}
+
+static std::string prepareVariableFillet(BRepFilletAPI_MakeFillet& builder, const TopoDS_Shape& shape,
+    const NumberArray& edges, const NumberArray& law, double& maximumRadius)
+{
+    const int count = law["length"].as<int>();
+    if (count < 4 || count > 128 || count % 2 != 0)
+        return "Variable-radius fillet requires 2 to 64 position/radius pairs";
+    if (law[0].as<double>() != 0 || law[count - 2].as<double>() != 1)
+        return "Radius law must start at position 0 and end at position 1";
+    double previous = -1;
+    maximumRadius = 0;
+    for (int i = 0; i < count; i += 2) {
+        const double position = law[i].as<double>();
+        const double radius = law[i + 1].as<double>();
+        if (!std::isfinite(position) || position < 0 || position > 1 || position <= previous)
+            return "Radius law positions must be finite and strictly increasing from 0 to 1";
+        if (!std::isfinite(radius) || radius <= 0)
+            return "Radius law radii must be positive and finite";
+        previous = position;
+        maximumRadius = std::max(maximumRadius, radius);
+    }
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
+    const auto inputFailure = cornerInputFailure(shape, edges, maximumRadius,
+        "variable-radius fillet", "maximum radius", edgeMap);
+    if (!inputFailure.empty())
+        return inputFailure;
+    std::set<int> selectedContours;
+    for (const auto index : vecFromJSArray<int>(edges)) {
+        const auto selected = TopoDS::Edge(edgeMap.FindKey(index + 1));
+        builder.Add(selected);
+        const int contour = builder.Contour(selected);
+        if (contour == 0)
+            return cornerContourFailure(shape, selected, index, "variable-radius fillet", maximumRadius, "maximum radius");
+        if (!selectedContours.insert(contour).second)
+            return "Variable-radius fillet requires one selected edge per tangent contour; select only one of the tangent-connected edges";
+        if (builder.Closed(contour) && law[1].as<double>() != law[count - 1].as<double>())
+            return "A closed fillet contour requires equal radius-law endpoint values";
+        int edgeInContour = 0;
+        for (int i = 1; i <= builder.NbEdges(contour); ++i) {
+            if (builder.Edge(contour, i).IsSame(selected)) {
+                edgeInContour = i;
+                break;
+            }
+        }
+        if (edgeInContour == 0)
+            return "Variable-radius fillet could not locate the selected edge in its contour";
+        // UandR is relative arc length of this edge in contour direction; API samples use natural curve direction.
+        const bool reverse = builder.Edge(contour, edgeInContour).Orientation() == TopAbs_REVERSED;
+        NCollection_Array1<gp_Pnt2d> samples(1, count / 2);
+        for (int i = 0; i < count / 2; ++i) {
+            const int source = reverse ? count - 2 - 2 * i : 2 * i;
+            const double position = law[source].as<double>();
+            samples(i + 1) = gp_Pnt2d(reverse ? 1 - position : position, law[source + 1].as<double>());
+        }
+        builder.SetRadius(samples, contour, edgeInContour);
+    }
+    return "";
+}
+
 class ShapeFactory {
 public:
+    static CornerSetbackResult filletCornerSetbackTracked(const TopoDS_Shape& shape, const NumberArray& edges,
+        double radius, const NumberArray& distances)
+    {
+        if (edges["length"].as<int>() != 3 || distances["length"].as<int>() != 3)
+            return CornerSetback::failure("three selected edges and three setback lengths are required");
+        std::array<int, 3> indexes;
+        std::array<double, 3> offsets;
+        for (int i = 0; i < 3; ++i) {
+            const double index = edges[i].as<double>();
+            if (!std::isfinite(index) || index < 0 || index != std::floor(index) || index > 2147483646)
+                return CornerSetback::failure("edge indexes must be finite nonnegative integers");
+            indexes[i] = static_cast<int>(index);
+            offsets[i] = distances[i].as<double>();
+        }
+        // A fixed finite fit budget; live callers also enforce a 180-second corner-worker deadline.
+        return CornerSetback::build(shape, indexes, radius, offsets, 512);
+    }
     static ShapeResult box(const Pln& ax3, double x, double y, double z)
     {
         gp_Pln pln = Pln::toPln(ax3);
@@ -1033,6 +1527,192 @@ public:
         return ShapeResult { cylinder.Solid(), true, "" };
     }
 
+    static TrackedShapeResult loftGuidedTracked(const ShapeArray& sections, const TopoDS_Wire& originalSpine,
+        const TopoDS_Wire& originalAuxiliary, bool solid)
+    {
+        auto originalInputs = vecFromJSArray<TopoDS_Shape>(sections);
+        if (originalInputs.size() < 2 || originalInputs.size() > 16)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft requires 2 to 16 sections" };
+        const size_t sectionCount = originalInputs.size();
+        originalInputs.push_back(originalSpine);
+        originalInputs.push_back(originalAuxiliary);
+        std::vector<std::unique_ptr<BRepBuilderAPI_Copy>> copies;
+        std::vector<TopoDS_Shape> copiedInputs;
+        for (const auto& input : originalInputs) {
+            if (input.IsNull())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input is missing" };
+            auto copy = std::make_unique<BRepBuilderAPI_Copy>(input, true, false);
+            if (!copy->IsDone())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input copy failed" };
+            copiedInputs.push_back(copy->Shape());
+            copies.push_back(std::move(copy));
+        }
+        const std::vector<TopoDS_Shape> profiles(copiedInputs.begin(), copiedInputs.begin() + sectionCount);
+        const auto spine = TopoDS::Wire(copiedInputs[sectionCount]);
+        const auto auxiliary = TopoDS::Wire(copiedInputs[sectionCount + 1]);
+        const auto error = GuidedLoft::validate(profiles, spine, auxiliary);
+        if (!error.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, error };
+        BRepOffsetAPI_MakePipeShell builder(spine);
+        builder.SetMode(auxiliary, false, BRepFill_NoContact);
+        builder.SetTolerance(1e-7, 1e-7, 1e-5);
+        builder.SetMaxDegree(12);
+        builder.SetMaxSegments(64);
+        builder.SetForceApproxC1(false);
+        builder.SetIsBuildHistory(true);
+        for (const auto& profile : profiles)
+            builder.Add(profile, false, false);
+        if (!builder.IsReady())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Incompatible guided loft sections" };
+        builder.Build();
+        if (!builder.IsDone())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft contact failed (status " + std::to_string(static_cast<int>(builder.GetStatus())) + ")" };
+        if (solid && !builder.MakeSolid())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
+        if (!BRepCheck_Analyzer(builder.Shape()).IsValid())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
+        BOPAlgo_ArgumentAnalyzer selfIntersection;
+        selfIntersection.SetShape1(builder.Shape());
+        selfIntersection.SelfInterMode() = true;
+        selfIntersection.StopOnFirstFaulty() = true;
+        selfIntersection.Perform();
+        if (selfIntersection.HasFaulty())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft output self-intersects or could not be checked" };
+        BRep_Builder topology;
+        TopoDS_Compound sides;
+        topology.MakeCompound(sides);
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
+        for (TopExp_Explorer input(profiles.front(), TopAbs_EDGE); input.More(); input.Next()) {
+            const auto& generated = builder.Generated(input.Current());
+            for (const auto& item : generated) {
+                for (TopExp_Explorer face(item, TopAbs_FACE); face.More(); face.Next()) {
+                    if (!seen.Contains(face.Current())) {
+                        seen.Add(face.Current());
+                        topology.Add(sides, face.Current());
+                    }
+                }
+            }
+        }
+        if (seen.Extent() > 512)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft exceeds the 512-side-face budget" };
+        if (seen.IsEmpty())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft side history missing" };
+        for (const auto& profile : profiles) {
+            BRepAlgoAPI_Cut uncovered;
+            NCollection_List<TopoDS_Shape> arguments, tools;
+            arguments.Append(profile);
+            tools.Append(sides);
+            uncovered.SetArguments(arguments);
+            uncovered.SetTools(tools);
+            uncovered.SetNonDestructive(true);
+            uncovered.Build();
+            if (!uncovered.IsDone() || uncovered.HasErrors())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft section coverage failed" };
+            GProp_GProps remaining;
+            BRepGProp::LinearProperties(uncovered.Shape(), remaining);
+            if (!std::isfinite(remaining.Mass()) || remaining.Mass() < 0 || remaining.Mass() > 1e-5)
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guides are incompatible with a requested section" };
+        }
+        BRepAlgoAPI_Cut uncoveredGuide;
+        NCollection_List<TopoDS_Shape> guideArguments, guideTools;
+        guideArguments.Append(auxiliary);
+        guideTools.Append(sides);
+        uncoveredGuide.SetArguments(guideArguments);
+        uncoveredGuide.SetTools(guideTools);
+        uncoveredGuide.SetNonDestructive(true);
+        uncoveredGuide.Build();
+        if (!uncoveredGuide.IsDone() || uncoveredGuide.HasErrors())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft boundary coverage failed" };
+        GProp_GProps guideRemaining;
+        BRepGProp::LinearProperties(uncoveredGuide.Shape(), guideRemaining);
+        if (!std::isfinite(guideRemaining.Mass()) || guideRemaining.Mass() < 0 || guideRemaining.Mass() > 1e-5)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Auxiliary guide does not lie completely on the loft sides; residual length " + std::to_string(guideRemaining.Mass()) + "; side faces " + std::to_string(seen.Extent()) };
+        const TopoDS_Shape& output = builder.Shape();
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        TrackedShapeResult result { output, true, "",
+            std::vector<int>(faces.Extent(), -1),
+            std::vector<int>(edges.Extent(), -1) };
+        result.faceEdgeMap.assign(faces.Extent(), -1);
+        bool historyMissing = false;
+        auto history = [&](TopAbs_ShapeEnum inputType,
+                           const NCollection_IndexedMap<
+                               TopoDS_Shape, TopTools_ShapeMapHasher>& outMap,
+                           std::vector<int>& map, std::vector<int>& ancestors) {
+            int offset = 0;
+            for (size_t inputIndex = 0; inputIndex < originalInputs.size(); inputIndex++) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputMap;
+                TopExp::MapShapes(originalInputs[inputIndex], inputType, inputMap);
+                for (int i = 1; i <= inputMap.Extent(); i++) {
+                    const auto& copied = copies[inputIndex]->ModifiedShape(inputMap.FindKey(i));
+                    if (copied.IsNull()) {
+                        historyMissing = true;
+                        continue;
+                    }
+                    mapInputShape(builder, copied, offset + i - 1, outMap, map,
+                        &ancestors);
+                }
+                offset += inputMap.Extent();
+            }
+        };
+        history(TopAbs_EDGE, faces, result.faceEdgeMap, result.pipeFaceEdges);
+        history(TopAbs_EDGE, edges, result.edgeMap, result.edgeAncestors);
+        std::vector<int> faceVertices(faces.Extent(), -1),
+            edgeVertices(edges.Extent(), -1);
+        history(TopAbs_VERTEX, faces, faceVertices, result.pipeFaceVertices);
+        history(TopAbs_VERTEX, edges, edgeVertices, result.pipeEdgeVertices);
+        if (historyMissing)
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft input copy lost topology ancestry" };
+        auto sectionEdges = [&](const TopoDS_Shape& boundary) {
+            std::vector<int> indexes;
+            if (!boundary.IsNull()) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                    boundaryEdges;
+                TopExp::MapShapes(boundary, TopAbs_EDGE, boundaryEdges);
+                for (int i = 1; i <= boundaryEdges.Extent(); i++) {
+                    int index = edges.FindIndex(boundaryEdges.FindKey(i));
+                    if (index > 0) {
+                        indexes.push_back(index - 1);
+                    }
+                }
+            }
+            return indexes;
+        };
+        result.pipeStartEdges = sectionEdges(builder.FirstShape());
+        result.pipeEndEdges = sectionEdges(builder.LastShape());
+        if (solid) {
+            // MakeSolid returns section wires, so identify caps through their
+            // complete boundary, never face enumeration or geometric proximity.
+            auto caps = [&](const std::vector<int>& boundary) {
+                std::vector<int> indexes;
+                for (int i = 1; i <= faces.Extent(); i++) {
+                    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                        faceEdges;
+                    TopExp::MapShapes(faces.FindKey(i), TopAbs_EDGE, faceEdges);
+                    bool belongs = faceEdges.Extent() > 0;
+                    for (int j = 1; j <= faceEdges.Extent() && belongs; j++) {
+                        int index = edges.FindIndex(faceEdges.FindKey(j)) - 1;
+                        belongs = std::find(boundary.begin(), boundary.end(), index) != boundary.end();
+                    }
+                    if (belongs) {
+                        indexes.push_back(i - 1);
+                    }
+                }
+                return indexes;
+            };
+            result.pipeStartFaces = caps(result.pipeStartEdges);
+            result.capFaces = caps(result.pipeEndEdges);
+            if (result.pipeStartFaces.size() != 1 || result.capFaces.size() != 1) {
+                return failedResult(GuardTag<TrackedShapeResult> { },
+                    "Guided loft cap ancestry is ambiguous");
+            }
+        }
+        if (seen.Extent() + result.pipeStartFaces.size() + result.capFaces.size() != static_cast<size_t>(faces.Extent()))
+            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft side ancestry is incomplete" };
+        return result;
+    }
+
     static ShapeResult sweep(const ShapeArray& sections, const TopoDS_Wire& path, bool isFrenet, bool isForceC1)
     {
         BRepOffsetAPI_MakePipeShell pipe(path);
@@ -1059,6 +1739,297 @@ public:
             return ShapeResult { TopoDS_Shape(), false, "Failed to sweep profile" };
         }
         return ShapeResult { pipe.Shape(), true, "" };
+    }
+
+    static TrackedShapeResult sweepTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, bool solid,
+        bool roundCorner)
+    {
+        return pipeTracked(section, path, solid, roundCorner, nullptr);
+    }
+
+    static TrackedShapeResult copyTracked(const TopoDS_Shape& input)
+    {
+        if (input.IsNull())
+            return failedResult(GuardTag<TrackedShapeResult> { }, "Tracked copy input is null");
+        BRepBuilderAPI_Copy copy(input, true, false);
+        const auto output = copy.Shape();
+        if (!copy.IsDone() || output.IsNull() || !BRepCheck_Analyzer(output).IsValid())
+            return failedResult(GuardTag<TrackedShapeResult> { }, "Tracked copy result is invalid");
+        TrackedShapeResult result { output, true, "", { }, { } };
+        auto history = [&](TopAbs_ShapeEnum type, std::vector<int>& map, std::vector<int>& ancestors) {
+            NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> originals, copied;
+            TopExp::MapShapes(input, type, originals);
+            TopExp::MapShapes(output, type, copied);
+            if (originals.Extent() != copied.Extent())
+                throw Standard_Failure("Tracked copy changed input topology");
+            map.assign(copied.Extent(), -1);
+            for (int i = 1; i <= originals.Extent(); ++i) {
+                const int index = copied.FindIndex(copy.ModifiedShape(originals.FindKey(i)));
+                if (index <= 0 || map[index - 1] != -1)
+                    throw Standard_Failure("Tracked copy has no unique original ancestry");
+                map[index - 1] = i - 1;
+                ancestors.push_back(index - 1);
+                ancestors.push_back(i - 1);
+            }
+        };
+        history(TopAbs_FACE, result.faceMap, result.faceAncestors);
+        history(TopAbs_EDGE, result.edgeMap, result.edgeAncestors);
+        return result;
+    }
+
+    static TrackedShapeResult faceSweepTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, const TopoDS_Face& support, bool roundCorner)
+    {
+        auto fail = [](const std::string& error) {
+            return failedResult(GuardTag<TrackedShapeResult> { }, error);
+        };
+        if (section.IsNull() || path.IsNull() || support.IsNull())
+            return fail("Face sweep requires a section, path and trimmed support face");
+        // Face construction changes wire flags, and p-curves mutate edge representations.
+        // Own deep copies before any builders or validators can touch borrowed topology.
+        BRepBuilderAPI_Copy sectionCopy(section, true, false), pathCopy(path, true, false), supportCopy(support, true, false);
+        const auto ownedSection = TopoDS::Wire(sectionCopy.Shape());
+        const auto ownedPath = TopoDS::Wire(pathCopy.Shape());
+        const auto ownedSupport = TopoDS::Face(supportCopy.Shape());
+        if (!BRepCheck_Analyzer(ownedSection).IsValid() || !BRepCheck_Analyzer(ownedPath).IsValid()
+            || !BRepCheck_Analyzer(ownedSupport).IsValid())
+            return fail("Face sweep input topology is invalid");
+        BRepBuilderAPI_MakeFace profileFace(ownedSection, true);
+        if (!profileFace.IsDone())
+            return fail("Face sweep section must be a planar closed profile");
+        BRepAdaptor_Surface profileSurface(profileFace.Face(), true);
+        if (profileSurface.GetType() != GeomAbs_Plane)
+            return fail("Face sweep section must be planar");
+        TopoDS_Vertex start, end;
+        TopExp::Vertices(ownedPath, start, end);
+        if (start.IsNull())
+            return fail("Face sweep path has no start vertex");
+        const gp_Pnt startPoint = BRep_Tool::Pnt(start);
+        BRepTools_WireExplorer explorer(ownedPath);
+        if (!explorer.More())
+            return fail("Face sweep path has no edge");
+        const TopoDS_Edge first = explorer.Current();
+        BRepAdaptor_Curve curve(first);
+        gp_Pnt curvePoint;
+        gp_Vec tangent;
+        curve.D1(first.Orientation() == TopAbs_REVERSED ? curve.LastParameter() : curve.FirstParameter(), curvePoint, tangent);
+        const double tolerance = 1e-6;
+        if (tangent.SquareMagnitude() <= tolerance * tolerance)
+            return fail("Face sweep path start tangent is degenerate");
+        const gp_Pln plane = profileSurface.Plane();
+        if (plane.Distance(startPoint) > tolerance
+            || !plane.Axis().Direction().IsParallel(gp_Dir(tangent), 1e-6))
+            return fail("Face sweep section must be authored at the path start, perpendicular to its tangent");
+        BRepClass_FaceClassifier sectionClassifier(profileFace.Face(), startPoint, tolerance);
+        if (sectionClassifier.State() != TopAbs_IN && sectionClassifier.State() != TopAbs_ON)
+            return fail("Face sweep section must contain the path start");
+
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pathEdges;
+        TopExp::MapShapes(ownedPath, TopAbs_EDGE, pathEdges);
+        if (pathEdges.Extent() < 1 || pathEdges.Extent() > 256)
+            return fail("Face sweep requires 1-256 path pieces");
+        ShapeFix_Edge fixer;
+        for (int i = 1; i <= pathEdges.Extent(); ++i) {
+            const auto edge = TopoDS::Edge(pathEdges.FindKey(i));
+            const double previousTolerance = BRep_Tool::Tolerance(edge);
+            fixer.FixAddPCurve(edge, ownedSupport, false, tolerance);
+            double firstParameter, lastParameter;
+            const auto pcurve = BRep_Tool::CurveOnSurface(edge, ownedSupport, firstParameter, lastParameter);
+            if (pcurve.IsNull())
+                return fail("Face sweep path has no support p-curve");
+            BRepLib::SameParameter(edge, tolerance);
+            BRepLib_CheckCurveOnSurface consistency(edge, ownedSupport);
+            consistency.Perform();
+            if (!BRep_Tool::SameParameter(edge) || !consistency.IsDone()
+                || !std::isfinite(consistency.MaxDistance()) || consistency.MaxDistance() > tolerance
+                || BRep_Tool::Tolerance(edge) > previousTolerance + 1e-9
+                || !BRepCheck_Analyzer(edge).IsValid())
+                return fail("Face sweep path p-curve is inconsistent with its 3D geometry");
+            GProp_GProps inputProperties, coveredProperties, remainderProperties;
+            BRepGProp::LinearProperties(edge, inputProperties);
+            BRepAlgoAPI_Common common(edge, ownedSupport);
+            common.SetNonDestructive(true);
+            common.Build();
+            if (!common.IsDone() || common.HasErrors())
+                return fail("Face sweep could not validate trimmed support coverage");
+            BRepGProp::LinearProperties(common.Shape(), coveredProperties);
+            BRepAlgoAPI_Cut remaining(edge, ownedSupport);
+            remaining.SetNonDestructive(true);
+            remaining.Build();
+            if (!remaining.IsDone() || remaining.HasErrors())
+                return fail("Face sweep could not validate the unsupported path remainder");
+            BRepGProp::LinearProperties(remaining.Shape(), remainderProperties);
+            const double allowed = std::max(tolerance, inputProperties.Mass() * 1e-7);
+            if (inputProperties.Mass() <= tolerance
+                || std::abs(inputProperties.Mass() - coveredProperties.Mass()) > allowed
+                || remainderProperties.Mass() > allowed)
+                return fail("Every whole path edge must lie on the selected trimmed support face");
+        }
+        auto result = pipeTracked(ownedSection, ownedPath, true, roundCorner, &ownedSupport);
+        if (!result.isOk)
+            return result;
+        // Copy maps establish the original input enumeration contract explicitly.
+        auto remapping = [&](TopAbs_ShapeEnum type) {
+            std::vector<int> remap;
+            int offset = 0;
+            for (auto item : { std::make_pair(TopoDS_Shape(section), &sectionCopy), std::make_pair(TopoDS_Shape(path), &pathCopy) }) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> originals, copied;
+                TopExp::MapShapes(item.first, type, originals);
+                TopExp::MapShapes(item.second->Shape(), type, copied);
+                const int copyOffset = remap.size();
+                remap.resize(copyOffset + copied.Extent(), -1);
+                for (int i = 1; i <= originals.Extent(); ++i) {
+                    const int index = copied.FindIndex(item.second->ModifiedShape(originals.FindKey(i)));
+                    if (index <= 0 || remap[copyOffset + index - 1] != -1)
+                        throw Standard_Failure("Face sweep copy lost unique input ancestry");
+                    remap[copyOffset + index - 1] = offset + i - 1;
+                }
+                offset += originals.Extent();
+            }
+            return remap;
+        };
+        const auto edgeRemap = remapping(TopAbs_EDGE), vertexRemap = remapping(TopAbs_VERTEX);
+        auto remapIndex = [](int& index, const std::vector<int>& map) {
+            if (index < 0)
+                return;
+            if (index >= static_cast<int>(map.size()) || map[index] < 0)
+                throw Standard_Failure("Face sweep history lost original input ancestry");
+            index = map[index];
+        };
+        for (auto* map : { &result.edgeMap, &result.faceEdgeMap })
+            for (int& index : *map)
+                remapIndex(index, edgeRemap);
+        for (auto* pairs : { &result.edgeAncestors, &result.pipeFaceEdges })
+            for (size_t i = 1; i < pairs->size(); i += 2)
+                remapIndex((*pairs)[i], edgeRemap);
+        for (auto* pairs : { &result.pipeFaceVertices, &result.pipeEdgeVertices })
+            for (size_t i = 1; i < pairs->size(); i += 2)
+                remapIndex((*pairs)[i], vertexRemap);
+        return result;
+    }
+
+    static TrackedShapeResult pipeTracked(const TopoDS_Wire& section,
+        const TopoDS_Wire& path, bool solid, bool roundCorner, const TopoDS_Face* support)
+    {
+        if (section.IsNull() || path.IsNull()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep requires a section and path wire");
+        }
+        if (!BRepCheck_Analyzer(section).IsValid() || !BRepCheck_Analyzer(path).IsValid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep input wire is invalid");
+        }
+        TopoDS_Vertex start, end;
+        TopExp::Vertices(path, start, end);
+        if (start.IsNull() || end.IsNull()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep path has no unambiguous endpoints");
+        }
+        BRepOffsetAPI_MakePipeShell pipe(path);
+        if (support) {
+            if (!pipe.SetMode(*support))
+                return failedResult(GuardTag<TrackedShapeResult> { }, "Face sweep could not establish a support-normal Darboux frame");
+            pipe.SetTolerance(1e-6, 1e-6, 1e-6);
+        } else
+            pipe.SetMode(true);
+        pipe.SetIsBuildHistory(true);
+        pipe.SetTransitionMode(roundCorner ? BRepBuilderAPI_RoundCorner
+                                           : BRepBuilderAPI_RightCorner);
+        if (roundCorner) {
+            pipe.SetForceApproxC1(true);
+        }
+        // Preserve the authored section placement; correction makes its plane
+        // orthogonal to the initial tangent, as required for round transitions.
+        pipe.Add(section, start, false, true);
+        pipe.Build();
+        if (!pipe.IsDone()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Failed to sweep section along path");
+        }
+        if (solid && !pipe.MakeSolid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep section does not enclose a solid");
+        }
+        const TopoDS_Shape& output = pipe.Shape();
+        if (output.IsNull() || !BRepCheck_Analyzer(output).IsValid()) {
+            return failedResult(GuardTag<TrackedShapeResult> { },
+                "Sweep result is invalid (BRepCheck_Analyzer)");
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, edges;
+        TopExp::MapShapes(output, TopAbs_FACE, faces);
+        TopExp::MapShapes(output, TopAbs_EDGE, edges);
+        TrackedShapeResult result { output, true, "",
+            std::vector<int>(faces.Extent(), -1),
+            std::vector<int>(edges.Extent(), -1) };
+        result.faceEdgeMap.assign(faces.Extent(), -1);
+        auto history = [&](TopAbs_ShapeEnum inputType,
+                           const NCollection_IndexedMap<
+                               TopoDS_Shape, TopTools_ShapeMapHasher>& outMap,
+                           std::vector<int>& map, std::vector<int>& ancestors) {
+            int offset = 0;
+            for (const TopoDS_Shape& input :
+                { TopoDS_Shape(section), TopoDS_Shape(path) }) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputMap;
+                TopExp::MapShapes(input, inputType, inputMap);
+                for (int i = 1; i <= inputMap.Extent(); i++) {
+                    mapInputShape(pipe, inputMap.FindKey(i), offset + i - 1, outMap, map,
+                        &ancestors);
+                }
+                offset += inputMap.Extent();
+            }
+        };
+        history(TopAbs_EDGE, faces, result.faceEdgeMap, result.pipeFaceEdges);
+        history(TopAbs_EDGE, edges, result.edgeMap, result.edgeAncestors);
+        std::vector<int> faceVertices(faces.Extent(), -1),
+            edgeVertices(edges.Extent(), -1);
+        history(TopAbs_VERTEX, faces, faceVertices, result.pipeFaceVertices);
+        history(TopAbs_VERTEX, edges, edgeVertices, result.pipeEdgeVertices);
+        auto sectionEdges = [&](const TopoDS_Shape& boundary) {
+            std::vector<int> indexes;
+            if (!boundary.IsNull()) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                    boundaryEdges;
+                TopExp::MapShapes(boundary, TopAbs_EDGE, boundaryEdges);
+                for (int i = 1; i <= boundaryEdges.Extent(); i++) {
+                    int index = edges.FindIndex(boundaryEdges.FindKey(i));
+                    if (index > 0) {
+                        indexes.push_back(index - 1);
+                    }
+                }
+            }
+            return indexes;
+        };
+        result.pipeStartEdges = sectionEdges(pipe.FirstShape());
+        result.pipeEndEdges = sectionEdges(pipe.LastShape());
+        if (solid && !start.IsSame(end)) {
+            // MakeSolid returns section wires, so identify caps through their
+            // complete boundary, never face enumeration or geometric proximity.
+            auto caps = [&](const std::vector<int>& boundary) {
+                std::vector<int> indexes;
+                for (int i = 1; i <= faces.Extent(); i++) {
+                    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>
+                        faceEdges;
+                    TopExp::MapShapes(faces.FindKey(i), TopAbs_EDGE, faceEdges);
+                    bool belongs = faceEdges.Extent() > 0;
+                    for (int j = 1; j <= faceEdges.Extent() && belongs; j++) {
+                        int index = edges.FindIndex(faceEdges.FindKey(j)) - 1;
+                        belongs = std::find(boundary.begin(), boundary.end(), index) != boundary.end();
+                    }
+                    if (belongs) {
+                        indexes.push_back(i - 1);
+                    }
+                }
+                return indexes;
+            };
+            result.pipeStartFaces = caps(result.pipeStartEdges);
+            result.capFaces = caps(result.pipeEndEdges);
+            if (result.pipeStartFaces.size() != 1 || result.capFaces.size() != 1) {
+                return failedResult(GuardTag<TrackedShapeResult> { },
+                    "Sweep cap ancestry is ambiguous");
+            }
+        }
+        return result;
     }
 
     static ShapeResult revolve(const TopoDS_Shape& profile, const Ax1& axis, double rad)
@@ -1103,6 +2074,69 @@ public:
             edgeHistory(prism, profile, prism.Shape()), faceFromEdgeHistory(prism, profile, prism.Shape()) };
         result.capFaces = sweepCapFaces(prism, prism.Shape());
         return result;
+    }
+
+    // Exact from-surface tool. endMode: 0 = translated start surface (distance),
+    // 1 = selected until surface, 2 = through the supplied bodies to a planar far cap.
+    static TrackedShapeResult prismFromTracked(const TopoDS_Shape& profile, const Vector3& direction,
+        const TopoDS_Shape& fromFace, double startOffset, int endMode, double depth,
+        const TopoDS_Shape& untilFace, double untilOffset, const ShapeArray& bounds, bool flush)
+    {
+        if (!isUsableDirection(direction))
+            return trackedError("The extrude direction is zero");
+        gp_Dir dir = Vector3::toDir(direction);
+        std::string error = profileError(profile, dir);
+        if (!error.empty())
+            return trackedError(error);
+        if (profile.ShapeType() != TopAbs_FACE)
+            return trackedError("From-face extrusion requires one planar profile face");
+        Handle(Geom_Surface) profileSurface = BRep_Tool::Surface(TopoDS::Face(profile));
+        if (profileSurface.IsNull()
+            || Handle(Geom_Plane)::DownCast(untrimmedSurface(profileSurface)).IsNull())
+            return trackedError("From-face extrusion requires a planar profile face");
+        if (fromFace.IsNull() || fromFace.ShapeType() != TopAbs_FACE)
+            return trackedError("The starting object is not a face");
+        if (!std::isfinite(startOffset))
+            return trackedError("The starting offset is not a number");
+        TopoDS_Face start = TopoDS::Face(fromFace);
+        Handle(Geom_Surface) surface = BRep_Tool::Surface(start);
+        if (surface.IsNull() || isParallelTo(untrimmedSurface(surface), dir))
+            return trackedError("The starting face is parallel to the extrusion");
+        gp_Trsf startShift;
+        startShift.SetTranslation(gp_Vec(dir) * startOffset);
+        start = TopoDS::Face(start.Moved(TopLoc_Location(startShift)));
+        TopoDS_Face end;
+        if (endMode == 0) {
+            if (!std::isfinite(depth) || depth <= Precision::Confusion())
+                return trackedError("From-face extrusion depth must be positive");
+            gp_Trsf endShift;
+            endShift.SetTranslation(gp_Vec(dir) * depth);
+            end = TopoDS::Face(start.Moved(TopLoc_Location(endShift)));
+        } else if (endMode == 1) {
+            if (untilFace.IsNull() || untilFace.ShapeType() != TopAbs_FACE || !std::isfinite(untilOffset))
+                return trackedError("The ending object is not a valid face");
+            gp_Trsf endShift;
+            endShift.SetTranslation(gp_Vec(dir) * untilOffset);
+            end = TopoDS::Face(untilFace.Moved(TopLoc_Location(endShift)));
+        } else if (endMode == 2) {
+            TopoDS_Compound targets = compoundOf(vecFromJSArray<TopoDS_Shape>(bounds));
+            double low, high;
+            Bnd_Box scene;
+            if (!projectedRange(targets, dir, low, high) || !boxOf(targets, scene) || !boxOf(profile, scene) || !boxOf(start, scene))
+                return trackedError("There is nothing to extrude through");
+            double size = std::sqrt(scene.SquareExtent()) + 1;
+            double distance = high + (flush ? 0 : size * 0.1 + 1);
+            double xmin, ymin, zmin, xmax, ymax, zmax;
+            scene.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+            gp_Pnt center((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2);
+            gp_Pnt origin = center.Translated(gp_Vec(dir) * (distance - gp_Vec(center.XYZ()).Dot(gp_Vec(dir))));
+            BRepBuilderAPI_MakeFace plane(gp_Pln(origin, dir), -size, size, -size, size);
+            if (!plane.IsDone())
+                return trackedError("Failed to create the extrusion end plane");
+            end = plane.Face();
+        } else
+            return trackedError("Unknown from-face extrusion extent");
+        return prismBetweenFaces(TopoDS::Face(profile), dir, start, end, endMode == 0 ? depth : 0);
     }
 
     // Tool prism of `profile` along `direction` up to `untilFace` (moved by `offset` along
@@ -1175,6 +2209,137 @@ public:
         }
         return trackedError(reached ? "The target face does not bound the extrusion of the profile"
                                     : "The target face is not reached along the extrude direction");
+    }
+
+    // Automatic next face. Only complete trimmed caps participate, with uniform ordering proved
+    // by exact bounded-tool containment. Limits apply after conservative bounds pruning.
+    static TrackedShapeResult prismNextTracked(const TopoDS_Shape& profile, const Vector3& direction,
+        const ShapeArray& candidates, double offset, bool hasStart, const TopoDS_Shape& startFace, double startOffset)
+    {
+        if (!isUsableDirection(direction))
+            return trackedError("The extrude direction is zero");
+        gp_Dir dir = Vector3::toDir(direction);
+        if (profile.IsNull() || profile.ShapeType() != TopAbs_FACE)
+            return trackedError("Next-face extrusion requires one planar profile face");
+        TopoDS_Face profileFace = TopoDS::Face(profile);
+        Handle(Geom_Surface) profileSurface = BRep_Tool::Surface(profileFace);
+        if (profileSurface.IsNull() || Handle(Geom_Plane)::DownCast(untrimmedSurface(profileSurface)).IsNull())
+            return trackedError("Next-face extrusion requires a planar profile face");
+        if (!std::isfinite(offset) || !std::isfinite(startOffset))
+            return trackedError("Next-face extrusion offsets must be finite");
+        std::string error = profileError(profile, dir);
+        if (!error.empty())
+            return trackedError(error);
+        if (hasStart && (startFace.IsNull() || startFace.ShapeType() != TopAbs_FACE))
+            return trackedError("The starting object is not a face");
+        TopoDS_Face start = hasStart ? TopoDS::Face(startFace) : profileFace;
+        Handle(Geom_Surface) startSurface = BRep_Tool::Surface(start);
+        if (startSurface.IsNull() || isParallelTo(untrimmedSurface(startSurface), dir))
+            return trackedError("The starting face is parallel to the extrusion");
+        gp_Trsf shift;
+        shift.SetTranslation(gp_Vec(dir) * startOffset);
+        start = TopoDS::Face(start.Moved(TopLoc_Location(shift)));
+        double startLow, startHigh;
+        if (!projectedRange(start, dir, startLow, startHigh))
+            return trackedError("The starting face has no extent");
+        struct Candidate {
+            int body;
+            int face;
+            TopoDS_Face cap;
+            TrackedShapeResult tool;
+            double volume;
+        };
+        std::vector<Candidate> valid;
+        std::vector<TopoDS_Face> partial;
+        std::string coverageFailure;
+        int bodies = 0, examined = 0, bodyIndex = -1;
+        for (const TopoDS_Shape& body : vecFromJSArray<TopoDS_Shape>(candidates)) {
+            bodyIndex++;
+            if (body.IsNull() || !intersectsProfileRayBounds(profile, body, dir, startLow))
+                continue;
+            if (++bodies > 64)
+                return trackedError("Next-face search exceeds 64 intersecting candidate bodies");
+            ShapeIndexMap faces;
+            TopExp::MapShapes(body, TopAbs_FACE, faces);
+            for (int f = 1; f <= faces.Extent(); f++) {
+                TopoDS_Face face = TopoDS::Face(faces.FindKey(f));
+                if (!intersectsProfileRayBounds(profile, face, dir, startLow))
+                    continue;
+                if (++examined > 512)
+                    return trackedError("Next-face search exceeds 512 intersecting candidate faces");
+                Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+                if (surface.IsNull() || isParallelTo(untrimmedSurface(surface), dir))
+                    continue;
+                TrackedShapeResult tool = prismBetweenFaces(profileFace, dir, start, face, 0, true);
+                if (!tool.isOk || !capCoversProfile(tool, profileFace, dir, coverageFailure)) {
+                    partial.push_back(face);
+                    continue;
+                }
+                GProp_GProps volume;
+                BRepGProp::VolumeProperties(tool.shape, volume);
+                if (std::abs(volume.Mass()) <= Precision::Confusion())
+                    continue;
+                valid.push_back({ bodyIndex, f - 1, face, tool, std::abs(volume.Mass()) });
+                if (valid.size() > 32)
+                    return trackedError("Next-face search exceeds 32 valid bounded tools");
+            }
+        }
+        if (valid.empty())
+            return trackedError("No complete next face is reached along the extrusion direction; partial or piecewise caps are unsupported" + (coverageFailure.empty() ? std::string() : ": " + coverageFailure));
+        std::vector<bool> dominated(valid.size(), false);
+        for (size_t a = 0; a < valid.size(); a++)
+            for (size_t b = a + 1; b < valid.size(); b++) {
+                BRepAlgoAPI_Common common(valid[a].tool.shape, valid[b].tool.shape);
+                common.SetNonDestructive(true);
+                common.Build();
+                if (!common.IsDone() || common.HasErrors())
+                    return trackedError("Cannot compare next-face candidate containment");
+                GProp_GProps volume;
+                BRepGProp::VolumeProperties(common.Shape(), volume);
+                double overlap = std::abs(volume.Mass());
+                double tolerance = 1e-6 * std::max({ 1.0, valid[a].volume, valid[b].volume });
+                bool aInB = std::abs(overlap - valid[a].volume) <= tolerance;
+                bool bInA = std::abs(overlap - valid[b].volume) <= tolerance;
+                if (aInB && !bInA)
+                    dominated[b] = true;
+                if (bInA && !aInB)
+                    dominated[a] = true;
+            }
+        int selected = -1;
+        for (size_t i = 0; i < valid.size(); i++)
+            if (!dominated[i]) {
+                if (selected >= 0)
+                    return trackedError("The next face is ambiguous: candidate caps tie or cross across the profile");
+                selected = static_cast<int>(i);
+            }
+        if (selected < 0)
+            return trackedError("The next face ordering is ambiguous");
+        Candidate& chosen = valid[selected];
+        // A nearer partial cap means the first boundary is piecewise, even if a farther face
+        // can cap the complete profile. Do not silently skip that obstruction.
+        for (const TopoDS_Face& face : partial) {
+            BRepAlgoAPI_Common common(face, chosen.tool.shape);
+            common.SetNonDestructive(true);
+            common.Build();
+            if (!common.IsDone() || common.HasErrors())
+                return trackedError("Cannot validate partial next-face candidates");
+            GProp_GProps area;
+            BRepGProp::SurfaceProperties(common.Shape(), area);
+            if (std::abs(area.Mass()) > 1e-6)
+                return trackedError("The next boundary is partial or piecewise; one uniformly nearest full-coverage face is required");
+        }
+        TrackedShapeResult result = chosen.tool;
+        if (offset != 0) {
+            gp_Trsf move;
+            move.SetTranslation(gp_Vec(dir) * offset);
+            TopoDS_Face end = TopoDS::Face(chosen.cap.Moved(TopLoc_Location(move)));
+            result = prismBetweenFaces(profileFace, dir, start, end, 0, true);
+            if (!result.isOk || !capCoversProfile(result, profileFace, dir, coverageFailure))
+                return trackedError("The next-face offset does not completely bound the extrusion");
+        }
+        result.nextTargetIndex = chosen.body;
+        result.nextFaceIndex = chosen.face;
+        return result;
     }
 
     // Tool prism of `profile` along `direction` through everything in `bounds`: it ends on the
@@ -2077,79 +3242,162 @@ public:
 
     static ShapeResult fillet(const TopoDS_Shape& shape, const NumberArray& edges, double radius)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, radius, "fillet", "radius", edgeMap);
+        if (!inputFailure.empty())
+            return ShapeResult { TopoDS_Shape(), false, inputFailure };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeFillet makeFillet(shape);
         for (auto edge : edgeVec) {
-            makeFillet.Add(radius, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeFillet.Add(radius, selected);
+            if (makeFillet.Contour(selected) == 0)
+                return ShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "fillet", radius, "radius") };
         }
         makeFillet.Build();
         if (!makeFillet.IsDone()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to fillet" };
+            return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(makeFillet, radius) };
         }
 
-        return ShapeResult { makeFillet.Shape(), true, "" };
+        const TopoDS_Shape& result = makeFillet.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
+            return ShapeResult { TopoDS_Shape(), false,
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" };
+        }
+        return ShapeResult { result, true, "" };
     }
 
     static TrackedShapeResult filletTracked(const TopoDS_Shape& shape, const NumberArray& edges, double radius)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, radius, "fillet", "radius", edgeMap);
+        if (!inputFailure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, inputFailure, { }, { } };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeFillet makeFillet(shape);
         for (auto edge : edgeVec) {
-            makeFillet.Add(radius, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeFillet.Add(radius, selected);
+            if (makeFillet.Contour(selected) == 0)
+                return TrackedShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "fillet", radius, "radius"), { }, { } };
         }
         makeFillet.Build();
         if (!makeFillet.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to fillet", { }, { } };
+            return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(makeFillet, radius), { }, { } };
         }
 
-        return TrackedShapeResult { makeFillet.Shape(), true, "", faceHistory(makeFillet, shape, makeFillet.Shape()),
-            edgeHistory(makeFillet, shape, makeFillet.Shape()) };
+        const TopoDS_Shape& result = makeFillet.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
+            return TrackedShapeResult { TopoDS_Shape(), false,
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+        }
+        return TrackedShapeResult { result, true, "", faceHistory(makeFillet, shape, result),
+            edgeHistory(makeFillet, shape, result) };
+    }
+
+    static ShapeResult filletVariableRadius(const TopoDS_Shape& shape, const NumberArray& edges, const NumberArray& law)
+    {
+        if (shape.IsNull())
+            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet input shape is null" };
+        BRepFilletAPI_MakeFillet builder(shape);
+        double maximumRadius = 0;
+        const auto failure = prepareVariableFillet(builder, shape, edges, law, maximumRadius);
+        if (!failure.empty())
+            return ShapeResult { TopoDS_Shape(), false, failure };
+        builder.Build();
+        if (!builder.IsDone())
+            return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius) };
+        const auto result = builder.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
+            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" };
+        return ShapeResult { result, true, "" };
+    }
+
+    static TrackedShapeResult filletVariableRadiusTracked(const TopoDS_Shape& shape, const NumberArray& edges, const NumberArray& law)
+    {
+        if (shape.IsNull())
+            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet input shape is null", { }, { } };
+        BRepFilletAPI_MakeFillet builder(shape);
+        double maximumRadius = 0;
+        const auto failure = prepareVariableFillet(builder, shape, edges, law, maximumRadius);
+        if (!failure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, failure, { }, { } };
+        builder.Build();
+        if (!builder.IsDone())
+            return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius), { }, { } };
+        const auto result = builder.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
+            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)", { }, { } };
+        std::vector<int> faceAncestors;
+        std::vector<int> edgeAncestors;
+        TrackedShapeResult tracked { result, true, "",
+            faceHistory(builder, shape, result, &faceAncestors),
+            edgeHistory(builder, shape, result, &edgeAncestors) };
+        tracked.faceAncestors = std::move(faceAncestors);
+        tracked.edgeAncestors = std::move(edgeAncestors);
+        return tracked;
     }
 
     static ShapeResult chamfer(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, distance, "chamfer", "distance", edgeMap);
+        if (!inputFailure.empty())
+            return ShapeResult { TopoDS_Shape(), false, inputFailure };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeChamfer makeChamfer(shape);
         for (auto edge : edgeVec) {
-            makeChamfer.Add(distance, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeChamfer.Add(distance, selected);
+            if (makeChamfer.Contour(selected) == 0)
+                return ShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "chamfer", distance, "distance") };
         }
         makeChamfer.Build();
         if (!makeChamfer.IsDone()) {
-            return ShapeResult { TopoDS_Shape(), false, "Failed to chamfer" };
+            return ShapeResult { TopoDS_Shape(), false, chamferBuildFailure(makeChamfer, distance) };
         }
-        return ShapeResult { makeChamfer.Shape(), true, "" };
+        const TopoDS_Shape& result = makeChamfer.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
+            return ShapeResult { TopoDS_Shape(), false,
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" };
+        }
+        return ShapeResult { result, true, "" };
     }
 
     static TrackedShapeResult chamferTracked(const TopoDS_Shape& shape, const NumberArray& edges, double distance)
     {
-        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
-
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
-        TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+        const auto inputFailure = cornerInputFailure(shape, edges, distance, "chamfer", "distance", edgeMap);
+        if (!inputFailure.empty())
+            return TrackedShapeResult { TopoDS_Shape(), false, inputFailure, { }, { } };
+        std::vector<int> edgeVec = vecFromJSArray<int>(edges);
 
         BRepFilletAPI_MakeChamfer makeChamfer(shape);
         for (auto edge : edgeVec) {
-            makeChamfer.Add(distance, TopoDS::Edge(edgeMap.FindKey(edge + 1)));
+            const auto selected = TopoDS::Edge(edgeMap.FindKey(edge + 1));
+            makeChamfer.Add(distance, selected);
+            if (makeChamfer.Contour(selected) == 0)
+                return TrackedShapeResult { TopoDS_Shape(), false,
+                    cornerContourFailure(shape, selected, edge, "chamfer", distance, "distance"), { }, { } };
         }
         makeChamfer.Build();
         if (!makeChamfer.IsDone()) {
-            return TrackedShapeResult { TopoDS_Shape(), false, "Failed to chamfer", { }, { } };
+            return TrackedShapeResult { TopoDS_Shape(), false, chamferBuildFailure(makeChamfer, distance), { }, { } };
         }
 
-        return TrackedShapeResult { makeChamfer.Shape(), true, "", faceHistory(makeChamfer, shape, makeChamfer.Shape()),
-            edgeHistory(makeChamfer, shape, makeChamfer.Shape()) };
+        const TopoDS_Shape& result = makeChamfer.Shape();
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
+            return TrackedShapeResult { TopoDS_Shape(), false,
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+        }
+        return TrackedShapeResult { result, true, "", faceHistory(makeChamfer, shape, result),
+            edgeHistory(makeChamfer, shape, result) };
     }
 
     static ShapeResult fillet2d(const TopoDS_Face& face, const TopoDS_Edge& edge1, const TopoDS_Edge& edge2, double radius)
@@ -2513,6 +3761,22 @@ public:
 
 EMSCRIPTEN_BINDINGS(ShapeFactory)
 {
+    value_object<CornerSetbackResult>("CornerSetbackResult")
+        .field("shape", &CornerSetbackResult::shape)
+        .field("isOk", &CornerSetbackResult::isOk)
+        .field("error", &CornerSetbackResult::error)
+        .field("g0Error", &CornerSetbackResult::g0Error)
+        .field("g1Error", &CornerSetbackResult::g1Error)
+        .field("fitDistanceError", &CornerSetbackResult::fitDistanceError)
+        .field("fitAngleError", &CornerSetbackResult::fitAngleError)
+        .field("boundaryCount", &CornerSetbackResult::boundaryCount)
+        .field("patchCount", &CornerSetbackResult::patchCount)
+        .field("faceMap", &CornerSetbackResult::faceMap)
+        .field("edgeMap", &CornerSetbackResult::edgeMap)
+        .field("faceEdgeMap", &CornerSetbackResult::faceEdgeMap)
+        .field("faceAncestors", &CornerSetbackResult::faceAncestors)
+        .field("edgeAncestors", &CornerSetbackResult::edgeAncestors)
+        .field("cornerFaces", &CornerSetbackResult::cornerFaces);
     class_<ShapeResult>("ShapeResult")
         .property("shape", &ShapeResult::shape, return_value_policy::reference())
         .property("isOk", &ShapeResult::isOk)
@@ -2545,9 +3809,18 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .property("faceEdgeMap", &TrackedShapeResult::faceEdgeMap)
         .property("faceAncestors", &TrackedShapeResult::faceAncestors)
         .property("edgeAncestors", &TrackedShapeResult::edgeAncestors)
-        .property("capFaces", &TrackedShapeResult::capFaces);
+        .property("capFaces", &TrackedShapeResult::capFaces)
+        .property("nextTargetIndex", &TrackedShapeResult::nextTargetIndex)
+        .property("nextFaceIndex", &TrackedShapeResult::nextFaceIndex)
+        .property("pipeFaceEdges", &TrackedShapeResult::pipeFaceEdges)
+        .property("pipeFaceVertices", &TrackedShapeResult::pipeFaceVertices)
+        .property("pipeEdgeVertices", &TrackedShapeResult::pipeEdgeVertices)
+        .property("pipeStartEdges", &TrackedShapeResult::pipeStartEdges)
+        .property("pipeEndEdges", &TrackedShapeResult::pipeEndEdges)
+        .property("pipeStartFaces", &TrackedShapeResult::pipeStartFaces);
 
     class_<ShapeFactory>("ShapeFactory")
+        .class_function("filletCornerSetbackTracked", guardedEntry<&ShapeFactory::filletCornerSetbackTracked>("ShapeFactory.filletCornerSetbackTracked"))
         .class_function("box", guardedEntry<&ShapeFactory::box>("ShapeFactory.box"))
         .class_function("cone", guardedEntry<&ShapeFactory::cone>("ShapeFactory.cone"))
         .class_function("sphere", guardedEntry<&ShapeFactory::sphere>("ShapeFactory.sphere"))
@@ -2556,6 +3829,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("cylinder", guardedEntry<&ShapeFactory::cylinder>("ShapeFactory.cylinder"))
         .class_function("pyramid", guardedEntry<&ShapeFactory::pyramid>("ShapeFactory.pyramid"))
         .class_function("sweep", guardedEntry<&ShapeFactory::sweep>("ShapeFactory.sweep"))
+        .class_function("loftGuidedTracked", guardedEntry<&ShapeFactory::loftGuidedTracked>("ShapeFactory.loftGuidedTracked"))
         .class_function("revolve", guardedEntry<&ShapeFactory::revolve>("ShapeFactory.revolve"))
         .class_function("prism", guardedEntry<&ShapeFactory::prism>("ShapeFactory.prism"))
         .class_function("pushPull", guardedEntry<&ShapeFactory::pushPull>("ShapeFactory.pushPull"))
@@ -2583,14 +3857,21 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("combine", guardedEntry<&ShapeFactory::combine>("ShapeFactory.combine"))
         .class_function("fillet", guardedEntry<&ShapeFactory::fillet>("ShapeFactory.fillet"))
         .class_function("chamfer", guardedEntry<&ShapeFactory::chamfer>("ShapeFactory.chamfer"))
+        .class_function("sweepTracked", guardedEntry<&ShapeFactory::sweepTracked>("ShapeFactory.sweepTracked"))
+        .class_function("faceSweepTracked", guardedEntry<&ShapeFactory::faceSweepTracked>("ShapeFactory.faceSweepTracked"))
+        .class_function("copyTracked", guardedEntry<&ShapeFactory::copyTracked>("ShapeFactory.copyTracked"))
         .class_function("revolveTracked", guardedEntry<&ShapeFactory::revolveTracked>("ShapeFactory.revolveTracked"))
         .class_function("prismTracked", guardedEntry<&ShapeFactory::prismTracked>("ShapeFactory.prismTracked"))
+        .class_function("prismFromTracked", guardedEntry<&ShapeFactory::prismFromTracked>("ShapeFactory.prismFromTracked"))
+        .class_function("prismNextTracked", guardedEntry<&ShapeFactory::prismNextTracked>("ShapeFactory.prismNextTracked"))
         .class_function("prismUntilTracked", guardedEntry<&ShapeFactory::prismUntilTracked>("ShapeFactory.prismUntilTracked"))
         .class_function("prismThruAllTracked", guardedEntry<&ShapeFactory::prismThruAllTracked>("ShapeFactory.prismThruAllTracked"))
         .class_function("booleanCommonTracked", guardedEntry<&ShapeFactory::booleanCommonTracked>("ShapeFactory.booleanCommonTracked"))
         .class_function("booleanCutTracked", guardedEntry<&ShapeFactory::booleanCutTracked>("ShapeFactory.booleanCutTracked"))
         .class_function("booleanFuseTracked", guardedEntry<&ShapeFactory::booleanFuseTracked>("ShapeFactory.booleanFuseTracked"))
         .class_function("filletTracked", guardedEntry<&ShapeFactory::filletTracked>("ShapeFactory.filletTracked"))
+        .class_function("filletVariableRadius", guardedEntry<&ShapeFactory::filletVariableRadius>("ShapeFactory.filletVariableRadius"))
+        .class_function("filletVariableRadiusTracked", guardedEntry<&ShapeFactory::filletVariableRadiusTracked>("ShapeFactory.filletVariableRadiusTracked"))
         .class_function("chamferTracked", guardedEntry<&ShapeFactory::chamferTracked>("ShapeFactory.chamferTracked"))
         .class_function("fillet2d", guardedEntry<&ShapeFactory::fillet2d>("ShapeFactory.fillet2d"))
         .class_function("chamfer2d", guardedEntry<&ShapeFactory::chamfer2d>("ShapeFactory.chamfer2d"))
