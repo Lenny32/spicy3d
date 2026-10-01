@@ -110,6 +110,7 @@ export class HotkeyService implements IService {
         PubSub.default.sub("executeCommand", this.executeCommand);
         PubSub.default.sub("pushShortcutContext", this.onPushContext);
         PubSub.default.sub("popShortcutContext", this.onPopContext);
+        window.addEventListener("keydown", this.saveKeyDown, true);
         window.addEventListener("keydown", this.eventHandlerKeyDown);
         window.addEventListener("keydown", this.commandKeyDown);
         Config.instance.onPropertyChanged(this.handleConfigChanged);
@@ -120,6 +121,7 @@ export class HotkeyService implements IService {
         PubSub.default.remove("executeCommand", this.executeCommand);
         PubSub.default.remove("pushShortcutContext", this.onPushContext);
         PubSub.default.remove("popShortcutContext", this.onPopContext);
+        window.removeEventListener("keydown", this.saveKeyDown, true);
         window.removeEventListener("keydown", this.eventHandlerKeyDown);
         window.removeEventListener("keydown", this.commandKeyDown);
         Config.instance.removePropertyChanged(this.handleConfigChanged);
@@ -142,6 +144,23 @@ export class HotkeyService implements IService {
         if (prop === "navigation3D") {
             this.loadProfile();
         }
+    };
+
+    private readonly saveKeyDown = (e: KeyboardEvent) => {
+        if (
+            !(e.ctrlKey || e.metaKey) ||
+            e.key.toLowerCase() !== "s" ||
+            e.shiftKey ||
+            e.altKey ||
+            this._keyMap.get("ctrl+s") !== "doc.save"
+        ) {
+            return;
+        }
+
+        // Capture Save before text inputs and panels can stop keyboard propagation.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat) PubSub.default.pub("executeCommand", "doc.save");
     };
 
     protected canHandleKey(e: KeyboardEvent): boolean {
