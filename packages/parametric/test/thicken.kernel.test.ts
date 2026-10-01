@@ -345,7 +345,7 @@ describe("thicken feature (real kernel)", () => {
             doc.modelManager.addNode(body);
 
             expect(body.shape.isOk).toBe(false);
-            expect(errorOf(body, "t1")).toBe("Thicken requires a preceding feature");
+            expect(errorOf(body, "t1")).toBe('thicken step "t1": Thicken requires a preceding feature');
         });
 
         test.each([
@@ -357,7 +357,7 @@ describe("thicken feature (real kernel)", () => {
             const body = boxBody(doc);
             thicken(body, { thickness, openFaces: [topFaceRef(body)] });
 
-            expect(errorOf(body, "t1")).toBe(message);
+            expect(errorOf(body, "t1")).toBe(`thicken step "t1": ${message}`);
         });
 
         test("an expression naming no variable fails the feature", () => {
@@ -375,7 +375,7 @@ describe("thicken feature (real kernel)", () => {
             const body = tubeBody(doc);
             thicken(body, { thickness: 2, openFaces: [ref] });
 
-            expect(errorOf(body, "t1")).toBe("Only a solid can have open faces");
+            expect(errorOf(body, "t1")).toBe('thicken step "t1": Only a solid can have open faces');
         });
 
         test("a wall thicker than the solid fails without breaking the kernel", () => {
@@ -471,7 +471,7 @@ describe("periodic ruled loft thickening (issue #126)", () => {
 
         thicken(body, { thickness });
 
-        expect(errorOf(body, "t1")).toBe(INCONSISTENT_OFFSET_ERROR);
+        expect(errorOf(body, "t1")).toBe(`thicken step "t1": ${INCONSISTENT_OFFSET_ERROR}`);
         expect(body.featureItems().find((item) => item.id === "loft")?.error).toBeUndefined();
         // The feature thickens a copy: the cached loft keeps its p-curves and tolerances.
         expect(converter.convertToBrep(skin).value).toBe(before.value);
@@ -542,4 +542,37 @@ test("thicken rejects a negative component hidden by a positive compound volume"
         small.dispose();
         large.dispose();
     }
+});
+
+test.each([2, -2])("open skin -> thicken -> common trim stays valid at thickness %s (#122)", (thickness) => {
+    const doc = newDoc();
+    const body = tubeBody(doc);
+    thicken(body, { thickness });
+    expect(errorOf(body, "t1")).toBeUndefined();
+    const before = body.shape.value.volume();
+    // A box covering the full wall in XY and its middle half in Z.
+    const sketch = new SketchNode({
+        document: doc,
+        plane: planeAt(5),
+        data: {
+            entities: square.entities.map((entity) => ({
+                ...entity,
+                params: entity.params.map((value) => value * 2),
+            })),
+            constraints: [],
+        },
+    });
+    doc.modelManager.addNode(sketch);
+    const tool = new ParametricBodyNode({
+        document: doc,
+        features: [{ id: "box", type: "extrude", sketchId: sketch.id, depth: 10 }],
+    });
+    doc.modelManager.addNode(tool);
+    body.setFeaturesEmitShapeChanged([
+        ...body.features,
+        { id: "trim", type: "boolean", operation: "common", toolIds: [tool.id] },
+    ]);
+    expect(errorOf(body, "trim")).toBeUndefined();
+    expect(body.shape.value.checkShape()).toBe(true);
+    expect(body.shape.value.volume()).toBeCloseTo(before / 2, 3);
 });

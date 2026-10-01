@@ -1,6 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { volumeTolerance } from "@spicy3d/core/src/shape/volumeValidity";
+
 import type {
     ClassHandle,
     IntVector,
@@ -28,6 +30,7 @@ import type {
 export class WorkerKernel {
     private readonly shapes = new Map<KernelHandle, TopoDS_Shape>();
     private readonly replicaLeases = new Set<KernelHandle>();
+    private readonly validatedShapes = new WeakSet<TopoDS_Shape>();
     private nextHandle = 0;
     private trapped = false;
     private requestId = 0;
@@ -258,7 +261,7 @@ export class WorkerKernel {
                 const a = left.map((id) => this.get(id));
                 const b = right.map((id) => this.get(id));
                 for (const [index, shape] of [...a, ...b].entries()) {
-                    const error = this.shapeError(shape);
+                    const error = this.shapeError(shape, false);
                     if (error) return this.geometryFailure(`Boolean ${operation} input ${index}: ${error}`);
                 }
                 const methods = {
@@ -287,7 +290,7 @@ export class WorkerKernel {
                         if (!saved.ok) return saved;
                         const error = this.shapeError(shape);
                         if (error) return this.geometryFailure(`Boolean ${operation} result: ${error}`);
-                        return saved.ok ? { ok: true, value: { handle: saved.value, tracking } } : saved;
+                        return { ok: true, value: { handle: saved.value, tracking } };
                     },
                     () => result.delete(),
                 );
@@ -417,7 +420,7 @@ export class WorkerKernel {
             if (shape.isNull() || !sameReplicaTopology(replica.topology, replicaTopology(m, shape))) {
                 throw new Error("Input BREP topology order changed");
             }
-            const error = this.shapeError(shape);
+            const error = this.shapeError(shape, !request.method.startsWith("boolean"));
             if (error)
                 throw new InvalidGeometryError(`${request.method} input ${owned.length - 1}: ${error}`);
             return shape;
@@ -546,7 +549,11 @@ export class WorkerKernel {
                         const thicken =
                             request.method === "makeThickSolidBySimple" ||
                             request.method === "makeThickSolidByJoin";
-                        if (thicken && m.Shape.volume(shape) < 0) {
+                        if (
+                            thicken &&
+                            m.Shape.volume(shape) <
+                                -volumeTolerance(m.Shape.volume(shape), m.Shape.boundingBox(shape, false))
+                        ) {
                             const fixed = m.ShapeFactory.fixSolid(shape, 1e-6);
                             const repaired = this.native(
                                 () => {
@@ -587,21 +594,26 @@ export class WorkerKernel {
         );
     }
 
-    /** Analyzer calls stay in the terminable worker, inside the request's deadline. */
-    private shapeError(shape: TopoDS_Shape): string | undefined {
+    /** Boolean operands need only orientation checks; reuse validated resident results. */
+    private shapeError(shape: TopoDS_Shape, analyze = true): string | undefined {
+        if (!analyze && this.validatedShapes.has(shape)) return undefined;
         const m = this.module;
-        if (!m.Shape.check(shape)) return "invalid shape (checkShape is false)";
+        if (analyze && !m.Shape.check(shape)) return "invalid shape (checkShape is false)";
         const solids = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_SOLID);
         try {
+            const tolerance = solids.length
+                ? volumeTolerance(m.Shape.volume(shape), m.Shape.boundingBox(shape, false))
+                : 0;
             // A positive compound total can hide an inside-out solid among valid ones.
             for (const [index, solid] of solids.entries()) {
                 const volume = m.Shape.volume(solid);
-                if (!Number.isFinite(volume) || volume < 0)
+                if (!Number.isFinite(volume) || volume < -tolerance)
                     return `solid ${index} has invalid volume (${volume} mm³)`;
             }
         } finally {
             for (const solid of solids) solid.delete();
         }
+        if (analyze) this.validatedShapes.add(shape);
         return undefined;
     }
 

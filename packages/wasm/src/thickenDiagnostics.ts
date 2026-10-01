@@ -24,7 +24,7 @@ export function thickenFailureDiagnostic(
     if (
         !Number.isFinite(thickness) ||
         thickness === 0 ||
-        !/offset|thick solid/i.test(error) ||
+        !/offset|thick\s*solid/i.test(error) ||
         NATIVE_TRAP.test(error)
     ) {
         return error;

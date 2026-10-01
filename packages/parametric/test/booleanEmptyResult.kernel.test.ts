@@ -95,7 +95,7 @@ describe("parametric boolean with an empty result", () => {
 
         expect(host.featureItems().map((x) => x.error)).toEqual([
             undefined,
-            "Boolean common produced an empty shape: the tools do not intersect the body",
+            'boolean step "b1": Boolean common produced an empty shape: the tools do not intersect the body',
         ]);
         expect(host.shape.isOk).toBe(true);
         const shape = host.shape.unchecked()!;
@@ -108,7 +108,7 @@ describe("parametric boolean with an empty result", () => {
 
         expect(host.featureItems().map((x) => x.error)).toEqual([
             undefined,
-            "Boolean cut produced an empty shape: the tools remove the whole body",
+            'boolean step "b1": Boolean cut produced an empty shape: the tools remove the whole body',
         ]);
         expect(host.shape.isOk).toBe(true);
         expect(extent(host.shape.unchecked()!)).toEqual(before);

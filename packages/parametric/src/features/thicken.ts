@@ -9,6 +9,7 @@ import {
     Result,
     resolveUnitSpec,
     ShapeTypes,
+    volumeTolerance,
 } from "@spicy3d/core";
 import { captureExtentFaceRef } from "./extrudeExtent";
 import {
@@ -186,7 +187,8 @@ function matchOpenFaces(
 
 /** `shape`, or its orientation-fixed copy when the kernel returned it inside out (negative volume). */
 function rightSideOut(shape: IShape): Result<IShape> {
-    if (shape.volume() >= 0) return checkedOrientation(shape);
+    if (shape.volume() >= -volumeTolerance(shape.volume(), shape.boundingBox()))
+        return checkedOrientation(shape);
     const fixed = shape.fixSolid(FIX_TOLERANCE);
     shape.dispose();
     if (fixed.isNull() || fixed.volume() <= 0) {
@@ -199,15 +201,12 @@ function rightSideOut(shape: IShape): Result<IShape> {
 
 /** A positive compound total must not hide an inside-out component. No new analyzer calls. */
 function checkedOrientation(shape: IShape): Result<IShape> {
-    const faces = shape.findSubShapes(ShapeTypes.face);
-    const count = faces.length;
-    for (const face of faces) face.dispose();
-    if (count >= 200) return Result.ok(shape);
     const solids = shape.findSubShapes(ShapeTypes.solid);
     try {
+        const tolerance = solids.length ? volumeTolerance(shape.volume(), shape.boundingBox()) : 0;
         for (const [index, solid] of solids.entries()) {
             const volume = solid.volume();
-            if (!Number.isFinite(volume) || volume < 0) {
+            if (!Number.isFinite(volume) || volume < -tolerance) {
                 shape.dispose();
                 return Result.err(`Thicken result: solid ${index} has invalid volume (${volume} mm³)`);
             }

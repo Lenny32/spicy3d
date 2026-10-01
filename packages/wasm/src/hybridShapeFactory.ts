@@ -207,7 +207,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                             ? `Self-intersection check timed out after ${queryDeadline} ms (result unknown)`
                             : answer.error.message;
                     if (
-                        answer.error.code === "invalid" &&
+                        (answer.error.code === "invalid" || answer.error.code === "geometry") &&
                         (request.method === "makeThickSolidBySimple" ||
                             request.method === "makeThickSolidByJoin")
                     ) {

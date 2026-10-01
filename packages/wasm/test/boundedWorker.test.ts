@@ -339,8 +339,9 @@ test("bounded simple thickening repairs the existing open-shell result orientati
         const result = keep(unwrapOk(task.take()));
         const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1)));
         expect(result.checkShape()).toBe(true);
-        expect(baseline.volume()).toBeLessThan(0);
-        expect(result.volume()).toBeCloseTo(-baseline.volume(), 7);
+        expect(baseline.checkShape()).toBe(true);
+        expect(baseline.volume()).toBeGreaterThan(0);
+        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
     } finally {
         hybrid.dispose();
     }

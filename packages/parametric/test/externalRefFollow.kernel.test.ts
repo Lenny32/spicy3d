@@ -592,7 +592,7 @@ test("a depth shrink past the cut triangle blames the cut, and the chain recover
     // the off-session re-solve ran before the cut evaluated: the line start rode down
     expect(sketch2.data.entities[0].params[1]).toBeCloseTo(4, 6);
     const items = body.featureItems();
-    expect(items.find((x) => x.id === "cut")?.error).toBe("No bounded regions found");
+    expect(items.find((x) => x.id === "cut")?.error).toBe('extrude step "cut": No bounded regions found');
     expect(items.find((x) => x.id === "f1")?.error).toBeUndefined();
     // a failed chain keeps the last good shape
     expect(body.shape.isOk).toBe(true);

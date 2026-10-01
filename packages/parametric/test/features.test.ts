@@ -16,6 +16,7 @@ import {
 } from "@spicy3d/core";
 import {
     createMockApplication,
+    MockShape,
     nearestOnCircle,
     nearestOnSegment,
     TestDocument,
@@ -115,7 +116,11 @@ function setupMocks() {
     const prismShapes: any[] = [];
     const revolvedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
     const filletedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
-    const fusedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
+    const fusedShape = Object.assign(new MockShape({ shapeType: ShapeTypes.solid }), {
+        isEqual: () => false,
+        dispose: rs.fn(),
+        findSubShapes: () => [],
+    });
     const line = rs.fn((start: XYZ, end: XYZ) => Result.ok(edge(start, end)));
     /** Full-circle edge: closed, so start and end coincide on the circumference. */
     const circle = rs.fn((normal: XYZ, center: XYZ, radius: number) =>
@@ -425,7 +430,9 @@ describe("feature evaluation", () => {
         };
         const body = bodyWith([{ id: "e1", type: "extrude", sketchId: sketch.id, depth: 5 }, feature]);
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Variable-radius fillets are not available in this kernel build");
+        expect(body.shape.error).toBe(
+            'fillet step "law": Variable-radius fillets are not available in this kernel build',
+        );
         expect(mocks.fillet).not.toHaveBeenCalled();
         const { radiusLaw: _removed, ...constant } = feature;
         body.setFeaturesEmitShapeChanged([body.features[0], constant]);
@@ -476,8 +483,8 @@ describe("feature evaluation", () => {
         const body = bodyWith([fillet]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("fillet requires a preceding feature");
-        expect(body.featureItems()[0].error).toBe("fillet requires a preceding feature");
+        expect(body.shape.error).toBe('fillet step "f1": fillet requires a preceding feature');
+        expect(body.featureItems()[0].error).toBe('fillet step "f1": fillet requires a preceding feature');
     });
 
     test("an edge ref that matches nothing surfaces as a feature error", () => {
@@ -494,8 +501,8 @@ describe("feature evaluation", () => {
         const body = bodyWith([extrude, fillet]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Edge not found after rebuild");
-        expect(body.featureItems()[1].error).toBe("Edge not found after rebuild");
+        expect(body.shape.error).toBe('fillet step "f1": Edge not found after rebuild');
+        expect(body.featureItems()[1].error).toBe('fillet step "f1": Edge not found after rebuild');
         expect(mocks.fillet).not.toHaveBeenCalled();
     });
 
@@ -530,7 +537,7 @@ describe("feature evaluation", () => {
         const body = bodyWith([booleanFeature("fuse", [toolSketch().id])]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("boolean requires a preceding feature");
+        expect(body.shape.error).toBe('boolean step "b1": boolean requires a preceding feature');
     });
 
     test("boolean fails when a tool node is missing", () => {
@@ -538,8 +545,8 @@ describe("feature evaluation", () => {
         const body = bodyWith([extrude, booleanFeature("cut", ["no-such-node"])]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Boolean tool not found");
-        expect(body.featureItems()[1].error).toBe("Boolean tool not found");
+        expect(body.shape.error).toBe('boolean step "b1": Boolean tool not found');
+        expect(body.featureItems()[1].error).toBe('boolean step "b1": Boolean tool not found');
     });
 
     test("a tool change re-evaluates the boolean but keeps the cached prefix", () => {
@@ -769,7 +776,7 @@ describe("feature evaluation", () => {
         const body = bodyWith([revolve]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Dimension mismatch: expected angle, got length");
+        expect(body.shape.error).toBe('revolve step "r1": Dimension mismatch: expected angle, got length');
     });
 
     test("editing a variable re-evaluates bodies without touching their feature list", () => {
@@ -805,8 +812,8 @@ describe("feature evaluation", () => {
         const body = bodyWith([extrude]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Unknown identifier: nope");
-        expect(body.featureItems()[0].error).toBe("Unknown identifier: nope");
+        expect(body.shape.error).toBe('extrude step "e1": Unknown identifier: nope');
+        expect(body.featureItems()[0].error).toBe('extrude step "e1": Unknown identifier: nope');
     });
 
     test("a body with no features yields an empty compound", () => {
@@ -1073,7 +1080,9 @@ describe("feature evaluation", () => {
             const body = bodyWith([extrude]);
 
             expect(body.shape.isOk).toBe(false);
-            expect(body.featureItems()[0].error).toBe("Sketch profile not found after rebuild");
+            expect(body.featureItems()[0].error).toBe(
+                'extrude step "e1": Sketch profile not found after rebuild',
+            );
         });
 
         test("symmetric extrudes both directions and fuses the halves", () => {
@@ -1193,7 +1202,7 @@ describe("feature evaluation", () => {
 
             expect(body.shape.isOk).toBe(false);
             expect(body.featureItems()[0].error).toBe(
-                "Extrude join/cut/intersect requires a preceding feature",
+                'extrude step "e1": Extrude join/cut/intersect requires a preceding feature',
             );
         });
     });
@@ -1316,7 +1325,9 @@ describe("feature evaluation", () => {
             doc.modelManager.addNode(body);
 
             expect(body.shape.isOk).toBe(false);
-            expect(body.featureItems()[0].error).toBe("Extrude source face requires a preceding feature");
+            expect(body.featureItems()[0].error).toBe(
+                'extrude step "p1": Extrude source face requires a preceding feature',
+            );
         });
 
         test("a missing source body surfaces as an error", () => {
@@ -1329,7 +1340,7 @@ describe("feature evaluation", () => {
             const body = bodyWith([feature]);
 
             expect(body.shape.isOk).toBe(false);
-            expect(body.featureItems()[0].error).toBe("Extrude source body not found");
+            expect(body.featureItems()[0].error).toBe('extrude step "p1": Extrude source body not found');
         });
 
         test("a source body showing a session preview fails transiently, then self-heals on restore", () => {
@@ -1356,7 +1367,7 @@ describe("feature evaluation", () => {
             // re-anchor (and untransacted persist) the profile refs onto the preview.
             expect(body.shape.isOk).toBe(false);
             expect(body.featureItems()[0].error).toBe(
-                "Extrude source body is rolled back for a sketch session",
+                'extrude step "p1": Extrude source body is rolled back for a sketch session',
             );
 
             // Once the source restores the full chain, the watch-triggered rebuild

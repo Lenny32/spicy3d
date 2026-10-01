@@ -15,7 +15,7 @@ import {
     type XYZ,
 } from "@spicy3d/core";
 import { SketchNode } from "../sketch/sketchNode";
-import { type TrackedMethod, trackedBoolean } from "./boolean";
+import { type TrackedMethod, trackedBoolean, validateBooleanResult } from "./boolean";
 import {
     canSweepTracked,
     type ExtentEnvironment,
@@ -249,7 +249,8 @@ const extrudeHandler: FeatureHandler<ExtrudeFeatureData> = {
                 source === undefined
                     ? extrudeFromSketch(feature, context, extents.value, startOffset)
                     : extrudeFromSourceFaces({ ...feature, source }, context, extents.value, startOffset);
-            return combineWithInput(built, feature, context);
+            const result = combineWithInput(built, feature, context);
+            return feature.operation === undefined ? result : validateBooleanResult(result);
         } finally {
             extents.value.dispose();
         }
@@ -589,6 +590,8 @@ function pressPullOperationTracked(
     try {
         const result = tracked([context.input], [built.value]);
         if (!result.isOk) return Result.err(result.error);
+        const valid = validateBooleanResult(Result.ok(result.value.shape));
+        if (!valid.isOk) return valid;
         const tool = {
             faceIds: (built.value.findSubShapes(ShapeTypes.face) as IFace[]).map(
                 (_, index) => `${feature.id}:tool:f${index}`,
@@ -653,6 +656,8 @@ function applyTrackedOperation(
 ): Result<IShape> {
     const result = tracked([input], [tool.shape]);
     if (!result.isOk) return Result.err(result.error);
+    const valid = validateBooleanResult(Result.ok(result.value.shape));
+    if (!valid.isOk) return valid;
 
     const { edgeMap, faceMap } = completeTrackedHistory([input, tool.shape], result.value);
     trackOperation(featureId, input, tracking, tool, { ...result.value, edgeMap, faceMap });

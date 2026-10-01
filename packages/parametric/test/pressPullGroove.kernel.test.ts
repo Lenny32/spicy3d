@@ -459,7 +459,11 @@ describe("(b2) open slot through the box splitting the top face", () => {
             },
         ]);
         // Neither piece is a clear winner: a loud failure, never a silent widen.
-        expect(featureErrors(body)).toEqual([undefined, undefined, "Face match is ambiguous after rebuild"]);
+        expect(featureErrors(body)).toEqual([
+            undefined,
+            undefined,
+            'extrude step "e3": Face match is ambiguous after rebuild',
+        ]);
         // The failed feature keeps the previous shape: nothing was swept.
         const after = snapshotFaces(body);
         expect(after.filter((s) => atPlane(s, 2, 1, 40))).toHaveLength(2);

@@ -512,5 +512,5 @@ export function evaluateFeature(feature: FeatureData, context: FeatureContext): 
 /** Keep kernel geometry failures attached to the feature that attempted to consume them. */
 export function featureEvaluationError(feature: FeatureData, error: string): string {
     const prefix = `${feature.type} step "${feature.id}": `;
-    return /invalid shape|invalid volume/.test(error) && !error.startsWith(prefix) ? prefix + error : error;
+    return !error.startsWith(prefix) ? prefix + error : error;
 }

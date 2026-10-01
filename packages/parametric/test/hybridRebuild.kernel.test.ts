@@ -212,7 +212,7 @@ test("a worker kernel failure keeps last-good geometry instead of replaying the 
     expect(await body.whenRebuilt()).toBe(false);
     expect(body.shape.value).toBe(previous);
     expect(local).not.toHaveBeenCalled();
-    expect(body.featureItems().at(-1)?.error).toBe("Native operation rejected");
+    expect(body.featureItems().at(-1)?.error).toBe('boolean step "f11": Native operation rejected');
 });
 
 test("an unavailable backend falls back locally while preserving the cached prefix", async () => {
@@ -292,7 +292,7 @@ test.each([
             body.requestRollbackIndex(undefined);
             expect(await body.whenRebuilt()).toBe(false);
             expect(body.shape.value).toBe(preview);
-            expect(body.featureItems().some((item) => item.error === message)).toBe(true);
+            expect(body.featureItems().some((item) => item.error?.endsWith(message))).toBe(true);
         }
         expect(native).toHaveBeenCalledTimes(1);
         expect(local).not.toHaveBeenCalled();

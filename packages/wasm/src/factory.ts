@@ -33,6 +33,7 @@ import {
     type TrackedShape,
     validateFilletCornerSetback,
     validateFilletRadiusLaw,
+    volumeTolerance,
     type XYZ,
     type XYZLike,
 } from "@spicy3d/core";
@@ -148,12 +149,16 @@ function bsplineLayoutError(
 }
 
 /**
- * Synchronous compatibility pre-check: no analyzer on the document's thread. Large
- * shapes leave volume validation to the bounded worker, like inspection's 200-face cutoff.
- * Empty booleans and non-solid sections remain valid; a negative component never does.
+ * Check every solid's orientation, including compounds whose total hides a negative component.
+ * Empty booleans and non-solid sections remain valid. This walks solids, never face wrappers.
  */
-function operationVolumeError(params: unknown[], op: string, role = "input"): string | undefined {
-    if (!/^(Fuse|Boolean|Prism|Loft|Fillet|Chamfer)/.test(op)) return undefined;
+function operationVolumeError(
+    params: unknown[],
+    op: string,
+    role = "input",
+    checkSolids = /^(Fuse|Boolean|Prism|Loft|Fillet|Chamfer)/.test(op),
+): string | undefined {
+    if (!checkSolids) return undefined;
     const shapes = params
         .flat(Infinity)
         .filter(
@@ -162,15 +167,14 @@ function operationVolumeError(params: unknown[], op: string, role = "input"): st
         );
     try {
         for (const [index, shape] of shapes.entries()) {
-            const faces = wasm.Shape.findSubShapes(shape, wasm.TopAbs_ShapeEnum.TopAbs_FACE);
-            const count = faces.length;
-            for (const face of faces) face.delete();
-            if (count >= 200) continue;
             const solids = wasm.Shape.findSubShapes(shape, wasm.TopAbs_ShapeEnum.TopAbs_SOLID);
             try {
+                const tolerance = solids.length
+                    ? volumeTolerance(wasm.Shape.volume(shape), wasm.Shape.boundingBox(shape, false))
+                    : 0;
                 for (const [solidIndex, solid] of solids.entries()) {
                     const volume = wasm.Shape.volume(solid);
-                    if (!Number.isFinite(volume) || volume < 0)
+                    if (!Number.isFinite(volume) || volume < -tolerance)
                         return `${op} ${role} ${index}: solid ${solidIndex} has invalid volume (${volume} mm³)`;
                 }
             } finally {
@@ -280,9 +284,26 @@ function validThickSolid(
         shape.dispose();
         return Result.err(`${op} failed: the result is not a solid (${type})${notSolidHint}`);
     }
-    if (shape.checkShape()) return result;
-    shape.dispose();
-    return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+    let oriented = shape;
+    const tolerance = volumeTolerance(shape.volume(), shape.boundingBox());
+    if (shape.volume() < -tolerance) {
+        oriented = shape.fixSolid(1e-6);
+        shape.dispose();
+        if (oriented.isNull() || oriented.volume() <= 0) {
+            oriented.dispose();
+            return Result.err(`${op} failed: thick solid is inside out`);
+        }
+    }
+    if (!oriented.checkShape()) {
+        oriented.dispose();
+        return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+    }
+    const error = operationVolumeError([(oriented as OccShape).shape], op, "result", true);
+    if (error) {
+        oriented.dispose();
+        return Result.err(error);
+    }
+    return Result.ok(oriented);
 }
 
 function containsSolid(shape: IShape): boolean {

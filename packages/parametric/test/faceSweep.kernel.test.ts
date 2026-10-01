@@ -196,7 +196,9 @@ describe("associative groove/rib on a face", () => {
         try {
             section.setDataEmitShapeChanged(square(0.5));
             expect(invalid).toHaveBeenCalled();
-            expect(body.featureItems()[1].error).toBe("Face sweep entering body ancestry is incomplete");
+            expect(body.featureItems()[1].error).toBe(
+                'faceSweep step "rib": Face sweep entering body ancestry is incomplete',
+            );
             expect(body.shape.value).toBe(previous);
         } finally {
             invalid.mockRestore();

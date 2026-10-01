@@ -192,7 +192,9 @@ describe("emboss on a planar face", () => {
         const body = addBody(doc, Plane.XY, rect(0, 0, 40, 40), 20);
         const sketch = addSketch(doc, above(35), rect(100, 100, 110, 110));
         emboss(body, sketch, isTop(20), 2);
-        expect(errors(body)[1]).toBe("Emboss profiles do not project onto the selected faces");
+        expect(errors(body)[1]).toBe(
+            'emboss step "emboss": Emboss profiles do not project onto the selected faces',
+        );
     });
 
     test("a non-positive depth is refused", () => {
@@ -200,7 +202,7 @@ describe("emboss on a planar face", () => {
         const body = addBody(doc, Plane.XY, rect(0, 0, 40, 40), 20);
         const sketch = addSketch(doc, above(35), rect(10, 10, 20, 20));
         emboss(body, sketch, isTop(20), 0);
-        expect(errors(body)[1]).toBe("Emboss depth must be positive");
+        expect(errors(body)[1]).toBe('emboss step "emboss": Emboss depth must be positive');
     });
 });
 

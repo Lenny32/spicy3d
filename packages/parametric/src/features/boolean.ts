@@ -15,6 +15,7 @@ import {
     type ShapeType,
     ShapeTypes,
     type TrackedShape,
+    volumeTolerance,
 } from "@spicy3d/core";
 import {
     type BooleanFeatureData,
@@ -145,7 +146,8 @@ const booleanHandler: FeatureHandler<BooleanFeatureData> = {
             }
             const result = untrackedBoolean(feature.operation, context.input, toolShapes);
             if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
-            return requireNonEmptyResult(feature.operation, context.input, result.value);
+            const valid = validateBooleanResult(result);
+            return valid.isOk ? requireNonEmptyResult(feature.operation, context.input, valid.value) : valid;
         } finally {
             owned.forEach((x) => x.dispose());
         }
@@ -264,7 +266,9 @@ function evaluateTracked(
     }
     const result = tracked([input], toolShapes);
     if (!result.isOk) return Result.err(booleanError(feature.operation, result.error));
-    const nonEmpty = requireNonEmptyResult(feature.operation, input, result.value.shape);
+    const valid = validateBooleanResult(Result.ok(result.value.shape));
+    if (!valid.isOk) return valid;
+    const nonEmpty = requireNonEmptyResult(feature.operation, input, valid.value);
     if (!nonEmpty.isOk) return nonEmpty;
     const { edgeMap, faceMap } = completeTrackedHistory([input, ...toolShapes], result.value);
     tracking.outputFaceIds = mapBooleanIds(
@@ -289,3 +293,30 @@ function evaluateTracked(
 }
 
 registerFeature("boolean", booleanHandler);
+
+/** Validate the result, not operands: imported tolerances may still boolean successfully. */
+export function validateBooleanResult(result: Result<IShape>): Result<IShape> {
+    if (!result.isOk) return result;
+    const shape = result.value;
+    let solids: IShape[] = [];
+    let error: string | undefined;
+    try {
+        solids = shape.findSubShapes(ShapeTypes.solid);
+        // Empty compounds must reach the operation-specific empty-result guard.
+        if (!shape.checkShape()) error = "Boolean result: invalid shape (checkShape is false)";
+        const tolerance = solids.length ? volumeTolerance(shape.volume(), shape.boundingBox()) : 0;
+        for (const [index, solid] of solids.entries()) {
+            const volume = solid.volume();
+            if (!Number.isFinite(volume) || volume < -tolerance) {
+                error ??= `Boolean result: solid ${index} has invalid volume (${volume} mm³)`;
+            }
+        }
+    } catch (cause) {
+        error = `Boolean result validation failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+    } finally {
+        for (const solid of solids) solid.dispose();
+    }
+    if (!error) return result;
+    shape.dispose();
+    return Result.err(error);
+}

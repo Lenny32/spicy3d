@@ -16,3 +16,4 @@ export * from "./shapeFactory";
 export * from "./shapeProvider";
 export * from "./shapeType";
 export * from "./surface";
+export * from "./volumeValidity";

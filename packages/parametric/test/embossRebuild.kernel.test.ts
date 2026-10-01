@@ -253,7 +253,7 @@ test("missing sketch, empty profiles, missing targets and no input are explicit 
     }
     const result = evaluateFeature(state.feature, { ...context, input: undefined });
     expect(result.isOk).toBe(false);
-    expect(result.error).toBe("Emboss requires a preceding feature");
+    expect(result.error).toBe('emboss step "emboss": Emboss requires a preceding feature');
 });
 
 test("an offset failure disposes previously built relief and permits a subsequent successful rebuild", () => {
@@ -272,7 +272,9 @@ test("an offset failure disposes previously built relief and permits a subsequen
         if (result.isOk) released = rs.spyOn(result.value, "dispose");
         return result;
     });
-    expect(apply(state, { ...state.feature, profiles })).toBe("injected offset failure");
+    expect(apply(state, { ...state.feature, profiles })).toBe(
+        'emboss step "emboss": injected offset failure',
+    );
     expect(released).not.toBeUndefined();
     expect(released).toHaveBeenCalledOnce();
     stub.mockRestore();

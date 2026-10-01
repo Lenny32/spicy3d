@@ -255,7 +255,7 @@ describe("ParametricBodyNode", () => {
 
         expect(mocks.prism).not.toHaveBeenCalled();
         expect(body.shape.unchecked()).toBe(lastGood);
-        expect(body.featureItems()[0].error).toBe("Sketch profile is not closed");
+        expect(body.featureItems()[0].error).toBe('extrude step "f1": Sketch profile is not closed');
     });
 
     test("keeps unrelated feature warnings when the chain fails", () => {
@@ -290,7 +290,7 @@ describe("ParametricBodyNode", () => {
         ]);
 
         const items = body.featureItems();
-        expect(items[1].error).toBe("Sketch not found");
+        expect(items[1].error).toBe('extrude step "f2": Sketch not found');
         expect(items[0].warning).toBe("Sketch has unresolved external references");
     });
 
@@ -298,8 +298,8 @@ describe("ParametricBodyNode", () => {
         const body = bodyWith([extrudeFeature("no-such-sketch")]);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Sketch not found");
-        expect(body.featureItems()[0].error).toBe("Sketch not found");
+        expect(body.shape.error).toBe('extrude step "f1": Sketch not found');
+        expect(body.featureItems()[0].error).toBe('extrude step "f1": Sketch not found');
     });
 
     test("a persisted failure is not re-evaluated on every shape read", () => {
@@ -379,8 +379,8 @@ describe("ParametricBodyNode", () => {
         doc.modelManager.addNode(body);
 
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Unknown feature type: notAFeature");
-        expect(body.featureItems()[0].error).toBe("Unknown feature type: notAFeature");
+        expect(body.shape.error).toBe('notAFeature step "f9": Unknown feature type: notAFeature');
+        expect(body.featureItems()[0].error).toBe('notAFeature step "f9": Unknown feature type: notAFeature');
     });
 
     test("featureItems exposes localized display and parameters", () => {
@@ -456,7 +456,7 @@ describe("ParametricBodyNode", () => {
         // Fillet now runs first with no preceding shape; the failed rebuild keeps the
         // last good shape and surfaces the error in the feature panel instead.
         expect(body.shape.unchecked()).toBe(lastGood);
-        expect(body.featureItems()[0].error).toBe("fillet requires a preceding feature");
+        expect(body.featureItems()[0].error).toBe('fillet step "f2": fillet requires a preceding feature');
     });
 
     test("moveFeature ignores out-of-range moves", () => {
@@ -1127,7 +1127,7 @@ describe("ParametricBodyNode", () => {
         doc.variables.setItems(variables(expression));
 
         expect(body.shape.unchecked()).toBe(shape);
-        expect(body.featureItems()[0].error).toBe("Unknown identifier: depth");
+        expect(body.featureItems()[0].error).toBe('extrude step "f1": Unknown identifier: depth');
         expect(mocks.prism).not.toHaveBeenCalled();
 
         doc.variables.setItems(variables("15"));
@@ -1148,7 +1148,7 @@ describe("ParametricBodyNode", () => {
 
         doc.variables.setItems(renamed);
 
-        expect(body.featureItems()[0].error).toBe("Unknown identifier: depth");
+        expect(body.featureItems()[0].error).toBe('extrude step "f1": Unknown identifier: depth');
         expect(mocks.prism).not.toHaveBeenCalled();
 
         doc.variables.setItems(variables("20"));

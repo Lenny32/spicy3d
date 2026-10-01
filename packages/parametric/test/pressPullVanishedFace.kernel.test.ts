@@ -258,7 +258,11 @@ describe.each([
         // Used to fail "Sketch profile match is ambiguous after rebuild" (the
         // groove floor and back wall tie the ceiling's fingerprint).
         editDepth(body, 20);
-        expect(errors(body)).toEqual([undefined, undefined, "Face not found after rebuild"]);
+        expect(errors(body)).toEqual([
+            undefined,
+            undefined,
+            'extrude step "e3": Face not found after rebuild',
+        ]);
         // The stored ref was NOT re-anchored onto a wrong face...
         expect(e3Ref(body)).toEqual(refBefore);
 
@@ -275,7 +279,11 @@ describe.each([
         for (const depth of [25, 24, 20, 15, 10]) {
             const body = buildGrooveWithCeilingPress(operation);
             editDepth(body, depth);
-            expect(errors(body)).toEqual([undefined, undefined, "Face not found after rebuild"]);
+            expect(errors(body)).toEqual([
+                undefined,
+                undefined,
+                'extrude step "e3": Face not found after rebuild',
+            ]);
         }
     });
 
