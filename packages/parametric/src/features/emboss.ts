@@ -17,6 +17,7 @@ import {
     type XYZ,
 } from "@spicy3d/core";
 import { trackedBoolean } from "./boolean";
+import { reliefIds } from "./embossIdentity";
 import { findSketch } from "./extrude";
 import {
     completeTrackedHistory,
@@ -122,7 +123,8 @@ function evaluateEmboss(feature: EmbossFeatureData, context: FeatureContext): Re
 
 interface EmbossTool {
     readonly shape: IShape;
-    readonly seed: string;
+    readonly faceIds: string[];
+    readonly edgeIds: string[];
 }
 
 /** The thickened face patches under the profiles, one solid each (host local space). */
@@ -171,7 +173,7 @@ function buildEmbossTools(
         for (const { face: target, seed: targetSeed } of targets.value) {
             const visible = visibleTarget(target, origin, normal, input, owned);
             if (!visible.isOk) return Result.err(visible.error);
-            for (const [visibleIndex, face] of visible.value.entries()) {
+            for (const face of visible.value) {
                 // A plane parallel to the sketch clips a copy of each profile moved onto it — a
                 // coplanar common, an order of magnitude cheaper than cutting the face by a prism.
                 const plane = parallelPlane(face, origin, normal);
@@ -198,16 +200,14 @@ function buildEmbossTools(
                         origin,
                         normal,
                         feature.deboss ? -depth : depth,
+                        local[profileIndex],
+                        profiles.value[profileIndex].face,
+                        `${feature.id}:relief:${targetSeed}:${profiles.value[profileIndex].seed}`,
                     );
                     if (!thickened.isOk) {
                         return Result.err(thickened.error);
                     }
-                    pieces.push(
-                        ...thickened.value.map((shape, patch) => ({
-                            shape,
-                            seed: `${feature.id}:relief:${targetSeed}:${profiles.value[profileIndex].seed}:v${visibleIndex}:p${patch}`,
-                        })),
-                    );
+                    pieces.push(...thickened.value);
                 }
             }
         }
@@ -307,7 +307,13 @@ function visibleTarget(
         if (!axis) return Result.err("Emboss target cylinder has no axis");
         const radial = normal.sub(axis.multiply(normal.dot(axis))).normalize();
         if (!radial) return Result.err("Emboss projection is parallel to the cylinder axis");
-        const side = origin.sub(cylinder.location).dot(radial);
+        // An oblique plane meets the infinite axis. Use the axis point at the finite
+        // target's midpoint to choose its near half, measuring signed plane distance.
+        // Both an in-plane sketch-origin shift and an axial cylinder-origin shift
+        // then leave the selected half unchanged.
+        const center = BoundingBox.center(face.boundingBox());
+        const axisPoint = cylinder.location.add(axis.multiply(center.sub(cylinder.location).dot(axis)));
+        const side = origin.sub(axisPoint).dot(normal);
         if (Math.abs(side) <= Precision.Distance)
             return Result.err("Emboss sketch plane must lie outside the cylinder axis");
         const facing = side > 0 ? radial : radial.multiply(-1);
@@ -388,11 +394,14 @@ function thickenPatches(
     origin: XYZ,
     normal: XYZ,
     thickness: number,
-): Result<IShape[]> {
+    profile: IFace,
+    originalProfile: IFace,
+    seed: string,
+): Result<EmbossTool[]> {
     const common = shapeFactory.booleanCommon([face], [clip]);
     if (!common.isOk)
         return common.error === "Boolean produced an empty shape" ? Result.ok([]) : Result.err(common.error);
-    const pieces: IShape[] = [];
+    const pieces: EmbossTool[] = [];
     const patches = common.value.findSubShapes(ShapeTypes.face) as IFace[];
     let success = false;
     try {
@@ -404,7 +413,15 @@ function thickenPatches(
                 continue;
             const thick = shapeFactory.makeThickSolidBySimple(patch, thickness);
             if (!thick.isOk) return Result.err(thick.error);
-            pieces.push(thick.value);
+            try {
+                pieces.push({
+                    shape: thick.value,
+                    ...reliefIds(thick.value, patch, profile, originalProfile, normal, seed),
+                });
+            } catch (error) {
+                thick.value.dispose();
+                throw error;
+            }
             if (thick.value.volume() < 0) thick.value.reserve();
             if (
                 !thick.value.checkShape() ||
@@ -422,7 +439,7 @@ function thickenPatches(
         common.value.dispose();
         if (!success)
             pieces.forEach((piece) => {
-                piece.dispose();
+                piece.shape.dispose();
             });
     }
 }
@@ -443,7 +460,7 @@ function facesSketch(patch: IFace, origin: XYZ, normal: XYZ): boolean {
 
 /**
  * Fuses (emboss) or cuts (deboss) the tools with the chain input. The tracked path keeps the
- * input's face/edge ids; the tool's sub-shapes get positional feature-scoped ids (new geometry).
+ * input's face/edge ids; relief sub-shapes inherit their profile boundary ancestry.
  */
 function combineWithInput(
     feature: EmbossFeatureData,
@@ -472,19 +489,8 @@ function combineWithInput(
         const toolFaces = shapes.flatMap((shape) => shape.findSubShapes(ShapeTypes.face));
         const toolEdges = shapes.flatMap((shape) => shape.findSubShapes(ShapeTypes.edge));
         owned.push(...toolFaces, ...toolEdges);
-        const seeds = (type: typeof ShapeTypes.face | typeof ShapeTypes.edge) =>
-            tools.flatMap(({ shape, seed }) => {
-                const subs = shape.findSubShapes(type);
-                try {
-                    return subs.map((_, k) => `${seed}:${type === ShapeTypes.face ? "f" : "e"}${k}`);
-                } finally {
-                    subs.forEach((sub) => {
-                        sub.dispose();
-                    });
-                }
-            });
-        const toolFaceIds = seeds(ShapeTypes.face),
-            toolEdgeIds = seeds(ShapeTypes.edge);
+        const toolFaceIds = tools.flatMap((tool) => tool.faceIds),
+            toolEdgeIds = tools.flatMap((tool) => tool.edgeIds);
         const history = completeTrackedHistory([input, ...shapes], result.value, {
             inputFaces: [...inputFaces, ...toolFaces] as IFace[],
             inputEdges: [...inputEdges, ...toolEdges] as IEdge[],

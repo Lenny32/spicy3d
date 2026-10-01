@@ -240,6 +240,64 @@ describe("emboss on a curved face", () => {
     });
 
     test.each([
+        [false, 0],
+        [true, 0],
+        [false, 45],
+        [true, 45],
+    ])("oblique projection is independent of plane origins for deboss=%s, cylinder z=%s", (deboss, z) => {
+        for (const [shift, reversed] of [
+            [0, false],
+            [60, false],
+            [60, true],
+        ] as const) {
+            const doc = newDocument();
+            try {
+                const body = addBody(
+                    doc,
+                    above(z),
+                    { entities: [{ id: 1, type: "circle", params: [0, 0, 15] }], constraints: [] },
+                    40,
+                );
+                const direction = reversed ? -1 : 1;
+                const plane = new Plane({
+                    origin: new XYZ({ x: 0, y: 30 - shift, z: 40 + z + shift }),
+                    normal: new XYZ({ x: 0, y: direction, z: direction }).normalize()!,
+                    xvec: XYZ.unitX,
+                });
+                const offset = shift * Math.SQRT2;
+                const sketch = addSketch(
+                    doc,
+                    plane,
+                    reversed ? rect(-5, -5 - offset, 5, 5 - offset) : rect(-5, -5 + offset, 5, 5 + offset),
+                );
+                emboss(
+                    body,
+                    sketch,
+                    (face) => {
+                        const surface = face.surface();
+                        try {
+                            return !surface.isPlanar();
+                        } finally {
+                            surface.dispose();
+                        }
+                    },
+                    1,
+                    deboss,
+                );
+                expect(errors(body)).toEqual([undefined, undefined]);
+                expect(body.shape.value.checkShape()).toBe(true);
+                expect(volume(body)).toBeCloseTo(
+                    9000 * Math.PI + (deboss ? -29 : 31) * Math.asin(1 / 3) * 10 * Math.SQRT2,
+                    3,
+                );
+                expect(body.shape.value.boundingBox().min.y).toBeCloseTo(-15, 5);
+            } finally {
+                doc.dispose();
+            }
+        }
+    });
+
+    test.each([
         false,
         true,
     ])("projection across the cylinder silhouette stays on the near half for deboss=%s", (deboss) => {

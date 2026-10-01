@@ -10,7 +10,7 @@ Planar faces and cylindrical faces are supported. Parallel planar targets use co
 
 Cylindrical relief is a **directional projection onto the near half**, with constant radial depth. It is not an arc-length-preserving unroll of the sketch and does not extend around the hidden half. Profiles can cross the cylinder's parameter seam. Projection parallel to the cylinder axis, or a sketch plane through the cylinder axis, is refused. Other curved surface types are refused. Inward-facing cavity surfaces and extreme offsets can fail; a failed offset or invalid boolean result is reported without committing the preview. Font and sketch-text creation are outside this change.
 
-Target face references use host-local fingerprints and tracked ancestry on the shape entering the feature. Sketch profile references use existing profile/entity identity. Generated topology is scoped to the feature, target and profile, with local patch/subshape ordinals; fingerprint checks remain the fallback after topology changes. Translation and rotation of a host are covered by kernel tests. Removing or fundamentally changing the selected region can require reselection.
+Target face references use host-local fingerprints and tracked ancestry on the shape entering the feature. Sketch profile references use existing profile/entity identity. Generated topology is scoped to the feature, target and profile, with boundary ancestry distinguishing the base, top and side geometry; fingerprint checks remain the fallback after topology changes. Translation and rotation of a host are covered by kernel tests. Removing or fundamentally changing the selected region can require reselection.
 
 ## Persistence
 
