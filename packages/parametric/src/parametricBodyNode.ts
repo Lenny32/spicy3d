@@ -1206,11 +1206,11 @@ export class ParametricBodyNode
         this.emitPropertyChanged("featuresJson", this.featuresJson);
     };
 
-    /** True when this notification came from a watched body that consumes this producer. */
+    /** A consumer refreshes its producers at their anchors, including variable-table updates. */
     private isConsumedByWatched(source?: INode): boolean {
         for (const node of this._watched.values()) {
             if (
-                node === source &&
+                (source === undefined || node === source) &&
                 node instanceof ParametricBodyNode &&
                 node.consumingFeatureIndex(this.id) !== undefined
             ) {
@@ -1584,7 +1584,8 @@ export class ParametricBodyNode
                 return;
             }
         }
-        // A notification from a watched body that CONSUMES this one is suppressed: it re-solves us
+        // A notification from our consumer, or a variable-table notification with no source,
+        // is suppressed while a watched body CONSUMES this one: it re-solves us
         // right before its boolean, against the chain state we actually anchor to
         // (`refreshConsumedTools`). Reacting here as well would make the two trade revisions
         // forever — its shape is rebuilt from ours, so every round invalidates the other's
