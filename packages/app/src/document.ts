@@ -370,7 +370,7 @@ export class Document extends Observable implements IDocument {
     markSaved(position: object = this.history.position()) {
         this.savedPosition = position;
         this.updateDirty();
-        if (!this.headless && KernelRecovery.current.available) KernelRecoveryCheckpoints.capture(this);
+        if (!this.headless && KernelRecovery.current.available) KernelRecoveryCheckpoints.capture(this, true);
     }
 
     override disposeInternal(): void {

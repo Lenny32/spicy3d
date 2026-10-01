@@ -29,9 +29,10 @@ export interface PreparedKernelRecovery extends IDisposable {
 
 export class KernelRecoveryCheckpoints {
     private static readonly checkpoints = new WeakMap<IDocument, KernelRecoveryCheckpoint>();
+    private static readonly revisions = new WeakMap<IDocument, number>();
 
     /** Never flush derived work or snapshot an open transaction into the committed checkpoint. */
-    static capture(document: IDocument): boolean {
+    static capture(document: IDocument, force = false): boolean {
         if (
             KernelState.current.isCrashed ||
             document.history.disabled ||
@@ -41,9 +42,19 @@ export class KernelRecoveryCheckpoints {
             return false;
         }
         const position = document.history.position();
+        const previous = KernelRecoveryCheckpoints.checkpoints.get(document);
+        const revision = DocumentRebuilds.revision(document);
+        if (
+            !force &&
+            previous?.position === position &&
+            KernelRecoveryCheckpoints.revisions.get(document) === revision
+        ) {
+            return true;
+        }
         const data = structuredClone(document.serialize());
         if (KernelState.current.isCrashed || position !== document.history.position()) return false;
         KernelRecoveryCheckpoints.checkpoints.set(document, { data, position, dirty: document.isDirty });
+        KernelRecoveryCheckpoints.revisions.set(document, revision);
         return true;
     }
 

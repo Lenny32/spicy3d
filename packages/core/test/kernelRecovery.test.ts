@@ -26,6 +26,18 @@ function context() {
 
 afterEach(() => KernelState.current.reset());
 
+test("repeated capture at an unchanged history position serializes only once", () => {
+    const doc = document();
+    const serialize = rs.spyOn(doc, "serialize");
+    try {
+        expect(KernelRecoveryCheckpoints.capture(doc)).toBe(true);
+        expect(KernelRecoveryCheckpoints.capture(doc)).toBe(true);
+        expect(serialize).toHaveBeenCalledTimes(1);
+    } finally {
+        serialize.mockRestore();
+    }
+});
+
 test("the committed checkpoint excludes an interrupted transaction and never reads dead native data", () => {
     const doc = document();
     expect(KernelRecoveryCheckpoints.capture(doc)).toBe(true);
