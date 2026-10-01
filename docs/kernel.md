@@ -67,8 +67,10 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
 - **Validation.** Thick-solid results (`makeThickSolidBySimple` / `ByJoin`) are checked with
   `BRepCheck_Analyzer` in C++ and `checkShape()` in TS: an invalid one is an error
   (`Thick solid is invalid`), not a solid. The inspections (`inspectionCommonVolume`,
-  `inspectionMass`) refuse an input that fails `checkShape()`. They also run a bounded
-  self-intersection test (`BOPAlgo_ArgumentAnalyzer`, up to 200 faces per shape).
+  `inspectionMass`) refuse an input that fails `checkShape()`. Common-volume and section-cap
+  inspections also run a bounded self-intersection test (`BOPAlgo_ArgumentAnalyzer`, below
+  200 unique faces per shape). Mass only runs `BRepCheck_Analyzer` and `VolumeProperties`;
+  it does not run the self-intersection analyzer.
   `Shape.checkSelfIntersection` in the worker is feature-detected: an older binary answers "not available".
 
 ### Thicken offset diagnostics (#121)
@@ -137,18 +139,22 @@ an error: "Self-intersection check timed out after N ms (result unknown)", never
 validity result. Simplify the skin before retrying; `checkShape` alone does not establish
 absence of self-intersection.
 
-Before `run_program` calls `inspectionCommonVolume`, `inspectionMass`, or
-`inspectionSectionCaps`, it runs the same bounded worker query on each applicable input.
-Common volume checks both shapes. Timeout, cancellation, or worker failure refuses the
-inspection with an error and never calls its main-thread binding; a detected
+Before `run_program` calls `inspectionCommonVolume` or `inspectionSectionCaps`, it runs the
+same bounded worker query on each applicable input.
+Common volume checks both shapes, but skips all pre-checks when either input fails
+`checkShape()`, letting the binding return its existing invalid-input error immediately.
+Timeout, cancellation, or worker failure refuses the inspection with an error and never calls its main-thread binding; a detected
 self-intersection returns the inspection's unavailable-result error. Missing bounded worker
 support also refuses an inspection that needs the pre-check. Feature detection skips the
 pre-check when the self-intersection binding is unavailable, and inputs with at least 200
 unique faces skip it because the kernel's bounded inspection analyzer already skips those
 inputs. Its occurrence count can be larger, so repeated faces may cause an extra pre-check.
-Queries that do not use this analyzer (for example `inspectionDistance`) are unaffected.
-Mass is guarded conservatively as part of the inspection workflow, although the current
-C++ source's mass binding only performs topology validity and mass calculations.
+Queries that do not use this analyzer (`inspectionMass` and `inspectionDistance`) do not
+pre-check. Mass retains its topology validity gate and mass calculation without a worker.
+
+Each applicable pre-check exports a BREP replica and starts a fresh Worker and OCCT instance.
+That startup adds latency per inspection; common volume normally pays for two sequential
+pre-checks, one per distinct input.
 
 The pre-check duplicates work: common-volume and section-cap inspections repeat the same
 analyzer synchronously after the verified BREP replica passes quickly in the worker. The
@@ -157,6 +163,8 @@ that known blocking path, not a hard deadline on the subsequent main-thread call
 intersection, mass calculations, topology validation, and replica capture can still block.
 Skipping an explicit self-intersection query does not bypass these inspection pre-checks.
 
-Direct synchronous `IShape.checkSelfIntersection()` calls (including feature validation)
-still use the existing binding. OCCT has no cooperative cancellation hook in this offline
-build; stopping a running check requires terminating its worker.
+Known main-thread callers remain: feature validation in `sweep`, `faceSweep`, and
+`guidedLoft`; the factory analyzer in `cpp/src/factory.cpp` (around line 1574); and inspection
+calls in `packages/app/src/analysis/basic.ts`. Direct synchronous
+`IShape.checkSelfIntersection()` calls still use the existing binding. OCCT has no cooperative
+cancellation hook in this offline build; stopping a running check requires terminating its worker.

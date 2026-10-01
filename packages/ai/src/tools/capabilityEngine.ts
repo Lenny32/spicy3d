@@ -824,6 +824,8 @@ function resolveQueryTarget(
     return entry;
 }
 
+type ResolvedQuery = { entry: LocalRef; args: unknown[] };
+
 /** Call the target's member with the op's arguments, unwrapping the Result it may return. */
 function invokeMember(cap: QueryCapability, target: Record<string, unknown>, args: unknown[]): unknown {
     const member = target[cap.name];
@@ -841,13 +843,16 @@ function runQuery(
     localRefs: Map<string, LocalRef>,
     results: Record<string, unknown>,
     numeric: NumericArgs,
+    resolved?: ResolvedQuery,
 ) {
     if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
     if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
 
-    const entry = resolveQueryTarget(cap, op.target, doc, localRefs);
+    const entry = resolved?.entry ?? resolveQueryTarget(cap, op.target, doc, localRefs);
     const target = entry.value as Record<string, unknown>;
-    const args = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric));
+    const args =
+        resolved?.args ??
+        cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric));
     const raw = invokeMember(cap, target, args);
 
     if (cap.returnKind === "mutate") {
@@ -1260,23 +1265,21 @@ async function runOp(
         return;
     }
     if (!cap) {
-        if (INSPECTION_SELF_INTERSECTION_ERRORS[op.method]) {
-            await precheckInspection(op, doc, factory, localRefs, numeric, owner, signal);
-        }
+        const resolved = INSPECTION_SELF_INTERSECTION_ERRORS[op.method]
+            ? await precheckInspection(op, doc, factory, localRefs, numeric, owner, signal)
+            : undefined;
         owner.run(() => {
             if (signal?.aborted) throw new Error("Query cancelled; inspection skipped");
-            runQueryOp(op, doc, localRefs, created, results, numeric);
+            runQueryOp(op, doc, localRefs, created, results, numeric, resolved);
         });
         return;
     }
     await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner, signal);
 }
 
-// Common-volume and section-cap bindings repeat the analyzer below 200 faces. Mass is
-// guarded too so inspection workflows cannot bypass the bounded validity query.
+// Common-volume and section-cap bindings repeat the analyzer below 200 faces.
 const INSPECTION_SELF_INTERSECTION_ERRORS: Record<string, string> = {
     "shape.inspectionCommonVolume": "Intersection volume is unavailable",
-    "shape.inspectionMass": "Volume center is unavailable",
     "shape.inspectionSectionCaps": "Section caps are unavailable",
 };
 
@@ -1288,17 +1291,27 @@ async function precheckInspection(
     numeric: NumericArgs,
     owner: IDocumentMutationScope,
     signal?: AbortSignal,
-): Promise<void> {
+): Promise<ResolvedQuery> {
     if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
     if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
-    const inputs = owner.run(() => {
+    const resolved = owner.run(() => {
         const query = queryCapabilities.find((c) => c.method === op.method)!;
-        const target = resolveQueryTarget(query, op.target, doc, localRefs).value as IShape;
+        const entry = resolveQueryTarget(query, op.target, doc, localRefs);
         const args = query.params.map((p) =>
             coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric),
         );
-        return op.method === "shape.inspectionCommonVolume" ? [target, args[0] as IShape] : [target];
+        return { entry, args };
     });
+    const target = resolved.entry.value as IShape;
+    const inputs =
+        op.method === "shape.inspectionCommonVolume" ? [target, resolved.args[0] as IShape] : [target];
+    // The common-volume binding refuses either invalid input before running the analyzer.
+    if (
+        op.method === "shape.inspectionCommonVolume" &&
+        owner.run(() => inputs.some((shape) => !shape.checkShape()))
+    ) {
+        return resolved;
+    }
     for (const shape of new Set(inputs)) {
         if (
             !owner.run(
@@ -1333,6 +1346,7 @@ async function precheckInspection(
             pending.cancel();
         }
     }
+    return resolved;
 }
 
 function runQueryOp(
@@ -1342,6 +1356,7 @@ function runQueryOp(
     created: CreatedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
+    resolved?: ResolvedQuery,
 ): void {
     const query = queryCapabilities.find((c) => c.method === op.method);
     if (!query) {
@@ -1353,7 +1368,7 @@ function runQueryOp(
         runClone(query, op, doc, localRefs, created, results);
         return;
     }
-    runQuery(query, op, doc, localRefs, results, numeric);
+    runQuery(query, op, doc, localRefs, results, numeric, resolved);
 }
 
 /** The parameter each profile-sweeping op sweeps; everything else takes its args as given. */

@@ -5,7 +5,7 @@ import { type BoundedShapeQuery, type IShape, Result, ShapeTypes } from "@spicy3
 import { createMockApplication, createMockDocument, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { buildCapabilityTools } from "../src/tools/capabilityEngine";
 
-const methods = ["shape.inspectionMass", "shape.inspectionCommonVolume", "shape.inspectionSectionCaps"];
+const methods = ["shape.inspectionCommonVolume", "shape.inspectionSectionCaps"];
 const box = (id: string) => ({ id, method: "box", args: { dx: 10, dy: 10, dz: 10 } });
 
 function setup(mode: "hang" | "pass" | "intersect" | "fail" = "pass", needsCheck = true) {
@@ -145,10 +145,10 @@ test.each(["intersect", "fail"] as const)("a %s worker result refuses inspection
     rs.useFakeTimers();
     const { doc, tool, inspection } = setup(mode);
     try {
-        const running = tool.handler({ ops: ops("shape.inspectionMass") });
+        const running = tool.handler({ ops: ops("shape.inspectionSectionCaps") });
         const rejected = expect(running).rejects.toThrow(
             mode === "intersect"
-                ? "Volume center is unavailable"
+                ? "Section caps are unavailable"
                 : "Worker operation failed; inspection skipped",
         );
         await rs.advanceTimersByTimeAsync(1);
@@ -162,8 +162,8 @@ test.each(["intersect", "fail"] as const)("a %s worker result refuses inspection
 test.each([
     "shape.inspectionMass",
     "shape.inspectionDistance",
-])("%s skips an unnecessary pre-check", async (method) => {
-    const { doc, tool, inspection, shapeQuery } = setup("hang", method === "shape.inspectionDistance");
+])("%s skips the worker even when needsCheck is true", async (method) => {
+    const { doc, tool, inspection, shapeQuery } = setup("hang");
     try {
         const response = JSON.parse((await tool.handler({ ops: ops(method) })) as string);
         expect(response.results.answer).toBe(5);
@@ -182,7 +182,7 @@ test.each([
         error: "requires a bounded geometry worker",
     },
     {
-        op: { method: "shape.inspectionMass", id: "mass", target: "source" },
+        op: { method: "shape.inspectionSectionCaps", id: "caps", target: "source" },
         error: "requires a bounded geometry worker; inspection skipped",
     },
 ])("bounded query rejects $error", async ({ op, error }) => {
@@ -192,6 +192,48 @@ test.each([
         await expect(tool.handler({ ops: [box("source"), op] })).rejects.toThrow(error);
         expect(shapeQuery).not.toHaveBeenCalled();
         expect(inspection).not.toHaveBeenCalled();
+        expect(doc.history.undoCount()).toBe(0);
+    } finally {
+        doc.dispose();
+    }
+});
+
+test.each(methods)("%s skips the pre-check when the analyzer is not needed", async (method) => {
+    const { doc, tool, inspection, shapeQuery } = setup("hang", false);
+    try {
+        const response = JSON.parse((await tool.handler({ ops: ops(method) })) as string);
+        expect(response.results.answer).toEqual(
+            method === "shape.inspectionSectionCaps" ? { ref: "answer", kind: "shape" } : 5,
+        );
+        expect(inspection).toHaveBeenCalledTimes(1);
+        expect(shapeQuery).not.toHaveBeenCalled();
+    } finally {
+        doc.dispose();
+    }
+});
+
+test.each([0, 1])("common volume skips all pre-checks when input %s is invalid", async (invalidIndex) => {
+    const { doc, tool, factory, shapes, inspection, shapeQuery } = setup("hang");
+    const originalBox = factory.box;
+    rs.spyOn(factory, "box").mockImplementation(() => {
+        const result = originalBox();
+        const shape = result.value;
+        rs.spyOn(shape, "checkShape").mockReturnValue(shapes.length - 1 !== invalidIndex);
+        shape.inspectionCommonVolume = rs.fn((other: IShape) => {
+            inspection();
+            return !shape.checkShape() || !other.checkShape()
+                ? Result.err("Intersection volume: the shape is invalid (checkShape is false)")
+                : Result.ok(5);
+        });
+        return result;
+    });
+    try {
+        await expect(tool.handler({ ops: ops("shape.inspectionCommonVolume") })).rejects.toThrow(
+            "checkShape is false",
+        );
+        expect(shapeQuery).not.toHaveBeenCalled();
+        expect(inspection).toHaveBeenCalledTimes(1);
+        expect(doc.modelManager.findNodes(() => true)).toEqual([]);
         expect(doc.history.undoCount()).toBe(0);
     } finally {
         doc.dispose();
