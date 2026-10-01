@@ -19,7 +19,7 @@ import { type ParametricOp, runParametricProgram } from "../../src/program/param
 import type { SketchInfo, SketchReport } from "../../src/program/sketchProgram";
 import { bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
 import { ConstraintKind, type SketchEntityData } from "../../src/sketch/sketchModel";
-import type { SketchNode } from "../../src/sketch/sketchNode";
+import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
 const WASM_BINARY = readFileSync(
@@ -437,6 +437,77 @@ describe("sketch actions", () => {
         expect(params).toContainEqual([0, 20, 4, 20]);
         expect(params).toContainEqual([4, 20, 10, 20]);
         expect(report(result, "s1").names["copy"]).toBeGreaterThan(3);
+    });
+
+    test("paste and expression offset a periodic 64-point footprint into a loft section", () => {
+        const doc = newDoc();
+        doc.variables.setItems([
+            { id: "flare", name: "flare", expression: "0.7", type: "unitless" },
+            { id: "height", name: "skirt_h", expression: "3", type: "length" },
+        ]);
+        const points: [number, number][] = Array.from({ length: 64 }, (_, i) => {
+            const angle = (2 * Math.PI * i) / 64;
+            return [30 * Math.cos(angle), 50 * Math.sin(angle)];
+        });
+        const result = run(doc, [
+            { op: "sketch", id: "s_fp", entities: [{ type: "bspline", points, periodic: true }] },
+            {
+                op: "construct",
+                id: "pl_top",
+                definition: { kind: "plane-offset", source: "XY", distance: "skirt_h" },
+            },
+            {
+                op: "sketch",
+                id: "s_top",
+                plane: { construction: "pl_top" },
+                actions: [
+                    { action: "paste", from: "s_fp", entities: [1] },
+                    { action: "offset", entity: 1, distance: "flare*skirt_h", name: "outline" },
+                    { action: "remove", entities: [1] },
+                ],
+            },
+            { op: "loft", id: "skirt", sections: ["s_fp", "s_top"] },
+        ]);
+        const top = sketchOf(doc, result, "s_top");
+        expect(top.data.entities).toHaveLength(1);
+        const outline = top.data.entities[0];
+        expect(outline.type).toBe("bspline");
+        expect(outline.periodic).toBe(true);
+        expect(outline.id).toBe(report(result, "s_top").names["outline"]);
+        expect(outline.params[0]).toBeCloseTo(32.1, 3);
+        const body = nodeById(
+            doc,
+            result.created.find((c) => c.id === "skirt")!.nodeId,
+        ) as ParametricBodyNode;
+        expect(body.featureItems().map((item) => item.error)).toEqual([undefined]);
+        const shape = body.shape.unchecked()!;
+        expect(shape.shapeType).toBe(ShapeTypes.solid);
+        expect(shape.checkShape()).toBe(true);
+        const bounds = shape.boundingBox();
+        expect(bounds.max.z - bounds.min.z).toBeCloseTo(3, 3);
+    });
+
+    test("offset expression errors name the action and roll back the sketch", () => {
+        const doc = newDoc();
+        const error = runExpectingFailure(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [0, 0],
+                            [10, 0],
+                        ],
+                    },
+                ],
+                actions: [{ action: "offset", entity: 1, distance: "missing" }],
+            },
+        ]);
+        expect(error).toContain('sketch action 1 ("offset") failed');
+        expect(error).toContain("missing");
+        expect(doc.modelManager.findNodes((node) => node instanceof SketchNode)).toEqual([]);
     });
 
     test("move, rotate and mirror transform entities; mirror copies stay symmetric", () => {

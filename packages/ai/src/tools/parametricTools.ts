@@ -192,8 +192,8 @@ const ACTION_SCHEMA = {
         },
         end: { type: "string", enum: ["start", "end"], description: "extend: which end grows (default end)" },
         distance: {
-            type: "number",
-            description: "offset: signed (+ = left of a line / outward of a circle)",
+            description:
+                "offset: mm or a length expression, evaluated once; + = left for open curves / outward for closed curves. B-splines produce a fixed approximate copy.",
         },
         delta: { type: "array", items: { type: "number" }, description: "move/paste: [du, dv]" },
         center: { type: "array", items: { type: "number" }, description: "rotate/polygon: [u, v]" },

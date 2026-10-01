@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { AsyncController, MeshDataUtils, PubSub, Result, VisualConfig } from "@spicy3d/core";
+import { bsplineOffsetSide } from "../bsplineOffset";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { entityDistance, sketchEntityMesh } from "../editor/sketchEventHandler";
 import {
@@ -29,7 +30,9 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
             this.controller = new AsyncController();
             const id = await editor.pickEntity(
                 this.operation === "extend" ? "prompt.sketchExtendTarget" : "prompt.pickSketchEntity",
-                ["line", "arc", "circle"],
+                this.operation === "offset"
+                    ? ["line", "arc", "circle", "bspline"]
+                    : ["line", "arc", "circle"],
                 undefined,
                 this.controller,
             );
@@ -106,6 +109,7 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
 }
 
 function offsetSide(e: SketchEntityData, uv: [number, number]): number {
+    if (e.type === "bspline") return bsplineOffsetSide(e, uv);
     const [x, y, x2, y2] = e.params;
     const signed =
         e.type === "line"

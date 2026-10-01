@@ -51,7 +51,14 @@ function setup(data: SketchData = { entities: [source, boundary, target], constr
     });
     app.activeView = view;
     const shape = () => Result.ok({ isEqual: () => false });
-    rs.stubGlobal("shapeFactory", { line: shape, circle: shape, arc: shape, wire: shape, combine: shape });
+    rs.stubGlobal("shapeFactory", {
+        line: shape,
+        circle: shape,
+        arc: shape,
+        bezier: shape,
+        wire: shape,
+        combine: shape,
+    });
     const node = new SketchNode({ document: doc, plane: Plane.XY, data });
     const editor = SketchEditor.enter(node);
     const handler = doc.visual.eventHandler as SketchEventHandler;
@@ -357,6 +364,26 @@ describe("geometry command interaction", () => {
         expect(node.data.entities[0]).toEqual(source);
         expect(node.data.entities[3].params).toEqual([0, side * 5, 100, side * 5]);
         expect(node.data.constraints).toEqual([]);
+    });
+
+    test("offset picks a B-spline and copies it on the chosen side", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 100, 0] };
+        const { editor, node, move, click } = setup({ entities: [spline], constraints: [] });
+        const preview = rs.spyOn(editor.annotations, "setGeometryPreview");
+        const command = new SketchOffsetCommand();
+        command.distance = 5;
+        const run = command.executeAsync();
+        await click(20);
+        move(20, -20);
+        expect(preview.mock.calls.at(-1)![0]).toHaveLength(1);
+        await click(20, -20);
+        await run;
+        expect(node.data.entities).toHaveLength(2);
+        expect(node.data.entities[0]).toEqual(spline);
+        const copy = node.data.entities[1];
+        expect(copy.type).toBe("bspline");
+        expect(copy.id).not.toBe(spline.id);
+        for (let i = 1; i < copy.params.length; i += 2) expect(copy.params[i]).toBeCloseTo(-5, 8);
     });
 
     test("split cancellation removes preview meshes without changing geometry", async () => {
