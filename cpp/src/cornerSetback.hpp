@@ -401,6 +401,14 @@ static std::string repairPatchParameters(const TopoDS_Face& patch, const std::ve
     return "";
 }
 
+// Reconstruct one trihedral constant-radius fillet corner using three independent setbacks.
+// Each selected edge contributes an away-from-corner cut plane and exact trimmed support.
+// Native fillet history identifies the pieces to retain, trim and replace; no geometric
+// nearest-neighbor match is allowed to invent stable ancestry.
+// A constrained plate supplies the replacement patch, checked independently for boundary
+// distance, boundary angle and approximation error before sewing.
+// Publication requires one valid, closed solid with complete face/edge derivation history.
+// Every early failure leaves the original shape untouched because reconstruction owns a copy.
 static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int, 3>& indexes,
     double radius, const std::array<double, 3>& distances, int maxSegments)
 {
