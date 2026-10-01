@@ -134,10 +134,7 @@ test.each(["fillet", "chamfer"] as const)("bounded %s matches the main-thread re
         const expectedFaces = baseline.findSubShapes(ShapeTypes.face);
         owned.push(...expectedFaces);
         expect(faces).toHaveLength(expectedFaces.length);
-        expect(await transport.client.request("stats", undefined)).toEqual({
-            ok: true,
-            value: { shapes: 0 },
-        });
+        expect(transport.client.isClosed).toBe(true);
     } finally {
         hybrid.dispose();
     }
@@ -436,7 +433,7 @@ test("an already completed strict result wins over a late signal abort and detac
         signal.abort();
         const result = keep(unwrapOk(operation.take()));
         expect(result.checkShape()).toBe(true);
-        expect(terminate).not.toHaveBeenCalled();
+        expect(terminate).toHaveBeenCalledTimes(1);
         expect(transport.client.pendingNative).toBe(0);
     } finally {
         remove.mockRestore();
@@ -445,28 +442,25 @@ test("an already completed strict result wins over a late signal abort and detac
     }
 });
 
-test("strict cancellation settles sharing tracked calls without quarantining the main kernel", async () => {
-    const factory = new ShapeFactory();
-    const box = keep(createBox(factory));
-    const other = keep(createBox(factory));
-    const transport = new HungTransport();
-    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
-    const signal = new AbortController();
+test("cancelling a bounded operation leaves a simultaneous boolean request running", async () => {
+    const transports: HungTransport[] = [];
+    const hybrid = new HybridShapeFactory(() => {
+        const transport = new HungTransport();
+        transports.push(transport);
+        return new KernelWorkerClient(transport);
+    });
+    const box = keep(createBox(new ShapeFactory()));
     try {
-        const tracked = hybrid.booleanTracked("fuse", [box], [other]);
-        if (!tracked) throw new Error("Expected tracked worker operation");
-        const strict = hybrid.shapeOperation(
-            { method: "fillet", shape: box, edges: [0], value: 1 },
-            signal.signal,
-        );
-        signal.abort();
-        await Promise.all([tracked.ready, strict.ready]);
-        expect(tracked.take().error).toContain("cancelled");
-        expect(tracked.canFallback).toBe(false);
-        expect(strict.take().error).toContain("cancelled");
-        expect(hybrid.failure).toBeUndefined();
-        expect(transport.terminated).toBe(1);
-        expect(box.checkShape()).toBe(true);
+        const boolean = hybrid.booleanTracked("fuse", [box], [box]);
+        expect(boolean).not.toBeUndefined();
+        const bounded = hybrid.shapeOperation({ method: "fillet", shape: box, edges: [0], value: 1 });
+        expect(transports).toHaveLength(2);
+        bounded.cancel();
+        await bounded.ready;
+        expect(transports[1].terminated).toBe(1);
+        expect(transports[0].terminated).toBe(0);
+        expect(hybrid.available).toBe(true);
+        boolean!.cancel();
     } finally {
         hybrid.dispose();
     }

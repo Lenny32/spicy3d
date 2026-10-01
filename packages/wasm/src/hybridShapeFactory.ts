@@ -128,13 +128,8 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     break;
                 }
             }
-            if (!this.worker) {
-                this.worker = this.createWorker();
-                this.removeFailureHandler = this.worker.addNativeFailureHandler((error) =>
-                    this.quarantine(error.message),
-                );
-            }
-            worker = this.worker;
+            // Termination is scoped to this operation, never the resident boolean worker.
+            worker = this.createWorker();
         } catch (error) {
             if (!(error instanceof WebAssembly.RuntimeError)) for (const shape of prepared) shape.dispose();
             else this.quarantine("Main geometry runtime failed while capturing a replica");
@@ -149,7 +144,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         const onAbort = () => {
             abort.abort();
             // Retire synchronously so a following call can create its generation immediately.
-            if (worker.isClosed) this.retireWorker(worker);
+            if (worker.isClosed) worker.dispose();
         };
         const cancel = () => {
             if (consumed) return;
@@ -167,8 +162,9 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
             .then((result) => {
                 signal?.removeEventListener("abort", onAbort);
                 if (!consumed) reply = result;
+                worker.dispose();
                 if (!result.ok && (result.error.code === "timeout" || result.error.code === "cancelled"))
-                    this.retireWorker(worker);
+                    worker.dispose();
             });
         return {
             ready,
@@ -239,13 +235,8 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
             if (edges.some((index) => index >= topology.edges.length))
                 throw new Error("Corner setback edge index is outside the input topology");
             snapshot = { brep: exportBrep(input.shape, "input"), topology };
-            if (!this.worker) {
-                this.worker = this.createWorker();
-                this.removeFailureHandler = this.worker.addNativeFailureHandler((error) =>
-                    this.quarantine(error.message),
-                );
-            }
-            worker = this.worker;
+            // Termination is scoped to this operation, never the resident boolean worker.
+            worker = this.createWorker();
         } catch (error) {
             this.mainTrapped = error instanceof WebAssembly.RuntimeError;
             if (this.mainTrapped)
@@ -281,8 +272,9 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
             )
             .then((answer) => {
                 if (!consumed) reply = answer;
+                worker.dispose();
                 if (!answer.ok && (answer.error.code === "timeout" || answer.error.code === "cancelled"))
-                    this.retireWorker(worker);
+                    worker.dispose();
             });
         return {
             ready,
