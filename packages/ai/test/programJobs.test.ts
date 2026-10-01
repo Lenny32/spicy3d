@@ -8,6 +8,7 @@ import { createMockApplication, createMockDocument, MockShape, TestDocument } fr
 import { createMcpServer, SerialQueue } from "../src/mcp/server";
 import { buildProgramJobTools, ProgramJobs } from "../src/tools/programJobs";
 import { buildReadTools } from "../src/tools/readTools";
+import { waitForTerminalJob } from "./_helpers/waitForTerminalJob";
 
 const boxOp = { id: "source", name: "source", method: "box", args: { dx: 10, dy: 10, dz: 10 } };
 const filletOp = {
@@ -84,13 +85,8 @@ async function connect() {
     return { client, call, marker };
 }
 
-async function terminal(call: Awaited<ReturnType<typeof connect>>["call"], jobId: string) {
-    for (let i = 0; i < 100; i++) {
-        const value = await call("get_program_job", { jobId });
-        if (["completed", "cancelled", "failed"].includes(value.state)) return value;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    throw new Error("Job did not settle");
+function terminal(call: Awaited<ReturnType<typeof connect>>["call"], jobId: string) {
+    return waitForTerminalJob(call, "get_program_job", jobId);
 }
 
 test("a worker-held job returns immediately, reports progress, and preserves the shared mutation FIFO", async () => {
