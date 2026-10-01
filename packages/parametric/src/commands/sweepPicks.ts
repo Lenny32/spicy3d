@@ -77,7 +77,7 @@ export async function pickSweepPath(
                     "error.default:{0}",
                     "A sweep path exceeds the 256-edge pick limit",
                 );
-                return undefined;
+                continue;
             }
             source = node;
             edges.push(captured.value);
