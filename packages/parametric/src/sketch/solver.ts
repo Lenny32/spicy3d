@@ -135,6 +135,8 @@ interface ConstraintRecord {
      */
     datumSources?: ParameterValue[];
     direction?: [number, number];
+    /** Loaded geometry's side for old unsigned/expression angles; never persisted. */
+    legacySide?: number;
     helperParams?: number[];
     helperConstraints?: number[];
     blockedParams?: number[];
@@ -292,8 +294,12 @@ export class SketchSolver implements ExternalEntityHost {
                     continue;
                 }
                 const current = this.system.get_params(new Uint32Array([paramIds[index]]))[0];
-                if (current === resolved.value) continue;
-                this.system.set_param(paramIds[index], resolved.value);
+                const value =
+                    record.legacySide === undefined
+                        ? resolved.value
+                        : Math.abs(resolved.value) * record.legacySide;
+                if (current === value) continue;
+                this.system.set_param(paramIds[index], value);
                 changed = true;
             }
         }
@@ -317,6 +323,7 @@ export class SketchSolver implements ExternalEntityHost {
         if (!resolved.isOk) return Result.err(resolved.error);
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = source;
+        record.legacySide = undefined;
         this._datumErrors.delete(constraintId);
         this.system.set_param(paramId, resolved.value);
         return Result.ok(undefined);
@@ -684,10 +691,14 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     setDatum(constraintId: number, value: number, index = 0): void {
-        const paramId = this.constraints.get(constraintId)?.datumParamIds?.[index];
-        if (paramId === undefined) {
+        const record = this.constraints.get(constraintId);
+        const paramId = record?.datumParamIds?.[index];
+        if (record === undefined || paramId === undefined) {
             throw new Error(`Constraint ${constraintId} has no datum ${index}`);
         }
+        record.legacySide = undefined;
+        if (record.datumSources === undefined) record.datumSources = [];
+        record.datumSources[index] = value;
         this.system.set_param(paramId, value);
     }
 
@@ -1775,6 +1786,18 @@ export class SketchSolver implements ExternalEntityHost {
         }
         for (const constraint of data.constraints) {
             this.addConstraintWithId(constraint.id, constraint);
+            if (constraint.kind !== ConstraintKind.Angle || constraint.datum === undefined) continue;
+            const record = this.constraints.get(constraint.id)!;
+            const paramId = record.datumParamIds![0];
+            const value = this.system.get_params(new Uint32Array([paramId]))[0];
+            const sweep = this.currentSweep(constraint.refs);
+            // Older unsigned literals and expressions used the geometry's side. Recover
+            // it before the first solve, without adding anything to the saved payload.
+            // Near 0/180 degrees the geometry cannot reliably tell us which side it used.
+            if (Math.abs(Math.sin(sweep)) > 1e-8 && Math.sign(sweep) !== Math.sign(value)) {
+                record.legacySide = Math.sign(sweep);
+                this.system.set_param(paramId, Math.abs(value) * record.legacySide);
+            }
         }
         this.legacyCounters = {};
         if (data.entityIdSeq !== undefined) this.legacyCounters.entityIdSeq = data.entityIdSeq;

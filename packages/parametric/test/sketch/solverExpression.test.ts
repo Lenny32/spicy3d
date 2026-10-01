@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { ANGLE_UNITS, type EvaluatedValue, LENGTH_UNITS, Plane, type Scope } from "@spicy3d/core";
+import { TestDocument } from "@spicy3d/core/test-utils";
 import {
     axisLineRefs,
     ConstraintKind,
@@ -10,6 +11,7 @@ import {
     toDatumSource,
     toStorageDatum,
 } from "../../src/sketch/sketchModel";
+import { SketchNode } from "../../src/sketch/sketchNode";
 import { SketchSolver } from "../../src/sketch/solver";
 import "./setup";
 
@@ -202,6 +204,94 @@ describe("signed Angle datums", () => {
         expect(x2 - x1).toBeCloseTo(10 * Math.cos(radians), 6);
         expect(y2 - y1).toBeCloseTo(10 * Math.sin(radians), 6);
     }
+
+    function legacyClockwiseData(datum: number | string) {
+        const { solver, line, id } = orientedLine(undefined, -30);
+        try {
+            expectOrientation(solver, line, -30);
+            const data = solver.toData();
+            const constraint = data.constraints.find((c) => c.id === id)!;
+            constraint.datum = datum;
+            return { data, line, id };
+        } finally {
+            solver.dispose();
+        }
+    }
+
+    test.each([Math.PI / 6, "tilt"])("loaded positive datum %s preserves clockwise geometry", (datum) => {
+        const { data, line, id } = legacyClockwiseData(datum);
+        const stored = structuredClone(data);
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
+        let reloaded: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, -30);
+            expect(data).toEqual(stored);
+            expect(solver.setScope(scopeOf({ tilt: angle(30), unrelated: length(5) }))).toBe(false);
+            expectOrientation(solver, line, -30);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.datum).toEqual(
+                typeof datum === "string" ? datum : -Math.PI / 6,
+            );
+            // The flag itself is never saved; the saved geometry recovers it next time.
+            expect(solver.toData().constraints.find((c) => c.id === id)).toEqual({
+                ...stored.constraints.find((c) => c.id === id),
+                datum: typeof datum === "string" ? datum : -Math.PI / 6,
+            });
+            reloaded = new SketchSolver(Plane.XY, solver.toData(), scopeOf({ tilt: angle(30) }));
+            expectOrientation(reloaded, line, -30);
+            if (typeof datum === "string") {
+                expect(solver.setScope(scopeOf({ tilt: angle(45) }))).toBe(true);
+                expectOrientation(solver, line, -45);
+                expect(solver.setScope(scopeOf({ tilt: angle(-20) }))).toBe(true);
+                expectOrientation(solver, line, -20);
+            }
+        } finally {
+            reloaded?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test.each([
+        [Math.PI / 6, "literal"],
+        [Math.PI / 6, "source"],
+        ["tilt", "literal"],
+        ["tilt", "source"],
+    ] as const)("explicit %s edit via %s clears the loaded side", (datum, method) => {
+        const { data, line, id } = legacyClockwiseData(datum);
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
+        try {
+            expectOrientation(solver, line, -30);
+            for (const degrees of [-40, 20]) {
+                if (method === "literal") {
+                    solver.setDatum(id, toStorageDatum(ConstraintKind.Angle, degrees));
+                } else {
+                    expect(solver.setDatumSource(id, degrees < 0 ? "-tilt - 10" : "tilt - 10").isOk).toBe(
+                        true,
+                    );
+                }
+                expectOrientation(solver, line, degrees);
+                expect(solver.setScope(scopeOf({ tilt: angle(30), unrelated: length(5) }))).toBe(false);
+                expectOrientation(solver, line, degrees);
+            }
+        } finally {
+            solver.dispose();
+        }
+    });
+
+    test.each([Math.PI / 6, "tilt"])("applyVariables preserves the stored side of %s", (datum) => {
+        const { data, line, id } = legacyClockwiseData(datum);
+        const document = new TestDocument();
+        const variables = [
+            { id: "tilt", name: "tilt", type: "angle" as const, expression: "30" },
+            { id: "unused", name: "unused", type: "length" as const, expression: "5" },
+        ];
+        document.variables.setItems(variables);
+        const node = new SketchNode({ document, plane: Plane.XY, data });
+        document.variables.setItems([variables[0], { ...variables[1], expression: "10" }]);
+        node.applyVariables();
+        const storedLine = node.data.entities.find((e) => e.id === line)!;
+        expect(storedLine.params[3] - storedLine.params[1]).toBeCloseTo(-5, 6);
+        expect(node.data.constraints.find((c) => c.id === id)?.datum).toBe(datum);
+    });
 
     test.each([
         -180, -120, -40, 0, 40, 120, 180,
