@@ -73,7 +73,10 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
         { key: "ruled", display: "option.command.isRuled", value: feature.ruled === true },
     ],
 
-    setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+    setParameter: (feature, key, value) =>
+        (key === "solid" || key === "ruled") && typeof value === "boolean"
+            ? { ...feature, [key]: value }
+            : feature,
 
     applyResolvedRefs: (feature, { resolvedProfiles, resolvedEdges }) => {
         // Only picked profiles are re-anchored: an absent one keeps meaning "the sketch's only profile".

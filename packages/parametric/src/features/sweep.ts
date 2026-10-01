@@ -258,7 +258,10 @@ const handler: FeatureHandler<SweepFeatureData> = {
         { key: "solid", display: "option.command.isSolid", value: feature.solid !== false },
         { key: "roundCorner", display: "option.command.roundCorner", value: feature.roundCorner === true },
     ],
-    setParameter: (feature, key, value) => ({ ...feature, [key]: value }),
+    setParameter: (feature, key, value) =>
+        (key === "solid" || key === "roundCorner") && typeof value === "boolean"
+            ? { ...feature, [key]: value }
+            : feature,
     applyResolvedRefs: (feature, refs) => ({
         ...feature,
         section:
