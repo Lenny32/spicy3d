@@ -203,7 +203,7 @@ describe("Export", () => {
                 (ctx.app.activeView as any).document = exportDocument([visualNode("a"), visualNode("b")]);
                 (cmd as any)._application = ctx.app;
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 await ctx.permanentCallback!();
 
                 expect(ctx.exportedNames).toEqual(["a", "b"]);
@@ -261,6 +261,62 @@ describe("Export", () => {
     });
 
     describe("executeAsync happy path", () => {
+        test.each([
+            ".step",
+            ".iges",
+            ".brep",
+            ".stl",
+            ".stl binary",
+            ".ply",
+            ".ply binary",
+            ".obj",
+        ])("waits for confirmation before exporting the chosen %s format", async (format) => {
+            const ctx = setupExportContext();
+            try {
+                const cmd = new Export();
+                (cmd as any)._application = ctx.app;
+                (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "part" }]);
+                const running = (cmd as any).executeAsync() as Promise<void>;
+                await Promise.resolve();
+
+                expect(ctx.permanentCallback).toBeUndefined();
+                expect(ctx.exportedNames).toEqual([]);
+                expect(ctx.downloads).toEqual([]);
+                cmd.format = format;
+                cmd.outputUnit = "in";
+                cmd.confirm();
+                await running;
+                expect(typeof ctx.permanentCallback).toBe("function");
+                await ctx.permanentCallback!();
+
+                expect(ctx.exportedOptions).toEqual([{ format, lengthUnit: "in" }]);
+                expect(ctx.downloads).toEqual([`part${format.replace(" binary", "")}`]);
+            } finally {
+                ctx.restore();
+            }
+        });
+
+        test.each([false, true])("cancel without exporting (options ready: %s)", async (optionsReady) => {
+            const ctx = setupExportContext();
+            try {
+                const cmd = new Export();
+                (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "part" }]);
+                const running = cmd.execute(ctx.app as any);
+                if (optionsReady) await Promise.resolve();
+                expect(ctx.permanentCallback).toBeUndefined();
+                await cmd.cancel();
+                await running;
+
+                expect(cmd.isCompleted).toBe(true);
+                expect(cmd.isCanceled).toBe(true);
+                expect(ctx.permanentCallback).toBeUndefined();
+                expect(ctx.exportedNames).toEqual([]);
+                expect(ctx.downloads).toEqual([]);
+            } finally {
+                ctx.restore();
+            }
+        });
+
         test("should publish showPermanent with nodes", async () => {
             let permanentChannel = "";
             const originalPub = PubSub.default.pub;
@@ -280,7 +336,7 @@ describe("Export", () => {
                 };
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "testNode", id: "1" }]);
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 expect(permanentChannel).toBe("showPermanent");
             } finally {
                 PubSub.default.pub = originalPub;
@@ -304,7 +360,7 @@ describe("Export", () => {
                 cmd.angularTolerance = 4;
                 (cmd as any)._application = ctx.app;
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 expect(ctx.permanentCallback).not.toBeUndefined();
                 await ctx.permanentCallback!();
                 expect(exportSpy).toHaveBeenCalledTimes(merge ? 1 : 2);
@@ -376,7 +432,7 @@ describe("Export", () => {
                 (cmd as any)._application = ctx.app;
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 expect(ctx.permanentCallback).toBeDefined();
                 await ctx.permanentCallback!();
 
@@ -395,7 +451,7 @@ describe("Export", () => {
                 (cmd as any)._application = ctx.app;
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 expect(ctx.permanentCallback).toBeDefined();
                 await ctx.permanentCallback!();
 
@@ -415,7 +471,7 @@ describe("Export", () => {
                 (cmd as any)._application = ctx.app;
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "a" }]);
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 await ctx.permanentCallback!();
 
                 expect(ctx.downloads).toEqual(["a.zip"]);
@@ -433,7 +489,7 @@ describe("Export", () => {
                 (cmd as any)._application = ctx.app;
                 (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }]);
 
-                await (cmd as any).executeAsync();
+                await confirmExport(cmd);
                 await ctx.permanentCallback!();
 
                 expect(ctx.exportedNames).toEqual(["a"]);
@@ -444,6 +500,14 @@ describe("Export", () => {
         });
     });
 });
+
+/** Let the options panel open, then accept its current settings. */
+async function confirmExport(command: Export) {
+    const running = (command as any).executeAsync() as Promise<void>;
+    await Promise.resolve();
+    command.confirm();
+    await running;
+}
 
 /** Install an app stub so Export constructor can call app.dataExchange.exportFormats(). */
 function installExportApp(): () => void {
@@ -474,12 +538,14 @@ function setupExportContext() {
     const ctx = {
         permanentCallback: undefined as (() => Promise<void>) | undefined,
         exportedNames: [] as string[],
+        exportedOptions: [] as { format: string; lengthUnit: unknown }[],
         downloads: [] as string[],
         blobs: [] as Blob[],
         app: {
             activeView: { document: createMockDocument() },
             dataExchange: {
-                export: (_format: string, nodes: { name: string }[], _options?: DataExportOptions) => {
+                export: (format: string, nodes: { name: string }[], options?: DataExportOptions) => {
+                    ctx.exportedOptions.push({ format, lengthUnit: options?.lengthUnit });
                     ctx.exportedNames.push(nodes.map((n) => n.name).join(","));
                     return Promise.resolve([new ArrayBuffer(8)]);
                 },
@@ -594,7 +660,7 @@ describe("Export output unit", () => {
             (cmd as any)._application = env.stub;
             (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }]);
 
-            await (cmd as any).executeAsync();
+            await confirmExport(cmd);
             await ctx.permanentCallback!();
 
             expect(env.exports).toEqual([{ format: ".stl", lengthUnit: "in" }]);

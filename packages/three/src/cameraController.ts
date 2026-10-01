@@ -36,7 +36,7 @@ const PAN_SPEED_FACTOR = 0.002;
 const CAMERA_FOV = 50;
 const CAMERA_NEAR = 0.1;
 const CAMERA_FAR = 1e6;
-const MIN_CARME_TO_TARGET = 50;
+const MIN_CAMERA_TO_TARGET = 0.02;
 const SHAPE_EMPTY_SIZE = 800;
 
 Camera.DEFAULT_UP = new Vector3(0, 0, 1);
@@ -296,10 +296,14 @@ export class CameraController extends Observable implements ICameraController {
     }
 
     zoom(x: number, y: number, delta: number): void {
+        if (delta === 0) return;
         const vector = this._target.clone().sub(this._position);
+        const distance = vector.length();
+        if (distance === 0) return;
 
-        const zoomFactor = this.caclueZoomFactor(x, y, vector);
-        const scale = delta > 0 ? zoomFactor : -zoomFactor;
+        const zoomFactor = this.calculateZoomFactor(x, y, vector, delta < 0);
+        const scale =
+            delta > 0 ? zoomFactor : -Math.min(zoomFactor, Math.max(0, 1 - MIN_CAMERA_TO_TARGET / distance));
         let mouse = this.mouseToWorld(x, y);
         if (this._camera instanceof PerspectiveCamera) {
             mouse = this.caculePerspectiveCameraMouse(vector, mouse);
@@ -307,11 +311,6 @@ export class CameraController extends Observable implements ICameraController {
         const targetMoveVector = this._target.clone().sub(mouse).multiplyScalar(scale);
         this._target.add(targetMoveVector);
         this._position.copy(this._target.clone().sub(vector.clone().multiplyScalar(1 + scale)));
-        if (vector.length() < MIN_CARME_TO_TARGET) {
-            this._target = this._position
-                .clone()
-                .add(vector.clone().normalize().multiplyScalar(MIN_CARME_TO_TARGET));
-        }
 
         if (this._camera instanceof OrthographicCamera) {
             this.updateOrthographicCamera(this._camera);
@@ -320,17 +319,30 @@ export class CameraController extends Observable implements ICameraController {
         this.updateCameraPosionTarget();
     }
 
-    private caclueZoomFactor(x: number, y: number, direction: Vector3) {
+    private calculateZoomFactor(x: number, y: number, direction: Vector3, zoomIn: boolean) {
         const raycaster = new Raycaster();
+        // Model faces and edges live outside the default layer. Match the viewport,
+        // including isolation, so zoom slows down at the surface we actually see.
+        raycaster.layers.mask = this.camera.layers.mask;
+        this.camera.updateMatrixWorld();
         raycaster.setFromCamera(this.view.screenToCameraRect(x, y), this.camera);
-        const intersect = raycaster
-            .intersectObjects(this.view.content.visualShapes.children)
-            .find((hit) => this.view.content.isAnalysisPointVisible(hit.point))?.point;
+        const intersect = raycaster.intersectObjects(this.view.content.visualShapes.children).find((hit) => {
+            for (let object: Object3D | null = hit.object; object; object = object.parent) {
+                if (!object.visible) return false;
+            }
+            return this.view.content.isAnalysisPointVisible(hit.point);
+        })?.point;
         let zoomFactor = ZOOM_SPEED_FACTOR;
         if (intersect) {
-            zoomFactor = (ZOOM_SPEED_FACTOR * this._position.distanceTo(intersect)) / direction.length();
+            const distance = direction.length();
+            const depth = intersect.clone().sub(this._position).dot(direction.clone().normalize());
+            // Use forward depth rather than ray length: off-centre cursor rays are
+            // longer, but each zoom step moves forward by scale * target distance.
+            const clearance = 2 * Math.max(0.01, distance / 1000);
+            zoomFactor = (ZOOM_SPEED_FACTOR * depth) / distance;
+            if (zoomIn) zoomFactor = Math.min(zoomFactor, Math.max(0, (depth - clearance) / distance));
         }
-        return zoomFactor;
+        return Math.min(ZOOM_SPEED_FACTOR, zoomFactor);
     }
 
     private updateCameraNearFar() {
