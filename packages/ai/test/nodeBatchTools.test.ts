@@ -2,8 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { FolderNode } from "@spicy3d/core";
+import { DocumentMutations, FolderNode, type INode, REDACTED } from "@spicy3d/core";
 import { createMockApplication, createMockView, TestDocument } from "@spicy3d/core/test-utils";
+import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
 import { toCallToolResult } from "../src/mcp/server";
 import { buildNodeTools } from "../src/tools/nodeTools";
 
@@ -32,13 +33,26 @@ afterEach(() => {
 
 describe("node batches", () => {
     test.each([
-        "delete_node",
-        "set_node_visible",
-    ])("%s reports missing ids and applies duplicates once in one undo step", async (name) => {
-        const {
-            doc,
-            nodes: [first, second, untouched],
-        } = setup();
+        {
+            name: "delete_node",
+            reply: (id: string) => ({ id, deleted: id }),
+            nodeIds: [2],
+            visibility: [true, true, true],
+        },
+        {
+            name: "set_node_visible",
+            reply: (id: string) => ({ id, visible: false }),
+            nodeIds: [0, 1, 2],
+            visibility: [false, false, true],
+        },
+    ])("$name reports missing ids and applies duplicates once in one undo step", async ({
+        name,
+        reply,
+        nodeIds,
+        visibility,
+    }) => {
+        const { doc, nodes } = setup();
+        const [first, second, untouched] = nodes;
         const before = doc.history.undoCount();
         const update = rs.spyOn(doc.visual, "update");
         const result = await call(name, {
@@ -48,32 +62,28 @@ describe("node batches", () => {
         expect(result.error).toContain("Some node ids failed");
         expect(toCallToolResult(JSON.stringify(result)).isError).toBe(true);
         expect(result.results).toEqual([
-            name === "delete_node" ? { id: first.id, deleted: first.id } : { id: first.id, visible: false },
+            reply(first.id),
             { id: "missing", error: "node not found; call get_document_state for current ids" },
-            name === "delete_node"
-                ? { id: second.id, deleted: second.id }
-                : { id: second.id, visible: false },
-            name === "delete_node" ? { id: first.id, deleted: first.id } : { id: first.id, visible: false },
+            reply(second.id),
+            reply(first.id),
         ]);
+        const assertApplied = () => {
+            expect(doc.modelManager.findNodes().map((node) => node.id)).toEqual(
+                nodeIds.map((i) => nodes[i].id),
+            );
+            expect(nodes.map((node) => node.visible)).toEqual(visibility);
+        };
         expect(doc.history.undoCount()).toBe(before + 1);
         expect(update).toHaveBeenCalledTimes(1);
-        if (name === "delete_node") {
-            expect(doc.modelManager.findNodes().map((node) => node.id)).toEqual([untouched.id]);
-        } else {
-            expect([first.visible, second.visible, untouched.visible]).toEqual([false, false, true]);
-        }
+        assertApplied();
         doc.history.undo();
         expect(doc.history.undoCount()).toBe(before);
         expect(new Set(doc.modelManager.findNodes().map((node) => node.id))).toEqual(
             new Set([first.id, second.id, untouched.id]),
         );
-        expect([first.visible, second.visible, untouched.visible]).toEqual([true, true, true]);
+        expect(nodes.map((node) => node.visible)).toEqual([true, true, true]);
         doc.history.redo();
-        if (name === "delete_node") {
-            expect(doc.modelManager.findNodes().map((node) => node.id)).toEqual([untouched.id]);
-        } else {
-            expect([first.visible, second.visible, untouched.visible]).toEqual([false, false, true]);
-        }
+        assertApplied();
     });
 
     test.each([
@@ -164,16 +174,110 @@ describe("node batches", () => {
         "set_node_visible",
     ])("%s bounds replies at the maximum batch size", async (name) => {
         const { doc } = setup();
+        const before = doc.history.undoCount();
         const ids = Array.from({ length: 100 }, (_, index) => `${index}`.padEnd(128, "\u0000"));
         const result = await call(name, { ids, visible: false });
         expect(result.results).toHaveLength(100);
         expect(result.results.map((item: { id: string }) => item.id)).toEqual(ids);
         const envelope = JSON.stringify(toCallToolResult(JSON.stringify(result)));
         expect(new TextEncoder().encode(envelope).byteLength).toBeLessThan(256 * 1024);
-        expect(doc.history.undoCount()).toBe(3);
+        expect(doc.history.undoCount()).toBe(before);
     });
 
-    test("a mutation failure rolls back every valid id and reports them as failed", async () => {
+    test("hiding a folder in a batch hides descendants through inherited visibility", async () => {
+        const {
+            doc,
+            nodes: [parent, child, other],
+        } = setup();
+        child.parent!.move(child, parent);
+        const grandchild = new FolderNode({ document: doc, name: "grandchild" });
+        child.add(grandchild);
+        const before = doc.history.undoCount();
+        const ids = [parent.id, other.id];
+        const result = await call("set_node_visible", { ids, visible: false });
+        expect(result).toEqual({ results: ids.map((id) => ({ id, visible: false })) });
+        expect([parent.visible, other.visible]).toEqual([false, false]);
+        expect([child.visible, grandchild.visible]).toEqual([true, true]);
+        expect([child.parentVisible, grandchild.parentVisible]).toEqual([false, false]);
+        expect(doc.history.undoCount()).toBe(before + 1);
+        doc.history.undo();
+        expect([parent.visible, other.visible, child.parentVisible, grandchild.parentVisible]).toEqual([
+            true,
+            true,
+            true,
+            true,
+        ]);
+        doc.history.redo();
+        expect([child.parentVisible, grandchild.parentVisible]).toEqual([false, false]);
+    });
+
+    test.each([
+        { name: "delete_node", deleted: true, visible: true },
+        { name: "set_node_visible", deleted: false, visible: false },
+    ])("$name batches a real parametric body with a folder", async ({ name, deleted, visible }) => {
+        const {
+            doc,
+            nodes: [folder],
+        } = setup();
+        const body = new ParametricBodyNode({ document: doc, features: [] });
+        doc.modelManager.addNode(body);
+        const before = doc.history.undoCount();
+        const ids = [body.id, folder.id];
+        const result = await call(name, { ids, visible: false });
+        expect(result.results.map((item: { id: string }) => item.id)).toEqual(ids);
+        expect(result.error).toBeUndefined();
+        const state = (node: INode) => ({ parent: node.parent, visible: node.visible });
+        const applied = { parent: deleted ? undefined : doc.modelManager.rootNode, visible };
+        expect(state(body)).toEqual(applied);
+        expect(state(folder)).toEqual(applied);
+        expect(doc.history.undoCount()).toBe(before + 1);
+        doc.history.undo();
+        expect(state(body)).toEqual({ parent: doc.modelManager.rootNode, visible: true });
+        expect(state(folder)).toEqual({ parent: doc.modelManager.rootNode, visible: true });
+        doc.history.redo();
+        expect(state(body)).toEqual(applied);
+        expect(state(folder)).toEqual(applied);
+    });
+
+    test.each([
+        "delete_node",
+        "set_node_visible",
+    ])("%s reports why document mutations are blocked", async (name) => {
+        const {
+            doc,
+            nodes: [first, second],
+        } = setup();
+        const before = doc.history.position();
+        const hold = DocumentMutations.hold(doc);
+        try {
+            const result = await call(name, { ids: [first.id, second.id], visible: false });
+            expect(result.results).toEqual(
+                [first, second].map((node) => ({
+                    id: node.id,
+                    error: "batch could not be applied; changes rolled back: A modeling program is running; wait for it to finish before editing",
+                })),
+            );
+            expect(doc.history.position()).toBe(before);
+            expect([first.parent, second.parent]).toEqual([
+                doc.modelManager.rootNode,
+                doc.modelManager.rootNode,
+            ]);
+            expect([first.visible, second.visible]).toEqual([true, true]);
+        } finally {
+            hold.release();
+        }
+    });
+
+    test.each([
+        { cause: "injected failure", expected: "injected failure" },
+        {
+            cause: "failed https://example.com/model?token=secret",
+            expected: `failed https://example.com/model?${REDACTED}`,
+        },
+    ])("a mutation failure rolls back every valid id and reports a safe cause: $cause", async ({
+        cause,
+        expected,
+    }) => {
         const {
             doc,
             nodes: [first, second, untouched],
@@ -182,14 +286,14 @@ describe("node batches", () => {
         const root = doc.modelManager.rootNode as FolderNode;
         const remove = root.remove.bind(root);
         rs.spyOn(root, "remove").mockImplementation((...nodes) => {
-            if (nodes.includes(second)) throw new Error("injected failure");
+            if (nodes.includes(second)) throw new Error(cause);
             remove(...nodes);
         });
         const result = await call("delete_node", { ids: [first.id, second.id] });
         expect(result.results).toEqual(
             [first, second].map((node) => ({
                 id: node.id,
-                error: "batch could not be applied; changes rolled back",
+                error: `batch could not be applied; changes rolled back: ${expected}`,
             })),
         );
         expect(doc.history.position()).toBe(before);

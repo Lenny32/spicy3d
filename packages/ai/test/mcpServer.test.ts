@@ -8,6 +8,7 @@ import { createMockApplication, createMockDocument } from "@spicy3d/core/test-ut
 import type { Tool } from "../src/llm/types";
 import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/server";
 import { SKILLS } from "../src/skills";
+import { buildTools } from "../src/tools";
 import { buildAskUserTool } from "../src/tools/askUser";
 import { imageByteBudget } from "../src/tools/imageEncoding";
 import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
@@ -91,6 +92,36 @@ describe("createMcpServer", () => {
         expect(tools.map((t) => t.name)).toEqual(["alpha", "get_usage_guide"]);
         expect(tools[0].inputSchema).toEqual({ type: "object", properties: {} });
         expect(client.getInstructions()).toBe("be careful");
+    });
+
+    test("every registry tool advertises an input schema without top-level combinators", async () => {
+        const registry = buildTools();
+        expect(registry.length).toBeGreaterThan(0);
+        const { client } = await connect(registry);
+        try {
+            const { tools } = await client.listTools();
+            // ask_user requires elicitation, so check its parameters directly as well.
+            for (const tool of registry) {
+                for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+                    expect(tool.parameters, `${tool.name}: ${keyword}`).not.toHaveProperty(keyword);
+                }
+            }
+            expect(tools.map((tool) => tool.name)).toEqual([
+                ...registry.filter((tool) => tool.name !== "ask_user").map((tool) => tool.name),
+                "get_usage_guide",
+            ]);
+            for (const tool of tools) {
+                for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+                    expect(tool.inputSchema, `${tool.name}: ${keyword}`).not.toHaveProperty(keyword);
+                }
+            }
+            expect(tools.find((tool) => tool.name === "delete_node")!.inputSchema.required).toEqual([]);
+            expect(tools.find((tool) => tool.name === "set_node_visible")!.inputSchema.required).toEqual([
+                "visible",
+            ]);
+        } finally {
+            await client.close();
+        }
     });
 
     test("calls the handler with the arguments and returns its result", async () => {

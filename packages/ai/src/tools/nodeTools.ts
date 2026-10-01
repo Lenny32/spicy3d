@@ -8,6 +8,7 @@ import {
     isConsumedTool,
     Matrix4,
     NodeUtils,
+    redactSecrets,
     Transaction,
 } from "@spicy3d/core";
 import type { Tool } from "../llm/types";
@@ -54,7 +55,6 @@ const NODE_TARGET_PROPERTIES = {
         description: "Batch node ids; mutually exclusive with id. Duplicates are applied once.",
     },
 };
-const NODE_TARGET_SCHEMA = [{ required: ["id"] }, { required: ["ids"] }];
 const NODE_BATCH_DESCRIPTION =
     " Pass exactly one of id or ids (1–100 ids, at most 128 characters each). Batch results are in input order; missing ids fail individually while valid nodes are changed together in one undo step. Duplicate ids are applied once. A batch with any failures includes a top-level error; inspect results before retrying.";
 
@@ -87,8 +87,6 @@ function applyNodeBatch(doc: IDocument, ids: string[], visible?: boolean): strin
         if (nodes.has(id) || errors.has(id)) continue;
         const node = findNode(doc, id);
         if (!node) errors.set(id, "node not found; call get_document_state for current ids");
-        else if (visible === undefined && !node.parent)
-            errors.set(id, "cannot delete a node without a parent");
         else nodes.set(id, node);
     }
     if (nodes.size > 0) {
@@ -108,8 +106,10 @@ function applyNodeBatch(doc: IDocument, ids: string[], visible?: boolean): strin
                     }
                 },
             );
-        } catch {
-            for (const id of nodes.keys()) errors.set(id, "batch could not be applied; changes rolled back");
+        } catch (error) {
+            const cause = redactSecrets(error instanceof Error ? error.message : String(error));
+            for (const id of nodes.keys())
+                errors.set(id, `batch could not be applied; changes rolled back: ${cause}`);
         }
         doc.visual.update();
     }
@@ -132,7 +132,7 @@ function deleteNodeTool(): Tool {
         parameters: {
             type: "object",
             properties: NODE_TARGET_PROPERTIES,
-            oneOf: NODE_TARGET_SCHEMA,
+            required: [],
         },
         handler: async (args) => {
             const doc = requireDocument();
@@ -165,7 +165,6 @@ function setNodeVisibleTool(): Tool {
                 visible: { type: "boolean", description: "true to show, false to hide" },
             },
             required: ["visible"],
-            oneOf: NODE_TARGET_SCHEMA,
         },
         handler: async (args) => {
             const doc = requireDocument();
