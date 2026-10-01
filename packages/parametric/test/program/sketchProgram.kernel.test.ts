@@ -628,6 +628,36 @@ describe("sketch actions", () => {
 });
 
 describe("sketchInfo", () => {
+    test.each([
+        { initial: 20, value: -40, expected: -40 },
+        { initial: "pcb_angle", value: "pcb_angle + 45", expected: 14.5 },
+    ])("reports signed datums and orientation after setDatum ($value)", ({ initial, value, expected }) => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "pcb", name: "pcb_angle", expression: "-30.5", type: "angle" }]);
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "t1",
+                plane: "XY",
+                entities: [{ type: "line", params: [100, 0, 110, 0] }],
+                constraints: [
+                    { kind: "Fix", points: [{ entity: 1, point: 0 }], datums: [100, 0] },
+                    { kind: "Distance", entities: [1], datum: 10 },
+                    { kind: "Angle", entities: ["xAxis", 1], datum: initial },
+                ],
+            },
+            { op: "editSketch", sketch: "t1", actions: [{ action: "setDatum", constraint: 3, value }] },
+            { op: "sketchInfo", id: "info", sketch: "t1" },
+        ]);
+        const info = result.results["info"] as SketchInfo;
+        expect(info.solve).toMatch(/^Ok/);
+        const angle = info.constraints.find((c) => c.kind === "Angle")!;
+        expect(angle.datum).toEqual(typeof value === "number" ? expect.closeTo(value, 6) : value);
+        const [x1, y1, x2, y2] = info.entities[0].params;
+        expect((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI).toBeCloseTo(expected, 6);
+        expect(Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(10, 6);
+    });
+
     test("reads a sketch back in display units", () => {
         const doc = newDoc();
         const result = run(doc, [

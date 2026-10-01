@@ -3,8 +3,10 @@
 
 import { ANGLE_UNITS, type EvaluatedValue, LENGTH_UNITS, Plane, type Scope } from "@spicy3d/core";
 import {
+    axisLineRefs,
     ConstraintKind,
     resolveDatumSource,
+    SKETCH_X_AXIS_ID,
     toDatumSource,
     toStorageDatum,
 } from "../../src/sketch/sketchModel";
@@ -169,5 +171,111 @@ describe("SketchSolver expression datums", () => {
         expect(result.error).toBe("Unknown identifier: nope");
         expect(solver.toData().constraints.find((x) => x.id === id)?.datum).toBeCloseTo(10);
         expect(measuredLength(solver, line)).toBeCloseTo(10);
+    });
+});
+
+describe("signed Angle datums", () => {
+    function orientedLine(datum?: number | string, degrees = 0, reversed = false) {
+        const solver = new SketchSolver(Plane.XY, undefined, scopeOf({ pcb_angle: angle(-30.5) }));
+        const radians = (degrees * Math.PI) / 180;
+        const line = solver.addLine(100, 0, 100 + 10 * Math.cos(radians), 10 * Math.sin(radians));
+        const start = { entityId: line, pointIndex: 0 };
+        const end = { entityId: line, pointIndex: 1 };
+        solver.addConstraint({ kind: ConstraintKind.Fix, refs: [start], datums: [100, 0] });
+        solver.addConstraint({ kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 });
+        const refs = [...axisLineRefs(SKETCH_X_AXIS_ID), start, end];
+        const id = solver.addConstraint({
+            kind: ConstraintKind.Angle,
+            refs: reversed ? [...refs.slice(2), ...refs.slice(0, 2)] : refs,
+            ...(datum === undefined ? {} : { datum }),
+        });
+        return { solver, line, id };
+    }
+
+    function expectOrientation(solver: SketchSolver, line: number, degrees: number) {
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const [x1, y1] = solver.pointOf({ entityId: line, pointIndex: 0 });
+        const [x2, y2] = solver.pointOf({ entityId: line, pointIndex: 1 });
+        const radians = (degrees * Math.PI) / 180;
+        expect(x1).toBeCloseTo(100, 6);
+        expect(y1).toBeCloseTo(0, 6);
+        expect(x2 - x1).toBeCloseTo(10 * Math.cos(radians), 6);
+        expect(y2 - y1).toBeCloseTo(10 * Math.sin(radians), 6);
+    }
+
+    test.each([
+        -180, -120, -40, 0, 40, 120, 180,
+    ])("literal %s degrees drives orientation through reload", (degrees) => {
+        const datum = toStorageDatum(ConstraintKind.Angle, degrees);
+        // Avoid starting exactly opposite the target at the solver's 180° singularity.
+        const { solver, line, id } = orientedLine(datum, Math.abs(degrees) === 180 ? 170 : 0);
+        let loaded: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, degrees);
+            const data = solver.toData();
+            expect(data.constraints.find((c) => c.id === id)?.datum).toBeCloseTo(datum, 9);
+            loaded = new SketchSolver(Plane.XY, data);
+            expectOrientation(loaded, line, degrees);
+            expect(loaded.toData().constraints.find((c) => c.id === id)?.datum).toBeCloseTo(datum, 9);
+        } finally {
+            loaded?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("setDatum changes sides instead of inheriting the old geometry's sign", () => {
+        const { solver, line, id } = orientedLine(toStorageDatum(ConstraintKind.Angle, 20));
+        try {
+            expectOrientation(solver, line, 20);
+            solver.setDatum(id, toStorageDatum(ConstraintKind.Angle, -40));
+            expectOrientation(solver, line, -40);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.datum).toBeCloseTo(
+                (-40 * Math.PI) / 180,
+            );
+            solver.setDatum(id, toStorageDatum(ConstraintKind.Angle, 14.5));
+            expectOrientation(solver, line, 14.5);
+        } finally {
+            solver.dispose();
+        }
+    });
+
+    test("expression edits and variable changes retain their signed orientation", () => {
+        const { solver, line, id } = orientedLine("pcb_angle");
+        let loaded: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, -30.5);
+            expect(solver.setDatumSource(id, "pcb_angle + 45").isOk).toBe(true);
+            expectOrientation(solver, line, 14.5);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.datum).toBe("pcb_angle + 45");
+            expect(solver.setScope(scopeOf({ pcb_angle: angle(-60) }))).toBe(true);
+            expectOrientation(solver, line, -15);
+            loaded = new SketchSolver(Plane.XY, solver.toData(), scopeOf({ pcb_angle: angle(-60) }));
+            expectOrientation(loaded, line, -15);
+            expect(loaded.toData().constraints.find((c) => c.id === id)?.datum).toBe("pcb_angle + 45");
+        } finally {
+            loaded?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("omitting the datum retains the measured clockwise sweep", () => {
+        const { solver, line, id } = orientedLine(undefined, -30.5);
+        try {
+            expectOrientation(solver, line, -30.5);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.datum).toBeCloseTo(
+                (-30.5 * Math.PI) / 180,
+            );
+        } finally {
+            solver.dispose();
+        }
+    });
+
+    test("reversing entity order reverses the signed sweep", () => {
+        const { solver, line } = orientedLine(toStorageDatum(ConstraintKind.Angle, 40), 0, true);
+        try {
+            expectOrientation(solver, line, -40);
+        } finally {
+            solver.dispose();
+        }
     });
 });

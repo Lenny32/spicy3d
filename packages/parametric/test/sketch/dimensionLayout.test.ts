@@ -121,11 +121,12 @@ describe("radiusDimension", () => {
 });
 
 describe("toDisplayDatum / toStorageDatum", () => {
-    test("angles convert between radians and degrees, displaying the magnitude", () => {
+    test("angles convert between radians and degrees, preserving the sign", () => {
         expect(toDisplayDatum(ConstraintKind.Angle, Math.PI)).toBeCloseTo(180, 9);
         expect(toStorageDatum(ConstraintKind.Angle, 180)).toBeCloseTo(Math.PI, 9);
-        // the stored sweep is signed (sign = side); the UI shows its magnitude
-        expect(toDisplayDatum(ConstraintKind.Angle, -Math.PI / 4)).toBeCloseTo(45, 9);
+        // Clockwise sweeps remain negative in both directions.
+        expect(toDisplayDatum(ConstraintKind.Angle, -Math.PI / 4)).toBeCloseTo(-45, 9);
+        expect(toStorageDatum(ConstraintKind.Angle, -45)).toBeCloseTo(-Math.PI / 4, 9);
     });
 
     test("point-line distance flips sign between UI and storage", () => {

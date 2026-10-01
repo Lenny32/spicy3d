@@ -119,7 +119,7 @@ const CONSTRAINT_SCHEMA = {
         },
         datum: {
             description:
-                "Dimension value in mm, degrees (Angle) or a ratio (Scale), or an expression naming document variables. Omit to keep the current measurement.",
+                "Dimension value in mm, signed degrees from the first directed line to the second, CCW positive (Angle), or a ratio (Scale), or an expression naming document variables. Omit to keep the current measurement.",
         },
         datums: { description: "Multi-value datum, e.g. Fix = [u, v]" },
         direction: {

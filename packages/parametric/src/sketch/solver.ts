@@ -770,7 +770,6 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     solve(fine: boolean): SolveOutcome {
-        this.syncAngleDatumSide();
         let report = this.system.solve(fine);
         this.refreshCache();
         // A fine solve can silently stall when the geometry starts far off its
@@ -853,23 +852,6 @@ export class SketchSolver implements ExternalEntityHost {
             }
             default:
                 return undefined;
-        }
-    }
-
-    /**
-     * Angle datums are signed: the sign records which side of the first line the
-     * second line sits on (the UI edits only the magnitude). Sync the sign with
-     * the current geometry before solving, so an edit never flips a line across
-     * its reference — and legacy unsigned datums adopt the loaded geometry's side.
-     */
-    private syncAngleDatumSide(): void {
-        for (const [id, record] of this.constraints) {
-            if (record.kind !== ConstraintKind.Angle || record.datumParamIds === undefined) continue;
-            const sweep = this.currentSweep(record.refs);
-            // ambiguous at 0°/180° — leave the datum sign alone
-            if (Math.abs(sweep) < 1e-9 || Math.abs(Math.PI - Math.abs(sweep)) < 1e-9) continue;
-            const datum = Number(this.system.get_params(new Uint32Array(record.datumParamIds))[0]);
-            if (datum !== 0 && sweep * datum < 0) this.setDatum(id, -datum);
         }
     }
 
@@ -1086,9 +1068,8 @@ export class SketchSolver implements ExternalEntityHost {
 
     /**
      * The datums of a record as they should be persisted, in order. A literal is read
-     * back from the solver — that is where the solver's normalization lands (the angle sign
-     * `syncAngleDatumSide` settles on, the geometric fallback a datumless constraint
-     * started from). An expression is returned as written: reading the solver back over it
+     * back from the solver, including the geometric fallback a datumless constraint
+     * started from. An expression is returned as written: reading the solver back over it
      * would replace the user's expression with whatever it currently evaluates to, once
      * per commit.
      */
@@ -1517,7 +1498,7 @@ export class SketchSolver implements ExternalEntityHost {
                 );
             case ConstraintKind.Angle:
                 return this.withDatum(this.pointParams(...refs), id, constraint, () =>
-                    this.currentAngle(refs),
+                    this.currentSweep(refs),
                 );
             case ConstraintKind.HorizontalDistance:
             case ConstraintKind.VerticalDistance:
@@ -1746,11 +1727,6 @@ export class SketchSolver implements ExternalEntityHost {
         const length = Math.hypot(dx, dy);
         if (length < 1e-12) return 0;
         return (dy * (px - x1) - dx * (py - y1)) / length;
-    }
-
-    /** Angle magnitude (radians) between the directions of the two referenced lines. */
-    private currentAngle(refs: SketchPointRef[]): number {
-        return Math.abs(this.currentSweep(refs));
     }
 
     /** Signed axis distance (axis 0: p2.x − p1.x; axis 1: p2.y − p1.y). */

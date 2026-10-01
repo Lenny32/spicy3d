@@ -282,3 +282,27 @@ describe("SketchAnnotationManager arc badge anchors", () => {
         }
     });
 });
+
+describe("angle dimension previews", () => {
+    test.each([-45, 45])("the preview displays a signed %s degree sweep", (degrees) => {
+        const { view, htmlTexts, restoreFactory } = setup();
+        const solver = new SketchSolver(Plane.XY);
+        const annotations = new SketchAnnotationManager(view, solver, new Map());
+        try {
+            const radians = (degrees * Math.PI) / 180;
+            annotations.setDimensionPreview({
+                kind: "angle",
+                a1: [0, 0],
+                a2: [10, 0],
+                b1: [0, 0],
+                b2: [10 * Math.cos(radians), 10 * Math.sin(radians)],
+                position: [20, 10],
+            });
+            expect(htmlTexts).toContain(`${degrees.toFixed(1)}°`);
+        } finally {
+            annotations.dispose();
+            solver.dispose();
+            restoreFactory();
+        }
+    });
+});

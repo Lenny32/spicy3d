@@ -174,7 +174,7 @@ the way the UI picks them — by entities and points — and the refs are derive
   { kind: "HorizontalDistance" | "VerticalDistance", points: [p1, p2], datum }   signed: p2 − p1
   { kind: "PointLineDistance", points: [p], entities: [line], datum }   signed: + = left of the line direction
   { kind: "Radius", entities: [circle|arc], datum }
-  { kind: "Angle", entities: [line1, line2], datum }
+  { kind: "Angle", entities: [line1, line2], datum }               signed from line1 to line2, CCW positive
   { kind: "Scale", entities: [line1, line2], datum }    length(line1) = datum × length(line2)
   Entity keys: an id, a name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
   "direction": [u, v] rotates the axis of Horizontal/Vertical/HorizontalDistance/VerticalDistance.

@@ -313,7 +313,7 @@ describe("dimension commands", () => {
         // between the two lines' drawing directions: the 60° sector
         { name: "between the lines", x: 470, y: 280, display: "60.00", reversed: [false, false] },
         // across the second line, towards the reversed first line: the 120° sector
-        { name: "beside the second line", x: 360, y: 270, display: "120.00", reversed: [true, false] },
+        { name: "beside the second line", x: 360, y: 270, display: "-120.00", reversed: [true, false] },
         // opposite the 60° sector: 60° again, with both lines reversed
         { name: "opposite", x: 360, y: 330, display: "60.00", reversed: [true, true] },
     ])("angle dimension measures the sector the label is placed in ($name)", async ({
@@ -1015,7 +1015,7 @@ describe("dimension commands", () => {
         }
     });
 
-    test("editing an angle below the reference line keeps it on that side", async () => {
+    test("editing a negative angle preserves its signed datum", async () => {
         const { app, doc, view, dialog, restorePub, restoreFactory } = setup();
         try {
             const node = new SketchNode({ document: doc, plane: Plane.XY });
@@ -1053,15 +1053,27 @@ describe("dimension commands", () => {
             handler.pointerDown(view, pointerEvent(450, 330));
             await run;
 
-            expect(dialogInput(dialog).value).toBe("90.00");
-            expect(confirmDialog(dialog, "45")).toBe(true);
+            expect(dialogInput(dialog).value).toBe("-90.00");
+            expect(confirmDialog(dialog, "-45")).toBe(true);
 
             // the line rotates to -45° on the SAME side instead of flipping to +45°
             // (which would read as 135° from the side the user is looking at)
             const [x1, y1] = editor.solver.pointOf({ entityId: 2, pointIndex: 0 });
             const [x2, y2] = editor.solver.pointOf({ entityId: 2, pointIndex: 1 });
             expect(Math.atan2(y2 - y1, x2 - x1)).toBeCloseTo(-Math.PI / 4, 6);
-            expect(editor.solver.toData().constraints.at(-1)?.datum).toBeCloseTo(-Math.PI / 4);
+            const constraint = editor.solver.toData().constraints.at(-1)!;
+            expect(constraint.datum).toBeCloseTo(-Math.PI / 4);
+
+            // Reopening a dimension also accepts negative values and an explicit side change.
+            editor.editDatum(constraint.id);
+            expect(dialogInput(dialog).value).toBe("-45.00");
+            expect(confirmDialog(dialog, "-30")).toBe(true);
+            expect(editor.solver.toData().constraints.at(-1)?.datum).toBeCloseTo(-Math.PI / 6);
+            editor.editDatum(constraint.id);
+            expect(confirmDialog(dialog, "30")).toBe(true);
+            const [ax, ay] = editor.solver.pointOf({ entityId: 2, pointIndex: 0 });
+            const [bx, by] = editor.solver.pointOf({ entityId: 2, pointIndex: 1 });
+            expect(Math.atan2(by - ay, bx - ax)).toBeCloseTo(Math.PI / 6, 6);
             editor.exit();
         } finally {
             restorePub();
