@@ -1381,7 +1381,7 @@ public:
             indexes[i] = static_cast<int>(index);
             offsets[i] = distances[i].as<double>();
         }
-        // A fixed finite fit budget; live callers also enforce the existing 90-second worker deadline.
+        // A fixed finite fit budget; live callers also enforce a 180-second corner-worker deadline.
         return CornerSetback::build(shape, indexes, radius, offsets, 512);
     }
     static ShapeResult box(const Pln& ax3, double x, double y, double z)

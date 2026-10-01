@@ -170,7 +170,7 @@ export function cornerJobDefinitions(jobs: Pick<ProgramJobs, "start" | "read" | 
         {
             name: "start_corner_setback_job",
             description:
-                "Queue a cancelable worker corner-setback edit on an existing three-edge fillet in this document. bodyId is the actual document node ID, not a run_parametric op alias. Distances are in the fillet's persisted selected-edge order, in mm or length expressions. Optional expectedEdgeRefs rejects a changed selection. Returns immediately; poll get_corner_setback_job. Uses the page mutation FIFO, captures this document/session and clones arguments. One successful edit is one undo step; failure/cancel preserves committed edits. Native work has a strict 90s deadline and no synchronous fallback. Job retention is ten minutes, maximum sixteen retained corner jobs/four active corner jobs per caller, separate from program-job caps (combined maximum 32 retained/8 active); a running corner job occupies the mutation FIFO for up to its 90s native deadline, result limit 1 MiB; queue-inclusive deadline defaults to 120s, maximum 600s.",
+                "Queue a cancelable worker corner-setback edit on an existing three-edge fillet in this document. bodyId is the actual document node ID, not a run_parametric op alias. Distances are in the fillet's persisted selected-edge order, in mm or length expressions. Optional expectedEdgeRefs rejects a changed selection. Returns immediately; poll get_corner_setback_job. Uses the page mutation FIFO, captures this document/session and clones arguments. One successful edit is one undo step; failure/cancel preserves committed edits. Native work has a strict 180s deadline and no synchronous fallback. Job retention is ten minutes, maximum sixteen retained corner jobs/four active corner jobs per caller, separate from program-job caps (combined maximum 32 retained/8 active); a running corner job occupies the mutation FIFO for up to its 180s native deadline, result limit 1 MiB; queue-inclusive deadline defaults to 240s, maximum 600s.",
             parameters: {
                 type: "object",
                 properties: {
@@ -198,7 +198,7 @@ export function cornerJobDefinitions(jobs: Pick<ProgramJobs, "start" | "read" | 
                     jobs.start(
                         {
                             ops: [cornerJobRequest(args)],
-                            ...(args["timeoutMs"] === undefined ? {} : { timeoutMs: args["timeoutMs"] }),
+                            timeoutMs: args["timeoutMs"] ?? 240_000,
                         },
                         context,
                     ),

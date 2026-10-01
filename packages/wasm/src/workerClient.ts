@@ -22,6 +22,10 @@ export interface IKernelWorkerTransport {
 
 type Pending = { complete: (result: KernelResult<unknown>) => void };
 
+// Accepted corner fits take about 64 seconds on the reference machine. Allow nearly
+// three times that cost for their fixed plate-fit budget, while keeping cancellation immediate.
+export const CORNER_WORKER_DEADLINE_MS = 180_000;
+
 /** Explicitly async RPC. Handles belong to this session and must be released or the client disposed. */
 export class KernelWorkerClient {
     private nextId = 0;
@@ -135,15 +139,16 @@ export class KernelWorkerClient {
             return Promise.resolve({ ok: false, error: { code: "closed", message: "Worker closed" } });
         if (signal?.aborted) return Promise.resolve(this.cancelled());
         const id = ++this.nextId;
+        const deadlineMs = operation === "cornerSetbackReplica" ? CORNER_WORKER_DEADLINE_MS : this.deadlineMs;
         const trace = PerformanceTrace.captureId;
         return new Promise((resolve) => {
             const deadline = setTimeout(
                 () =>
                     this.close({
                         code: "timeout",
-                        message: `Geometry worker operation timed out after ${this.deadlineMs} ms`,
+                        message: `Geometry worker operation timed out after ${deadlineMs} ms`,
                     }),
-                this.deadlineMs,
+                deadlineMs,
             );
             const complete = (result: KernelResult<unknown>) => {
                 signal?.removeEventListener("abort", cancel);

@@ -5,6 +5,7 @@ import { type IDisposable, type IEdge, type IFace, type IShape, ShapeTypes, XYZ 
 import { trackCornerSetback } from "../../parametric/src/features/cornerSetbackTracking";
 import type { ShapeTracking } from "../../parametric/src/features/feature";
 import { OccCylindricalSurface, OccRectangularSurface } from "../src/surface";
+import { CORNER_WORKER_DEADLINE_MS } from "../src/workerClient";
 import { createBox, createTestConverter, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
 
@@ -62,7 +63,7 @@ describe("bounded fitted corner setbacks", () => {
         expect(output.checkShape()).toBe(true);
         expect(output.volume()).toBeGreaterThan(0);
         expect(output.volume()).toBeLessThan(64000);
-        expect(elapsed).toBeLessThan(90000);
+        expect(elapsed).toBeLessThan(CORNER_WORKER_DEADLINE_MS);
         expect(result.g0Error).toBeLessThanOrEqual(1e-4);
         expect(result.g1Error).toBeLessThanOrEqual(1e-3);
         expect(result.fitDistanceError).toBeLessThanOrEqual(1e-4);

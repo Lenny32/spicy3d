@@ -32,6 +32,32 @@ afterEach(() => {
     for (const value of values.reverse()) value.dispose();
 });
 
+test("corner fits keep a finite deadline with enough margin for slower machines", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const client = new KernelWorkerClient(transport);
+    try {
+        const pending = client.request("cornerSetbackReplica", {
+            shape: { brep: "test", topology: { graph: "test", faces: [], edges: [] } },
+            edges: [0, 1, 2],
+            radius: 1,
+            distances: [2, 2, 2],
+        });
+        await rs.advanceTimersByTimeAsync(100_000);
+        expect(client.pendingRequests).toBe(1);
+        expect(transport.terminated).toBe(0);
+        await rs.advanceTimersByTimeAsync(80_000);
+        expect(await pending).toMatchObject({
+            ok: false,
+            error: { code: "timeout", message: expect.stringContaining("180000") },
+        });
+        expect(transport.terminated).toBe(1);
+        expect(client.pendingRequests).toBe(0);
+    } finally {
+        client.dispose();
+    }
+});
+
 test("a hung generation times out all callers, detaches stale replies and clears deadlines", async () => {
     rs.useFakeTimers();
     const transport = new HungTransport();

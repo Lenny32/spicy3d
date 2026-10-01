@@ -25,7 +25,10 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   (`packages/ai/src/mcp/server.ts`), preserving cross-call program refs. Built-in metadata reads
   `get_document_state`, `get_selection`, and the document resource remain responsive during a
   pending worker operation and report a captured committed-state snapshot.
-- **Finite worker deadline.** Every worker request has a 90-second deadline. A timeout terminates
+- **Finite worker deadline.** Worker requests have a 90-second deadline; corner-setback fits have
+  180 seconds for their fixed plate-fit budget (roughly three times the measured reference cost).
+  Corner jobs default to a 240-second queue-inclusive deadline and remain immediately cancelable.
+  A timeout terminates
   its generation, fails the program, and rolls back nodes/history and reference registries.
   A following operation creates a fresh worker. Selected bounded factory methods never retry
   synchronously when a worker is unavailable or timed out. Other main-thread calls can still hang.
