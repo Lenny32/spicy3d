@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { Precision, Result } from "@spicy3d/core";
+import { offsetBSpline } from "./bsplineOffset";
 import { arcAngles, entityRadius, type SketchEntityData } from "./sketchModel";
 
 type UV = [number, number];
@@ -227,8 +228,15 @@ export function extendCurve(
 
 /** Positive distance is left of a line, outward from a circular curve. */
 export function offsetCurve(source: SketchEntityData, distance: number): Result<GeometryEdit> {
-    if (!editableCurve(source) || !Number.isFinite(distance) || Math.abs(distance) < EPS)
+    if (!Number.isFinite(distance) || Math.abs(distance) < EPS)
         return Result.err("Offset must be a finite nonzero distance");
+    if (source.type === "bspline") {
+        const offset = offsetBSpline(source, distance);
+        if (!offset.isOk) return Result.err(offset.error);
+        const pieces = [offset.value];
+        return Result.ok({ source, pieces, preview: pieces, copy: true });
+    }
+    if (!editableCurve(source)) return Result.err("Select a line, arc, circle or B-spline");
     const p = source.params;
     let params: number[];
     if (source.type === "line") {

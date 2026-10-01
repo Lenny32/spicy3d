@@ -202,6 +202,12 @@ sketch re-solves after each action and a failing one rolls everything back):
 - { action: "split", entity, at: [u, v] }                  splits at "at" (snaps to a nearby intersection)
 - { action: "extend", entity, to: boundary, end? = "end" } lengthens a line/arc to the boundary entity
 - { action: "offset", entity, distance, name? }            parallel copy; + = left of a line / outward
+  Supports lines, arcs, circles and open/periodic B-splines (fit or control mode). For open B-splines
+  + is left along the curve; for periodic B-splines + is outward regardless of winding. B-splines
+  are approximated to 0.001 mm at checked samples, with at most 512 fit points; collapsed, inverted
+  or crossing offsets are refused. distance takes mm or a length expression, evaluated ONCE.
+  The copy is not associative: later source/variable edits do not update it. Remove the pasted
+  source from a section sketch if only the offset outline should contribute to a loft.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }
 - { action: "mirror", entities, axis: line|"xAxis"|"yAxis", copy? = true }   copies get Symmetric constraints

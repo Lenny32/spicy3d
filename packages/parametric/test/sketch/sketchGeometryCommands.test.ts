@@ -2,13 +2,14 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type ICameraController, Plane, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
+import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
     createMockVisualWithDocument,
     TestDocument,
 } from "@spicy3d/core/test-utils";
+import * as bsplineOffset from "../../src/sketch/bsplineOffset";
 import { SketchCopyCommand } from "../../src/sketch/commands/sketchCopy";
 import { SketchExtendCommand } from "../../src/sketch/commands/sketchExtend";
 import { SketchMirrorCommand } from "../../src/sketch/commands/sketchMirror";
@@ -51,7 +52,14 @@ function setup(data: SketchData = { entities: [source, boundary, target], constr
     });
     app.activeView = view;
     const shape = () => Result.ok({ isEqual: () => false });
-    rs.stubGlobal("shapeFactory", { line: shape, circle: shape, arc: shape, wire: shape, combine: shape });
+    rs.stubGlobal("shapeFactory", {
+        line: shape,
+        circle: shape,
+        arc: shape,
+        bezier: shape,
+        wire: shape,
+        combine: shape,
+    });
     const node = new SketchNode({ document: doc, plane: Plane.XY, data });
     const editor = SketchEditor.enter(node);
     const handler = doc.visual.eventHandler as SketchEventHandler;
@@ -357,6 +365,68 @@ describe("geometry command interaction", () => {
         expect(node.data.entities[0]).toEqual(source);
         expect(node.data.entities[3].params).toEqual([0, side * 5, 100, side * 5]);
         expect(node.data.constraints).toEqual([]);
+    });
+
+    test("offset picks a B-spline and copies it on the chosen side", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 100, 0] };
+        const { editor, node, move, click } = setup({ entities: [spline], constraints: [] });
+        const preview = rs.spyOn(editor.annotations, "setGeometryPreview");
+        const command = new SketchOffsetCommand();
+        command.distance = 5;
+        const run = command.executeAsync();
+        await click(20);
+        move(20, -20);
+        expect(preview.mock.calls.at(-1)![0]).toHaveLength(1);
+        await click(20, -20);
+        await run;
+        expect(node.data.entities).toHaveLength(2);
+        expect(node.data.entities[0]).toEqual(spline);
+        const copy = node.data.entities[1];
+        expect(copy.type).toBe("bspline");
+        expect(copy.id).not.toBe(spline.id);
+        for (let i = 1; i < copy.params.length; i += 2) expect(copy.params[i]).toBeCloseTo(-5, 8);
+    });
+
+    test("offset fits each B-spline side once while the pointer moves", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 100, 0] };
+        const { editor, node, move, click } = setup({ entities: [spline], constraints: [] });
+        const fit = rs.spyOn(bsplineOffset, "offsetBSpline");
+        try {
+            const preview = rs.spyOn(editor.annotations, "setGeometryPreview");
+            const command = new SketchOffsetCommand();
+            command.distance = 5;
+            const run = command.executeAsync();
+            await click(20);
+            for (const y of [-20, -25, -30, 20, 25, -35, 30]) move(20, y);
+            expect(preview.mock.calls.at(-1)![0]).toHaveLength(1);
+            expect(fit.mock.calls.map(([, distance]) => distance)).toEqual([-5, 5]);
+            await click(20, 30);
+            await run;
+            expect(fit).toHaveBeenCalledTimes(2);
+            expect(node.data.entities).toHaveLength(2);
+        } finally {
+            fit.mockRestore();
+        }
+    });
+
+    test("offset reports malformed B-spline geometry instead of aborting", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 0, 0, 100, 0] };
+        const { node, move, click, pressEscape } = setup({ entities: [spline], constraints: [] });
+        const errors = rs.fn();
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            const run = command.executeAsync();
+            await click(20);
+            expect(() => move(20, -20)).not.toThrow();
+            await click(20, -20);
+            expect(errors).toHaveBeenCalled();
+            pressEscape();
+            await run;
+            expect(node.data.entities).toEqual([spline]);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
     });
 
     test("split cancellation removes preview meshes without changing geometry", async () => {
