@@ -346,7 +346,12 @@ export class BlockConstraintCommand extends SketchConstraintCommand {
             ids = [id];
         }
         for (const id of ids) {
-            if (id < 1 || editor.solver.hasConstraint(ConstraintKind.Block, [centerRef(id)])) continue;
+            if (
+                id < 1 ||
+                editor.solver.entity(id) === undefined ||
+                editor.solver.hasConstraint(ConstraintKind.Block, [centerRef(id)])
+            )
+                continue;
             editor.solver.addConstraint({ kind: ConstraintKind.Block, refs: [centerRef(id)] });
         }
         editor.solve(true);
@@ -370,7 +375,8 @@ export class ConstructionConstraintCommand extends SketchConstraintCommand {
             ids = [id];
         }
         for (const id of ids) {
-            if (id > 0) editor.solver.setConstruction(id, !editor.solver.entity(id)?.construction);
+            if (id > 0 && editor.solver.entity(id) !== undefined)
+                editor.solver.setConstruction(id, !editor.solver.entity(id)?.construction);
         }
         editor.solve(true);
         editor.commit();

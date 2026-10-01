@@ -1,7 +1,14 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { EMPTY_SCOPE, type ParameterValue, type Plane, Result, type Scope } from "@spicy3d/core";
+import {
+    EMPTY_SCOPE,
+    type I18nKeys,
+    type ParameterValue,
+    type Plane,
+    Result,
+    type Scope,
+} from "@spicy3d/core";
 import { INCIDENCE_TOLERANCE } from "../features/refGeometry";
 import {
     type BSplineOptions,
@@ -52,6 +59,7 @@ import {
     syncExternalRoles,
     toDatumSource,
 } from "./sketchModel";
+import { createSketchText, type SketchTextData, type SketchTextSettings, textIds } from "./sketchText";
 import { type SplinePoint, splineParams } from "./splineGeometry";
 import { type SketchTransform, transformSketchSelection } from "./utilityOperations";
 
@@ -144,6 +152,40 @@ export class SketchSolver implements ExternalEntityHost {
      * places params in it — see `ExternalEntityHost`. Replaced wholesale by `reset`.
      */
     system: SolverSystem;
+    /** Editable text does not add solver parameters or constraints. */
+    private textRecords: SketchTextData[] = [];
+
+    texts(): SketchTextData[] {
+        return structuredClone(this.textRecords);
+    }
+
+    text(id: number): SketchTextData | undefined {
+        const text = this.textRecords.find((text) => text.id === id);
+        return text === undefined ? undefined : structuredClone(text);
+    }
+
+    addText(settings: SketchTextSettings): Result<number, I18nKeys> {
+        const result = createSketchText(this.toData(), settings, undefined, this.ids);
+        if (!result.isOk) return Result.err(result.error as I18nKeys);
+        this.textRecords.push(result.value);
+        return Result.ok(result.value.id);
+    }
+
+    updateText(id: number, settings: Partial<SketchTextSettings>): Result<void, I18nKeys> {
+        const previous = this.text(id);
+        if (!previous) return Result.err("error.sketch.textMissing");
+        const result = createSketchText(this.toData(), { ...previous, ...settings }, previous, this.ids);
+        if (!result.isOk) return Result.err(result.error as I18nKeys);
+        this.textRecords = this.textRecords.map((text) => (text.id === id ? result.value : text));
+        return Result.ok(undefined);
+    }
+
+    removeText(id: number): boolean {
+        const before = this.textRecords.length;
+        this.textRecords = this.textRecords.filter((text) => text.id !== id);
+        return before !== this.textRecords.length;
+    }
+
     /** Entity tables holding real AND external entities (externals under reserved negative ids). */
     private readonly entityTypes = new Map<number, SketchEntityType>();
     private readonly constructionEntities = new Set<number>();
@@ -983,6 +1025,7 @@ export class SketchSolver implements ExternalEntityHost {
     toData(): SketchData {
         const constraints = this.constraintsData();
         const result: SketchData = { entities: this.entities(), constraints };
+        if (this.textRecords.length) result.texts = this.texts();
         // external refs live in SketchData, not in the entity list — preserve them
         if (this.external.refs.length > 0) {
             result.externalRefs = JSON.parse(JSON.stringify(this.external.refs)) as ExternalRefData[];
@@ -1220,7 +1263,12 @@ export class SketchSolver implements ExternalEntityHost {
     private registerEntity(type: SketchEntityType, paramIds: number[], id?: number): number {
         let entityId: number;
         if (id === undefined) {
-            entityId = this.ids.next("entity", (candidate) => this.entityTypes.has(candidate));
+            entityId = this.ids.next(
+                "entity",
+                (candidate) =>
+                    this.entityTypes.has(candidate) ||
+                    textIds({ texts: this.textRecords }).includes(candidate),
+            );
         } else {
             entityId = id;
         }
@@ -1711,6 +1759,7 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     private loadData(data: SketchData): void {
+        this.textRecords = structuredClone(data.texts ?? []);
         // The constraints are rebuilt below, so their datum errors are too.
         this._datumErrors.clear();
         this.external.refPositions = data.refPositions === undefined ? undefined : { ...data.refPositions };

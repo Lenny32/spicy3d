@@ -295,6 +295,32 @@ registerMergePayload("sketch.data", {
     rule: {
         kind: "object",
         fields: {
+            texts: {
+                kind: "list",
+                key: "id",
+                order: "stable",
+                segment: "text",
+                item: {
+                    kind: "object",
+                    fields: {
+                        id: scalar,
+                        value: scalar,
+                        profileIds: atomic,
+                        x: scalar,
+                        y: scalar,
+                        angle: scalar,
+                        height: scalar,
+                        frame: atomic,
+                        alignment: scalar,
+                        verticalAlignment: scalar,
+                        spacing: scalar,
+                        flipHorizontal: scalar,
+                        flipVertical: scalar,
+                        font: scalar,
+                    },
+                    groups: { content: ["value", "profileIds"], position: ["x", "y"] },
+                },
+            },
             entities: {
                 kind: "list",
                 key: "id",

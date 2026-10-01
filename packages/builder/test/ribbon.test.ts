@@ -94,6 +94,7 @@ describe("SketchRibbonProfiles", () => {
         expect(finish.items).toEqual(["sketch.exit", "sketch.autoConstrain"]);
         const create = flattenItems(sketchTab.groups[0].items);
         expect(create).toContain("sketch.spline");
+        expect(create).toContain("sketch.text");
         // the B-spline tool sits right after the spline tool
         expect(create.indexOf("sketch.bspline")).toBe(create.indexOf("sketch.spline") + 1);
     });

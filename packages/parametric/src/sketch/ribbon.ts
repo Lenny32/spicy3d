@@ -37,6 +37,12 @@ export const SketchRibbonProfiles: RibbonProfileExtra[] = [
                     "sketch.spline",
                     "sketch.bspline",
                     "sketch.controlBSpline",
+                    {
+                        type: "pulldown",
+                        display: "command.sketch.text",
+                        icon: "icon-text",
+                        items: ["sketch.text", "sketch.editText", "sketch.explodeText"],
+                    },
                     "sketch.point",
                     "sketch.projectEdges",
                 ],

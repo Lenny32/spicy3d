@@ -50,6 +50,7 @@ import {
 } from "./sketchModel";
 import { SketchSolver } from "./solver";
 import { splineParams, splinePoints, splineSegments } from "./splineGeometry";
+import { textContours } from "./textGeometry";
 
 const NOT_A_PLANE = "Construction source is not a plane";
 
@@ -378,6 +379,23 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
             const edge = this.entityEdge({ id: ref.entityId, type: ref.type, params: ref.snapshot });
             if (!edge.isOk) return Result.err(edge.error);
             edges.push(edge.value);
+        }
+        for (const text of data.texts ?? []) {
+            const contours = textContours(text);
+            if (!contours.isOk) return Result.err(contours.error);
+            if (text.profileIds.length < contours.value.length)
+                return Result.err("Missing text contour identities");
+            for (const contour of contours.value) {
+                for (const segment of contour) {
+                    const points = segment.map((point) => toWorld(this.plane, ...point));
+                    const edge =
+                        segment.length === 2
+                            ? shapeFactory.line(points[0], points[1])
+                            : shapeFactory.bezier(points);
+                    if (!edge.isOk) return Result.err(edge.error);
+                    edges.push(edge.value);
+                }
+            }
         }
         return Result.ok(edges);
     }

@@ -77,8 +77,9 @@ function formatValue(field: string, value: unknown, unit: LengthUnit): string {
 }
 
 /** Sketch items summarized per sketch ("Sketch 2: +3 lines, −1 constraint"). */
-const SKETCH_SEGMENTS = new Set(["entity", "constraint", "external", "anchor"]);
+const SKETCH_SEGMENTS = new Set(["entity", "constraint", "external", "anchor", "text"]);
 const NOUNS: Record<string, [I18nKeys, I18nKeys]> = {
+    text: ["diff.noun.text", "diff.noun.texts"],
     line: ["diff.noun.line", "diff.noun.lines"],
     circle: ["diff.noun.circle", "diff.noun.circles"],
     arc: ["diff.noun.arc", "diff.noun.arcs"],

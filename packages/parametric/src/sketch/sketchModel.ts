@@ -20,6 +20,8 @@ import { bsplineEdgeCount } from "./bsplineEdges";
 import type { BSplineParametrization } from "./bsplineGeometry";
 import type { ControlBSplineDefinition } from "./controlBSplineGeometry";
 import { ConstraintKind } from "./planegcs";
+import type { SketchTextData } from "./sketchText";
+import { textContours } from "./textGeometry";
 
 export { ConstraintKind };
 
@@ -227,6 +229,7 @@ export interface ExternalRefData {
 }
 
 export interface SketchData {
+    texts?: SketchTextData[];
     entities: SketchEntityData[];
     constraints: SketchConstraintData[];
     /** Datum label positions chosen by the user; absent when never placed. */
@@ -256,6 +259,7 @@ export interface SketchData {
 
 /** Detached, sketch-agnostic clipboard; only relationships wholly inside the selection travel. */
 export interface SketchClipboard {
+    texts?: SketchTextData[];
     entities: SketchEntityData[];
     constraints: SketchConstraintData[];
     origin: [number, number];
@@ -344,6 +348,12 @@ export function shapeEntityIds(data: SketchData): number[] {
             .filter(isProfileEntity)
             .flatMap((entity) => Array(entityEdgeCount(entity)).fill(entity.id) as number[]),
         ...profileExternalRefs(data).map((r) => r.entityId),
+        ...(data.texts ?? []).flatMap((text) => {
+            const contours = textContours(text);
+            return contours.isOk
+                ? contours.value.flatMap((contour, index) => contour.map(() => text.profileIds[index]))
+                : [];
+        }),
     ];
 }
 
