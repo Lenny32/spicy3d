@@ -2864,19 +2864,27 @@ public:
         return "";
     }
 
-    // Empty text = the thick solid is valid. BRepOffset may answer IsDone() with a result whose
-    // offset faces cross (steep, narrow faces of an open shell); a later boolean or inspection
-    // on it may raise, so the cheap topology check runs here. Self-intersection is not tested
-    // (expensive): callers opt in with Shape.checkSelfIntersection.
+    // Empty text = the thick solid is valid. The sampled curve-on-surface test of the default
+    // BRepCheck_Analyzer can miss an offset edge whose p-curve disagrees with its 3D curve between
+    // sample points (periodic ruled lofts, issue #126): such a solid passes checkShape and the
+    // self-interference checks yet breaks every boolean. Only the exact test runs (it covers the
+    // sampled one); the sampled one runs again only to word a failure. Re-parameterizing the
+    // edges (BRepLib::SameParameter, ShapeFix) does not repair such a result: the offset geometry
+    // itself is off, so it is refused.
     static std::string thickSolidResultError(const TopoDS_Shape& result)
     {
         if (result.IsNull()) {
             return "Failed to create thick solid: empty result";
         }
+        if (BRepCheck_Analyzer(result, true, false, true).IsValid()) {
+            return "";
+        }
         if (!BRepCheck_Analyzer(result).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
-        return "";
+        return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
+               "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the "
+               "thickness or the sections";
     }
 
     static const char* offsetErrorName(BRepOffset_Error error)
