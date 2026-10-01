@@ -1,10 +1,12 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { rs } from "@rstest/core";
 import { Plane, XYZ } from "@spicy3d/core";
-import { OrthographicCamera } from "three";
+import { type CanvasTexture, OrthographicCamera, PerspectiveCamera, type Sprite } from "three";
 import { gridLabels } from "../src/gridLabels";
 import { ThreeGrid } from "../src/threeGrid";
+import { ThreeGridLabels } from "../src/threeGridLabels";
 
 function cameraOn(plane: Plane, extent = 200) {
     const camera = new OrthographicCamera(-extent, extent, extent, -extent, 0.1, 2000);
@@ -30,7 +32,7 @@ describe("grid coordinates", () => {
             expect(values).toContain("50");
             expect(values).toContain("100");
         }
-        expect(labels.filter((label) => label.text === "0 mm")).toHaveLength(1);
+        expect(labels.some((label) => label.text === "0 mm" || label.text === "0")).toBe(false);
         const x50 = labels.find((label) => label.axis === "x" && label.text === "50");
         expect(x50).toMatchObject({ axis: "x", text: "50" });
         expect(x50?.x).toBeCloseTo(500);
@@ -52,7 +54,7 @@ describe("grid coordinates", () => {
         camera.lookAt(500, 0, 0);
         const labels = gridLabels(camera, Plane.XY, 800, 800);
         expect(labels.some((label) => label.axis === "y")).toBe(false);
-        expect(labels.find((label) => label.text === "500")).toEqual({
+        expect(labels.find((label) => label.text === "500")).toMatchObject({
             axis: "x",
             text: "500",
             x: 400,
@@ -75,6 +77,62 @@ describe("grid coordinates", () => {
             expect(grid.material.uniforms["uPlaneNormal"].value.toArray()).toEqual([1, 0, 0]);
         } finally {
             grid.dispose();
+        }
+    });
+});
+
+describe("rendered grid labels", () => {
+    beforeEach(() => {
+        rs.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+            measureText: (text: string) => ({ width: text.length * 12 }),
+            fillText: rs.fn(),
+        } as unknown as CanvasRenderingContext2D);
+    });
+
+    afterEach(() => {
+        rs.restoreAllMocks();
+    });
+
+    test.each(["orthographic", "perspective"])("keeps text screen sized with a %s camera", (type) => {
+        const camera = type === "orthographic" ? cameraOn(Plane.XY) : new PerspectiveCamera(45, 1, 0.1, 2000);
+        camera.position.set(0, 0, 1000);
+        camera.lookAt(0, 0, 0);
+        const group = new ThreeGridLabels();
+        try {
+            group.update(camera, Plane.XY, 800, 800, "#333333");
+            expect(group.children.length).toBeGreaterThan(0);
+            for (const child of group.children) {
+                const sprite = child as Sprite;
+                const projected = sprite.position.clone().project(camera);
+                const right = sprite.position.clone();
+                right.x += sprite.scale.x;
+                right.project(camera);
+                const texture = sprite.material.map as CanvasTexture;
+                expect((right.x - projected.x) * 400).toBeCloseTo(texture.image.width / 2);
+                expect(sprite.material.depthTest).toBe(true);
+                expect(sprite.material.depthWrite).toBe(false);
+                expect(sprite.renderOrder).toBe(-1);
+            }
+        } finally {
+            group.dispose();
+        }
+    });
+
+    test("reuses textures and releases them when the workplane goes edge on", () => {
+        const group = new ThreeGridLabels();
+        try {
+            const camera = cameraOn(Plane.XY);
+            group.update(camera, Plane.XY, 800, 800, "#333333");
+            expect(group.children.length).toBeGreaterThan(0);
+            const texture = (group.children[0] as Sprite).material.map as CanvasTexture;
+            const dispose = rs.spyOn(texture, "dispose");
+            group.update(camera, Plane.XY, 800, 800, "#333333");
+            expect((group.children[0] as Sprite).material.map).toBe(texture);
+            group.update(camera, Plane.YZ, 800, 800, "#333333");
+            expect(group.children).toHaveLength(0);
+            expect(dispose).toHaveBeenCalledOnce();
+        } finally {
+            group.dispose();
         }
     });
 });

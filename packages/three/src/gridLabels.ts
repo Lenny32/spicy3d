@@ -8,6 +8,7 @@ export interface GridLabel {
     text: string;
     x: number;
     y: number;
+    z: number;
     axis: "x" | "y";
 }
 
@@ -52,14 +53,14 @@ export function gridLabels(camera: Camera, plane: Plane, width: number, height: 
         const end = Math.floor(Math.max(...coordinates) / step);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end - start > 200) continue;
         for (let index = start; index <= end; index++) {
-            if (axis === "y" && index === 0) continue;
+            if (index === 0) continue;
             const point = project(origin.clone().addScaledVector(direction, index * step));
             const x = point.x + (axis === "y" ? 10 : 0);
             const y = point.y + (axis === "x" ? 12 : 0);
             if (point.z < -1 || point.z > 1 || x < 30 || x > width - 30 || y < 12 || y > height - 12) {
                 continue;
             }
-            labels.push({ text: index === 0 ? "0 mm" : String(index * step), x, y, axis });
+            labels.push({ text: String(index * step), x, y, z: point.z, axis });
         }
     }
     return labels;

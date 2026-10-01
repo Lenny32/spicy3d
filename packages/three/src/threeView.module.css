@@ -37,19 +37,3 @@
 .noEvent {
     pointer-events: none;
 }
-
-.gridLabels {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    pointer-events: none;
-    user-select: none;
-    color: var(--foreground-color);
-    opacity: 0.55;
-    font: 11px sans-serif;
-
-    span {
-        position: absolute;
-        white-space: nowrap;
-    }
-}
