@@ -12,13 +12,17 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { rs } from "@rstest/core";
 import {
+    DocumentMutations,
     DocumentRebuilds,
     FolderNode,
     I18n,
     type IEdge,
     type IFace,
+    PerformanceTrace,
     ShapeTypes,
     Transaction,
 } from "@spicy3d/core";
@@ -29,7 +33,11 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
-import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
+import { createMcpServer, SerialQueue } from "../../../ai/src/mcp/server";
+import { buildParametricTools, runParametric } from "../../../ai/src/tools/parametricTools";
+import { buildParametricJobTools, buildProgramJobTools } from "../../../ai/src/tools/programJobs";
+import { buildReadTools } from "../../../ai/src/tools/readTools";
+import { waitForTerminalJob } from "../../../ai/test/_helpers/waitForTerminalJob";
 import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
@@ -1862,6 +1870,225 @@ test.each(["extrude", "boolean"])("%s rejects join before resolving or changing 
         expect(doc.history.position()).toBe(position);
         expect(doc.modelManager.findNode((node) => node instanceof ParametricBodyNode)).toBeUndefined();
     } finally {
+        doc.dispose();
+    }
+});
+
+// The reported pattern: independent extruded tools consumed by one long boolean chain.
+function booleanEditModel(doc: TestDocument) {
+    const ops: ParametricOp[] = [
+        { op: "sketch", id: "base-sketch", entities: rect(0, 0, 30, 30) },
+        { op: "extrude", id: "base", sketch: "base-sketch", depth: 2 },
+    ];
+    for (let i = 0; i < 14; i++) {
+        ops.push(
+            { op: "sketch", id: `sketch-${i}`, entities: [{ type: "circle", params: [i + 2, 15, 0.3] }] },
+            { op: "extrude", id: `tool-${i}`, sketch: `sketch-${i}`, depth: 2 },
+            { op: "boolean", id: `cut-${i}`, body: "base", tools: [`tool-${i}`], operation: "cut" },
+        );
+    }
+    const result = run(doc, ops);
+    const bodyId = result.created.find((entry) => entry.id === "base")!.nodeId;
+    const body = doc.modelManager.findNode((node) => node.id === bodyId) as ParametricBodyNode;
+    const edits: ParametricOp[] = [4, 9, 12].map((i) => ({
+        op: "editSketch",
+        sketch: `sketch-${i}`,
+        actions: [{ action: "move", entities: [1], delta: [0, 2] }],
+    }));
+    return { body, edits };
+}
+
+function bodyReplays(body: ParametricBodyNode) {
+    return PerformanceTrace.snapshot().records.filter(
+        (record) => record.stage === "body.rebuild" && record.details?.["nodeId"] === body.id,
+    );
+}
+
+test("consecutive boolean-tool sketch edits rebuild their owner once and reuse its prefix", () => {
+    const doc = newDoc();
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        const prefix = body.timelineStateAt(5)?.shape;
+        const before = doc.history.undoCount();
+        PerformanceTrace.enable();
+        const result = run(doc, [...edits, { op: "edges", body: "base", id: "updated-edges" }]);
+        const centers = (result.results["updated-edges"] as EdgesReport).edges.flatMap(({ reference }) =>
+            reference.edge.kind === "circle" ? [reference.edge.center] : [],
+        );
+        const changed = centers.filter((center) => [6, 11, 14].some((x) => Math.abs(center.x - x) < 1e-6));
+        expect(changed).toHaveLength(6);
+        for (const center of changed) expect(center.y).toBeCloseTo(17);
+        expect(bodyReplays(body)).toHaveLength(1);
+        expect(body.timelineStateAt(5)?.shape).toBe(prefix);
+        const misses = PerformanceTrace.snapshot().records.filter(
+            (record) =>
+                record.stage === "body.feature" &&
+                record.details?.["nodeId"] === body.id &&
+                !record.details?.["cacheHit"],
+        );
+        expect(misses.map((record) => record.details?.["index"])).toEqual([
+            5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+        ]);
+        expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+        expect(doc.history.undoCount()).toBe(before + 1);
+    } finally {
+        PerformanceTrace.disable();
+        doc.dispose();
+    }
+});
+
+test.each([
+    false,
+    true,
+])("background sketch batch yields with atomic completion/cancellation: %s", async (cancel) => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    app.activeView = { document: doc } as never;
+    doc.selection = createMockSelection();
+    rs.stubGlobal("app", app);
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        const sketches = doc.modelManager.findNodes((node) => node instanceof SketchNode) as SketchNode[];
+        const before = sketches.map((sketch) => sketch.dataJson);
+        const count = doc.history.undoCount();
+        const controller = new AbortController();
+        PerformanceTrace.enable();
+        const running = runParametric(
+            { ops: edits, responseMode: "compact" },
+            controller.signal,
+            () => {},
+            doc,
+        );
+        // Let module initialization and the first yielded feature reach the event loop.
+        await rs.waitFor(() => expect(DocumentRebuilds.pending(doc)).toBe(true), { interval: 1 });
+        expect(body.isRebuilding).toBe(true);
+        expect(DocumentMutations.isHeld(doc)).toBe(true);
+        expect(DocumentRebuilds.status(doc).featureIndexes.length).toBeGreaterThan(0);
+        expect(() => doc.history.undo()).toThrow("modeling program is running");
+        if (cancel) {
+            controller.abort();
+            await expect(running).rejects.toThrow("cancelled");
+            expect(sketches.map((sketch) => sketch.dataJson)).toEqual(before);
+            expect(doc.history.undoCount()).toBe(count);
+        } else {
+            const result = JSON.parse(await running);
+            expect(Object.keys(result.results)).toHaveLength(3);
+            expect(bodyReplays(body)).toHaveLength(1);
+            expect(doc.history.undoCount()).toBe(count + 1);
+            doc.history.undo();
+            await DocumentRebuilds.settled(doc);
+            expect(sketches.map((sketch) => sketch.dataJson)).toEqual(before);
+        }
+        expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+        expect(DocumentRebuilds.pending(doc)).toBe(false);
+        expect(DocumentMutations.isHeld(doc)).toBe(false);
+    } finally {
+        PerformanceTrace.disable();
+        rs.unstubAllGlobals();
+        doc.dispose();
+    }
+});
+
+test("MCP parametric jobs return a handle and permit status, metadata and cancellation during rebuild", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    app.activeView = { document: doc } as never;
+    doc.selection = createMockSelection();
+    rs.stubGlobal("app", app);
+    const client = new Client({ name: "parametric-jobs-test", version: "1" });
+    const server = createMcpServer({
+        tools: [...buildParametricJobTools(), ...buildProgramJobTools(), ...buildReadTools()],
+        queue: new SerialQueue(),
+    });
+    try {
+        const { edits } = booleanEditModel(doc);
+        const before = doc.history.undoCount();
+        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+        await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+        const call = async (name: string, args: Record<string, unknown> = {}) => {
+            const response = await client.callTool({ name, arguments: args });
+            const content = response.content as { type: string; text: string }[];
+            expect(content[0].type).toBe("text");
+            return JSON.parse(content[0].text);
+        };
+        const started = await call("start_parametric_job", { ops: edits, responseMode: "compact" });
+        expect(started.state).toBe("queued");
+        expect(started.documentId).toBe(doc.id);
+        await rs.waitFor(() => expect(DocumentRebuilds.pending(doc)).toBe(true), { interval: 1 });
+        const status = await call("get_parametric_job", { jobId: started.jobId });
+        expect(status.state).toBe("running");
+        const rebuild = await call("get_rebuild_status");
+        expect(rebuild.pending).toBeGreaterThan(0);
+        const metadata = await call("get_document_state");
+        expect(metadata.hasActiveDocument).toBe(true);
+        const cancelled = await call("cancel_parametric_job", { jobId: started.jobId });
+        expect(cancelled.state).toBe("cancelling");
+        const finished = await waitForTerminalJob(call, "get_parametric_job", started.jobId);
+        expect(finished.state).toBe("cancelled");
+        expect(doc.history.undoCount()).toBe(before);
+        expect(DocumentMutations.isHeld(doc)).toBe(false);
+        // A second job proves the cancelled job released the shared queue and owner.
+        const second = await call("start_parametric_job", {
+            ops: [{ op: "features", body: "base" }],
+            responseMode: "compact",
+        });
+        const completed = await waitForTerminalJob(call, "get_parametric_job", second.jobId);
+        expect(completed.state).toBe("completed");
+        expect(completed.result.results.features).toHaveLength(15);
+        expect(doc.history.undoCount()).toBe(before);
+    } finally {
+        await client.close();
+        await DocumentRebuilds.settled(doc);
+        rs.unstubAllGlobals();
+        doc.dispose();
+    }
+});
+
+test("a failed sketch batch discards its deferred work and restores previous edits", async () => {
+    const doc = newDoc();
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        const nodes = doc.modelManager.findNodes((node) => node instanceof SketchNode) as SketchNode[];
+        const before = nodes.map((node) => node.dataJson);
+        const count = doc.history.undoCount();
+        expect(() =>
+            run(doc, [
+                edits[0],
+                {
+                    op: "editSketch",
+                    sketch: "missing",
+                    actions: [{ action: "move", entities: [1], delta: [0, 2] }],
+                },
+            ]),
+        ).toThrow('op 1 ("editSketch") failed');
+        await DocumentRebuilds.settled(doc);
+        expect(nodes.map((node) => node.dataJson)).toEqual(before);
+        expect(doc.history.undoCount()).toBe(count);
+        expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+        expect(DocumentRebuilds.pending(doc)).toBe(false);
+    } finally {
+        doc.dispose();
+    }
+});
+
+test("a geometry query between sketch edits observes that position in the program", () => {
+    const doc = newDoc();
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        PerformanceTrace.enable();
+        const result = run(doc, [edits[0], { op: "edges", body: "base", id: "between" }, edits[1]]);
+        expect(bodyReplays(body)).toHaveLength(2);
+        const centers = (result.results["between"] as EdgesReport).edges.flatMap(({ reference }) =>
+            reference.edge.kind === "circle" ? [reference.edge.center] : [],
+        );
+        const first = centers.filter((center) => Math.abs(center.x - 6) < 1e-6);
+        const second = centers.filter((center) => Math.abs(center.x - 11) < 1e-6);
+        expect(first).toHaveLength(2);
+        expect(second).toHaveLength(2);
+        for (const center of first) expect(center.y).toBeCloseTo(17);
+        for (const center of second) expect(center.y).toBeCloseTo(15);
+    } finally {
+        PerformanceTrace.disable();
         doc.dispose();
     }
 });

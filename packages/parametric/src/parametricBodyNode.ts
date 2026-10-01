@@ -221,6 +221,38 @@ export class ParametricBodyNode
     private static readonly ASYNC_FEATURE_THRESHOLD = 12;
     private static readonly synchronousDocuments = new WeakMap<IDocument, number>();
 
+    private static readonly deferredUpstream = new WeakMap<
+        IDocument,
+        Map<ParametricBodyNode, INode | undefined>
+    >();
+
+    /** Coalesce sketch notifications; geometry reads drain their own dependencies on demand. */
+    static withDeferredUpstream<T>(document: IDocument, action: () => T): T {
+        if (ParametricBodyNode.deferredUpstream.has(document)) return action();
+        const pending = new Map<ParametricBodyNode, INode | undefined>();
+        ParametricBodyNode.deferredUpstream.set(document, pending);
+        try {
+            const result = action();
+            while (pending.size) pending.keys().next().value?.drainDeferredUpstream();
+            return result;
+        } finally {
+            ParametricBodyNode.deferredUpstream.delete(document);
+        }
+    }
+
+    private drainDeferredUpstream(): void {
+        const pending = ParametricBodyNode.deferredUpstream.get(this.document);
+        if (!pending?.has(this)) return;
+        const source = pending.get(this);
+        pending.delete(this);
+        this.rebuildFromUpstream("batched-upstream", source, true);
+    }
+
+    /** Cancel ephemeral work before the owning program rolls its edits back. */
+    cancelProgramRebuild(): void {
+        this.cancelRebuild("program-cancelled");
+    }
+
     /**
      * Ordered programs capture topology between writes and validate each write before continuing.
      * Their callback must remain synchronous. The scope is document-local and nestable; incoming
@@ -666,6 +698,7 @@ export class ParametricBodyNode
         // this node as its source) gets the previous result as-is: recomputing here
         // would re-enter generateShape.
         if (this._evaluating) return this._shape;
+        this.drainDeferredUpstream();
         if (ParametricBodyNode.evaluationDepth > 0) this._job?.flush();
         if (this._job) return this._shape;
         if (!this._shape.isOk && (!this._evaluated || this.hasNewReferences())) {
@@ -1571,7 +1604,7 @@ export class ParametricBodyNode
      * `variableSync.ts`). A failed rebuild keeps the last good shape silently; the
      * feature panel carries the error.
      */
-    private rebuildFromUpstream(trigger = "upstream", source?: INode): void {
+    private rebuildFromUpstream(trigger = "upstream", source?: INode, draining = false): void {
         // Skip while evaluating: a referenced node (e.g. the sketch) may generate its
         // shape lazily mid-evaluation and notify — the in-flight pass reads it fresh.
         if (this._evaluating) return;
@@ -1595,6 +1628,11 @@ export class ParametricBodyNode
         // rebuilds it directly, and so does the consumer once it stops consuming us.
         if (this.isConsumedByWatched(source)) return;
 
+        const pending = ParametricBodyNode.deferredUpstream.get(this.document);
+        if (pending && !draining) {
+            pending.set(this, source);
+            return;
+        }
         const result = this.generateShape(trigger);
         if (result.isOk) {
             this.shape = result;
