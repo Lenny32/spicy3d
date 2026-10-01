@@ -533,12 +533,12 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
         if (count != 1)
             return failure("could not identify one rolling strip per selected edge");
         TopoDS_Face clipped;
-        TopoDS_Edge section;
-        if (!clipFace(strip, cuts[i], clipped, section, &filletHistory, &reconstructionHistory))
+        TopoDS_Edge sectionEdge;
+        if (!clipFace(strip, cuts[i], clipped, sectionEdge, &filletHistory, &reconstructionHistory))
             return failure("could not trim a rolling strip at its setback cross-section");
         replaced.push_back(strip);
         retained.push_back(clipped);
-        boundary.push_back({ section, clipped });
+        boundary.push_back({ sectionEdge, clipped });
     }
     for (const auto& original : supports) {
         const auto surface = BRep_Tool::Surface(original);
