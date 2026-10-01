@@ -212,7 +212,7 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
         {
             name: "start_program_job",
             description:
-                "Queue a run_program in the page's shared mutation FIFO and immediately return a jobId. Poll get_program_job for live completed-operation counts and the completion result. Worker-eligible geometry remains responsive; synchronous query/creation operations retain their existing limits. Jobs belong to this MCP session and the active document, expire ten minutes after finishing, and cancel when the session ends. Default deadline 120s, maximum 600s; result limit 1 MiB. An oversized result reports completed with a reporting error, preserving committed edits. Load modeling-api for ops.",
+                "Queue a run_program in the page's shared mutation FIFO and immediately return a jobId. Poll get_program_job for live completed-operation counts and the completion result. Worker-eligible geometry remains responsive; synchronous query/creation operations retain their existing limits. Jobs belong to this MCP session and the active document, expire ten minutes after finishing, and cancel when the session ends. Per caller, this family allows sixteen retained/four active jobs, separately from corner jobs (combined maximum 32 retained/8 active). A running corner job can occupy the shared FIFO for up to 90s. Default deadline 120s, maximum 600s; result limit 1 MiB. An oversized result reports completed with a reporting error, preserving committed edits. Load modeling-api for ops.",
             parameters: {
                 ...runProgramParameters(),
                 properties: {
