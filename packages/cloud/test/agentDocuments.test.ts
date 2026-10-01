@@ -142,7 +142,8 @@ describe("the agent's cloud link", () => {
     });
 
     test("an agent's save reports what the server stored: the user's manual save joined it", async () => {
-        const a = await device();
+        // No backoff retry may push the manual save alone before the agent's save joins it.
+        const a = await device({ sync: { initialDelayMs: 60_000, maxDelayMs: 60_000 } });
         const doc = await a.create("doc-1", { w: "10" });
         a.network.down = true;
         doc.edit("w", "11");
