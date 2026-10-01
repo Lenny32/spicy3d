@@ -51,6 +51,7 @@ import { convertFromContinuity, getJoinType, getOffsetMode } from "./helper";
 import { guardKernelResults } from "./kernelGuard";
 import { prepareLoftSection } from "./loftSections";
 import { OccEdge, OccShape } from "./shape";
+import { thickenFailureDiagnostic } from "./thickenDiagnostics";
 
 function ensureOccShape(shapes: IShape | IShape[]): TopoDS_Shape[] {
     if (Array.isArray(shapes)) {
@@ -1227,7 +1228,7 @@ export class ShapeFactory implements IShapeFactory {
         ) as Result<ICompound>;
     }
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape> {
-        return validThickSolid(
+        const result = validThickSolid(
             convertShapeResult(
                 wasm.ShapeFactory.makeThickSolidBySimple,
                 [ensureOccShape(shape)[0], thickness],
@@ -1236,6 +1237,7 @@ export class ShapeFactory implements IShapeFactory {
             "MakeThickSolidBySimple",
             shape,
         );
+        return result.isOk ? result : Result.err(thickenFailureDiagnostic(result.error, shape, thickness));
     }
     makeThickSolidByJoin(
         shape: IShape,
@@ -1247,7 +1249,7 @@ export class ShapeFactory implements IShapeFactory {
     ): Result<IShape> {
         const refused = refuseIntersectionJoin(shape, joinType);
         if (refused) return Result.err(refused);
-        return validThickSolid(
+        const result = validThickSolid(
             convertShapeResult(
                 wasm.ShapeFactory.makeThickSolidByJoin,
                 [
@@ -1265,6 +1267,9 @@ export class ShapeFactory implements IShapeFactory {
             closingFaces,
             "; for an open shell use makeThickSolidBySimple",
         );
+        return result.isOk
+            ? result
+            : Result.err(thickenFailureDiagnostic(result.error, shape, thickness, closingFaces));
     }
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape> {
         const prepared: IShape[] = [];

@@ -6,7 +6,7 @@ import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";
 import { type IKernelWorkerTransport, KernelWorkerClient } from "../src/workerClient";
 import type { KernelMessage } from "../src/workerProtocol";
-import { createBox, unwrapOk } from "./helpers";
+import { createBox, createSphere, unwrapOk } from "./helpers";
 import { NativeWorkerTransport } from "./workerHarness";
 import "./setup";
 
@@ -240,6 +240,33 @@ test("an opening face from a different shape fails before entering the worker", 
         await task.ready;
         expect(task.take().error).toBe("Opening face is not part of the input shape");
         expect(createWorker).not.toHaveBeenCalled();
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("a bounded thicken failure names the limiting curvature region", async () => {
+    const factory = new ShapeFactory();
+    const sphere = keep(createSphere(factory, undefined, 2));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: sphere,
+            closingFaces: [],
+            thickness: -3.75,
+            joinType: "arc",
+            mode: "skin",
+            intersection: false,
+        });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("input face index 0 near (");
+        expect(result.error).toContain("curvature radius 2 mm <= |thickness| 3.75 mm");
+        expect(sphere.checkShape()).toBe(true);
+        expect(sphere.volume()).toBeCloseTo((4 / 3) * Math.PI * 8, 6);
     } finally {
         hybrid.dispose();
     }

@@ -22,6 +22,7 @@ import { refuseIntersectionJoin, ShapeFactory } from "./factory";
 import { prepareLoftSection } from "./loftSections";
 import { replicaTopology, sameReplicaTopology } from "./replicaTopology";
 import { OccShape, OccSubEdgeShape, OccSubFaceShape } from "./shape";
+import { thickenFailureDiagnostic } from "./thickenDiagnostics";
 import type { KernelWorkerClient } from "./workerClient";
 import { createKernelWorker } from "./workerFactory";
 import { workerProfile } from "./workerProfile";
@@ -176,7 +177,24 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                 this.active.delete(cancel);
                 const answer = reply;
                 reply = undefined;
-                if (!answer.ok) return Result.err(answer.error.message);
+                if (!answer.ok) {
+                    const message = answer.error.message;
+                    if (
+                        answer.error.code === "invalid" &&
+                        (request.method === "makeThickSolidBySimple" ||
+                            request.method === "makeThickSolidByJoin")
+                    ) {
+                        return Result.err(
+                            thickenFailureDiagnostic(
+                                message,
+                                request.shape,
+                                request.thickness,
+                                request.method === "makeThickSolidByJoin" ? request.closingFaces : [],
+                            ),
+                        );
+                    }
+                    return Result.err(message);
+                }
                 let shape: OccShape | undefined;
                 try {
                     shape = importReplica(answer.value);

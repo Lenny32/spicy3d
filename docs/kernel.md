@@ -67,6 +67,33 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   self-intersection test (`BOPAlgo_ArgumentAnalyzer`, up to 200 faces per shape).
   `Shape.checkSelfIntersection` is feature-detected: an older binary answers "not available".
 
+### Thicken offset diagnostics (#121)
+
+Failed thickening in the main factory and the bounded MCP worker bridge retains the original
+kernel/validation error. Using existing surface D2, face normal and trimmed-domain queries,
+TypeScript samples a 5 × 5 interior UV grid on at most 64 input faces, excluding opening faces
+and points outside the face trim. When a principal curvature in the signed offset direction
+has radius no greater than the requested thickness, the error names the likely input face
+index (zero-based), position in local shape coordinates (mm), sampled radius and a suggestion
+to reduce absolute thickness below that radius or smooth the region. The parametric thicken
+feature forwards these errors, including when thickness is a live expression.
+
+This is a sampled local regularity limit, **not a maximum successful thickness**. Sampling can
+miss a narrow crease; collisions between distant faces and offset trimming failures have other
+causes. Uninformative offset statuses with no sampled limit get a qualified hint instead of an
+invented failing face. Successful results and the existing validity/opening-face checks are
+unchanged. Diagnostics never retry the offset; worker cancellation/timeouts and native traps
+do not trigger sampling.
+
+The curvature-tolerant envelope mode remains blocked under the frozen save format and offline
+WASM constraints. Open skins already use `MakeThickSolidBySimple`. The existing Join binding
+fixes self-intersection handling to false and exposes no `RemoveIntEdges` argument. Exposing
+such controls or another offset algorithm requires a C++ binding and a rebuilt WASM module;
+the existing optional feature `mode` only accepts OCCT `skin`/`pipe`, and `joinType` controls
+edge joins. A persisted envelope selection would require a new stored option (or extending
+the existing mode's accepted values), approval of the payload change, a parametric version
+bump/migration and fixtures. None of those changes is made here.
+
 ## Dead-kernel state
 
 After an abort or a fatal trap, `packages/wasm/src/kernelGuard.ts` runs a small probe (a unit box)

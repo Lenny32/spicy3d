@@ -146,6 +146,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   does not apply to it, nor do joinType ("arc" default | "intersection") and mode ("skin" | "pipe"),
   which shape a solid's walls. Faces the thicken leaves where they were keep their ids, so a fillet
   after it survives a thickness edit.
+  Offset failures can name a likely limiting input face index, position (body coordinates, mm),
+  and sampled curvature radius. Try a smaller absolute wall_t or smooth that region; the sampled
+  radius is a local estimate, NOT a guaranteed maximum successful thickness. No reported limit
+  does not rule out a narrow crease or collisions between distant offset walls. skin/pipe and
+  arc/intersection do not provide a self-intersection-trimming envelope mode.
 - { op: "boolean", id, body, operation, tools }   // operation: fuse | cut | common
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.
