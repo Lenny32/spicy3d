@@ -9,6 +9,7 @@ import {
     createMockVisualWithDocument,
     TestDocument,
 } from "@spicy3d/core/test-utils";
+import * as bsplineOffset from "../../src/sketch/bsplineOffset";
 import { SketchCopyCommand } from "../../src/sketch/commands/sketchCopy";
 import { SketchExtendCommand } from "../../src/sketch/commands/sketchExtend";
 import { SketchMirrorCommand } from "../../src/sketch/commands/sketchMirror";
@@ -384,6 +385,28 @@ describe("geometry command interaction", () => {
         expect(copy.type).toBe("bspline");
         expect(copy.id).not.toBe(spline.id);
         for (let i = 1; i < copy.params.length; i += 2) expect(copy.params[i]).toBeCloseTo(-5, 8);
+    });
+
+    test("offset fits each B-spline side once while the pointer moves", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 100, 0] };
+        const { editor, node, move, click } = setup({ entities: [spline], constraints: [] });
+        const fit = rs.spyOn(bsplineOffset, "offsetBSpline");
+        try {
+            const preview = rs.spyOn(editor.annotations, "setGeometryPreview");
+            const command = new SketchOffsetCommand();
+            command.distance = 5;
+            const run = command.executeAsync();
+            await click(20);
+            for (const y of [-20, -25, -30, 20, 25, -35, 30]) move(20, y);
+            expect(preview.mock.calls.at(-1)![0]).toHaveLength(1);
+            expect(fit.mock.calls.map(([, distance]) => distance)).toEqual([-5, 5]);
+            await click(20, 30);
+            await run;
+            expect(fit).toHaveBeenCalledTimes(2);
+            expect(node.data.entities).toHaveLength(2);
+        } finally {
+            fit.mockRestore();
+        }
     });
 
     test("offset reports malformed B-spline geometry instead of aborting", async () => {

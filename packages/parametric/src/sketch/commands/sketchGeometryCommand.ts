@@ -40,6 +40,24 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
             if (this.operation === "extend") targetId = id;
             else sourceId = id;
         }
+        // A B-spline offset is costly to fit and only depends on the side the cursor is on:
+        // keep both sides of the current source so pointer moves reuse them.
+        let offsetSource = "";
+        const offsets = new Map<number, Result<GeometryEdit>>();
+        const offset = (source: SketchEntityData, distance: number): Result<GeometryEdit> => {
+            if (source.type !== "bspline") return offsetCurve(source, distance);
+            const key = JSON.stringify(source);
+            if (key !== offsetSource) {
+                offsetSource = key;
+                offsets.clear();
+            }
+            let edit = offsets.get(distance);
+            if (!edit) {
+                edit = offsetCurve(source, distance);
+                offsets.set(distance, edit);
+            }
+            return edit;
+        };
         const proposal = (uv: [number, number]): Result<GeometryEdit> => {
             const curves = constraintTargetEntities(editor.solver).filter(editableCurve);
             const source =
@@ -61,7 +79,7 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                     : Result.err("The extension target no longer exists");
             }
             try {
-                return offsetCurve(source, this.offsetDistance * offsetSide(source, uv));
+                return offset(source, this.offsetDistance * offsetSide(source, uv));
             } catch (e) {
                 return Result.err(e instanceof Error ? e.message : String(e));
             }
