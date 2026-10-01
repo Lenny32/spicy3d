@@ -34,7 +34,7 @@ export interface IShapeConverter {
 
 /** Runtime tessellation controls; neither value changes the CAD shape. */
 export interface StlTessellationOptions {
-    /** Requested linear tessellation deflection in the input shape's coordinate unit (normally mm); finite > 0. */
+    /** Requested linear tessellation deflection in the input shape's coordinate unit (normally mm); finite >= 0.001. */
     linearTolerance?: number;
     /** Angular deflection in degrees; finite > 0 and <= 180. */
     angularTolerance?: number;
@@ -44,9 +44,9 @@ export interface StlTessellationOptions {
 export function validateStlTessellation(options?: StlTessellationOptions): string | undefined {
     if (
         options?.linearTolerance !== undefined &&
-        (!Number.isFinite(options.linearTolerance) || options.linearTolerance <= 0)
+        (!Number.isFinite(options.linearTolerance) || options.linearTolerance < 0.001)
     ) {
-        return "STL linearTolerance must be a finite number greater than zero";
+        return "STL linearTolerance must be a finite number of at least 0.001 mm";
     }
     if (
         options?.angularTolerance !== undefined &&

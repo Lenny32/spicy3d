@@ -50,6 +50,7 @@ test.each(["merged", "separate"])("passes STL tolerances to every %s output", as
 
 test.each([
     { linearTolerance: 0 },
+    { linearTolerance: 1e-9 },
     { linearTolerance: -1 },
     { linearTolerance: Number.NaN },
     { linearTolerance: Number.POSITIVE_INFINITY },

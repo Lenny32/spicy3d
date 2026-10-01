@@ -14,6 +14,7 @@ const converter = createTestConverter();
 
 test.each([
     { linearTolerance: 0 },
+    { linearTolerance: 1e-9 },
     { linearTolerance: -1 },
     { linearTolerance: Number.NaN },
     { angularTolerance: 0 },
