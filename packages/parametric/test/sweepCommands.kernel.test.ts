@@ -53,7 +53,7 @@ function setup() {
     doc.modelManager.addNode(path);
     return { app, doc, section, path };
 }
-function pick(node: SketchNode, kind: number): VisualShapeData {
+function pick(node: SketchNode | ParametricBodyNode, kind: number): VisualShapeData {
     const shape =
         kind === ShapeTypes.face ? node.mesh.faces?.range[0]?.shape : node.mesh.edges?.range[0]?.shape;
     expect(shape).not.toBeUndefined();
@@ -95,6 +95,16 @@ async function edit(state: Awaited<ReturnType<typeof create>>) {
 }
 
 describe("interactive associative sweep (real kernel)", () => {
+    test("repicking skips the sweep's own body and preserves the external path", async () => {
+        const state = await create();
+        const { session, done } = await edit(state);
+        picker(state.doc, session, [pick(state.body, ShapeTypes.edge), pick(state.path, ShapeTypes.edge)]);
+        await session.pickPath();
+        session.confirm();
+        await done;
+        expect((state.body.features[0] as SweepFeatureData).path.nodeId).toBe(state.path.id);
+        expect(state.body.shape.value.volume()).toBeCloseTo(10 * Math.PI, 5);
+    });
     test("captures actual edge topology, previews, and commits creation as one undo step", async () => {
         const { doc, section, path, body } = await create();
         expect(body.shape.isOk).toBe(true);

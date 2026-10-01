@@ -83,6 +83,23 @@ test("the published MCP tool creates and edits a real cylindrical-wall rib and c
     doc.history.redo();
     expect(body.features).toHaveLength(2);
 });
+test.each(["faceSweep", "editFaceSweep"])("%s rejects its own body as a sweep path", async (kind) => {
+    const { doc, body, op, tool } = await setup();
+    if (kind === "editFaceSweep") await tool.handler({ ops: [op] });
+    const before = JSON.stringify(body.features);
+    const position = doc.history.position();
+    const path = { nodeId: body.id, edgeIndexes: [0] };
+    const invalid =
+        kind === "faceSweep"
+            ? { ...op, path }
+            : { op: kind, body: body.id, featureId: body.features[1].id, path };
+    await expect(tool.handler({ ops: [invalid] })).rejects.toThrow(
+        "Sweep path must belong to a different body",
+    );
+    expect(JSON.stringify(body.features)).toBe(before);
+    expect(doc.history.position()).toBe(position);
+});
+
 test("a failed multi-op MCP edit restores exact payload, geometry and undo position", async () => {
     const { doc, body, op, tool } = await setup();
     await tool.handler({ ops: [op] });

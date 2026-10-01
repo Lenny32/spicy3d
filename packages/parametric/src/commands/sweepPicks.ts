@@ -39,13 +39,16 @@ export async function pickSweepPath(
     document: IDocument,
     controller: () => AsyncController,
     changed?: (path: SweepFeatureData["path"]) => void,
+    host?: ShapeNode,
 ): Promise<SweepFeatureData["path"] | undefined> {
     let source: ShapeNode | undefined;
     const edges: EdgeRef[] = [];
     while (true) {
         const current = controller();
         const picked = await new SelectShapeStep(ShapeTypes.edge, "prompt.select.sweepPath", {
-            nodeFilter: { allow: (node) => node instanceof ShapeNode && (!source || node === source) },
+            nodeFilter: {
+                allow: (node) => node instanceof ShapeNode && node !== host && (!source || node === source),
+            },
         }).execute(document, current);
         if (!picked)
             return current.result?.status === "success" && source && edges.length
@@ -53,6 +56,14 @@ export async function pickSweepPath(
                 : undefined;
         for (const shape of picked.shapes) {
             const node = shape.owner.node;
+            if (node === host) {
+                PubSub.default.pub(
+                    "showToast",
+                    "error.default:{0}",
+                    "Sweep path must belong to a different body",
+                );
+                continue;
+            }
             if (!(node instanceof ShapeNode) || (source && node !== source)) {
                 PubSub.default.pub(
                     "showToast",

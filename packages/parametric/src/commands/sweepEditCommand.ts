@@ -56,7 +56,12 @@ export class SweepEditCommand extends CancelableCommand {
     @property("option.command.sweepPath")
     readonly pickPath = (): Promise<void> =>
         this.pick(async () => {
-            const path = await pickSweepPath(this.document, () => this.newPickController());
+            const path = await pickSweepPath(
+                this.document,
+                () => this.newPickController(),
+                undefined,
+                this.body,
+            );
             if (path && this.feature) this.feature = { ...this.feature, path };
         });
     @property("common.confirm")

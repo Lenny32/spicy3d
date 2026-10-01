@@ -70,7 +70,12 @@ export class FaceSweepCommand extends CancelableCommand {
     @property("option.command.sweepPath")
     readonly pickPath = (): Promise<void> =>
         this.pick(async () => {
-            const path = await pickSweepPath(this.document, () => this.newPickController());
+            const path = await pickSweepPath(
+                this.document,
+                () => this.newPickController(),
+                undefined,
+                this.body,
+            );
             if (path && this.feature) this.feature = { ...this.feature, path };
         });
     @property("faceSweep.pickSupport")
@@ -124,7 +129,12 @@ export class FaceSweepCommand extends CancelableCommand {
             this.body = picked.body;
             const section = await pickSweepSection(this.document, this.newPickController());
             if (!section || this.isCanceled) return;
-            const path = await pickSweepPath(this.document, () => this.newPickController());
+            const path = await pickSweepPath(
+                this.document,
+                () => this.newPickController(),
+                undefined,
+                this.body,
+            );
             if (!path || this.isCanceled) return;
             this.feature = {
                 id: Id.generate(),

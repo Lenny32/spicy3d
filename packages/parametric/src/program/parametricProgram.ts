@@ -1154,7 +1154,11 @@ function sweepSectionInput(state: State, input: SweepSectionInput): SweepFeature
     return { sketchId: sketch.id, profile: captureProfileRef(profiles.value[index].face) };
 }
 
-function sweepPathInput(state: State, input: SweepPathInput): SweepFeatureData["path"] {
+function sweepPathInput(
+    state: State,
+    input: SweepPathInput,
+    host?: ParametricBodyNode,
+): SweepFeatureData["path"] {
     if (
         !input ||
         typeof input.nodeId !== "string" ||
@@ -1165,6 +1169,7 @@ function sweepPathInput(state: State, input: SweepPathInput): SweepFeatureData["
         throw new Error("Sweep path requires nodeId and 1–256 ordered edgeIndexes");
     }
     const node = resolveNode(state, input.nodeId, "path source");
+    if (node === host) throw new Error("Sweep path must belong to a different body");
     if (!(node instanceof ShapeNode) || !node.shape.isOk)
         throw new Error("Sweep path source has no valid shape");
     const topology = node.shape.value.findSubShapes(ShapeTypes.edge);
@@ -1221,7 +1226,7 @@ function runEditSweepOp(state: State, op: EditSweepOp): void {
     const edited: SweepFeatureData = {
         ...rest,
         section: op.section !== undefined ? sweepSectionInput(state, op.section) : feature.section,
-        path: op.path !== undefined ? sweepPathInput(state, op.path) : feature.path,
+        path: op.path !== undefined ? sweepPathInput(state, op.path, body) : feature.path,
         ...((op.solid ?? feature.solid) === false ? { solid: false } : {}),
         ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
     };
@@ -1262,7 +1267,7 @@ function runFaceSweepOp(state: State, op: FaceSweepOp): void {
         id: Id.generate(),
         type: "faceSweep",
         section: sweepSectionInput(state, op.section),
-        path: sweepPathInput(state, op.path),
+        path: sweepPathInput(state, op.path, body),
         support: faceSweepSupportInput(state, op.support, body),
         operation: op.operation,
         ...(op.roundCorner === true ? { roundCorner: true } : {}),
@@ -1283,7 +1288,7 @@ function runEditFaceSweepOp(state: State, op: EditFaceSweepOp): void {
     const edited: FaceSweepFeatureData = {
         ...rest,
         section: op.section === undefined ? feature.section : sweepSectionInput(state, op.section),
-        path: op.path === undefined ? feature.path : sweepPathInput(state, op.path),
+        path: op.path === undefined ? feature.path : sweepPathInput(state, op.path, body),
         support: op.support === undefined ? feature.support : faceSweepSupportInput(state, op.support, body),
         operation: op.operation ?? feature.operation,
         ...((op.roundCorner ?? feature.roundCorner) === true ? { roundCorner: true } : {}),
