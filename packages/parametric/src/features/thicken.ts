@@ -35,6 +35,7 @@ import { matchSourceFaceIndexes } from "./sourceFaceMatcher";
  *   apply. The kernel's `makeThickSolidByJoin` answers no solid for these inputs (the factory
  *   refuses it).
  *
+ * The kernel works on a copy of the input, which it would otherwise modify (see `evaluate`).
  * The inputs are checked before any kernel call (an input the kernel rejects may raise inside it):
  * a shape to thicken, a valid one, a thickness that resolves to a non-zero length. A thick solid
  * the kernel returns inside out (negative volume: an outward offset of a closed shell) is turned
@@ -80,7 +81,16 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
         if (!thickness.isOk) return Result.err(thickness.error);
         if (!input.checkShape()) return Result.err("The shape to thicken is invalid");
 
-        const result = thickenShape(feature, context, input, thickness.value);
+        // The offset algorithms add p-curves to and widen tolerances on the shape they read, and
+        // `input` is the previous step's cached shape: they work on a copy. A copy keeps the
+        // sub-shape order, so face refs matched on it hold for `input`.
+        const owned = input.clone();
+        let result: Result<IShape>;
+        try {
+            result = thickenShape(feature, context, owned, thickness.value);
+        } finally {
+            owned.dispose();
+        }
         if (!result.isOk) return result;
         const oriented = rightSideOut(result.value);
         if (!oriented.isOk) return oriented;
