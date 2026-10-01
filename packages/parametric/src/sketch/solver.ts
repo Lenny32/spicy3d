@@ -1,7 +1,14 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { EMPTY_SCOPE, type ParameterValue, type Plane, Result, type Scope } from "@spicy3d/core";
+import {
+    EMPTY_SCOPE,
+    type I18nKeys,
+    type ParameterValue,
+    type Plane,
+    Result,
+    type Scope,
+} from "@spicy3d/core";
 import { INCIDENCE_TOLERANCE } from "../features/refGeometry";
 import {
     type BSplineOptions,
@@ -157,18 +164,18 @@ export class SketchSolver implements ExternalEntityHost {
         return text === undefined ? undefined : structuredClone(text);
     }
 
-    addText(settings: SketchTextSettings): Result<number> {
+    addText(settings: SketchTextSettings): Result<number, I18nKeys> {
         const result = createSketchText(this.toData(), settings, undefined, this.ids);
-        if (!result.isOk) return Result.err(result.error);
+        if (!result.isOk) return Result.err(result.error as I18nKeys);
         this.textRecords.push(result.value);
         return Result.ok(result.value.id);
     }
 
-    updateText(id: number, settings: Partial<SketchTextSettings>): Result<void> {
+    updateText(id: number, settings: Partial<SketchTextSettings>): Result<void, I18nKeys> {
         const previous = this.text(id);
-        if (!previous) return Result.err("Sketch text no longer exists");
+        if (!previous) return Result.err("error.sketch.textMissing");
         const result = createSketchText(this.toData(), { ...previous, ...settings }, previous, this.ids);
-        if (!result.isOk) return Result.err(result.error);
+        if (!result.isOk) return Result.err(result.error as I18nKeys);
         this.textRecords = this.textRecords.map((text) => (text.id === id ? result.value : text));
         return Result.ok(undefined);
     }

@@ -7,8 +7,9 @@ import { createMockApplication, createMockView, TestDocument } from "@spicy3d/co
 import { SketchTextCommand, textOutlineMesh } from "../../src/sketch/commands/sketchText";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import { randomSketchIds, sequentialSketchIds } from "../../src/sketch/sketchIds";
+import { shapeEntityIds } from "../../src/sketch/sketchModel";
 import { SketchSolver } from "../../src/sketch/solver";
-import { addTextGeometry, textContours } from "../../src/sketch/textGeometry";
+import { addTextGeometry, textContourKeys, textContours } from "../../src/sketch/textGeometry";
 import "./setup";
 
 function fakeEditor() {
@@ -201,22 +202,116 @@ test("script updates keep retired contour identities through solver round trips 
         const original = solver.text(added.value)!;
         expect(original.profileIds).toHaveLength(3);
         expect(solver.updateText(added.value, { value: "H" }).isOk).toBe(true);
+        const replaced = solver.text(added.value)!.profileIds;
+        expect(replaced).toHaveLength(4);
+        expect(replaced.slice(1)).toEqual(original.profileIds);
+        expect(original.profileIds).not.toContain(replaced[0]);
         const line = solver.addLine(50, 0, 60, 0);
-        expect([original.id, ...original.profileIds]).not.toContain(line);
+        expect([original.id, ...replaced]).not.toContain(line);
         const roundTrip = new SketchSolver(Plane.XY, solver.toData(), undefined, sequentialSketchIds());
         try {
-            expect(roundTrip.updateText(added.value, { value: "B", height: 8, angle: 25 }).isOk).toBe(true);
-            expect(roundTrip.text(added.value)!.profileIds).toEqual(original.profileIds);
+            expect(roundTrip.updateText(added.value, { height: 8, angle: 25 }).isOk).toBe(true);
+            expect(roundTrip.text(added.value)!.profileIds).toEqual(replaced);
+            // Retired slots stay reserved: B comes back with fresh contour identities.
+            expect(roundTrip.updateText(added.value, { value: "B" }).isOk).toBe(true);
+            const restored = roundTrip.text(added.value)!.profileIds;
+            expect(restored).toHaveLength(7);
+            expect(restored.slice(3)).toEqual(replaced);
+            expect([original.id, ...replaced, line]).not.toContain(restored[0]);
+            expect(new Set(restored).size).toBe(7);
             expect(roundTrip.solve(true).result).toMatch(/^Ok/);
             expect(roundTrip.text(added.value)).toMatchObject({ value: "B", height: 8, angle: 25 });
             const later = roundTrip.addPoint(50, 10);
-            expect([original.id, ...original.profileIds, line]).not.toContain(later);
+            expect([original.id, ...restored, line]).not.toContain(later);
         } finally {
             roundTrip.dispose();
         }
     } finally {
         solver.dispose();
     }
+});
+
+test("contour identities follow glyphs, not contour indices", () => {
+    const solver = new SketchSolver(Plane.XY, undefined, undefined, sequentialSketchIds());
+    try {
+        const added = solver.addText({
+            value: "AB",
+            x: 0,
+            y: 0,
+            height: 5,
+            angle: 0,
+            frame: { width: 20, height: 10 },
+        });
+        expect(added.isOk).toBe(true);
+        const before = solver.text(added.value)!.profileIds;
+        const aCount = textContourKeys("A").length;
+        expect(aCount).toBe(2);
+        expect(before).toHaveLength(aCount + 3);
+        const aIds = before.slice(0, aCount);
+        const bIds = before.slice(aCount);
+
+        expect(solver.updateText(added.value, { value: "XB" }).isOk).toBe(true);
+        const after = solver.text(added.value)!.profileIds;
+        const xCount = textContourKeys("X").length;
+        expect(xCount).toBe(1);
+        expect(after.slice(xCount, xCount + 3)).toEqual(bIds);
+        expect([...aIds, ...bIds, added.value]).not.toContain(after[0]);
+        // A's contours are retired: still reserved, past the live contour slots.
+        expect(after.slice(xCount + 3)).toEqual(aIds);
+        const shapeIds = new Set(shapeEntityIds(solver.toData()));
+        expect([...bIds, after[0]].every((id) => shapeIds.has(id))).toBe(true);
+        expect(aIds.some((id) => shapeIds.has(id))).toBe(false);
+
+        expect(solver.updateText(added.value, { value: "BX" }).isOk).toBe(true);
+        const swapped = solver.text(added.value)!.profileIds;
+        expect(swapped.slice(0, 3)).toEqual(bIds);
+        expect(swapped[3]).toBe(after[0]);
+        expect(swapped.slice(4)).toEqual(aIds);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test.each([
+    { height: 9 },
+    { x: 4, y: -3 },
+    { angle: 30 },
+    { frame: { width: 40, height: 20 } },
+    { alignment: "center" as const, verticalAlignment: "middle" as const },
+    { spacing: 25 },
+    { flipHorizontal: true, flipVertical: true },
+])("layout-only edit %o keeps every contour identity", (patch) => {
+    const solver = new SketchSolver(Plane.XY, undefined, undefined, sequentialSketchIds());
+    try {
+        const added = solver.addText({
+            value: "AB\nA",
+            x: 0,
+            y: 0,
+            height: 5,
+            angle: 0,
+            frame: { width: 20, height: 10 },
+        });
+        expect(added.isOk).toBe(true);
+        const before = solver.text(added.value)!.profileIds;
+        expect(solver.updateText(added.value, patch).isOk).toBe(true);
+        expect(solver.text(added.value)!.profileIds).toEqual(before);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("contour keys match textContours order and count occurrences per glyph", () => {
+    const contours = textContours({ value: "AB\nA", x: 0, y: 0, height: 5, angle: 0 });
+    expect(contours.isOk).toBe(true);
+    const keys = textContourKeys("AB\nA");
+    expect(keys).toHaveLength(contours.value.length);
+    expect(keys).toEqual(["A#0:0", "A#0:1", "B#0:0", "B#0:1", "B#0:2", "A#1:0", "A#1:1"]);
+});
+
+test("an unknown font is reported as such", () => {
+    const result = textContours({ value: "A", x: 0, y: 0, height: 5, angle: 0, font: "serif" as "sans" });
+    expect(result.isOk).toBe(false);
+    expect(result.error).toBe("error.sketch.unsupportedTextFont");
 });
 
 test("cancelled text edits clear previews and preserve content", () => {

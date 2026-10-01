@@ -70,7 +70,10 @@ export function promptSketchText(editor: SketchEditor, initial: SketchTextSettin
     error.className = style.error;
     content.append(error);
     const read = (): SketchTextSettings => {
-        const number = (key: string) => Number(fields.get(key)!.value);
+        const number = (key: string) => {
+            const text = fields.get(key)!.value.trim();
+            return text === "" ? Number.NaN : Number(text);
+        };
         return {
             ...initial,
             value: value.value,
@@ -112,7 +115,7 @@ export function promptSketchText(editor: SketchEditor, initial: SketchTextSettin
                 const result =
                     id === undefined ? editor.solver.addText(read()) : editor.solver.updateText(id, read());
                 if (!result.isOk) {
-                    error.textContent = result.error;
+                    error.textContent = I18n.translate(result.error);
                     return false;
                 }
                 clear();

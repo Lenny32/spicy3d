@@ -25,8 +25,8 @@ import { randomSketchIds } from "../../src/sketch/sketchIds";
 import { type SketchData, shapeEntityIds } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import { SketchSolver } from "../../src/sketch/solver";
-import { addTextGeometry, type TextOutlineOptions } from "../../src/sketch/textGeometry";
-import { copySketchSelection } from "../../src/sketch/utilityOperations";
+import { addTextGeometry, type TextOutlineOptions, textContours } from "../../src/sketch/textGeometry";
+import { copySketchSelection, transformSketchSelection } from "../../src/sketch/utilityOperations";
 import "./setup";
 
 const previousFactory = Object.getOwnPropertyDescriptor(globalThis, "shapeFactory");
@@ -207,6 +207,44 @@ test("copy/paste, move and mirror retain curves, closure and holes with fresh id
         expect(profiles.value.outer.map(wires)).toEqual([2, 2, 2, 2]);
     } finally {
         solver.dispose();
+    }
+});
+
+test.each([
+    ["the X axis", [0, 0, 1, 0], 0],
+    ["a rotated axis", [3, -2, 8, 4], 25],
+])("mirroring text about %s yields the exact mirror image of its contours", (_name, axis, angle) => {
+    const data = textData("Ao", { angle });
+    const original = data.texts![0];
+    const mirrored = transformSketchSelection(data, [original.id], {
+        kind: "mirror",
+        axis: { id: -1, type: "line", params: axis },
+    });
+    expect(mirrored.isOk).toBe(true);
+    const [ax, ay, bx, by] = axis;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const reflect = ([x, y]: readonly [number, number]): [number, number] => {
+        const t = ((x - ax) * dx + (y - ay) * dy) / len2;
+        const fx = ax + t * dx;
+        const fy = ay + t * dy;
+        return [2 * fx - x, 2 * fy - y];
+    };
+    const points = (text: TextOutlineOptions) => {
+        const contours = textContours(text);
+        expect(contours.isOk).toBe(true);
+        return contours.value.flatMap((contour) => contour.flat());
+    };
+    const expected = points(original)
+        .map(reflect)
+        .sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    const actual = points(mirrored.value.data.texts![0]).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    expect(actual).toHaveLength(expected.length);
+    expect(expected.length).toBeGreaterThan(0);
+    for (const [i, point] of expected.entries()) {
+        expect(actual[i][0]).toBeCloseTo(point[0], 6);
+        expect(actual[i][1]).toBeCloseTo(point[1], 6);
     }
 });
 

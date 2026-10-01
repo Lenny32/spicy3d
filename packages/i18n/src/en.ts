@@ -521,6 +521,8 @@ export default {
         "error.sketch.invalidTextSize": "Text height must be positive and placement must be finite",
         "error.sketch.unsupportedTextCharacter":
             "This font supports Latin-1 characters and common typographic marks only",
+        "error.sketch.unsupportedTextFont": "This font is not supported",
+        "error.sketch.textMissing": "The text no longer exists",
         "command.sketch.controlBSpline": "Control B-spline",
         "dialog.title.controlBSpline": "Control B-spline settings",
         "sketch.controlBSpline.degree": "Degree",

@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import {
     AutosaveHolds,
+    I18n,
     type IApplication,
     type ICameraController,
     type IDocument,
@@ -23,6 +24,7 @@ import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { promptControlBSpline } from "../../src/sketch/editor/controlBSplinePrompt";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
+import { promptSketchText } from "../../src/sketch/editor/textPrompt";
 import { ConstraintKind, type SketchData } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import { copySketchSelection } from "../../src/sketch/utilityOperations";
@@ -1001,6 +1003,45 @@ test("explicit text defaults do not rewrite an unchanged saved record or create 
         expect(node.dataJson).toBe(stored);
         expect(doc.history.position()).toBe(before);
     } finally {
+        SketchEditor.exit();
+        restoreFactory();
+    }
+});
+
+test("text prompt translates errors and rejects blank number fields", () => {
+    const { doc, restoreFactory } = setup();
+    const originalPub = PubSub.default.pub;
+    let dialog: { content: HTMLElement; buttons: any[] } | undefined;
+    PubSub.default.pub = ((topic: string, ...args: any[]) => {
+        if (topic === "showDialog") dialog = { content: args[1], buttons: args[2] };
+        else (originalPub as any).call(PubSub.default, topic, ...args);
+    }) as typeof originalPub;
+    try {
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { entities: [], constraints: [] },
+        });
+        const editor = SketchEditor.enter(node);
+        promptSketchText(editor, {
+            value: "A",
+            x: 0,
+            y: 0,
+            height: 5,
+            angle: 0,
+            frame: { width: 20, height: 10 },
+        } as any);
+        expect(dialog).not.toBeUndefined();
+        const field = (name: string) => dialog!.content.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+        const message = dialog!.content.querySelector("p")!;
+        field("x").value = "";
+        field("x").dispatchEvent(new Event("input", { bubbles: true }));
+        expect(message.textContent).toBe(I18n.translate("error.sketch.invalidTextSize"));
+        expect(dialog!.buttons[0].shouldClose()).toBe(false);
+        expect(message.textContent).toBe(I18n.translate("error.sketch.invalidTextSize"));
+        expect(editor.solver.texts()).toHaveLength(0);
+    } finally {
+        PubSub.default.pub = originalPub;
         SketchEditor.exit();
         restoreFactory();
     }

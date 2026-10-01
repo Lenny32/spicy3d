@@ -548,6 +548,8 @@ export const I18N_KEYS = [
     "error.sketch.emptyText",
     "error.sketch.invalidTextSize",
     "error.sketch.unsupportedTextCharacter",
+    "error.sketch.unsupportedTextFont",
+    "error.sketch.textMissing",
     "command.sketch.controlBSpline",
     "dialog.title.controlBSpline",
     "sketch.controlBSpline.degree",

@@ -26,10 +26,47 @@ export interface TextOutlineOptions {
 type TextGeometryError =
     | "error.sketch.invalidTextSize"
     | "error.sketch.unsupportedTextCharacter"
+    | "error.sketch.unsupportedTextFont"
     | "error.sketch.emptyText";
 
 const LINE_PITCH = 1.6;
 const contourCache = new Map<string, OutlineSegment[][]>();
+
+function textLines(value: string): string[] {
+    return value.replace(/\r\n?/g, "\n").split("\n");
+}
+
+/** Glyph contours in font units, or undefined for a character the font does not cover. */
+function cachedGlyphContours(char: string): OutlineSegment[][] | undefined {
+    const glyph = NOTO_SANS.glyphs[char];
+    if (glyph === undefined) return undefined;
+    let contours = contourCache.get(char);
+    if (contours === undefined) {
+        contours = glyphContours(glyph[1]);
+        contourCache.set(char, contours);
+    }
+    return contours;
+}
+
+/**
+ * One key per contour, in the order `textContours` emits them: `${char}#${occurrence}:${contour}`,
+ * so a glyph keeps its key when other characters are inserted, removed or replaced. Characters the
+ * font does not cover contribute no key.
+ */
+export function textContourKeys(value: string): string[] {
+    const keys: string[] = [];
+    const occurrences = new Map<string, number>();
+    for (const line of textLines(value)) {
+        for (const char of line) {
+            const contours = cachedGlyphContours(char);
+            if (contours === undefined) continue;
+            const occurrence = occurrences.get(char) ?? 0;
+            occurrences.set(char, occurrence + 1);
+            for (const index of contours.keys()) keys.push(`${char}#${occurrence}:${index}`);
+        }
+    }
+    return keys;
+}
 
 /** Exact, closed Noto Sans contours in sketch UV; height measures flat capitals such as H. */
 export function textContours(options: TextOutlineOptions): Result<OutlineSegment[][], TextGeometryError> {
@@ -46,13 +83,13 @@ export function textContours(options: TextOutlineOptions): Result<OutlineSegment
     if (!Number.isFinite(options.spacing ?? 0) || (options.spacing ?? 0) <= -100)
         return Result.err("error.sketch.invalidTextSize");
     if (options.font !== undefined && options.font !== "sans")
-        return Result.err("error.sketch.unsupportedTextCharacter");
+        return Result.err("error.sketch.unsupportedTextFont");
     const scale = height / NOTO_SANS.capHeight;
     const radians = ((angle % 360) * Math.PI) / 180;
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
     const result: OutlineSegment[][] = [];
-    const lines = value.replace(/\r\n?/g, "\n").split("\n");
+    const lines = textLines(value);
     const pitch = LINE_PITCH * NOTO_SANS.capHeight;
     const spacing = 1 + (options.spacing ?? 0) / 100;
     for (const [row, line] of lines.entries()) {
@@ -75,12 +112,9 @@ export function textContours(options: TextOutlineOptions): Result<OutlineSegment
                     : (lines.length - 1) * pitch;
         for (const char of line) {
             const glyph = NOTO_SANS.glyphs[char];
-            if (glyph === undefined) return Result.err("error.sketch.unsupportedTextCharacter");
-            let contours = contourCache.get(char);
-            if (contours === undefined) {
-                contours = glyphContours(glyph[1]);
-                contourCache.set(char, contours);
-            }
+            const contours = cachedGlyphContours(char);
+            if (glyph === undefined || contours === undefined)
+                return Result.err("error.sketch.unsupportedTextCharacter");
             const place = ([u, v]: Point2): Point2 => {
                 let lx = (u + pen) * scale;
                 let ly = (v + firstBaseline - row * pitch) * scale;

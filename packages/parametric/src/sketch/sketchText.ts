@@ -4,13 +4,16 @@
 import { Result } from "@spicy3d/core";
 import { defaultSketchIds, type SketchIdAllocator } from "./sketchIds";
 import type { SketchData } from "./sketchModel";
-import { type TextOutlineOptions, textContours } from "./textGeometry";
+import { type TextOutlineOptions, textContourKeys, textContours } from "./textGeometry";
 
 /** Editable text, independent of the constraint solver. All dimensions are sketch UV millimetres. */
 export interface SketchTextData extends TextOutlineOptions {
     id: number;
     frame: { width: number; height: number };
-    /** Stable contour slots, including retired slots after shortening text. Never reused by entities. */
+    /**
+     * Stable contour ids: the first entries follow the contours of `value` in order, later entries are
+     * retired slots (contours of removed glyphs), kept reserved and never reused by entities or contours.
+     */
     profileIds: number[];
 }
 
@@ -20,7 +23,11 @@ export function textIds(data: Pick<SketchData, "texts">): number[] {
     return (data.texts ?? []).flatMap((text) => [text.id, ...text.profileIds]);
 }
 
-/** Shared by UI and script callers: validate first, then allocate only missing contour identities. */
+/**
+ * Shared by UI and script callers: validate first, then allocate only missing contour identities.
+ * With `previous`, a contour keeps its id when the same glyph occurrence still exists (see
+ * `textContourKeys`), so editing "AB" to "XB" keeps B's ids, gives X fresh ones and retires A's.
+ */
 export function createSketchText(
     data: SketchData,
     settings: SketchTextSettings,
@@ -29,15 +36,34 @@ export function createSketchText(
 ): Result<SketchTextData> {
     const contours = textContours(settings);
     if (!contours.isOk) return Result.err(contours.error);
-    const taken = new Set([...data.entities.map((e) => e.id), ...textIds(data)]);
+    const taken = new Set([
+        ...data.entities.map((e) => e.id),
+        ...textIds(data),
+        ...(previous ? [previous.id, ...previous.profileIds] : []),
+    ]);
     const next = () => {
         const id = allocator.next("entity", (candidate) => taken.has(candidate));
         taken.add(id);
         return id;
     };
     const id = previous?.id ?? next();
-    const profileIds = [...(previous?.profileIds ?? [])];
-    while (profileIds.length < contours.value.length) profileIds.push(next());
+    const reusable = new Map<string, number>();
+    if (previous) {
+        const previousKeys = textContourKeys(previous.value);
+        for (const [index, key] of previousKeys.entries()) {
+            const previousId = previous.profileIds[index];
+            if (previousId !== undefined) reusable.set(key, previousId);
+        }
+    }
+    const keys = textContourKeys(settings.value);
+    const used = new Set<number>();
+    const profileIds = keys.map((key) => {
+        const reused = reusable.get(key);
+        if (reused === undefined) return next();
+        used.add(reused);
+        return reused;
+    });
+    for (const retired of previous?.profileIds ?? []) if (!used.has(retired)) profileIds.push(retired);
     return Result.ok({ ...structuredClone(settings), id, profileIds });
 }
 

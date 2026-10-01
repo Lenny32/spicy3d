@@ -133,7 +133,7 @@ export function transformSketchSelection(
     if (entities.some((e) => e.params.some((p) => !Number.isFinite(p))))
         return Result.err("Transform values must be finite");
     const texts = (source.texts ?? []).map((text) => {
-        const [x, y] = transformPoint(text.x, text.y, transform);
+        let [x, y] = transformPoint(text.x, text.y, transform);
         let angle = text.angle,
             flipVertical = text.flipVertical;
         if (transform.kind === "rotate") angle += (transform.angle * 180) / Math.PI;
@@ -141,6 +141,12 @@ export function transformSketchSelection(
             const [ax, ay, bx, by] = transform.axis.params;
             angle = (2 * Math.atan2(by - ay, bx - ax) * 180) / Math.PI - angle;
             flipVertical = !flipVertical;
+            // flipVertical reflects inside the frame (v -> H - v) while a mirror maps v -> -v:
+            // shift the origin by -H along the new frame's v axis.
+            const height = text.frame?.height ?? 0;
+            const radians = (angle * Math.PI) / 180;
+            x += height * Math.sin(radians);
+            y -= height * Math.cos(radians);
         }
         return {
             ...text,
@@ -152,7 +158,10 @@ export function transformSketchSelection(
             profileIds: duplicate ? text.profileIds.map(() => newEntityId()) : text.profileIds,
         };
     });
-    if (texts.some((text) => !textContours(text).isOk)) return Result.err("Transform values must be finite");
+    for (const text of texts) {
+        const contours = textContours(text);
+        if (!contours.isOk) return Result.err(contours.error);
+    }
     if (texts.length) {
         result.texts = duplicate
             ? [...(result.texts ?? []), ...texts]
