@@ -12,7 +12,7 @@ page retains a main-thread instance for local shape handles and synchronous quer
 meshing, imports and exports. The existing hybrid worker runs opt-in parametric booleans, and
 MCP `run_program` uses its bounded factory bridge for boolean fuse/cut/common, fillet/chamfer,
 loft, and thick-solid simple/join. Worker inputs and outputs are verified BREP replicas;
-no native handles cross realms. See [bounded worker execution](kernel-bounded-worker.md).
+no native handles cross realms.
 
 While a main-thread native call runs, nothing else in the tab runs: no rendering, no input,
 no autosave or cloud sync, and no WebSocket traffic, so the MCP relay gets no answer either. JavaScript cannot interrupt
@@ -32,7 +32,7 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
 - **Cancellation.** A call cancelled while queued never starts. Programs check their signal
   between operations and before commit, rolling back if cancelled. A pending native operation
   in the strict bounded bridge terminates its worker generation immediately on abort, reports
-  cancellation, and rolls back before the next queued mutation. See [cancellation](kernel-cancellation.md).
+  cancellation, and rolls back before the next queued mutation.
   Other synchronous calls still only check cancellation between operations.
 - **Document consistency.** A yielding MCP program holds a runtime document ownership scope;
   new UI commands and direct property/tree edits are blocked until commit or rollback.
@@ -70,7 +70,7 @@ After an abort or a fatal trap, `packages/wasm/src/kernelGuard.ts` runs a small 
 against the module. Often the module survives, and nothing changes. If the probe fails, core's
 `KernelState` records the kernel as crashed with the first reason. Its native generation is permanently retired: resetting public crash state cannot revive its handles. Factory and converter calls refuse to enter that generation. MCP kernel tools answer the crash error before starting work, while metadata tools report `kernel: "crashed"`.
 
-The application offers Recover and Reload. Recover creates a fresh main WASM instance and stages reconstruction of every open document from its last healthy committed checkpoint. All candidates must validate before activation. Success preserves committed unsaved edits, stable document/feature IDs and clean/dirty status, then clears undo/redo as explicitly approved. Scene-backed MCP refs re-derive; standalone geometry and creation snapshots invalidate. Preparation failure keeps original document graphs and history. A later viewport refresh failure reports an error while the new kernel stays healthy. See [main-kernel recovery](kernel-recovery.md) for bounds, limitations and API details. `recover_kernel` uses the normal MCP mutation FIFO. Reload remains available if a current checkpoint or supported document reconstruction is unavailable.
+The application offers Recover and Reload. Recover creates a fresh main WASM instance and stages reconstruction of every open document from its last healthy committed checkpoint. All candidates must validate before activation. Success preserves committed unsaved edits, stable document/feature IDs and clean/dirty status, then clears undo/redo as explicitly approved. Scene-backed MCP refs re-derive; standalone geometry and creation snapshots invalidate. Preparation failure keeps original document graphs and history. A later viewport refresh failure reports an error while the new kernel stays healthy. `recover_kernel` uses the normal MCP mutation FIFO. Reload remains available if a current checkpoint or supported document reconstruction is unavailable.
 
 A main-thread hang is not a crash: the page cannot detect or end it. A worker hang is ended by
 its finite deadline without marking the main kernel crashed.
@@ -91,5 +91,5 @@ its finite deadline without marking the main kernel crashed.
 ## Plan
 
 Phase 1 of [KERNEL-01](../tickets/kernel-01-worker-kernel.md) extends the existing hybrid worker
-with [bounded MCP factory execution](kernel-bounded-worker.md). Full model evaluation and
+with bounded MCP factory execution. Full model evaluation and
 main-kernel recovery (#98) remain separate work.
