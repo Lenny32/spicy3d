@@ -5,3 +5,4 @@ These findings were checked against the actual C++ scopes and uses. OCCT `Handle
 | Comment | Finding | Source evidence / disposition |
 | --- | --- | --- |
 | [4144597375](https://github.com/Lenny32/spicy3d/pull/107#discussion_r4144597375) | Unused static variable | False positive. `vertices` is a local in `filletBuildFailure`, read by both `vertices > 0` and the final `faulty == 0 && vertices == 0` diagnostic. |
+| [4145470407](https://github.com/Lenny32/spicy3d/pull/107#discussion_r4145470407) | Unused static variable | False positive. `output` is a local in `prismBetweenFaces`, read by BRepCheck, volume validation and returned tracked history. |
