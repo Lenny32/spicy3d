@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type IEdge, type IFace, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
 import type { FeatureData, ThickenFeatureData } from "../src/features/feature";
@@ -320,5 +320,81 @@ describe("thicken feature (real kernel)", () => {
             const box = boxBody(newDoc());
             expect(box.shape.value.volume()).toBeCloseTo(4000, 6);
         });
+    });
+});
+
+// Extracted sketch geometry from the snapshot attached to issue #126.
+const mouseSkirtSections = JSON.parse(
+    readFileSync(path.resolve(import.meta.dirname, "fixtures/mouseSkirt.json"), "utf8"),
+) as { z: number; data: SketchData }[];
+
+function mouseSkirt(doc: TestDocument): ParametricBodyNode {
+    const sketches = mouseSkirtSections.map(({ z, data }) => {
+        const sketch = new SketchNode({ document: doc, plane: planeAt(z), data });
+        doc.modelManager.addNode(sketch);
+        return sketch;
+    });
+    const body = new ParametricBodyNode({
+        document: doc,
+        features: [
+            {
+                id: "loft",
+                type: "loft",
+                sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
+                solid: false,
+                ruled: true,
+            },
+        ],
+    });
+    doc.modelManager.addNode(body);
+    return body;
+}
+
+describe("periodic ruled loft thickening (issue #126)", () => {
+    test.each([1.9, -1.9])("refuses inconsistent offset edge geometry at thickness %d", (thickness) => {
+        const body = mouseSkirt(newDoc());
+        expect(body.shape.isOk).toBe(true);
+        const skin = body.shape.value;
+        expect(skin.checkShape()).toBe(true);
+        const converter = new OccShapeConverter();
+        const before = converter.convertToBrep(skin);
+        expect(before.isOk).toBe(true);
+
+        const result = shapeFactory.makeThickSolidBySimple(skin, thickness);
+
+        expect(result.isOk).toBe(false);
+        expect(result.error).toBe(
+            "Failed to create thick solid: offset edge curves are inconsistent with their surfaces (exact BRepCheck_Analyzer)",
+        );
+        // The failed kernel operation must not add p-curves or change tolerances on the loft.
+        const after = converter.convertToBrep(skin);
+        expect(after.isOk).toBe(true);
+        expect(after.value).toBe(before.value);
+
+        thicken(body, { thickness });
+        expect(errorOf(body, "t1")).toBe(result.error);
+        expect(body.featureItems().find((item) => item.id === "loft")?.error).toBeUndefined();
+    });
+
+    test.each([2, -2])("a valid shelled box still supports a trim at thickness %d", (thickness) => {
+        const body = boxBody(newDoc());
+        thicken(body, { thickness, joinType: "intersection", openFaces: [topFaceRef(body)] });
+        expect(errorOf(body, "t1")).toBeUndefined();
+        const wall = body.shape.value;
+        const plane = new Plane({ origin: new XYZ(0, -20, -10), normal: XYZ.unitZ, xvec: XYZ.unitX });
+        const box = shapeFactory.box(plane, 40, 40, 40);
+        expect(box.isOk).toBe(true);
+        try {
+            const cut = shapeFactory.booleanCut([wall], [box.value]);
+            expect(cut.isOk).toBe(true);
+            try {
+                expect(cut.value.checkShape()).toBe(true);
+                expect(cut.value.volume()).toBeCloseTo(wall.volume() / 2, 1);
+            } finally {
+                cut.value.dispose();
+            }
+        } finally {
+            box.value.dispose();
+        }
     });
 });

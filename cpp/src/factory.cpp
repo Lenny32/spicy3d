@@ -2864,10 +2864,10 @@ public:
         return "";
     }
 
-    // Empty text = the thick solid is valid. BRepOffset may answer IsDone() with a result whose
-    // offset faces cross (steep, narrow faces of an open shell); a later boolean or inspection
-    // on it may raise, so the cheap topology check runs here. Self-intersection is not tested
-    // (expensive): callers opt in with Shape.checkSelfIntersection.
+    // The sampled BRepCheck test can miss an offset edge whose p-curve disagrees with
+    // its 3D curve between sample points (periodic ruled lofts, for example). Such a
+    // solid can pass checkShape and self-interference checks yet break every boolean.
+    // Use the exact curve-on-surface test before handing a thick solid to consumers.
     static std::string thickSolidResultError(const TopoDS_Shape& result)
     {
         if (result.IsNull()) {
@@ -2875,6 +2875,9 @@ public:
         }
         if (!BRepCheck_Analyzer(result).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
+        }
+        if (!BRepCheck_Analyzer(result, true, false, true).IsValid()) {
+            return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces (exact BRepCheck_Analyzer)";
         }
         return "";
     }
@@ -2925,7 +2928,10 @@ public:
             return ShapeResult { TopoDS_Shape(), false, inputError };
         }
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
-        makeThickSolid.MakeThickSolidBySimple(shape, thickness);
+        // BuildMissingWalls adds p-curves and repairs edge tolerances on the source
+        // faces. Keep those mutations local, including when validation refuses the result.
+        BRepBuilderAPI_Copy ownedInput(shape, true, false);
+        makeThickSolid.MakeThickSolidBySimple(ownedInput.Shape(), thickness);
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
