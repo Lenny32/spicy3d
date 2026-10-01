@@ -525,7 +525,11 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     for (const input of inputs) input.dispose();
                     inputs = [];
                     if (canFallback) this.disable();
-                    else if (result.error.code !== "timeout" && result.error.code !== "cancelled")
+                    else if (
+                        result.error.code !== "timeout" &&
+                        result.error.code !== "cancelled" &&
+                        result.error.code !== "geometry"
+                    )
                         this.quarantine(result.error.message);
                     return Result.err(result.error.message);
                 }

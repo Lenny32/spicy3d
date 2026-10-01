@@ -275,7 +275,9 @@ function isKernelResponse(value: unknown): value is KernelResponse {
         typeof error === "object" &&
         "code" in error &&
         typeof error.code === "string" &&
-        ["cancelled", "closed", "kernel", "invalid", "unavailable", "timeout"].includes(error.code) &&
+        ["cancelled", "closed", "kernel", "invalid", "geometry", "unavailable", "timeout"].includes(
+            error.code,
+        ) &&
         "message" in error &&
         typeof error.message === "string"
     );

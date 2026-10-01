@@ -4,7 +4,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IEdge, type IFace, type IShape, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
+import {
+    type IEdge,
+    type IFace,
+    type IShape,
+    Plane,
+    Result,
+    ShapeTypes,
+    Transaction,
+    XYZ,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
@@ -507,4 +516,30 @@ describe("periodic ruled loft thickening (issue #126)", () => {
         expect(errorOf(body, "t1")).toBeUndefined();
         expectHalfTrim(body.shape.value);
     });
+});
+
+test("thicken rejects a negative component hidden by a positive compound volume", () => {
+    const body = boxBody(newDoc());
+    const large = shapeFactory.box(Plane.XY, 20, 20, 20).value;
+    const small = shapeFactory.box(Plane.XY, 1, 2, 3).value;
+    small.reserve();
+    const compound = shapeFactory.combine([large, small]).value;
+    expect(compound.checkShape()).toBe(true);
+    expect(compound.volume()).toBeCloseTo(7994, 5);
+    const call = rs
+        .spyOn(shapeFactory, "makeThickSolidByJoin")
+        .mockImplementation(() => Result.ok(compound.clone()));
+    try {
+        thicken(body, { thickness: -1, openFaces: [topFaceRef(body)] });
+        expect(call).toHaveBeenCalledOnce();
+        expect(errorOf(body, "t1")).toContain(
+            'thicken step "t1": Thicken result: solid 1 has invalid volume',
+        );
+        expect(body.shape.value.volume()).toBeCloseTo(4000, 5);
+    } finally {
+        call.mockRestore();
+        compound.dispose();
+        small.dispose();
+        large.dispose();
+    }
 });

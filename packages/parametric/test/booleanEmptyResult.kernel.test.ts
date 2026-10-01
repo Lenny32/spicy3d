@@ -180,3 +180,36 @@ describe("parametric boolean with an empty result", () => {
         expect(extent(result.unchecked()!)).toEqual([5, 5, 0, 10, 10, 10]);
     });
 });
+
+test.each([
+    "cut",
+    "common",
+    "fuse",
+] as const)("%s names the feature step for an inside-out tool", (operation) => {
+    const doc = newDoc();
+    const host = box(doc, [0, 0, 10, 10], 10);
+    const tool = box(doc, [2, 2, 5, 5], 10);
+    expect(host.shape.isOk).toBe(true);
+    expect(host.shape.value.volume()).toBeCloseTo(1000, 6);
+    expect(tool.shape.isOk).toBe(true);
+    tool.shape.value.reserve();
+    expect(tool.shape.value.volume()).toBeCloseTo(-90, 6);
+    host.setFeaturesEmitShapeChanged([...host.features, boolean(operation, tool)]);
+    expect(host.featureItems()[1].error).toContain('boolean step "b1":');
+    expect(host.featureItems()[1].error).toContain("has invalid volume");
+    expect(host.shape.value.volume()).toBeCloseTo(1000, 6);
+});
+
+test("extrude common refuses an inside-out input instead of returning its whole prism", () => {
+    const doc = newDoc();
+    const host = box(doc, [0, 0, 10, 10], 10);
+    const input = host.shape.value;
+    input.reserve();
+    expect(input.volume()).toBeCloseTo(-1000, 6);
+    const feature = { ...host.features[0], id: "intersect", operation: "common" } as ExtrudeFeatureData;
+    const handler = featureHandler("extrude")!;
+    expect(handler).not.toBeUndefined();
+    const result = handler.evaluate(feature, { document: doc, host, input, scope: new Map() });
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("BooleanCommon input 0: solid 0 has invalid volume");
+});

@@ -186,14 +186,36 @@ function matchOpenFaces(
 
 /** `shape`, or its orientation-fixed copy when the kernel returned it inside out (negative volume). */
 function rightSideOut(shape: IShape): Result<IShape> {
-    if (shape.volume() >= 0) return Result.ok(shape);
+    if (shape.volume() >= 0) return checkedOrientation(shape);
     const fixed = shape.fixSolid(FIX_TOLERANCE);
     shape.dispose();
     if (fixed.isNull() || fixed.volume() <= 0) {
         if (!fixed.isNull()) fixed.dispose();
         return Result.err("Thicken failed: the thick solid is inside out");
     }
-    return checked(fixed);
+    const valid = checked(fixed);
+    return valid.isOk ? checkedOrientation(valid.value) : valid;
+}
+
+/** A positive compound total must not hide an inside-out component. No new analyzer calls. */
+function checkedOrientation(shape: IShape): Result<IShape> {
+    const faces = shape.findSubShapes(ShapeTypes.face);
+    const count = faces.length;
+    for (const face of faces) face.dispose();
+    if (count >= 200) return Result.ok(shape);
+    const solids = shape.findSubShapes(ShapeTypes.solid);
+    try {
+        for (const [index, solid] of solids.entries()) {
+            const volume = solid.volume();
+            if (!Number.isFinite(volume) || volume < 0) {
+                shape.dispose();
+                return Result.err(`Thicken result: solid ${index} has invalid volume (${volume} mm³)`);
+            }
+        }
+    } finally {
+        for (const solid of solids) solid.dispose();
+    }
+    return Result.ok(shape);
 }
 
 /**

@@ -147,11 +147,49 @@ function bsplineLayoutError(
     return undefined;
 }
 
+/**
+ * Synchronous compatibility pre-check: no analyzer on the document's thread. Large
+ * shapes leave volume validation to the bounded worker, like inspection's 200-face cutoff.
+ * Empty booleans and non-solid sections remain valid; a negative component never does.
+ */
+function operationVolumeError(params: unknown[], op: string, role = "input"): string | undefined {
+    if (!/^(Fuse|Boolean|Prism|Loft|Fillet|Chamfer)/.test(op)) return undefined;
+    const shapes = params
+        .flat(Infinity)
+        .filter(
+            (value): value is TopoDS_Shape =>
+                value !== null && typeof value === "object" && "shapeType" in value && "isNull" in value,
+        );
+    try {
+        for (const [index, shape] of shapes.entries()) {
+            const faces = wasm.Shape.findSubShapes(shape, wasm.TopAbs_ShapeEnum.TopAbs_FACE);
+            const count = faces.length;
+            for (const face of faces) face.delete();
+            if (count >= 200) continue;
+            const solids = wasm.Shape.findSubShapes(shape, wasm.TopAbs_ShapeEnum.TopAbs_SOLID);
+            try {
+                for (const [solidIndex, solid] of solids.entries()) {
+                    const volume = wasm.Shape.volume(solid);
+                    if (!Number.isFinite(volume) || volume < 0)
+                        return `${op} ${role} ${index}: solid ${solidIndex} has invalid volume (${volume} mm³)`;
+                }
+            } finally {
+                for (const solid of solids) solid.delete();
+            }
+        }
+    } catch (error) {
+        return kernelCallFailure(`${op} ${role} validation`, error);
+    }
+    return undefined;
+}
+
 function convertShapeResult<P extends unknown[] = unknown[]>(
     factory: (...params: P) => ShapeResult,
     params: P,
     op: string,
 ): Result<IShape, string> {
+    const inputError = operationVolumeError(params, op);
+    if (inputError) return Result.err(inputError);
     let result: ShapeResult;
     const span = PerformanceTrace.enabled
         ? PerformanceTrace.begin("kernel.operation", {
@@ -172,7 +210,12 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
     if (!result.isOk) {
         res = Result.err(result.error);
     } else {
-        res = Result.ok(OccShape.wrap(result.shape));
+        const shape = OccShape.wrap(result.shape);
+        const error = operationVolumeError([(shape as OccShape).shape], op, "result");
+        if (error) {
+            shape.dispose();
+            res = Result.err(error);
+        } else res = Result.ok(shape);
     }
 
     result.delete();
@@ -302,6 +345,8 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     params: P,
     op: string,
 ): Result<TrackedShape, string> {
+    const inputError = operationVolumeError(params, op);
+    if (inputError) return Result.err(inputError);
     let result: TrackedShapeResult;
     // OCCT's tracked call includes history completion in C++; it cannot be timed separately here.
     const span = PerformanceTrace.enabled
@@ -324,8 +369,16 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     if (!result.isOk) {
         res = Result.err(result.error);
     } else {
+        const shape = OccShape.wrap(result.shape);
+        const error = operationVolumeError([(shape as OccShape).shape], op, "result");
+        if (error) {
+            shape.dispose();
+            result.delete();
+            if (PerformanceTrace.enabled) PerformanceTrace.end(history);
+            return Result.err(error);
+        }
         res = Result.ok({
-            shape: OccShape.wrap(result.shape),
+            shape,
             faceMap: toIntArray(result.faceMap),
             edgeMap: toIntArray(result.edgeMap),
             faceEdgeMap: toIntArray(result.faceEdgeMap),

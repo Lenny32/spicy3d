@@ -13,6 +13,8 @@ Long sketch-edit batches: use start_parametric_job with the same { ops, response
 
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
 
+Validity: bounded run_program booleans, fillet/chamfer and loft validate operands and results; tracked worker booleans (including extrude operations during asynchronous rebuilds) reject invalid topology and negative-volume solid components. A positive total volume is insufficient for a multi-solid result. Geometry errors name the operation/input or result; parametric rebuild diagnostics also name the feature step. Fix the offending upstream geometry before continuing. Validation uses worker deadlines, not a guarantee against all self-intersections; synchronous compatibility paths only pre-check volumes below 200 faces.
+
 Ops run in order; later ops reference earlier ids. An op that EDITS a body (extrude with "body", fillet,
 chamfer, boolean) also registers its own id as another name for that body, so any of them works as a
 reference afterwards. Anywhere a reference is expected you may also pass the real node id of an existing

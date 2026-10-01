@@ -168,3 +168,21 @@ Known main-thread callers remain: feature validation in `sweep`, `faceSweep`, an
 calls in `packages/app/src/analysis/basic.ts`. Direct synchronous
 `IShape.checkSelfIntersection()` calls still use the existing binding. OCCT has no cooperative
 cancellation hook in this offline build; stopping a running check requires terminating its worker.
+
+### Boolean and downstream validity (#119)
+
+The tracked boolean worker and bounded operation bridge check operands and results with
+`BRepCheck_Analyzer` before export/history acceptance. Every solid component is checked for
+finite, non-negative signed volume: a positive compound total cannot hide an inside-out
+component. Bounded fillet/chamfer and loft also reject invalid inputs. Geometry rejection is
+an ordinary operation error; it neither falls back to the synchronous kernel nor disables a
+healthy worker. Parametric rebuild errors identify the feature type and step id.
+
+These checks run inside the existing terminable worker request deadline. They do not add
+main-thread analyzer calls or the more expensive self-intersection analyzer. Synchronous
+compatibility calls check component volumes only below 200 faces, using the inspection
+pre-check cutoff; larger shapes need the worker path for this validation. Synchronous
+positive-volume topology failures remain outside this gate. Empty boolean results remain
+subject to the existing feature-specific empty-result errors. Thicken retains its existing
+orientation repair for a valid inside-out offset before it becomes a feature result; the
+bounded bridge performs the same repair before checking every output component.

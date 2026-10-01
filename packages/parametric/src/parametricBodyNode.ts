@@ -38,7 +38,13 @@ import {
 import { hasFeatureEditor, startFeatureEdit } from "./commands/featureEditRegistry";
 import { ReselectFeatureCommand } from "./commands/reselectCommand";
 import { EdgeReselectSession, ProfileReselectSession } from "./commands/reselectSession";
-import { evaluateFeature, type FeatureData, featureHandler, type ShapeTracking } from "./features";
+import {
+    evaluateFeature,
+    type FeatureData,
+    featureEvaluationError,
+    featureHandler,
+    type ShapeTracking,
+} from "./features";
 import {
     BodyTimeline,
     type FeatureCacheEntry,
@@ -1453,7 +1459,7 @@ export class ParametricBodyNode
                 const evaluationStart = parked ? started : performance.now();
                 const result = parked ? pending.take() : evaluateFeature(feature, context);
                 const evaluationMs = performance.now() - evaluationStart;
-                if (!result.isOk) return Result.err(result.error);
+                if (!result.isOk) return Result.err(featureEvaluationError(feature, result.error));
                 // A handler that cannot track (e.g. the kernel lacks history) leaves the
                 // output empty — ids stay undefined from here on rather than guessing.
                 const output: FeatureStepOutput = {

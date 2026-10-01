@@ -6,7 +6,7 @@ import type { BoundingBox, Vector3 } from "../lib/spicy-wasm";
 /** Session-scoped, never serialized into a document. Not an IShape. */
 export type KernelHandle = string;
 export type KernelFailure = {
-    code: "cancelled" | "closed" | "kernel" | "invalid" | "unavailable" | "timeout";
+    code: "cancelled" | "closed" | "kernel" | "invalid" | "geometry" | "unavailable" | "timeout";
     message: string;
 };
 export type KernelResult<T> = { ok: true; value: T } | { ok: false; error: KernelFailure };

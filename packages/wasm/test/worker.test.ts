@@ -380,6 +380,7 @@ test.each([
     const module = {
         ...wasm,
         ShapeFactory: { ...wasm.ShapeFactory, box: () => result, booleanFuseTracked: () => result },
+        Shape: { ...wasm.Shape, check: () => true, findSubShapes: () => [] },
         Converter: { ...wasm.Converter, convertFromBrep: () => shape },
         Mesher: class {
             delete = destroyed;

@@ -325,7 +325,7 @@ test("bounded fuse applies requested simplification before exporting its replica
     }
 });
 
-test("bounded simple thickening matches the existing open-shell behavior", async () => {
+test("bounded simple thickening repairs the existing open-shell result orientation", async () => {
     const factory = new ShapeFactory();
     const box = keep(createBox(factory));
     const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
@@ -339,7 +339,8 @@ test("bounded simple thickening matches the existing open-shell behavior", async
         const result = keep(unwrapOk(task.take()));
         const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1)));
         expect(result.checkShape()).toBe(true);
-        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+        expect(baseline.volume()).toBeLessThan(0);
+        expect(result.volume()).toBeCloseTo(-baseline.volume(), 7);
     } finally {
         hybrid.dispose();
     }

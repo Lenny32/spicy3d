@@ -505,5 +505,12 @@ export function featureHandler(type: string): FeatureHandler | undefined {
 export function evaluateFeature(feature: FeatureData, context: FeatureContext): Result<IShape> {
     const handler = handlers.get(feature.type);
     if (handler === undefined) return Result.err(`Unknown feature type: ${feature.type}`);
-    return handler.evaluate(feature, context);
+    const result = handler.evaluate(feature, context);
+    return result.isOk ? result : Result.err(featureEvaluationError(feature, result.error));
+}
+
+/** Keep kernel geometry failures attached to the feature that attempted to consume them. */
+export function featureEvaluationError(feature: FeatureData, error: string): string {
+    const prefix = `${feature.type} step "${feature.id}": `;
+    return /invalid shape|invalid volume/.test(error) && !error.startsWith(prefix) ? prefix + error : error;
 }
