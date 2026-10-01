@@ -17,6 +17,7 @@ import { hasDocumentReadSnapshot } from "../../../ai/src/tools/readTools";
 import { registerFeature } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { type ParametricOp, runParametricProgram, runParametricProgramAsync } from "../../src/program";
+import type { SketchData } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -27,6 +28,8 @@ beforeAll(async () => {
 let document: TestDocument;
 let calls: number[];
 let fail: boolean;
+/** Feature 63 also fails while sketch "a" starts beyond this x. */
+let failBeyond: number;
 let model: ParametricBodyNode;
 let sketches: SketchNode[];
 
@@ -35,6 +38,7 @@ beforeEach(() => {
     document = new TestDocument({ application: createMockApplication(), selection: createMockSelection() });
     calls = [];
     fail = false;
+    failBeyond = Number.POSITIVE_INFINITY;
     runParametricProgram(document, [
         { op: "sketch", id: "a", entities: [{ type: "line", params: [0, 0, 10, 0] }] },
         { op: "sketch", id: "b", entities: [{ type: "line", params: [0, 1, 10, 1] }] },
@@ -47,7 +51,8 @@ beforeEach(() => {
         setParameter: (feature) => feature,
         evaluate: (feature: { index: number }) => {
             calls.push(feature.index);
-            if (fail && feature.index === 63) return Result.err("batch failure");
+            const beyond = sketches[0].data.entities[0].params[0] > failBeyond;
+            if ((fail || beyond) && feature.index === 63) return Result.err("batch failure");
             return Result.ok(new MockShape());
         },
     });
@@ -180,7 +185,12 @@ test("a parametric job holds reads and mutation ownership until its batched rebu
     const app = document.application;
     app.activeView = createMockView({ document });
     rs.stubGlobal("app", app);
-    const running = runParametric({ ops: [move(sketches[0], 1), move(sketches[1], 2)] }, undefined, undefined, document);
+    const running = runParametric(
+        { ops: [move(sketches[0], 1), move(sketches[1], 2)] },
+        undefined,
+        undefined,
+        document,
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(DocumentMutations.isHeld(document)).toBe(true);
     expect(hasDocumentReadSnapshot()).toBe(true);
@@ -188,4 +198,82 @@ test("a parametric job holds reads and mutation ownership until its batched rebu
     expect(calls).toEqual([60, 61, 62, 63, 64]);
     expect(DocumentMutations.isHeld(document)).toBe(false);
     expect(hasDocumentReadSnapshot()).toBe(false);
+});
+
+test.each([
+    "sync",
+    "async",
+])("%s: a later op may repair what a sketch edit broke downstream", async (mode) => {
+    failBeyond = 50;
+    const ops = [
+        move(sketches[0], 100),
+        { op: "features", body: model.id } as ParametricOp,
+        move(sketches[0], -100),
+    ];
+    if (mode === "sync") Transaction.execute(document, "repair", () => runParametricProgram(document, ops));
+    else await run(ops);
+    expect(sketches[0].data.entities[0].params[0]).toBe(0);
+    expect(model.featureItems().every((item) => item.error === undefined)).toBe(true);
+});
+
+test.each([
+    "sync",
+    "async",
+])("%s: a downstream failure left at the end rolls the program back", async (mode) => {
+    failBeyond = 50;
+    const original = sketches[0].dataJson;
+    const ops = [move(sketches[0], 100)];
+    const running =
+        mode === "sync"
+            ? Promise.resolve().then(() =>
+                  Transaction.execute(document, "broken", () => runParametricProgram(document, ops)),
+              )
+            : run(ops);
+    await expect(running).rejects.toThrow(/batch failure/);
+    failBeyond = Number.POSITIVE_INFINITY;
+    await DocumentRebuilds.settled(document);
+    expect(sketches[0].dataJson).toBe(original);
+});
+
+test("a geometry read inside an edit batch sees the edit, not the pre-batch shape", () => {
+    const before = model.shape.value;
+    ParametricBodyNode.withDeferredUpstream(document, () => {
+        const data = sketches[0].data;
+        data.entities[0].params[0] = 5;
+        sketches[0].setDataEmitShapeChanged(data);
+        expect(calls).toEqual([]);
+        expect(model.shape.value).not.toBe(before);
+        expect(calls).toEqual([60, 61, 62, 63, 64]);
+    });
+    expect(DocumentRebuilds.status(document).pending).toBe(0);
+});
+
+test("a failed build keeps the built shape, so editing back to its data needs no rebuild", async () => {
+    const sketch = sketches[0];
+    const good = sketch.data;
+    const broken = sketch.data;
+    broken.entities[0].params[0] = 5;
+    const target = sketch as unknown as { buildEdges(data: SketchData): Result<unknown> };
+    const buildEdges = target.buildEdges.bind(sketch);
+    const build = rs
+        .spyOn(target, "buildEdges")
+        .mockImplementation((data: SketchData) =>
+            data.entities[0].params[0] === 5 ? Result.err("build failure") : buildEdges(data),
+        );
+    const original = sketch.shape.value;
+    const result = model.shape.value;
+    try {
+        sketch.setDataEmitShapeChanged(broken);
+        await DocumentRebuilds.settled(document);
+        expect(build).toHaveBeenCalledTimes(1);
+        expect(sketch.shape.value).toBe(original);
+        sketch.setDataEmitShapeChanged(good);
+        await DocumentRebuilds.settled(document);
+        expect(build).toHaveBeenCalledTimes(1);
+        expect(sketch.shape.value).toBe(original);
+        expect(model.shape.value).toBe(result);
+        expect(calls).toEqual([]);
+    } finally {
+        build.mockRestore();
+    }
 });

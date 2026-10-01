@@ -559,6 +559,11 @@ function* evaluateProgram(
         changed: new Map(),
         sketchNames: new Map(),
     };
+    const bodies = () =>
+        document.modelManager
+            .findNodes()
+            .filter((node): node is ParametricBodyNode => node instanceof ParametricBodyNode);
+    const existingErrors = new Map(bodies().map((body) => [body.id, erroredFeatureIds(body)]));
     for (let index = 0; index < ops.length; ) {
         const run = () => {
             const op = ops[index];
@@ -587,6 +592,13 @@ function* evaluateProgram(
             ParametricBodyNode.withSynchronousEvaluation(document, run);
         }
         yield index;
+    }
+    // Checked once all ops ran, so a later op may repair what an earlier sketch edit broke downstream.
+    for (const body of bodies()) {
+        const failed = body
+            .featureItems()
+            .find((item) => item.error !== undefined && !existingErrors.get(body.id)?.has(item.id));
+        if (failed) throw new Error(`feature "${failed.display}" (${failed.id}) failed: ${failed.error}`);
     }
     state.out.bodies = [...state.touched].map((body) =>
         options.responseMode === "compact"

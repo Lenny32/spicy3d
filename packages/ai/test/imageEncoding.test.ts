@@ -88,6 +88,25 @@ describe("image budget", () => {
         expect(inside).toBe(1234);
         expect(imageByteBudget()).toBeUndefined();
     });
+
+    test("an overlapping call ending last does not restore a finished call's budget", async () => {
+        let finishFirst!: () => void;
+        let finishSecond!: () => void;
+        const first = withImageByteBudget(
+            1234,
+            () => new Promise<void>((resolve) => (finishFirst = resolve)),
+        );
+        const second = withImageByteBudget(
+            1234,
+            () => new Promise<void>((resolve) => (finishSecond = resolve)),
+        );
+        finishFirst();
+        await first;
+        expect(imageByteBudget()).toBe(1234);
+        finishSecond();
+        await second;
+        expect(imageByteBudget()).toBeUndefined();
+    });
 });
 
 /** A browser that cannot decode (or re-encode) the view image. */
