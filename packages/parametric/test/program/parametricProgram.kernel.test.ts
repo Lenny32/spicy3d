@@ -1851,3 +1851,17 @@ test("run_parametric rejects caller-provided next candidates rather than manual 
     expect(message).toContain("automatically");
     expect(doc.modelManager.findNodes((node) => node instanceof ParametricBodyNode)).toHaveLength(1);
 });
+
+test.each(["extrude", "boolean"])("%s rejects join before resolving or changing the document", (op) => {
+    const doc = newDoc();
+    const position = doc.history.position();
+    try {
+        expect(() => run(doc, [{ op, id: "invalid", operation: "join" } as unknown as ParametricOp])).toThrow(
+            /operation must be fuse, cut or common/,
+        );
+        expect(doc.history.position()).toBe(position);
+        expect(doc.modelManager.findNode((node) => node instanceof ParametricBodyNode)).toBeUndefined();
+    } finally {
+        doc.dispose();
+    }
+});

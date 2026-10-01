@@ -828,6 +828,8 @@ function describeConstruction(node: ConstructionNode) {
 // ------------------------------------------------------------------ Features
 
 function runExtrudeOp(state: State, op: ExtrudeOp): void {
+    if (op.operation !== undefined && !["fuse", "cut", "common"].includes(op.operation))
+        throw new Error("Extrude operation must be fuse, cut or common");
     const sketch = resolveSketch(state, op.sketch);
     const scope = state.document.variables.evaluate().scope;
     ensureUnit(op.depth, scope, LENGTH_UNITS, "depth");
@@ -1501,6 +1503,8 @@ function runThickenOp(state: State, op: ThickenOp): void {
 }
 
 function runBooleanOp(state: State, op: BooleanOp): void {
+    if (!["fuse", "cut", "common"].includes(op.operation))
+        throw new Error("Boolean operation must be fuse, cut or common");
     const body = resolveBody(state, op.body);
     const tools = op.tools.map((tool) => resolveNode(state, tool, "boolean tool"));
     for (const tool of tools) {
