@@ -8,7 +8,7 @@ on:
 
 jobs:
     test-and-deploy:
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
 
         steps:
             - name: Checkout repository
