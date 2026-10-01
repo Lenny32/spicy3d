@@ -1,11 +1,12 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Transaction } from "@spicy3d/core";
-import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
+import { AutosaveHolds, DocumentMutations, DocumentRebuilds, Transaction } from "@spicy3d/core";
+import type { ParametricOp, ProgramResult, ProgramRunOptions } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
 import { requireDocument } from "./documentContext";
 import { noteOpDuration } from "./opBudget";
+import { holdDocumentReadSnapshot } from "./readTools";
 
 /**
  * Loads the parametric module on first use. It must not be imported at module scope:
@@ -666,18 +667,45 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
     if (kinds.has("editSketch")) parametric.SketchEditor.exit();
 
     let result: ProgramResult | undefined;
-    // Synchronous by construction: the solver is initialized above, and a throw here
-    // rolls the whole program back, so a half-built body never survives.
-    Transaction.execute(document, "run_parametric", () => {
-        // Cancellation is checked between ops; a running op is timed for the slow-op warning.
-        result = parametric.runParametricProgram(document, ops as ParametricOp[], {
-            signal,
-            responseMode,
-            onOpFinished: noteOpDuration,
+    const options: ProgramRunOptions = { signal, responseMode, onOpFinished: noteOpDuration };
+    if (kinds.has("editSketch")) {
+        const releaseSnapshot = holdDocumentReadSnapshot(document);
+        const releaseAutosave = AutosaveHolds.hold("run_parametric");
+        let owner: ReturnType<typeof DocumentMutations.hold> | undefined;
+        try {
+            owner = DocumentMutations.hold(document);
+            const scope = owner;
+            await Transaction.executeAsync(
+                document,
+                "run_parametric",
+                async () => {
+                    result = await parametric.runParametricProgramAsync(
+                        document,
+                        ops as ParametricOp[],
+                        scope,
+                        options,
+                    );
+                    scope.run(() => {
+                        document.selection.clearSelection();
+                        document.visual.update();
+                    });
+                },
+                scope,
+            );
+        } finally {
+            // Rollback can schedule restoration jobs that captured this mutation scope too.
+            await DocumentRebuilds.settled(document);
+            owner?.release();
+            releaseAutosave();
+            releaseSnapshot();
+        }
+    } else {
+        Transaction.execute(document, "run_parametric", () => {
+            result = parametric.runParametricProgram(document, ops as ParametricOp[], options);
+            document.selection.clearSelection();
+            document.visual.update();
         });
-        document.selection.clearSelection();
-        document.visual.update();
-    });
+    }
     // Serialized outside the transaction on purpose: a fault here is a reporting fault,
     // and it must not discard a build that has already committed to history.
     return JSON.stringify(result);

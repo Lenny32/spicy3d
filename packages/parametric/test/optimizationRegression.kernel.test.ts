@@ -168,7 +168,8 @@ test.each([
     expect(body.shape.value).toBe(prefix);
     expect(body.setRollbackIndex(undefined)).toBe(true);
     expectVolume(body, after);
-    expect(prism).toHaveBeenCalledTimes(change === "suppression" ? 1 : 2);
+    const geometryUnchanged = change === "constraint addition" || change === "constraint removal";
+    expect(prism).toHaveBeenCalledTimes(geometryUnchanged ? 0 : change === "suppression" ? 1 : 2);
     const editedJson = body.featuresJson;
     const editedData = pocket.dataJson;
     const editedPlane = pocket.plane;

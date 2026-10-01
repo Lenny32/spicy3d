@@ -238,6 +238,40 @@ export class ParametricBodyNode
         }
     }
 
+    private static readonly upstreamBatches = new WeakMap<IDocument, Set<ParametricBodyNode>>();
+
+    /** Coalesce upstream notifications; explicit geometry reads still drain their dependencies. */
+    static batchUpstreamChanges<T>(document: IDocument, action: () => T): T {
+        if (ParametricBodyNode.upstreamBatches.has(document)) return action();
+        const pending = new Set<ParametricBodyNode>();
+        ParametricBodyNode.upstreamBatches.set(document, pending);
+        try {
+            const result = action();
+            while (pending.size) {
+                // Producers first, so several edited tools publish before their common consumer.
+                const node =
+                    [...pending].find((body) =>
+                        [...body.referencedIds()].every(
+                            (id) => ![...pending].some((other) => other.id === id),
+                        ),
+                    ) ?? pending.values().next().value!;
+                node.flushUpstreamChange();
+            }
+            return result;
+        } finally {
+            ParametricBodyNode.upstreamBatches.delete(document);
+        }
+    }
+
+    private flushUpstreamChange(): void {
+        const pending = ParametricBodyNode.upstreamBatches.get(this.document);
+        if (!pending?.delete(this)) return;
+        for (const node of this._watched.values()) {
+            if (node instanceof ParametricBodyNode) node.flushUpstreamChange();
+        }
+        this.rebuildFromUpstream("batch", undefined, true);
+    }
+
     get isRebuilding(): boolean {
         return this._job !== undefined;
     }
@@ -666,6 +700,7 @@ export class ParametricBodyNode
         // this node as its source) gets the previous result as-is: recomputing here
         // would re-enter generateShape.
         if (this._evaluating) return this._shape;
+        this.flushUpstreamChange();
         if (ParametricBodyNode.evaluationDepth > 0) this._job?.flush();
         if (this._job) return this._shape;
         if (!this._shape.isOk && (!this._evaluated || this.hasNewReferences())) {
@@ -1571,7 +1606,7 @@ export class ParametricBodyNode
      * `variableSync.ts`). A failed rebuild keeps the last good shape silently; the
      * feature panel carries the error.
      */
-    private rebuildFromUpstream(trigger = "upstream", source?: INode): void {
+    private rebuildFromUpstream(trigger = "upstream", source?: INode, immediate = false): void {
         // Skip while evaluating: a referenced node (e.g. the sketch) may generate its
         // shape lazily mid-evaluation and notify — the in-flight pass reads it fresh.
         if (this._evaluating) return;
@@ -1595,6 +1630,12 @@ export class ParametricBodyNode
         // rebuilds it directly, and so does the consumer once it stops consuming us.
         if (this.isConsumedByWatched(source)) return;
 
+        const pending = ParametricBodyNode.upstreamBatches.get(this.document);
+        if (pending && !immediate) {
+            this.cancelRebuild("batched-upstream");
+            pending.add(this);
+            return;
+        }
         const result = this.generateShape(trigger);
         if (result.isOk) {
             this.shape = result;

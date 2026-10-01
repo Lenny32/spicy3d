@@ -7,8 +7,10 @@ import {
     type ConstructionRef,
     Continuities,
     type Continuity,
+    DocumentRebuilds,
     type FeatureItem,
     type IDocument,
+    type IDocumentMutationScope,
     Id,
     type IEdge,
     type IFace,
@@ -493,16 +495,62 @@ export function runParametricProgram(
     ops: readonly ParametricOp[],
     options: ProgramRunOptions = {},
 ): ProgramResult {
-    return ParametricBodyNode.withSynchronousEvaluation(document, () =>
-        evaluateProgram(document, ops, options),
-    );
+    return ParametricBodyNode.withSynchronousEvaluation(document, () => {
+        const steps = evaluateProgram(document, ops, options);
+        let step = steps.next();
+        while (!step.done) step = steps.next();
+        return step.value;
+    });
 }
 
-function evaluateProgram(
+/** Caller owns the transaction and mutation scope across background rebuild waits. */
+export async function runParametricProgramAsync(
+    document: IDocument,
+    ops: readonly ParametricOp[],
+    owner: IDocumentMutationScope,
+    options: ProgramRunOptions = {},
+): Promise<ProgramResult> {
+    await DocumentRebuilds.settled(document);
+    const existingErrors = new Map(
+        document.modelManager
+            .findNodes()
+            .filter((node) => node instanceof ParametricBodyNode)
+            .map((node) => [node.id, erroredFeatureIds(node)]),
+    );
+    const steps = evaluateProgram(document, ops, options);
+    try {
+        let step = owner.run(() => steps.next());
+        while (!step.done) {
+            await DocumentRebuilds.settled(document);
+            if (options.signal?.aborted)
+                throw new Error("cancelled during sketch rebuild; the whole program was rolled back");
+            owner.run(() => {
+                for (const node of document.modelManager.findNodes()) {
+                    if (!(node instanceof ParametricBodyNode)) continue;
+                    const failure = node
+                        .featureItems()
+                        .find(
+                            (item) => item.error !== undefined && !existingErrors.get(node.id)?.has(item.id),
+                        );
+                    if (failure)
+                        throw new Error(
+                            `feature "${failure.display}" (${failure.id}) failed: ${failure.error}`,
+                        );
+                }
+            });
+            step = owner.run(() => steps.next());
+        }
+        return step.value;
+    } finally {
+        owner.run(() => steps.return(undefined as never));
+    }
+}
+
+function* evaluateProgram(
     document: IDocument,
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
-): ProgramResult {
+): Generator<void, ProgramResult> {
     if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
         throw new Error('"responseMode" must be "full" or "compact"');
     }
@@ -516,7 +564,7 @@ function evaluateProgram(
         changed: new Map(),
         sketchNames: new Map(),
     };
-    ops.forEach((op, index) => {
+    const run = (op: ParametricOp, index: number) => {
         if (options.signal?.aborted) {
             throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
         }
@@ -528,7 +576,21 @@ function evaluateProgram(
         } finally {
             options.onOpFinished?.(String(op.op), performance.now() - start);
         }
-    });
+    };
+    for (let index = 0; index < ops.length; ) {
+        if (ops[index].op === "editSketch") {
+            ParametricBodyNode.batchUpstreamChanges(document, () => {
+                do {
+                    run(ops[index], index);
+                    index++;
+                } while (index < ops.length && ops[index].op === "editSketch");
+            });
+            yield;
+        } else {
+            ParametricBodyNode.withSynchronousEvaluation(document, () => run(ops[index], index));
+            index++;
+        }
+    }
     state.out.bodies = [...state.touched].map((body) =>
         options.responseMode === "compact"
             ? compactBodyReport(body, state.changed.get(body) ?? new Set())

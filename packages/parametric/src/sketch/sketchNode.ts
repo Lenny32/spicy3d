@@ -234,8 +234,29 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         options.document.modelManager.addNodeObserver(this.handleConstructionTreeChanged);
     }
 
+    private _shapeData?: SketchData;
+
     setDataEmitShapeChanged(data: SketchData): void {
-        this.setPropertyEmitShapeChanged("dataJson", JSON.stringify(data));
+        const previous = this._shapeData ?? this.data;
+        const geometry = ({
+            constraints: _constraints,
+            anchors: _anchors,
+            entities,
+            ...rest
+        }: SketchData) => ({
+            ...rest,
+            entities: entities.map(({ params: _params, ...entity }) => entity),
+        });
+        if (
+            !entitiesMoved(previous.entities, data.entities) &&
+            JSON.stringify(geometry(previous)) === JSON.stringify(geometry(data))
+        ) {
+            // Compare to the data that BUILT the shape, so small consecutive edits cannot accumulate drift.
+            // Constraint/label-only edits still enter undo, but keep the native shape identity.
+            this.setProperty("dataJson", JSON.stringify(data));
+        } else {
+            this.setPropertyEmitShapeChanged("dataJson", JSON.stringify(data));
+        }
     }
 
     private _geometryRevision = 0;
@@ -340,10 +361,10 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         // are combined into a compound — empty when every entity was deleted, which
         // keeps the visual in sync instead of leaving a stale ghost behind.
         // Use convert.toWire/toFace downstream when a closed profile is needed.
-        if (edges.value.length === 1) {
-            return Result.ok(edges.value[0]);
-        }
-        return shapeFactory.combine(edges.value);
+        const result =
+            edges.value.length === 1 ? Result.ok(edges.value[0]) : shapeFactory.combine(edges.value);
+        if (result.isOk) this._shapeData = data;
+        return result;
     }
 
     /** The sketch's own entity edges, followed by the profile-role external refs. */
