@@ -11,6 +11,7 @@ import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
 import type { FeatureData, ThickenFeatureData } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
+import { runParametricProgram } from "../src/program/parametricProgram";
 import { type SketchData, SketchNode } from "../src/sketch";
 
 const WASM_BINARY = readFileSync(
@@ -269,6 +270,63 @@ describe("thicken feature (real kernel)", () => {
     });
 
     describe("errors", () => {
+        test("a collapsed free-form offset reports an error on creation and thickness edits", () => {
+            const doc = newDoc();
+            const sketch = new SketchNode({
+                document: doc,
+                plane: planeAt(0),
+                data: {
+                    entities: [
+                        {
+                            id: 1,
+                            type: "bspline",
+                            params: [-10, 0, -1, 15, 1, 15, 10, 0],
+                            control: { degree: 3, knots: [0, 1], multiplicities: [4, 4] },
+                        },
+                        { id: 2, type: "line", params: [10, 0, 10, -15] },
+                        { id: 3, type: "line", params: [10, -15, -10, -15] },
+                        { id: 4, type: "line", params: [-10, -15, -10, 0] },
+                    ],
+                    constraints: [],
+                },
+            });
+            doc.modelManager.addNode(sketch);
+            const body = new ParametricBodyNode({
+                document: doc,
+                features: [{ id: "e1", type: "extrude", sketchId: sketch.id, depth: 20 }],
+            });
+            doc.modelManager.addNode(body);
+            expect(body.shape.isOk).toBe(true);
+            const volume = body.shape.value.volume();
+            expect(volume).toBeCloseTo(8790, 6);
+            const openings = faces(body).flatMap((face, index) =>
+                face.surface().isPlanar() ? [captureExtentFaceRef(face, body.faceIdAt(index))] : [],
+            );
+            expect(openings).toHaveLength(5);
+            // The skin's crown radius is 3.025 mm. OCCT used to accept these
+            // inward offsets while returning the original solid without a wall.
+            const openFaceIndexes = faces(body).flatMap((face, index) =>
+                face.surface().isPlanar() ? [index] : [],
+            );
+            expect(() =>
+                Transaction.execute(doc, "failed thicken program", () =>
+                    runParametricProgram(doc, [
+                        { op: "thicken", id: "failed", body: body.id, thickness: -5, openFaceIndexes },
+                    ]),
+                ),
+            ).toThrow("offset did not remove an opening face");
+            expect(body.features).toHaveLength(1);
+            expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
+
+            thicken(body, { thickness: -5, openFaces: openings });
+            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
+
+            body.setFeatureParameter("t1", "thickness", -7);
+            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
+        });
+
         test("needs a preceding feature", () => {
             const doc = newDoc();
             const body = new ParametricBodyNode({

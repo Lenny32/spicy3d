@@ -12,7 +12,7 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
-import { buildParametricTools } from "../../../ai/src/tools/parametricTools";
+import { runParametric } from "../../../ai/src/tools/parametricTools";
 import { hasDocumentReadSnapshot } from "../../../ai/src/tools/readTools";
 import { registerFeature } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
@@ -86,7 +86,7 @@ async function run(ops: ParametricOp[], signal?: AbortSignal) {
             document,
             "batch test",
             async () => {
-                await runParametricProgramAsync(document, ops, owner, { signal });
+                await runParametricProgramAsync(document, ops, { signal }, owner);
             },
             owner,
         );
@@ -176,14 +176,11 @@ test("sub-tolerance edits are compared to the built geometry rather than accumul
     expect(calls).toEqual([60, 61, 62, 63, 64]);
 });
 
-test("the MCP handler holds reads and mutation ownership until its batched rebuild completes", async () => {
+test("a parametric job holds reads and mutation ownership until its batched rebuild completes", async () => {
     const app = document.application;
     app.activeView = createMockView({ document });
     rs.stubGlobal("app", app);
-    const tool = buildParametricTools().find((entry) => entry.name === "run_parametric");
-    expect(tool).not.toBeUndefined();
-    if (!tool) throw new Error("missing parametric tool");
-    const running = tool.handler({ ops: [move(sketches[0], 1), move(sketches[1], 2)] });
+    const running = runParametric({ ops: [move(sketches[0], 1), move(sketches[1], 2)] }, undefined, undefined, document);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(DocumentMutations.isHeld(document)).toBe(true);
     expect(hasDocumentReadSnapshot()).toBe(true);

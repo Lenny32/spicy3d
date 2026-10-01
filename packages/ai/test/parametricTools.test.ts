@@ -8,6 +8,7 @@ import * as parametric from "@spicy3d/parametric";
 import { SKETCH_ACTION_NAMES } from "@spicy3d/parametric";
 import { buildTools } from "../src/tools";
 import { buildParametricTools } from "../src/tools/parametricTools";
+import { isProgramJobTool } from "../src/tools/programJobs";
 
 const runParametric = () => buildParametricTools().find((tool) => tool.name === "run_parametric")!;
 
@@ -181,4 +182,18 @@ describe("parametric response mode", () => {
             rs.unstubAllGlobals();
         }
     });
+});
+
+test("parametric job tools append after existing tools and bypass only by built-in identity", () => {
+    const tools = buildTools();
+    const jobs = tools.slice(-3);
+    expect(jobs.map((tool) => tool.name)).toEqual([
+        "start_parametric_job",
+        "get_parametric_job",
+        "cancel_parametric_job",
+    ]);
+    for (const tool of jobs) {
+        expect(isProgramJobTool(tool)).toBe(true);
+        expect(isProgramJobTool({ ...tool })).toBe(false);
+    }
 });

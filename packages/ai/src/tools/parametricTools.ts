@@ -1,9 +1,16 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { AutosaveHolds, DocumentMutations, DocumentRebuilds, Transaction } from "@spicy3d/core";
-import type { ParametricOp, ProgramResult, ProgramRunOptions } from "@spicy3d/parametric";
+import {
+    AutosaveHolds,
+    DocumentMutations,
+    DocumentRebuilds,
+    type IDocument,
+    Transaction,
+} from "@spicy3d/core";
+import type { ParametricOp, ProgramResult } from "@spicy3d/parametric";
 import type { Tool } from "../llm/types";
+import type { ProgramProgress } from "./capabilityEngine";
 import { requireDocument } from "./documentContext";
 import { noteOpDuration } from "./opBudget";
 import { holdDocumentReadSnapshot } from "./readTools";
@@ -618,7 +625,7 @@ const OPS_SCHEMA = {
     required: ["op"],
 };
 
-const RUN_PARAMETRIC_PARAMETERS = {
+export const RUN_PARAMETRIC_PARAMETERS = {
     type: "object",
     properties: {
         ops: { type: "array", items: OPS_SCHEMA, description: "Operations, run in order" },
@@ -637,15 +644,20 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body. Consecutive editSketch operations coalesce downstream rebuilds. Use start_parametric_job for long sketch-edit batches with live status and cancellation.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
-            handler: runParametric,
+            handler: (args, signal) => runParametric(args, signal),
         },
     ];
 }
 
-async function runParametric(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
-    const document = requireDocument();
+export async function runParametric(
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    progress?: (value: ProgramProgress) => void,
+    capturedDocument?: IDocument,
+): Promise<string> {
+    const document = capturedDocument ?? requireDocument();
     if (typeof document === "string") return document;
 
     const ops = (args as { ops?: unknown }).ops;
@@ -664,17 +676,30 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
     if ([...kinds].some((kind) => SOLVER_OPS.has(String(kind)))) await parametric.initPlaneGcs();
     // An open sketch session keeps its own solver and would commit over an edit made
     // behind its back — close it (committing what the user drew) before editing sketches.
-    if (kinds.has("editSketch")) parametric.SketchEditor.exit();
+    if (kinds.has("editSketch") && parametric.SketchEditor.getActive()?.document === document)
+        parametric.SketchEditor.exit();
 
     let result: ProgramResult | undefined;
-    const options: ProgramRunOptions = { signal, responseMode, onOpFinished: noteOpDuration };
-    if (kinds.has("editSketch")) {
+    if (capturedDocument) {
+        const assertIdle = () => {
+            if (globalThis.app.executingCommand || Transaction.isActive(document))
+                throw new Error(
+                    "Finish the active command or transaction before running a parametric program",
+                );
+        };
+        assertIdle();
+        await DocumentRebuilds.settled(document);
+        assertIdle();
         const releaseSnapshot = holdDocumentReadSnapshot(document);
-        const releaseAutosave = AutosaveHolds.hold("run_parametric");
-        let owner: ReturnType<typeof DocumentMutations.hold> | undefined;
+        let owner: ReturnType<typeof DocumentMutations.hold>;
         try {
             owner = DocumentMutations.hold(document);
-            const scope = owner;
+        } catch (error) {
+            releaseSnapshot();
+            throw error;
+        }
+        const releaseAutosave = AutosaveHolds.hold("parametric program");
+        try {
             await Transaction.executeAsync(
                 document,
                 "run_parametric",
@@ -682,30 +707,48 @@ async function runParametric(args: Record<string, unknown>, signal?: AbortSignal
                     result = await parametric.runParametricProgramAsync(
                         document,
                         ops as ParametricOp[],
-                        scope,
-                        options,
+                        {
+                            signal,
+                            responseMode,
+                            onOpFinished: noteOpDuration,
+                        },
+                        owner,
+                        progress,
                     );
-                    scope.run(() => {
+                    // No abort check here: the program checks between steps and restores its refs
+                    // when it throws. A cancel arriving after it returned leaves the job completed.
+                    owner.run(() => {
                         document.selection.clearSelection();
                         document.visual.update();
                     });
                 },
-                scope,
+                owner,
             );
         } finally {
-            // Rollback can schedule restoration jobs that captured this mutation scope too.
-            await DocumentRebuilds.settled(document);
-            owner?.release();
-            releaseAutosave();
-            releaseSnapshot();
+            // Rollback may enqueue restoration work. Keep ownership until it has settled,
+            // and release it even if waiting fails, or the document would stay held.
+            try {
+                await DocumentRebuilds.settled(document);
+            } finally {
+                releaseSnapshot();
+                owner.release();
+                releaseAutosave();
+            }
         }
-    } else {
-        Transaction.execute(document, "run_parametric", () => {
-            result = parametric.runParametricProgram(document, ops as ParametricOp[], options);
-            document.selection.clearSelection();
-            document.visual.update();
-        });
+        return JSON.stringify(result);
     }
+    // Synchronous by construction: the solver is initialized above, and a throw here
+    // rolls the whole program back, so a half-built body never survives.
+    Transaction.execute(document, "run_parametric", () => {
+        // Cancellation is checked between ops; a running op is timed for the slow-op warning.
+        result = parametric.runParametricProgram(document, ops as ParametricOp[], {
+            signal,
+            responseMode,
+            onOpFinished: noteOpDuration,
+        });
+        document.selection.clearSelection();
+        document.visual.update();
+    });
     // Serialized outside the transaction on purpose: a fault here is a reporting fault,
     // and it must not discard a build that has already committed to history.
     return JSON.stringify(result);

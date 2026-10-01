@@ -503,45 +503,40 @@ export function runParametricProgram(
     });
 }
 
-/** Caller owns the transaction and mutation scope across background rebuild waits. */
+/** Background programs yield between operations and await the coalesced sketch rebuilds. */
 export async function runParametricProgramAsync(
     document: IDocument,
     ops: readonly ParametricOp[],
+    options: ProgramRunOptions,
     owner: IDocumentMutationScope,
-    options: ProgramRunOptions = {},
+    progress?: (value: { completed: number; total: number }) => void,
 ): Promise<ProgramResult> {
-    await DocumentRebuilds.settled(document);
-    const existingErrors = new Map(
-        document.modelManager
-            .findNodes()
-            .filter((node) => node instanceof ParametricBodyNode)
-            .map((node) => [node.id, erroredFeatureIds(node)]),
-    );
+    const refs = refsFor(document);
+    const previousRefs = new Map(refs);
     const steps = evaluateProgram(document, ops, options);
+    const cancel = () =>
+        owner.run(() => {
+            for (const node of document.modelManager.findNodes()) {
+                if (node instanceof ParametricBodyNode) node.cancelProgramRebuild(owner);
+            }
+        });
+    options.signal?.addEventListener("abort", cancel, { once: true });
     try {
-        let step = owner.run(() => steps.next());
-        while (!step.done) {
+        for (;;) {
+            if (options.signal?.aborted) throw new Error("Parametric program cancelled; edits rolled back");
+            const step = owner.run(() => steps.next());
+            if (step.done) return step.value;
             await DocumentRebuilds.settled(document);
-            if (options.signal?.aborted)
-                throw new Error("cancelled during sketch rebuild; the whole program was rolled back");
-            owner.run(() => {
-                for (const node of document.modelManager.findNodes()) {
-                    if (!(node instanceof ParametricBodyNode)) continue;
-                    const failure = node
-                        .featureItems()
-                        .find(
-                            (item) => item.error !== undefined && !existingErrors.get(node.id)?.has(item.id),
-                        );
-                    if (failure)
-                        throw new Error(
-                            `feature "${failure.display}" (${failure.id}) failed: ${failure.error}`,
-                        );
-                }
-            });
-            step = owner.run(() => steps.next());
+            progress?.({ completed: step.value, total: ops.length });
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
-        return step.value;
+    } catch (error) {
+        cancel();
+        refs.clear();
+        for (const [key, value] of previousRefs) refs.set(key, value);
+        throw error;
     } finally {
+        options.signal?.removeEventListener("abort", cancel);
         owner.run(() => steps.return(undefined as never));
     }
 }
@@ -550,7 +545,7 @@ function* evaluateProgram(
     document: IDocument,
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
-): Generator<void, ProgramResult> {
+): Generator<number, ProgramResult, void> {
     if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
         throw new Error('"responseMode" must be "full" or "compact"');
     }
@@ -564,32 +559,34 @@ function* evaluateProgram(
         changed: new Map(),
         sketchNames: new Map(),
     };
-    const run = (op: ParametricOp, index: number) => {
-        if (options.signal?.aborted) {
-            throw new Error(`cancelled before op ${index} ("${op.op}"); the whole program was rolled back`);
-        }
-        const start = performance.now();
-        try {
-            runOp(state, op);
-        } catch (err) {
-            throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
-        } finally {
-            options.onOpFinished?.(String(op.op), performance.now() - start);
-        }
-    };
     for (let index = 0; index < ops.length; ) {
-        if (ops[index].op === "editSketch") {
-            ParametricBodyNode.batchUpstreamChanges(document, () => {
-                do {
-                    run(ops[index], index);
-                    index++;
-                } while (index < ops.length && ops[index].op === "editSketch");
-            });
-            yield;
-        } else {
-            ParametricBodyNode.withSynchronousEvaluation(document, () => run(ops[index], index));
+        const run = () => {
+            const op = ops[index];
+            if (options.signal?.aborted) {
+                throw new Error(
+                    `cancelled before op ${index} ("${op.op}"); the whole program was rolled back`,
+                );
+            }
+            const start = performance.now();
+            try {
+                runOp(state, op);
+            } catch (err) {
+                throw new Error(`op ${index} ("${op.op}") failed: ${(err as Error).message}`);
+            } finally {
+                options.onOpFinished?.(String(op.op), performance.now() - start);
+            }
             index++;
+        };
+        if (ops[index].op === "editSketch") {
+            ParametricBodyNode.withDeferredUpstream(document, () => {
+                do run();
+                while (index < ops.length && ops[index].op === "editSketch");
+            });
+        } else {
+            // Topology-dependent operations must validate before the next operation reads it.
+            ParametricBodyNode.withSynchronousEvaluation(document, run);
         }
+        yield index;
     }
     state.out.bodies = [...state.touched].map((body) =>
         options.responseMode === "compact"

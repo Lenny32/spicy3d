@@ -525,7 +525,7 @@ test("batched edits of two producers rebuild their shared consumer once", () => 
     warm(consumer);
     const prefix = consumer.timelineStateAt(3)?.shape;
     calls = [];
-    ParametricBodyNode.batchUpstreamChanges(document, () => {
+    ParametricBodyNode.withDeferredUpstream(document, () => {
         inputs[0].shape = Result.ok(shape("left edited"));
         inputs[1].shape = Result.ok(shape("right edited"));
         inputs[0].shape = Result.ok(shape("left edited again"));
