@@ -1373,7 +1373,7 @@ function persistentEdges(given: PersistentEdgeReference[], body: ParametricBodyN
         const edge = reference.edge;
         if (
             !edge ||
-            (edge.edgeId !== undefined && typeof edge.edgeId !== "string") ||
+            (edge.edgeId !== undefined && (typeof edge.edgeId !== "string" || edge.edgeId.length > 4096)) ||
             (edge.splitPiece !== undefined && typeof edge.splitPiece !== "boolean")
         ) {
             throw new Error("invalid persistent edge reference");

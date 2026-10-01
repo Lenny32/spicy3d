@@ -182,7 +182,7 @@ function registerRef(doc: IDocument, refs: Map<string, LocalRef>, id: string, en
     if (entry.listCount !== undefined) {
         // A re-run replaces the family, including individually mutated members.
         for (const key of refs.keys()) {
-            if (key.startsWith(id)) refs.delete(key);
+            if (key === id || (key.startsWith(id) && /^\d+$/.test(key.slice(id.length)))) refs.delete(key);
         }
     }
     setRef(refs, id, entry);

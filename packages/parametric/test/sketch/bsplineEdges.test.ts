@@ -4,7 +4,7 @@
 import { rs } from "@rstest/core";
 import { type IEdge, type IShapeFactory, Plane, Result, XYZ, type XYZLike } from "@spicy3d/core";
 import { createMockDocument } from "@spicy3d/core/test-utils";
-import { bsplineSpanCount, kernelBuildsBSplineEdges } from "../../src/sketch/bsplineEdges";
+import { bsplineEdgeCount, bsplineSpanCount, kernelBuildsBSplineEdges } from "../../src/sketch/bsplineEdges";
 import { type BSplinePoint, bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
 import { type SketchData, shapeEntityIds } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
@@ -147,4 +147,8 @@ describe("bspline edges, feature-detected", () => {
         rs.stubGlobal("shapeFactory", undefined);
         expect(kernelBuildsBSplineEdges()).toBe(false);
     });
+});
+
+test("malformed control knots produce no topology identities", () => {
+    expect(bsplineEdgeCount([0, 0, 1, 1], false, { degree: 1 } as any)).toBe(0);
 });

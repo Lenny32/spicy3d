@@ -43,7 +43,7 @@ function inputs(radius = 10, halfWidth = 2) {
 }
 
 test("projected output IDs retain actual source and target ancestry across geometry edits", () => {
-    let previous: string[] | undefined;
+    const identities: string[][] = [];
     for (const [radius, span] of [
         [10, 2],
         [12, 3],
@@ -62,8 +62,8 @@ test("projected output IDs retain actual source and target ancestry across geome
             if (!projected.isOk) throw new Error(projected.error);
             try {
                 expect(projected.value.edgeIds.length).toBeGreaterThan(0);
-                if (previous !== undefined) expect(projected.value.edgeIds).toEqual(previous);
-                previous = projected.value.edgeIds;
+
+                identities.push(projected.value.edgeIds);
                 const length = projected.value.shape
                     .findSubShapes(ShapeTypes.edge)
                     .reduce((sum, edge) => sum + (edge as IEdge).length(), 0);
@@ -75,6 +75,8 @@ test("projected output IDs retain actual source and target ancestry across geome
             scene.dispose();
         }
     }
+    expect(identities).toHaveLength(2);
+    expect(identities[1]).toEqual(identities[0]);
 });
 
 test("fixed world direction is converted into rotated host coordinates", () => {

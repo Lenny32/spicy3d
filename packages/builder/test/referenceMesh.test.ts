@@ -195,6 +195,15 @@ test("scan facets with zero area preserve their vertices and use zero normals", 
         new TextEncoder().encode(ascii.replace("vertex 0 1 0", "vertex 0 0 0")).buffer,
     );
     expect(result.isOk).toBe(true);
-    expect(result.value.position.length).toBe(9);
+    expect(result.value.position?.length).toBe(9);
     expect(Array.from(result.value.normal!)).toEqual(Array(9).fill(0));
+});
+
+test("binary scans accept trailing bytes after all declared records", () => {
+    const original = new Uint8Array(binary());
+    const padded = new Uint8Array(original.length + 4);
+    padded.set(original);
+    const result = parseReferenceStl(padded.buffer);
+    expect(result.isOk).toBe(true);
+    expect(result.value.position?.length).toBe(9);
 });

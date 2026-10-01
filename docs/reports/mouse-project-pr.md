@@ -12,7 +12,7 @@ transactional rollback and committed metadata reads. Reference STL meshes suppor
 deviation measurements; exports support tessellation controls, bounded bytes and separate files
 in one archive. Main-kernel recovery preserves committed state for supported synchronous replays.
 
-All 26 issues #81–#106 are implemented, reviewed, tested and pushed on this branch. This is the
+All 26 issues #81–#106 have implementations on this branch. The 2026-10-01 review found correctness gaps in corner flushing and shared-worker cancellation; the earlier checks did not cover those cases. This is the
 single integration PR; it is ready for the boss's review and must remain unmerged. Issues retain
 their open state and original labels. The [durable checklist](https://github.com/Lenny32/spicy3d/blob/enhancement-mouse-project/docs/reports/mouse-project-checklist.md)
 records dependencies, full integration SHAs and validation.
@@ -72,3 +72,8 @@ fails rather than moving or dropping sections. See [guided loft implementation](
 
 Refs #81, #82, #83, #84, #85, #86, #87, #88, #89, #90, #91, #92, #93, #94, #95, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #106.
 Keep issues open and never merge this PR automatically.
+
+
+## Review corrections (2026-10-01)
+
+Synchronous flush keeps worker-only corner rebuilds parked; callers requiring final geometry must await `DocumentRebuilds.settled()`. Corner and bounded requests use dedicated worker instances so their cancellation does not terminate the resident boolean worker. Recovery requires a healthy checkpoint at the current committed history position; a crash during the post-commit rebuild requires Reload. Program and corner job caps apply separately, allowing up to 32 retained and 8 active jobs per caller in total; a running corner can occupy the mutation FIFO for up to 90 seconds. These limits supplement the original feature delivery notes.

@@ -103,20 +103,25 @@ describe("ordered whole-edge path references (real kernel)", () => {
 
     test("places source-local references through source world and host inverse transforms", () => {
         const { source, context, edges } = fixture(line(point(0, 0, 0), point(0, 0, 10)));
-        rs.spyOn(source, "worldTransform").mockReturnValue(Matrix4.fromTranslation(10, 20, 30));
-        const placed = {
-            ...context,
-            host: { id: "host", worldTransform: () => Matrix4.fromTranslation(3, 4, 5) },
-        };
-        const result = resolvePathReferences(
-            { nodeId: source.id, edges: [captureEdgeRef(edges[0])] },
-            placed,
-        );
-        expect(result.isOk).toBe(true);
-        expect(result.value.references[0].edges[0].ends()[0].isEqualTo(point(7, 16, 25))).toBe(true);
-        expect(result.value.references[0].edges[0].ends()[1].isEqualTo(point(7, 16, 35))).toBe(true);
-        result.value.dispose();
-        rs.restoreAllMocks();
+        const transform = rs
+            .spyOn(source, "worldTransform")
+            .mockReturnValue(Matrix4.fromTranslation(10, 20, 30));
+        try {
+            const placed = {
+                ...context,
+                host: { id: "host", worldTransform: () => Matrix4.fromTranslation(3, 4, 5) },
+            };
+            const result = resolvePathReferences(
+                { nodeId: source.id, edges: [captureEdgeRef(edges[0])] },
+                placed,
+            );
+            expect(result.isOk).toBe(true);
+            expect(result.value.references[0].edges[0].ends()[0].isEqualTo(point(7, 16, 25))).toBe(true);
+            expect(result.value.references[0].edges[0].ends()[1].isEqualTo(point(7, 16, 35))).toBe(true);
+            result.value.dispose();
+        } finally {
+            transform.mockRestore();
+        }
     });
 
     test("adopts an entire tracked split span and preserves each piece's real provenance", () => {

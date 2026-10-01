@@ -8,9 +8,9 @@ export function parseReferenceStl(buffer: ArrayBuffer, scale = 1): Result<Mesh> 
     try {
         const view = new DataView(buffer);
         let positions: Float32Array;
-        // Binary headers may start with "solid"; the exact record count disambiguates them.
+        // Binary headers may start with "solid"; the complete record count disambiguates them.
         const count = buffer.byteLength >= 84 ? view.getUint32(80, true) : 0;
-        if (count > 0 && 84 + count * 50 === buffer.byteLength) {
+        if (count > 0 && 84 + count * 50 <= buffer.byteLength) {
             positions = new Float32Array(count * 9);
             for (let triangle = 0; triangle < count; triangle++) {
                 for (let coordinate = 0; coordinate < 9; coordinate++) {

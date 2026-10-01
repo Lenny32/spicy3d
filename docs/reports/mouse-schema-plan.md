@@ -1,5 +1,15 @@
 # Mouse project schema coordination
 
+## Explicit PR #107 confirmation (2026-10-01)
+
+The boss directly answered **"Approve the listed existing changes"** to the approval question
+covering sketch **2→3** and parametric **5→13**: startFace, radiusLaw, next extent, sweep, projection,
+faceSweep, cornerSetbacks and guided loft. This confirms those existing PR #107 changes only.
+The document envelope version remains unchanged; no further schema changes are authorized.
+
+This records the approval requested by the PR review dated 2026-10-01.
+
+
 The boss approval in [mouse-plan.md](../../mouse-plan.md) permits necessary backward-compatible
 payload changes for #81–#106. Existing fixtures and unknown-node/userData content remain unchanged.
 After the approval reviewer rejected file-based authorization, the user directly confirmed

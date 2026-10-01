@@ -1437,16 +1437,25 @@ describe("capabilityEngine", () => {
                         args: { subshapeType: "face" },
                     };
                     await tool.handler({
-                        ops: [{ id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } }, query],
+                        ops: [
+                            { id: "b", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+                            query,
+                            { ...query, id: "f#sibling" },
+                        ],
                     });
                     faces = [{ shapeType: ShapeTypes.face, area: () => 42 }];
                     const result = JSON.parse(
                         (await tool.handler({
-                            ops: [query, { id: "a", method: "face.area", target: "f#0" }],
+                            ops: [
+                                query,
+                                { id: "a", method: "face.area", target: "f#0" },
+                                { id: "sibling", method: "face.area", target: "f#sibling#0" },
+                            ],
                         })) as string,
                     );
                     expect(result.results.f).toEqual({ count: 1, refs: ["f#0"], kind: "shape" });
                     expect(result.results.a).toBe(42);
+                    expect(result.results.sibling).toBe(42);
                     await expect(
                         tool.handler({ ops: [{ id: "a", method: "face.area", target: "f#1" }] }),
                     ).rejects.toThrow("ai.error.unknownRef");

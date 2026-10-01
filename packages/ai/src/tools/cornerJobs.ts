@@ -37,6 +37,7 @@ function edgeReference(value: unknown): value is EdgeRef {
         !record(value) ||
         typeof value["edgeId"] !== "string" ||
         !value["edgeId"] ||
+        value["edgeId"].length > 4096 ||
         (value["splitPiece"] !== undefined && typeof value["splitPiece"] !== "boolean")
     )
         return false;
@@ -146,7 +147,7 @@ export function cornerJobDefinitions(jobs: Pick<ProgramJobs, "start" | "read" | 
         type: "object",
         properties: {
             kind: { type: "string", enum: ["line", "circle", "other"] },
-            edgeId: { type: "string" },
+            edgeId: { type: "string", maxLength: 4096 },
             splitPiece: { type: "boolean" },
             start: xyz,
             end: xyz,

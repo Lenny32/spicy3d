@@ -289,7 +289,7 @@ is being validated before integration. PR #107 remains draft until all 26 and fi
 
 ## Final delivery: all 26 tickets
 
-All issues **#81–#106** are reviewed, implemented, integrated, validated and pushed. #85's complete
+All issues **#81–#106** have integrated implementations. The validation below is the historical pre-review result, not proof that every workflow was correct. The 2026-10-01 review exposed corner-flush and shared-worker cancellation gaps, now covered by dedicated regression checks. #85's complete
 integration is b3237da250b0477afd0ab25cf561dac3801beba7; #84's complete integration is c6b23b528404c1a303fbcff8630f5fe82db64592.
 The native/API foundations are f2fd0008db18aec8acb252934ec26966f3ab2286 and
 a4a0872ba1fe3b05e4d8fcafba9b258586d2f028. Earlier progress sections above are historical snapshots.
@@ -317,3 +317,8 @@ The original scan-specific failures remain unconfirmed without their original in
 All 26 issues receive [done] titles and full-SHA/commit-link evidence while remaining OPEN with
 labels unchanged. The same PR #107 is made ready for review after these checks; it remains unmerged.
 Only enhancement-mouse-project was pushed; develop and main were never pushed or merged.
+
+
+## Review corrections (2026-10-01)
+
+Synchronous flush keeps worker-only corner rebuilds parked; callers requiring final geometry must await `DocumentRebuilds.settled()`. Corner and bounded requests use dedicated worker instances so their cancellation does not terminate the resident boolean worker. Recovery requires a healthy checkpoint at the current committed history position; a crash during the post-commit rebuild requires Reload. Program and corner job caps apply separately, allowing up to 32 retained and 8 active jobs per caller in total; a running corner can occupy the mutation FIFO for up to 90 seconds. These limits supplement the original feature delivery notes.

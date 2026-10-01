@@ -59,7 +59,14 @@ export function bsplineEdgeCount(
     periodic: boolean,
     control?: BSplineOptions["control"],
 ): number {
-    if (control !== undefined) return kernelBuildsBSplineEdges() ? 1 : control.knots.length - 1;
+    if (control !== undefined) {
+        try {
+            const curve = entityBSpline(params, { periodic, control });
+            return kernelBuildsBSplineEdges() ? 1 : curve.knots.length - 1;
+        } catch {
+            return 0; // Invalid control data has no geometry or topology identity.
+        }
+    }
     if (kernelBuildsBSplineEdges()) return 1;
     // counted on the points the curve is built from (a periodic one drops a repeated first point)
     const fit = bsplineFitParams(bsplinePoints(params), periodic);

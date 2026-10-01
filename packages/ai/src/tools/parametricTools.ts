@@ -528,7 +528,7 @@ const OPS_SCHEMA = {
                         type: "object",
                         properties: {
                             kind: { type: "string", enum: ["line", "circle", "other"] },
-                            edgeId: { type: "string" },
+                            edgeId: { type: "string", maxLength: 4096 },
                             splitPiece: { type: "boolean" },
                             start: XYZ_SCHEMA,
                             end: XYZ_SCHEMA,
