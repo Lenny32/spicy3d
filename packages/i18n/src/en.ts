@@ -475,6 +475,14 @@ export default {
         "prompt.pickSplinePoint":
             "Pick next spline point; Enter to finish, Esc to cancel (interior points stay fixed)",
         "command.sketch.bspline": "B-spline",
+        "command.sketch.text": "Text",
+        "sketch.text.value": "Text",
+        "sketch.text.height": "Cap height (mm)",
+        "prompt.pickTextPosition": "Place text outlines (content cannot be edited after placement)",
+        "error.sketch.emptyText": "Enter text with at least one visible character",
+        "error.sketch.invalidTextSize": "Text height must be positive and placement must be finite",
+        "error.sketch.unsupportedTextCharacter":
+            "This font supports Latin-1 characters and common typographic marks only",
         "command.sketch.controlBSpline": "Control B-spline",
         "dialog.title.controlBSpline": "Control B-spline settings",
         "sketch.controlBSpline.degree": "Degree",

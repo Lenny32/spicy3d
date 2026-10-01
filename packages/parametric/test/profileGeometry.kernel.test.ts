@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type IEdge, XYZ } from "@spicy3d/core";
+import { type IEdge, Precision, XYZ } from "@spicy3d/core";
 import { OccShape } from "@spicy3d/wasm/src/shape";
 import { createTestFactory, unwrapOk } from "@spicy3d/wasm/test/helpers";
 import "@spicy3d/wasm/test/setup";
@@ -15,6 +15,23 @@ afterEach(() => {
 function line(x1: number, y1: number, x2: number, y2: number): IEdge {
     return unwrapOk(createTestFactory().line(new XYZ(x1, y1, 0), new XYZ(x2, y2, 0)));
 }
+
+test("shared endpoint intersection roundoff stays a vertex contact, while a nearby crossing splits", () => {
+    const offset = Precision.Distance * 2;
+    const first = line(-10, 0, 0, 0);
+    const adjacent = line(0, 0, 0, 10);
+    const crossing = line(-offset, -5, -offset, 5);
+    try {
+        rs.spyOn(first, "intersect").mockReturnValue([{ parameter: 1, point: new XYZ(offset, 0, 0) }]);
+        expect(needsKernelSplit([first, adjacent])).toBe(false);
+        rs.restoreAllMocks();
+        expect(needsKernelSplit([first, crossing])).toBe(true);
+    } finally {
+        first.dispose();
+        adjacent.dispose();
+        crossing.dispose();
+    }
+});
 
 test("an 81-edge loop queries bounds once per edge and never requests a render mesh", () => {
     const vertices = Array.from({ length: 81 }, (_, i) => {

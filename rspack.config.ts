@@ -117,6 +117,10 @@ export default defineConfig({
         new rspack.CopyRspackPlugin({
             patterns: [
                 {
+                    from: resolve(configDir, "packages/parametric/src/sketch/fonts/LICENSE-OFL.txt"),
+                    to: "licenses/noto-sans-OFL.txt",
+                },
+                {
                     from: resolve(configDir, "public"),
                     globOptions: {
                         // With a proxied server, the dev server's own output would answer

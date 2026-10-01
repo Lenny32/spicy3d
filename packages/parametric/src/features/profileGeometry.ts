@@ -174,6 +174,13 @@ function endpointOnInterior(aPoints: [XYZ, XYZ], b: IEdge, bPoints: [XYZ, XYZ]):
 
 /** A contact at a shared endpoint of both edges is a plain vertex; anything else splits an edge. */
 function isVertexContact(aPoints: [XYZ, XYZ], bPoints: [XYZ, XYZ], point: XYZ): boolean {
+    // OCCT intersections of adjacent quadratic curves can drift just beyond Precision.Distance
+    // after face construction attaches p-curves. An already shared endpoint remains a vertex
+    // contact within the splitter's incidence tolerance; otherwise a rebuild fills glyph holes.
+    if (
+        aPoints.some((a) => a.distanceTo(point) < INCIDENCE_TOLERANCE && bPoints.some((b) => coincides(a, b)))
+    )
+        return true;
     return nearEndpoint(aPoints, point) && nearEndpoint(bPoints, point);
 }
 

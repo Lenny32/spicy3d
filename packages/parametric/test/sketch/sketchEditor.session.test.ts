@@ -20,11 +20,13 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
+import { SketchTextCommand } from "../../src/sketch/commands/sketchText";
 import { promptControlBSpline } from "../../src/sketch/editor/controlBSplinePrompt";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
 import { ConstraintKind, type SketchData } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
+import { copySketchSelection } from "../../src/sketch/utilityOperations";
 import "./setup";
 
 interface TestContext {
@@ -103,6 +105,54 @@ const DATA: SketchData = {
     entities: [{ id: 1, type: "line", params: [0, 0, 10, 0] }],
     constraints: [],
 };
+
+test("text placement is one undo step and its outlines support selection, transforms and deletion", () => {
+    const { doc, restoreFactory } = setup();
+    Object.assign(shapeFactory, {
+        supportsBSplineEdges: true,
+        bspline: () => Result.ok({ isEqual: () => false }),
+        combine: () => Result.ok(new MockShape()),
+    });
+    try {
+        const node = new SketchNode({ document: doc, plane: Plane.XY, data: DATA });
+        const editor = SketchEditor.enter(node);
+        const before = doc.history.undoCount();
+        const command = new SketchTextCommand();
+        command.text = "Ao";
+        (command as any).stepDatas = [{ point: new XYZ({ x: 20, y: 10, z: 0 }) }];
+        (command as any).executeMainTask();
+        expect(doc.history.undoCount()).toBe(before + 1);
+        const placed = node.data;
+        const ids = placed.entities.filter((e) => e.id !== 1).map((e) => e.id);
+        expect(ids.length).toBeGreaterThan(0);
+        editor.selectEntities(ids);
+        expect(editor.selectedEntityIds).toEqual(ids);
+        const clipboard = copySketchSelection(placed, editor.selectedEntityIds);
+        expect(clipboard.isOk).toBe(true);
+        expect(clipboard.value.entities).toHaveLength(ids.length);
+        expect(editor.applyTransform(ids, { kind: "move", delta: [5, 7] })).toBe(true);
+        expect(node.data.entities[0]).toEqual(DATA.entities[0]);
+        expect(node.data.entities[1].params[0]).toBeCloseTo(placed.entities[1].params[0] + 5, 10);
+        doc.history.undo();
+        expect(node.data).toEqual(placed);
+        editor.deleteEntities(ids);
+        expect(node.data).toEqual(DATA);
+        expect(editor.solver.entities()).toEqual(DATA.entities);
+        doc.history.undo();
+        expect(node.data).toEqual(placed);
+        doc.history.undo();
+        expect(node.data).toEqual(DATA);
+        expect(editor.solver.entities()).toEqual(DATA.entities);
+        doc.history.redo();
+        expect(node.data).toEqual(placed);
+        editor.exit();
+        const reopened = SketchEditor.enter(node);
+        expect(reopened.solver.toData()).toEqual(placed);
+    } finally {
+        SketchEditor.exit();
+        restoreFactory();
+    }
+});
 
 describe("SketchEditor session statics", () => {
     afterEach(() => {
