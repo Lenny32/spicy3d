@@ -22,8 +22,9 @@ import { registerDocumentModule, registerMigration } from "@spicy3d/core";
  * 11: support-normal face sweeps with section/path/support picks and join/cut behavior.
  * 12: independently editable fillet corner setbacks; older readers would silently omit the corner patch.
  * 13: optional loft spine and boundary guides; older readers would silently build an unguided loft.
+ * 14: sketch-profile emboss/deboss; older readers cannot rebuild this new feature.
  */
-export const PARAMETRIC_FORMAT_VERSION = 13;
+export const PARAMETRIC_FORMAT_VERSION = 14;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -87,3 +88,6 @@ registerMigration("parametric", 11, (document) => document);
 
 // parametric 12 → 13: absent guides preserve the existing loft operation verbatim.
 registerMigration("parametric", 12, (document) => document);
+
+// parametric 13 → 14: emboss is new; existing feature records retain their meaning verbatim.
+registerMigration("parametric", 13, (document) => document);

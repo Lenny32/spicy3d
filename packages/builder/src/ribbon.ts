@@ -222,6 +222,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                     "feature.cornerSetback",
                     "feature.chamfer",
                     "feature.thicken",
+                    "feature.emboss",
                     { type: "split", items: ["feature.fuse", "feature.cut", "feature.common"] },
                 ],
                 collapsedItems: ["feature.variable"],

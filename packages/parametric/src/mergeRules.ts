@@ -262,7 +262,20 @@ registerMergePayload("parametric.features", {
                         direction: atomic,
                     },
                 },
-                // a thicken (parametric 5): the thickness is a parameter; the open faces are one pick
+                // Emboss (parametric 14): source selection is grouped; target faces are one pick.
+                emboss: {
+                    kind: "object",
+                    fields: {
+                        ...featureBase,
+                        sketchId: nodeRef,
+                        profiles,
+                        faces: profiles,
+                        depth: expression,
+                        deboss: scalar,
+                    },
+                    groups: { input: ["sketchId", "profiles"] },
+                },
+                // A thicken (parametric 5): thickness is a parameter; open faces are one pick.
                 thicken: {
                     kind: "object",
                     fields: {
