@@ -425,6 +425,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     if (!BRepCheck_Analyzer(shape).IsValid())
         return failure("requires a valid solid");
     const History copiedHistory = derivedHistory(copy, inputHistory(input), shape);
+    // Resolve picks through copy history so trimming never aliases the feature's native input.
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edgeMap;
     TopExp::MapShapes(input, TopAbs_EDGE, edgeMap);
     std::array<TopoDS_Edge, 3> selected;
@@ -439,6 +440,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
             if (selected[i].IsSame(selected[j]))
                 return failure("three distinct incident edges are required");
     }
+    // Require one trihedral corner; multiple shared endpoints would leave the setback ambiguous.
     TopoDS_Vertex commonVertex;
     int commonVertices = 0;
     for (TopExp_Explorer vertex(selected[0], TopAbs_VERTEX); vertex.More(); vertex.Next()) {
@@ -477,6 +479,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     }
     if (supports.size() != 3)
         return failure("requires a trihedral corner with three supporting faces");
+    // Place each trim plane by signed arc length away from the corner, perpendicular to its tangent.
     std::array<gp_Pln, 3> cuts;
     std::array<gp_Vec, 3> edgeDirections;
     for (int i = 0; i < 3; ++i) {
@@ -510,6 +513,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
             return failure("the selected edge has no regular tangent at its setback");
         cuts[i] = gp_Pln(point, gp_Dir(tangent));
     }
+    // Start with rolling fillets and retain their ancestry before replacing the corner cap.
     BRepFilletAPI_MakeFillet fillet(shape);
     for (const auto& edge : selected)
         fillet.Add(radius, edge);
@@ -584,6 +588,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
         retained.push_back(clipped);
         boundary.push_back({ connector, clipped });
     }
+    // Remove only the generated cap; all retained support boundaries must close into one loop.
     std::vector<TopoDS_Face> originalCaps;
     for (const auto& item : fillet.Generated(commonVertex))
         if (item.ShapeType() == TopAbs_FACE) {
@@ -597,6 +602,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     std::vector<TopoDS_Face> patches;
     double maximumDistance = 0;
     double maximumAngle = 0;
+    // Constrain the plate against the trimmed supports, then fit within the finite segment budget.
     GeomPlate_BuildPlateSurface plate(3, 50, 5, 1e-6, distanceTolerance / 20, angularTolerance / 20, 0.1);
     for (const auto& item : boundary) {
         occ::handle<BRepAdaptor_Surface> support = new BRepAdaptor_Surface(item.support);
@@ -662,6 +668,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     if (!patchError.empty())
         return failure("corner patch BREP is invalid:" + patchError);
     patches.push_back(patch);
+    // Sew unchanged faces, trimmed supports and the verified patch while carrying their derivations.
     BRepBuilderAPI_Sewing sewing(distanceTolerance);
     for (TopExp_Explorer face(fillet.Shape(), TopAbs_FACE); face.More(); face.Next()) {
         bool replace = false;
@@ -704,6 +711,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     const auto outputError = validityError(output);
     if (!outputError.empty())
         return failure("the final setback BREP is invalid:" + outputError);
+    // A closed BREP alone is insufficient: reject self-interference and non-inward volume changes.
     BOPAlgo_ArgumentAnalyzer selfInterference;
     selfInterference.SetShape1(output);
     selfInterference.SelfInterMode() = true;
