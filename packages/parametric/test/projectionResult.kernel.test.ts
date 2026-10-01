@@ -109,6 +109,52 @@ test("fixed world direction is converted into rotated host coordinates", () => {
     }
 });
 
+test("two assembled outputs cannot claim the same projected source edge", () => {
+    const scene = inputs();
+    const left = unwrapOk(factory.line(new XYZ({ x: 0, y: -2, z: 10 }), new XYZ({ x: 0, y: 0, z: 10 })));
+    const right = unwrapOk(factory.line(new XYZ({ x: 0, y: 0, z: 10 }), new XYZ({ x: 0, y: 2, z: 10 })));
+    const wire = factory.wire.bind(factory);
+    let duplicated = false;
+    const mock = rs.spyOn(factory, "wire").mockImplementation((edges) => {
+        const result = wire(edges);
+        if (edges.length === 2 && result.isOk) {
+            const find = result.value.findSubShapes.bind(result.value);
+            result.value.findSubShapes = (kind) => {
+                const outputs = find(kind);
+                if (kind === ShapeTypes.edge && outputs.length === 2) {
+                    duplicated = true;
+                    outputs[1].dispose();
+                    return [outputs[0], outputs[0].clone()];
+                }
+                return outputs;
+            };
+        }
+        return result;
+    });
+    try {
+        const result = buildProjectionResult(
+            "project",
+            "source",
+            [
+                { edges: [left], seed: "sketch:source:path:ent1", stable: true },
+                { edges: [right], seed: "sketch:source:path:ent2", stable: true },
+            ],
+            "target",
+            scene.target,
+            XYZ.unitX,
+            Matrix4.identity(),
+        );
+        expect(duplicated).toBe(true);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("provenance is ambiguous");
+    } finally {
+        mock.mockRestore();
+        left.dispose();
+        right.dispose();
+        scene.dispose();
+    }
+});
+
 test.each(["source", "target"])("projection rejects untracked %s provenance explicitly", (kind) => {
     const scene = inputs();
     try {

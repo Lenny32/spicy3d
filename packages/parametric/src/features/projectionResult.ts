@@ -65,6 +65,7 @@ export function buildProjectionResult(
             if (!projected.isOk) return Result.err(projected.error);
             owned.push(projected.value);
             const pieces = projected.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+            owned.push(...pieces);
             projectedEdges.push(...pieces);
             if (projectedEdges.length > 512)
                 return Result.err("Projection exceeds the 512-output-piece limit");
@@ -75,12 +76,14 @@ export function buildProjectionResult(
         if (!joined.isOk) return Result.err(`Projected source spans do not form one curve: ${joined.error}`);
         owned.push(joined.value);
         const outputs = joined.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+        owned.push(...outputs);
         // MakeWire copies inputs to protect their vertices. Transfer existing ancestry
         // only through unchanged geometry with a unique match.
         const candidateBounds = projectedEdges.map((edge) => edge.geometryBoundingBox());
         const candidateLengths = projectedEdges.map((edge) => edge.length());
         let comparisons = 0;
         const edgeIds: string[] = [];
+        const claimed = new Set<number>();
         for (const edge of outputs) {
             const bounds = edge.geometryBoundingBox();
             const edgeLength = edge.length();
@@ -107,18 +110,19 @@ export function buildProjectionResult(
                     return Result.err(`Projection ancestry comparison failed: ${overlap.error}`);
                 }
                 try {
-                    const length = overlap.value
-                        .findSubShapes(ShapeTypes.edge)
-                        .reduce((sum, piece) => sum + (piece as IEdge).length(), 0);
+                    const pieces = overlap.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+                    owned.push(...pieces);
+                    const length = pieces.reduce((sum, piece) => sum + piece.length(), 0);
                     if (Math.abs(length - edgeLength) <= 1e-6) matches.push(index);
                 } finally {
                     overlap.value.dispose();
                 }
             }
-            if (matches.length !== 1)
+            if (matches.length !== 1 || claimed.has(matches[0]))
                 return Result.err(
                     "Projected curve provenance is ambiguous after assembling its source spans",
                 );
+            claimed.add(matches[0]);
             edgeIds.push(ids[matches[0]]);
         }
         if (edgeIds.length !== projectedEdges.length)
