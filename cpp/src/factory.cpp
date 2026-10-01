@@ -3262,7 +3262,7 @@ public:
         }
 
         const TopoDS_Shape& result = makeFillet.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return ShapeResult { TopoDS_Shape(), false,
                 "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" };
         }
@@ -3291,7 +3291,7 @@ public:
         }
 
         const TopoDS_Shape& result = makeFillet.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return TrackedShapeResult { TopoDS_Shape(), false,
                 "Failed to fillet: the result is invalid (BRepCheck_Analyzer)", { }, { } };
         }
@@ -3312,7 +3312,7 @@ public:
         if (!builder.IsDone())
             return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius) };
         const auto result = builder.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
             return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" };
         return ShapeResult { result, true, "" };
     }
@@ -3330,7 +3330,7 @@ public:
         if (!builder.IsDone())
             return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius), { }, { } };
         const auto result = builder.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
             return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)", { }, { } };
         std::vector<int> faceAncestors;
         std::vector<int> edgeAncestors;
@@ -3363,7 +3363,7 @@ public:
             return ShapeResult { TopoDS_Shape(), false, chamferBuildFailure(makeChamfer, distance) };
         }
         const TopoDS_Shape& result = makeChamfer.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return ShapeResult { TopoDS_Shape(), false,
                 "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" };
         }
@@ -3392,7 +3392,7 @@ public:
         }
 
         const TopoDS_Shape& result = makeChamfer.Shape();
-        if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
+        if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return TrackedShapeResult { TopoDS_Shape(), false,
                 "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)", { }, { } };
         }

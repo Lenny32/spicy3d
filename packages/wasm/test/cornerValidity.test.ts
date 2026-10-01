@@ -77,7 +77,9 @@ describe("corner result validity", () => {
         expect(rounded.volume() - cut.volume()).toBeCloseTo(360, 5);
     });
 
-    test.each(corners)("%s refuses an invalid result", (operation) => {
+    test.each(
+        corners,
+    )("%s preserves legacy corner results on already-invalid imported geometry", (operation) => {
         const box = keep(createBox(factory));
         const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
         owned.push(...faces);
@@ -86,7 +88,8 @@ describe("corner result validity", () => {
         const invalid = keep(unwrapOk(factory.solid([shell])));
         expect(invalid.checkShape()).toBe(false);
         const result = factory[operation](invalid, [0], 0.5);
-        expect(result.isOk).toBe(false);
-        expect(result.error).toContain("the result is invalid (BRepCheck_Analyzer)");
+        expect(result.isOk).toBe(true);
+        const value = keep("faceMap" in result.value ? result.value.shape : result.value);
+        expect(value.checkShape()).toBe(false);
     });
 });
