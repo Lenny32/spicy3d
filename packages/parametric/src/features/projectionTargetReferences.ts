@@ -36,15 +36,20 @@ export function captureProjectionTarget(node: ShapeNode, index: number): Result<
     if (!Number.isInteger(index) || index < 0)
         return Result.err("Projection target face index must be a nonnegative integer");
     const faces = node.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
-    const local = faces[index];
-    if (local === undefined) return Result.err("Projection target face index is out of bounds");
-    const id = isBodyTrackingNode(node) ? node.faceIdAt(index) : undefined;
-    const splitPiece = id !== undefined && isBodyTrackingNode(node) && node.faceIndexesOfId(id).length > 1;
-    const world = local.transformedMul(node.worldTransform()) as IFace;
     try {
-        return Result.ok({ nodeId: node.id, face: captureProfileRef(world, id, splitPiece) });
+        const local = faces[index];
+        if (local === undefined) return Result.err("Projection target face index is out of bounds");
+        const id = isBodyTrackingNode(node) ? node.faceIdAt(index) : undefined;
+        const splitPiece =
+            id !== undefined && isBodyTrackingNode(node) && node.faceIndexesOfId(id).length > 1;
+        const world = local.transformedMul(node.worldTransform()) as IFace;
+        try {
+            return Result.ok({ nodeId: node.id, face: captureProfileRef(world, id, splitPiece) });
+        } finally {
+            world.dispose();
+        }
     } finally {
-        world.dispose();
+        for (const face of faces) face.dispose();
     }
 }
 

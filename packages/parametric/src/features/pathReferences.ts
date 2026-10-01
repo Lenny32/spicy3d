@@ -251,6 +251,7 @@ export function resolvePathReferences(
         }
         owned.add(wire.value);
         const edges = collectEdges(wire.value);
+        for (const edge of edges) owned.add(edge);
         const edgeSeeds: string[] = [];
         const edgeSeedStable: boolean[] = [];
         const available = new Set(pieces);
