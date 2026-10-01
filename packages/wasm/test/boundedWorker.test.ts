@@ -619,7 +619,7 @@ test.each([5, Infinity])("self-intersection stays bounded with slow-op budget %s
         await task.ready;
         const result = task.take();
         expect(result.isOk).toBe(false);
-        expect(result.error).toContain(`timed out after ${deadline} ms`);
+        expect(result.error).toBe(`Self-intersection check timed out after ${deadline} ms (result unknown)`);
         expect(transport.terminated).toBe(1);
     } finally {
         Config.instance.slowOpWarningSeconds = previous;

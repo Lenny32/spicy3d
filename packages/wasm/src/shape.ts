@@ -14,6 +14,7 @@ import {
     Id,
     type IEdge,
     type IFace,
+    type IInspectionPrecheck,
     type IShape,
     type IShapeMeshData,
     type IShell,
@@ -115,7 +116,7 @@ function occShapeDeserialize(properties: Serialized) {
     deserialize: occShapeDeserialize,
     serialize: occShapeSerialize,
 })
-export class OccShape implements IShape {
+export class OccShape implements IShape, IInspectionPrecheck {
     // Tolerances are stored on shared native subshapes, so changing one invalidates parent exports too.
     private static toleranceRevision = 0;
     private serializedToleranceRevision = -1;
@@ -516,6 +517,18 @@ export class OccShape implements IShape {
 
     checkShape(): boolean {
         return wasm.Shape.check(this.shape);
+    }
+
+    get needsInspectionSelfIntersectionCheck(): boolean {
+        if (!selfIntersectionBinding() || this.isNull()) return false;
+        // Unique faces give a conservative cutoff: the kernel counts occurrences.
+        // Repeated faces can cause an extra pre-check, never an unsafe bypass.
+        const faces = wasm.Shape.findSubShapes(this.shape, getShapeEnum(ShapeTypes.face));
+        try {
+            return faces.length < 200;
+        } finally {
+            for (const face of faces) face.delete();
+        }
     }
 
     checkSelfIntersection(): Result<boolean> {

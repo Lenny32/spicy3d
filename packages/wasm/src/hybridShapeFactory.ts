@@ -178,19 +178,18 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         if (signal?.aborted) abort.abort();
         this.active.add(cancel);
         const budget = Config.instance.slowOpWarningSeconds * 1000;
+        const queryDeadline = Number.isFinite(budget) && budget > 0 ? Math.min(30_000, budget) : 30_000;
         const pending =
             args.method === "checkSelfIntersection"
                 ? worker.request("checkSelfIntersectionReplica", { shape: args.shape }, abort.signal, {
                       terminateOnAbort: true,
-                      deadlineMs: Number.isFinite(budget) && budget > 0 ? Math.min(30_000, budget) : 30_000,
+                      deadlineMs: queryDeadline,
                   })
                 : worker.request("boundedReplica", args, abort.signal, { terminateOnAbort: true });
         const ready = pending.then((result) => {
             signal?.removeEventListener("abort", onAbort);
             if (!consumed) reply = result;
             worker.dispose();
-            if (!result.ok && (result.error.code === "timeout" || result.error.code === "cancelled"))
-                worker.dispose();
         });
         return {
             ready,
@@ -203,7 +202,10 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                 const answer = reply;
                 reply = undefined;
                 if (!answer.ok) {
-                    const message = answer.error.message;
+                    const message =
+                        request.method === "checkSelfIntersection" && answer.error.code === "timeout"
+                            ? `Self-intersection check timed out after ${queryDeadline} ms (result unknown)`
+                            : answer.error.message;
                     if (
                         answer.error.code === "invalid" &&
                         (request.method === "makeThickSolidBySimple" ||

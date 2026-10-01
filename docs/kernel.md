@@ -128,15 +128,35 @@ Phase 1 of [KERNEL-01](../tickets/kernel-01-worker-kernel.md) extends the existi
 with bounded MCP factory execution. Full model evaluation and
 main-kernel recovery (#98) remain separate work.
 
-
 ### Self-intersection query isolation (#120)
 
-The MCP query runs on a verified BREP copy in a worker dedicated to that operation. Cancellation
-or deadline terminates only that worker; the main kernel's source shapes and the resident boolean
-worker remain intact. The next query creates a fresh instance. Timeout is an error, never a
-successful validity result; choose a simpler skin or skip this expensive check explicitly when
-appropriate, understanding that `checkShape` alone does not establish absence of self-intersection.
-Direct synchronous `IShape.checkSelfIntersection()` calls (including feature validation) still
-use the existing binding. OCCT has no cooperative cancellation hook in this offline build; stopping
-a running check requires terminating its worker. Replica capture on the main thread and other
-synchronous checks remain potential blocking work.
+The MCP query runs on a verified BREP copy in a worker dedicated to that operation.
+Cancellation or deadline terminates only that worker; the main kernel's source shapes and
+resident boolean worker remain intact. The next query creates a fresh instance. Timeout is
+an error: "Self-intersection check timed out after N ms (result unknown)", never a successful
+validity result. Simplify the skin before retrying; `checkShape` alone does not establish
+absence of self-intersection.
+
+Before `run_program` calls `inspectionCommonVolume`, `inspectionMass`, or
+`inspectionSectionCaps`, it runs the same bounded worker query on each applicable input.
+Common volume checks both shapes. Timeout, cancellation, or worker failure refuses the
+inspection with an error and never calls its main-thread binding; a detected
+self-intersection returns the inspection's unavailable-result error. Missing bounded worker
+support also refuses an inspection that needs the pre-check. Feature detection skips the
+pre-check when the self-intersection binding is unavailable, and inputs with at least 200
+unique faces skip it because the kernel's bounded inspection analyzer already skips those
+inputs. Its occurrence count can be larger, so repeated faces may cause an extra pre-check.
+Queries that do not use this analyzer (for example `inspectionDistance`) are unaffected.
+Mass is guarded conservatively as part of the inspection workflow, although the current
+C++ source's mass binding only performs topology validity and mass calculations.
+
+The pre-check duplicates work: common-volume and section-cap inspections repeat the same
+analyzer synchronously after the verified BREP replica passes quickly in the worker. The
+same geometry should make that repeated analyzer fast too; this is an effective bound on
+that known blocking path, not a hard deadline on the subsequent main-thread call. Boolean
+intersection, mass calculations, topology validation, and replica capture can still block.
+Skipping an explicit self-intersection query does not bypass these inspection pre-checks.
+
+Direct synchronous `IShape.checkSelfIntersection()` calls (including feature validation)
+still use the existing binding. OCCT has no cooperative cancellation hook in this offline
+build; stopping a running check requires terminating its worker.

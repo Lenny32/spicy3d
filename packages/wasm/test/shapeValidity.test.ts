@@ -280,9 +280,32 @@ describe("checkSelfIntersection is feature-detected on the kernel build", () => 
         const box = occBox();
         withBinding(undefined, () => {
             expect(shapeClass().checkSelfIntersection).toBeUndefined();
+            expect(box.needsInspectionSelfIntersectionCheck).toBe(false);
             const result = box.checkSelfIntersection();
             expect(result.isOk ? "" : result.error).toBe(SELF_INTERSECTION_UNAVAILABLE);
         });
+    });
+
+    test.each([
+        199, 200,
+    ])("inspection pre-check matches the %s-face cutoff without running the analyzer", (count) => {
+        const box = occBox();
+        const release = rs.fn(() => {});
+        const faces = rs
+            .spyOn(wasm.Shape, "findSubShapes")
+            .mockReturnValue(
+                Array.from({ length: count }, () => ({ delete: release }) as unknown as TopoDS_Shape),
+            );
+        const analyzer = rs.fn((_shape: TopoDS_Shape) => true);
+        try {
+            withBinding(analyzer, () => {
+                expect(box.needsInspectionSelfIntersectionCheck).toBe(count < 200);
+                expect(analyzer).not.toHaveBeenCalled();
+                expect(release).toHaveBeenCalledTimes(count);
+            });
+        } finally {
+            faces.mockRestore();
+        }
     });
 
     test("the committed binary has the binding: a box has no self-intersection", () => {
