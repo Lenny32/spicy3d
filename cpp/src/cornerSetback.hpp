@@ -280,6 +280,8 @@ static bool clipFace(const TopoDS_Face& face, const gp_Pln& plane, TopoDS_Face& 
         return false;
     const gp_Pnt keep = plane.Location().Translated(gp_Vec(plane.Axis().Direction()));
     BRepPrimAPI_MakeHalfSpace halfSpace(boundary.Face(), keep);
+    if (!halfSpace.IsDone())
+        return false;
     BRepAlgoAPI_Common common(face, halfSpace.Solid());
     if (!common.IsDone() || !oneFace(common.Shape(), clipped))
         return false;
