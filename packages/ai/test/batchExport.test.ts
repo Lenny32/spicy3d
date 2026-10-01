@@ -132,7 +132,7 @@ describe("separate MCP model exports", () => {
         expect(download).not.toHaveBeenCalled();
     });
 
-    test("preserves per-output results when the returned archive exceeds its byte limit", async () => {
+    test("reports completed outputs and stops before archiving when the byte limit is exceeded", async () => {
         const { tool, download } = prepare();
         const result = JSON.parse(
             (await tool.handler({
@@ -143,7 +143,7 @@ describe("separate MCP model exports", () => {
             })) as string,
         );
         expect(result.error).toContain("exceeds maxBytes");
-        expect(result.outputs).toHaveLength(3);
+        expect(result.outputs).toHaveLength(1);
         expect(result.bytes).toBeGreaterThan(1);
         expect(result.data).toBeUndefined();
         expect(download).not.toHaveBeenCalled();
@@ -160,4 +160,24 @@ describe("separate MCP model exports", () => {
         expect(typeof result.error).toBe("string");
         expect(exportFile).not.toHaveBeenCalled();
     });
+});
+
+test("batch export rejects excessive ids and stops at the uncompressed byte budget", async () => {
+    const { tool, exportFile } = prepare();
+    try {
+        const excessive = JSON.parse(
+            (await tool.handler({ format: ".step", mode: "separate", ids: Array(257).fill("a") })) as string,
+        );
+        expect(excessive.error).toContain("256");
+        expect(exportFile).not.toHaveBeenCalled();
+        const limited = JSON.parse(
+            (await tool.handler({ format: ".step", mode: "separate", maxBytes: 4 })) as string,
+        );
+        expect(limited.error).toContain("before archiving");
+        expect(exportFile).toHaveBeenCalledTimes(2);
+        expect(limited.bytes).toBe(6);
+    } finally {
+        rs.restoreAllMocks();
+        rs.unstubAllGlobals();
+    }
 });

@@ -226,12 +226,15 @@ async function handleSeparateExport(
                   .findNodes((node) => node.parent === document.modelManager.rootNode)
                   .map((node) => node.id)
             : (ids as string[]);
+    if (requested.length > 256)
+        return JSON.stringify({ error: "Separate export supports at most 256 node ids" });
     if (requested.length === 0) return JSON.stringify({ error: "no exportable nodes" });
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip();
     const outputs: BatchExportOutput[] = [];
     const names = new Set<string>();
     const exported: string[] = [];
+    let accumulatedBytes = 0;
     for (const id of requested) {
         const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
         const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
@@ -261,6 +264,15 @@ async function handleSeparateExport(
                 continue;
             }
             const blob = new Blob(data);
+            accumulatedBytes += blob.size;
+            if (accumulatedBytes > maxBytes) {
+                return JSON.stringify({
+                    error: "Separate export exceeds maxBytes before archiving",
+                    bytes: accumulatedBytes,
+                    maxBytes,
+                    outputs,
+                });
+            }
             zip.file(filename, await blob.arrayBuffer());
             names.add(filename.toLowerCase());
             output.bytes = blob.size;
