@@ -59,6 +59,8 @@ import { CameraController } from "./cameraController";
 import { Constants } from "./constants";
 import { ThreeRefSegmentAnnotation } from "./threeAnnotation";
 import { ThreeGeometry } from "./threeGeometry";
+import { ThreeGrid } from "./threeGrid";
+import { ThreeGridLabels } from "./threeGridLabels";
 import { ThreeHelper } from "./threeHelper";
 import type { ThreeHighlighter } from "./threeHighlighter";
 import style from "./threeView.module.css";
@@ -113,6 +115,7 @@ export class ThreeView extends Observable implements IView {
     private _needsUpdate: boolean = false;
     private _workplane: Plane;
     private _isolatedNodes?: INode[];
+    private readonly _gridLabels = new ThreeGridLabels();
 
     private readonly _scene: Scene;
     private readonly _renderer: WebGLRenderer;
@@ -178,6 +181,7 @@ export class ThreeView extends Observable implements IView {
 
     override disposeInternal(): void {
         super.disposeInternal();
+        this._gridLabels.dispose();
         this._gizmo.dispose();
         this._resizeObserver.disconnect();
     }
@@ -303,7 +307,7 @@ export class ThreeView extends Observable implements IView {
     }
 
     toImage(maxSize?: number): string {
-        this._renderer.render(this._scene, this.camera);
+        this.renderScene();
         const source = this.renderer.domElement;
         // Scaled down before encoding: a full-size PNG of a HiDPI viewport takes seconds to encode.
         const canvas = fitsWithin(source, maxSize) ? undefined : this.copyRendered(maxSize);
@@ -311,7 +315,7 @@ export class ThreeView extends Observable implements IView {
     }
 
     snapshot(maxSize?: number): HTMLCanvasElement | undefined {
-        this._renderer.render(this._scene, this.camera);
+        this.renderScene();
         return this.copyRendered(maxSize, this.backgroundColor());
     }
 
@@ -351,10 +355,32 @@ export class ThreeView extends Observable implements IView {
 
     set workplane(value: Plane) {
         this.setProperty("workplane", value);
+        this.update();
     }
 
     update() {
         this._needsUpdate = true;
+    }
+
+    private prepareGrid() {
+        for (const object of this._scene.children) {
+            if (object instanceof ThreeGrid) object.setWorkplane(this.workplane);
+        }
+    }
+
+    private renderScene() {
+        this.prepareGrid();
+        if (Config.instance.showGrid) {
+            const color = this._dom ? getComputedStyle(this._dom).color : "#333333";
+            this._gridLabels.update(this.camera, this.workplane, this.width, this.height, color);
+            this._scene.add(this._gridLabels);
+        }
+        try {
+            this._renderer.render(this._scene, this.camera);
+        } finally {
+            // Views share a scene; each render must use only this view's labels.
+            this._scene.remove(this._gridLabels);
+        }
     }
 
     private animate() {
@@ -370,7 +396,7 @@ export class ThreeView extends Observable implements IView {
 
         const dir = this.camera.position.clone().sub(this.cameraController.target);
         this.dynamicLight.position.copy(dir);
-        this._renderer.render(this._scene, this.camera);
+        this.renderScene();
         this._cssRenderer.render(this._scene, this.camera);
         this._gizmo?.update();
 
