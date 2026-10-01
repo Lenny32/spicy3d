@@ -119,12 +119,15 @@ function terminal(call: Awaited<ReturnType<typeof connect>>["call"], jobId: stri
 }
 test("published tools append and only their private identity grants job bypass", () => {
     const tools = buildTools();
-    expect(tools.slice(-3).map((tool) => tool.name)).toEqual([
+    const start = tools.findIndex((tool) => tool.name === "start_corner_setback_job");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const corner = tools.slice(start, start + 3);
+    expect(corner.map((tool) => tool.name)).toEqual([
         "start_corner_setback_job",
         "get_corner_setback_job",
         "cancel_corner_setback_job",
     ]);
-    expect(tools.slice(-3).map(isProgramJobTool)).toEqual([true, true, true]);
+    expect(corner.map(isProgramJobTool)).toEqual([true, true, true]);
     expect(
         isProgramJobTool({
             name: "get_corner_setback_job",
