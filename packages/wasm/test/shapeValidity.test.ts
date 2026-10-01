@@ -126,6 +126,23 @@ describe("thick solid results are checked", () => {
         expect(input.volume()).toBeCloseTo(6000, 6);
     });
 
+    test.each(["simple", "join"])("%s refuses a rebuilt input even without opening faces", (api) => {
+        const input = occBox();
+        const rebuilt = wasm.ShapeFactory.combine([input.shape]);
+        const binding = rs
+            .spyOn(wasm.ShapeFactory, api === "simple" ? "makeThickSolidBySimple" : "makeThickSolidByJoin")
+            .mockReturnValue(rebuilt);
+        const result =
+            api === "simple"
+                ? factory.makeThickSolidBySimple(input, 1)
+                : factory.makeThickSolidByJoin(input, [], -1, "arc");
+        expect(binding).toHaveBeenCalledOnce();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("offset returned the input shape unchanged");
+        expect(input.checkShape()).toBe(true);
+        expect(input.volume()).toBeCloseTo(6000, 6);
+    });
+
     test("a thick solid of a closed box (one face opened) passes", () => {
         const box = keep(createBox(factory));
         const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
