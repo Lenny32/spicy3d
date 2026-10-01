@@ -95,6 +95,7 @@ export type SketchPickPreview = (uv: [number, number] | undefined) => void;
 interface PickRequest {
     kind: SketchPickKind;
     entityType?: SketchEntityTypeFilter;
+    includeText?: boolean;
     /** Entity picks only: also allow picking the datum X/Y axes. */
     datum?: boolean;
     preview?: SketchPickPreview;
@@ -125,6 +126,9 @@ export class SketchEditor implements IDisposable {
     private readonly savedCamera: SavedCamera;
     private pickRequest?: PickRequest;
     private disposed = false;
+    get isActive(): boolean {
+        return !this.disposed && SketchEditor.getActive() === this;
+    }
     /** Visibility before the session; a consumed sketch is hidden but editing shows it. */
     private readonly savedVisible: boolean;
     /**
@@ -649,6 +653,7 @@ export class SketchEditor implements IDisposable {
         | {
               kind: SketchPickKind;
               entityType?: SketchEntityTypeFilter;
+              includeText?: boolean;
               datum?: boolean;
               preview?: SketchPickPreview;
           }
@@ -667,10 +672,12 @@ export class SketchEditor implements IDisposable {
     pickEntity(
         prompt: I18nKeys,
         type?: SketchEntityTypeFilter,
-        options?: { datum?: boolean },
+        options?: { datum?: boolean; includeText?: boolean },
         controller?: AsyncController,
     ): Promise<number | undefined> {
-        return this.startPick("entity", prompt, type, options?.datum, undefined, controller);
+        const pending = this.startPick<number>("entity", prompt, type, options?.datum, undefined, controller);
+        if (this.pickRequest) this.pickRequest.includeText = options?.includeText;
+        return pending;
     }
 
     /**
@@ -855,6 +862,7 @@ export class SketchEditor implements IDisposable {
         if (ids.length === 0) return;
         const removedConstraints: number[] = [];
         for (const entityId of ids) {
+            if (this.solver.removeText(entityId)) continue;
             // external references are not regular solver entities — they remove through their own flow
             const removed = isExternalEntityId(entityId)
                 ? this.solver.removeExternalEntity(entityId)

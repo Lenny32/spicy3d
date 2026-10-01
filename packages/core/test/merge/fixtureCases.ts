@@ -277,6 +277,44 @@ const OURS_LINE_ID = 734_251_950_211;
 const THEIRS_LINE_ID = 91_827_364_555;
 
 const CASES: Record<string, CaseBuilder> = {
+    "sketch-text-content-vs-height": () => {
+        const base = edit(sharedBase(), (d) => {
+            d["moduleVersions"] = { ...d["moduleVersions"], sketch: 4 };
+            editSketch(d, "sketch-1", (data) => {
+                data["texts"] = [
+                    {
+                        id: 800,
+                        value: "O",
+                        profileIds: [801, 802],
+                        x: 100,
+                        y: 100,
+                        height: 10,
+                        angle: 0,
+                        frame: { width: 30, height: 20 },
+                    },
+                ];
+            });
+        });
+        const content = (d: Doc) =>
+            editSketch(d, "sketch-1", (data) => {
+                data["texts"][0].value = "B";
+                data["texts"][0].profileIds.push(803);
+            });
+        const height = (d: Doc) =>
+            editSketch(d, "sketch-1", (data) => {
+                data["texts"][0].height = 12;
+            });
+        return {
+            description:
+                "Editable text content and cap height changed independently; both retained with stable contour ids.",
+            base,
+            ours: edit(base, content),
+            theirs: edit(base, height),
+            expected: edit(base, content, height),
+            conflicts: [],
+        };
+    },
+
     "delete-node-vs-move": () => {
         const base = sharedBase();
         const ours = edit(base, (d) => removeNode(d, BOX));

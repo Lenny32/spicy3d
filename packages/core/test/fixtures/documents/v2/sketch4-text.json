@@ -1,0 +1,77 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 5,
+        "sketch": 4
+    },
+    "id": "fixture-sketch4-text",
+    "name": "Editable Noto Sans text with a glyph hole and explicit extrusion profile",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[],\"constraints\":[],\"texts\":[{\"id\":10,\"value\":\"O\",\"x\":5,\"y\":5,\"height\":10,\"angle\":15,\"frame\":{\"width\":30,\"height\":20},\"profileIds\":[11,12],\"font\":\"sans\",\"alignment\":\"center\",\"verticalAlignment\":\"middle\",\"spacing\":0,\"flipHorizontal\":false,\"flipVertical\":false}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-text",
+                "name": "Editable text",
+                "visible": false,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"text-extrude\",\"type\":\"extrude\",\"sketchId\":\"sketch-text\",\"depth\":2,\"profiles\":[{\"edges\":[],\"entities\":[11]}]}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-text",
+                "name": "Text extrusion",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

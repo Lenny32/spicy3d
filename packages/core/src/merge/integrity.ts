@@ -53,6 +53,8 @@ export interface TargetNames {
     /** The feature of `body` that swept `sketchId` in some version (what a `sketch:<id>:…` tracked id needs). */
     sketchFeature(body: string, sketchId: string): string | undefined;
     entity(sketchId: string, entityId: number): string;
+    /** Owning item to restore: text contour ids resolve through their text record. */
+    entityTarget(sketchId: string, entityId: number): string;
     variableItem(name: string): string | undefined;
 }
 
@@ -263,11 +265,10 @@ export function collectReferences(
                 if (typeof value !== "number" || env.sketch === undefined) return [];
                 if (value < 0 && value >= -3) return [];
                 if (env.sketch.entities.has(value)) return [];
-                const segment = value < 0 ? "external" : "entity";
                 return [
                     {
                         label: names.entity(env.sketch.id, value),
-                        target: joinPath("node", env.sketch.id, segment, value),
+                        target: names.entityTarget(env.sketch.id, value),
                     },
                 ];
             }
@@ -295,7 +296,7 @@ export function collectReferences(
                         if (entities !== undefined && typeof entity === "number" && !entities.has(entity)) {
                             missing.push({
                                 label: names.entity(sketchId, entity),
-                                target: joinPath("node", sketchId, "entity", entity),
+                                target: names.entityTarget(sketchId, entity),
                             });
                         }
                     }
@@ -484,6 +485,13 @@ export function collectReferences(
 
 function sketchEntities(data: Json): Set<number> {
     const ids = new Set<number>();
+    for (const text of Array.isArray(data["texts"]) ? data["texts"] : []) {
+        if (!isRecord(text)) continue;
+        if (typeof text["id"] === "number") ids.add(text["id"]);
+        for (const id of Array.isArray(text["profileIds"]) ? text["profileIds"] : []) {
+            if (typeof id === "number") ids.add(id);
+        }
+    }
     for (const entity of Array.isArray(data["entities"]) ? data["entities"] : []) {
         if (isRecord(entity) && typeof entity["id"] === "number") ids.add(entity["id"]);
     }

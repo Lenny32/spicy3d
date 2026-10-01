@@ -205,7 +205,7 @@ test("the parametric-6 starting-face fixture survives cloud manifest/blob assemb
     expect(merged.conflicts).toEqual([]);
     expect(merged.merged["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 3,
+        sketch: 4,
     });
 });
 
@@ -261,7 +261,7 @@ test("the parametric-8 next fixture survives exact cloud manifest/blob assembly"
     expect(result.conflicts).toEqual([]);
     expect(result.merged["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 3,
+        sketch: 4,
     });
 });
 

@@ -168,6 +168,26 @@ function targetNames(views: MergeViews, rules: MergeRuleRegistry): TargetNames {
             const view = order.find((v) => v.byId.has(id));
             return view === undefined ? id : nodeLabel(view.byId.get(id), id);
         },
+        entityTarget: (sketchId, entityId) => {
+            for (const view of order) {
+                const className = view.className(sketchId);
+                if (className === undefined) continue;
+                for (const property of payloadProperties(rules, className).keys()) {
+                    const parsed = view.payload(sketchId, property);
+                    if (!parsed.ok || !isRecord(parsed.value)) continue;
+                    const texts = parsed.value["texts"];
+                    if (!Array.isArray(texts)) continue;
+                    const owner = texts.find(
+                        (text) =>
+                            isRecord(text) &&
+                            (text["id"] === entityId ||
+                                (Array.isArray(text["profileIds"]) && text["profileIds"].includes(entityId))),
+                    );
+                    if (isRecord(owner)) return joinPath("node", sketchId, "text", String(owner["id"]));
+                }
+            }
+            return joinPath("node", sketchId, entityId < 0 ? "external" : "entity", entityId);
+        },
         entity: (sketchId, entityId) => {
             for (const view of order) {
                 const className = view.className(sketchId);
@@ -175,6 +195,17 @@ function targetNames(views: MergeViews, rules: MergeRuleRegistry): TargetNames {
                 for (const property of payloadProperties(rules, className).keys()) {
                     const parsed = view.payload(sketchId, property);
                     if (!parsed.ok || !isRecord(parsed.value)) continue;
+                    const texts = parsed.value["texts"];
+                    if (Array.isArray(texts)) {
+                        const owner = texts.find(
+                            (text) =>
+                                isRecord(text) &&
+                                (text["id"] === entityId ||
+                                    (Array.isArray(text["profileIds"]) &&
+                                        text["profileIds"].includes(entityId))),
+                        );
+                        if (isRecord(owner)) return itemLabel("text", owner, owner["id"]);
+                    }
                     const lists = [parsed.value["entities"], parsed.value["externalRefs"]];
                     for (const list of lists) {
                         if (!Array.isArray(list)) continue;

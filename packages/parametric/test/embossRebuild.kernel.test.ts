@@ -302,7 +302,7 @@ test("parametric 13 migration preserves existing models and newer readers enforc
     } as Serialized;
     const result = DocumentMigrations.migrate(data);
     expect(result.isOk).toBe(true);
-    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 14, sketch: 3 });
+    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 14, sketch: 4 });
     expect(result.value["models"]).toEqual(data["models"]);
     expect(result.value["userData"]).toEqual(data["userData"]);
 });

@@ -41,7 +41,10 @@ export class SketchMoveCommand extends SketchUtilityCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         const ids = await this.selection(editor);
         if (!ids) return;
-        let anchor = selectionCenter(editor.solver.entities().filter((e) => ids.includes(e.id)));
+        let anchor = selectionCenter(
+            editor.solver.entities().filter((e) => ids.includes(e.id)),
+            editor.solver.texts().filter((text) => ids.includes(text.id)),
+        );
         let chooseAnchor = false;
         try {
             do {

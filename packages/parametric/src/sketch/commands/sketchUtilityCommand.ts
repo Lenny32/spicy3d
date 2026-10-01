@@ -5,6 +5,7 @@ import { AsyncController, type I18nKeys, PubSub, property } from "@spicy3d/core"
 import type { SketchEditor } from "../editor/sketchEditor";
 import { sketchEntityMesh } from "../editor/sketchEventHandler";
 import type { SketchClipboard } from "../sketchModel";
+import { textFrameMesh, textOutlineMesh } from "../textVisual";
 import { type SketchTransform, transformSketchSelection } from "../utilityOperations";
 import { SketchConstraintCommand } from "./sketchConstraints";
 
@@ -26,7 +27,12 @@ export abstract class SketchUtilityCommand extends SketchConstraintCommand {
     protected async selection(editor: SketchEditor): Promise<number[] | undefined> {
         if (editor.selectedEntityIds.length) return editor.selectedEntityIds;
         this.controller = new AsyncController();
-        const id = await editor.pickEntity("prompt.pickSketchEntity", undefined, undefined, this.controller);
+        const id = await editor.pickEntity(
+            "prompt.pickSketchEntity",
+            undefined,
+            { includeText: true },
+            this.controller,
+        );
         if (id === undefined) return undefined;
         if (id < 1) {
             PubSub.default.pub("displayError", "Select editable sketch entities");
@@ -58,9 +64,17 @@ export abstract class SketchUtilityCommand extends SketchConstraintCommand {
                 at && transformSketchSelection(editor.solver.toData(), ids, proposal(at), clipboard, copy);
             editor.annotations.setGeometryPreview(
                 result?.isOk
-                    ? result.value.data.entities
-                          .filter((e) => result.value.ids.includes(e.id))
-                          .map((e) => sketchEntityMesh(editor, e, 0xffaa33))
+                    ? [
+                          ...result.value.data.entities
+                              .filter((e) => result.value.ids.includes(e.id))
+                              .map((e) => sketchEntityMesh(editor, e, 0xffaa33)),
+                          ...(result.value.data.texts ?? [])
+                              .filter((text) => result.value.ids.includes(text.id))
+                              .flatMap((text) => [
+                                  textOutlineMesh(editor.node.plane, text),
+                                  textFrameMesh(editor.node.plane, text),
+                              ]),
+                      ]
                     : [],
             );
         };

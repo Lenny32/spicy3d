@@ -42,3 +42,8 @@ PubSub.default.sub("nodeDoubleClicked", (node) => {
         );
     }
 });
+
+export * from "./sketchText";
+export * from "./textGeometry";
+
+import "./commands/sketchTextEdit";

@@ -18,6 +18,15 @@ function normalized(data: SketchData, anchors: boolean): SketchData {
             dangling: ref.dangling ?? false,
         })),
         refPositions: data.refPositions ?? {},
+        texts: (data.texts ?? []).map((text) => ({
+            ...text,
+            font: text.font ?? "sans",
+            alignment: text.alignment ?? "left",
+            verticalAlignment: text.verticalAlignment ?? "bottom",
+            spacing: text.spacing ?? 0,
+            flipHorizontal: text.flipHorizontal ?? false,
+            flipVertical: text.flipVertical ?? false,
+        })),
         anchors: anchors ? [...(data.anchors ?? [])].sort((a, b) => a.id - b.id) : [],
     };
 }

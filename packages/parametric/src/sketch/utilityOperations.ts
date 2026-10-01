@@ -15,6 +15,8 @@ import {
     type SketchEntityData,
     type SketchPointRef,
 } from "./sketchModel";
+import { type SketchTextData, textFramePoints, textIds } from "./sketchText";
+import { textContours } from "./textGeometry";
 
 export type SketchTransform =
     | { kind: "move"; delta: [number, number] }
@@ -49,7 +51,10 @@ export function transformEntity(entity: SketchEntityData, transform: SketchTrans
     return { ...entity, params };
 }
 
-export function selectionCenter(entities: SketchEntityData[]): [number, number] {
+export function selectionCenter(
+    entities: SketchEntityData[],
+    texts: SketchTextData[] = [],
+): [number, number] {
     const points = entities.flatMap((e) => {
         if (e.type === "circle") {
             const [x, y, r] = e.params;
@@ -60,6 +65,7 @@ export function selectionCenter(entities: SketchEntityData[]): [number, number] 
         }
         return Array.from({ length: e.params.length / 2 }, (_, i) => e.params.slice(2 * i, 2 * i + 2));
     });
+    points.push(...texts.flatMap(textFramePoints));
     if (points.length === 0) return [0, 0];
     return [0, 1].map(
         (i) => (Math.min(...points.map((p) => p[i])) + Math.max(...points.map((p) => p[i]))) / 2,
@@ -70,14 +76,16 @@ export function copySketchSelection(data: SketchData, ids: readonly number[]): R
     const selected = new Set(ids);
     const snapshot = cloneSketchData(data);
     const entities = snapshot.entities.filter((e) => selected.has(e.id));
-    if (entities.length === 0 || entities.length !== selected.size)
+    const texts = (snapshot.texts ?? []).filter((text) => selected.has(text.id));
+    if (entities.length + texts.length === 0 || entities.length + texts.length !== selected.size)
         return Result.err("Select editable sketch entities");
     return Result.ok({
         entities,
         constraints: snapshot.constraints.filter(
             (c) => c.refs.length > 0 && c.refs.every((r) => selected.has(r.entityId)),
         ),
-        origin: selectionCenter(entities),
+        ...(texts.length ? { texts } : {}),
+        origin: selectionCenter(entities, texts),
     });
 }
 
@@ -111,7 +119,7 @@ export function transformSketchSelection(
         return Result.err("The mirror axis must be outside the selection");
     const duplicate = copy || clipboard !== undefined;
     const result = cloneSketchData(data);
-    const entityIds = new Set(data.entities.map((e) => e.id));
+    const entityIds = new Set([...data.entities.map((e) => e.id), ...textIds(data)]);
     const newEntityId = () => {
         const id = allocator.next("entity", (candidate) => entityIds.has(candidate));
         entityIds.add(id);
@@ -124,6 +132,41 @@ export function transformSketchSelection(
     }));
     if (entities.some((e) => e.params.some((p) => !Number.isFinite(p))))
         return Result.err("Transform values must be finite");
+    const texts = (source.texts ?? []).map((text) => {
+        let [x, y] = transformPoint(text.x, text.y, transform);
+        let angle = text.angle,
+            flipVertical = text.flipVertical;
+        if (transform.kind === "rotate") angle += (transform.angle * 180) / Math.PI;
+        if (transform.kind === "mirror") {
+            const [ax, ay, bx, by] = transform.axis.params;
+            angle = (2 * Math.atan2(by - ay, bx - ax) * 180) / Math.PI - angle;
+            flipVertical = !flipVertical;
+            // flipVertical reflects inside the frame (v -> H - v) while a mirror maps v -> -v:
+            // shift the origin by -H along the new frame's v axis.
+            const height = text.frame?.height ?? 0;
+            const radians = (angle * Math.PI) / 180;
+            x += height * Math.sin(radians);
+            y -= height * Math.cos(radians);
+        }
+        return {
+            ...text,
+            x,
+            y,
+            angle,
+            flipVertical,
+            id: duplicate ? newEntityId() : text.id,
+            profileIds: duplicate ? text.profileIds.map(() => newEntityId()) : text.profileIds,
+        };
+    });
+    for (const text of texts) {
+        const contours = textContours(text);
+        if (!contours.isOk) return Result.err(contours.error);
+    }
+    if (texts.length) {
+        result.texts = duplicate
+            ? [...(result.texts ?? []), ...texts]
+            : (result.texts ?? []).map((text) => texts.find((updated) => updated.id === text.id) ?? text);
+    }
     const remap = (ref: SketchPointRef): SketchPointRef => ({
         entityId: mapping.get(ref.entityId) ?? ref.entityId,
         pointIndex:
@@ -180,7 +223,7 @@ export function transformSketchSelection(
     }
     const retained = new Set(result.constraints.map((c) => c.id));
     if (result.anchors) result.anchors = result.anchors.filter((a) => retained.has(a.id));
-    return Result.ok({ data: result, ids: entities.map((e) => e.id) });
+    return Result.ok({ data: result, ids: [...entities.map((e) => e.id), ...texts.map((text) => text.id)] });
 }
 
 function transformConstraint(

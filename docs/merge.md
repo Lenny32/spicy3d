@@ -272,6 +272,11 @@ feature by its `type`:
 
 ## Sketches
 
+Editable text (sketch module v4) is keyed by object id. Content and contour identities merge as
+one group; frame position is another group. Layout fields merge independently. A dangling text
+profile reference resolves by restoring the owning text record, including its contour slots.
+
+
 `SketchNode.dataJson` (`SketchData`) merges field by field:
 
 - `entities`: `stable` list of `entity` by `id`. `params` (the geometry) is **one value per
@@ -501,6 +506,7 @@ node/<body>/feature/<featureId>[/param/<key>]        a feature, a parameter or a
 node/<body>/feature/<featureId>/position | /rebuild
 node/<body>/insertAfter/<featureId> · node/<body>/insertAtStart
 node/<sketch>/entity/<entityId>[/<field>]
+node/<sketch>/text/<textId>[/<field>]
 node/<sketch>/constraint/<constraintId>[/<field>]
 node/<sketch>/external/<entityId>[/<field>]
 node/<sketch>/anchor/<constraintId> · node/<sketch>/refPosition/<bodyId>
@@ -849,6 +855,23 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 
 `SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
 
+- `texts`: list of `text` by `id` (stable order)
+  - `id`: scalar
+  - `value`: scalar
+  - `profileIds`: atomic
+  - `x`: scalar
+  - `y`: scalar
+  - `angle`: scalar
+  - `height`: scalar
+  - `frame`: atomic
+  - `alignment`: scalar
+  - `verticalAlignment`: scalar
+  - `spacing`: scalar
+  - `flipHorizontal`: scalar
+  - `flipVertical`: scalar
+  - `font`: scalar
+  - group `content` (one value): `value`, `profileIds`
+  - group `position` (one value): `x`, `y`
 - `entities`: list of `entity` by `id` (stable order)
   - `id`: scalar
   - `type`: scalar
