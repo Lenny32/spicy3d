@@ -89,7 +89,10 @@ export function worldFaceOf(data: VisualShapeData, owned: IFace[]): IFace {
  * The to-object extent of a picked face: its fingerprint in world coordinates with the face's
  * tracked id when its body tracks ids (like a press-pull pick), and the body it is on.
  */
-export function toObjectExtentOf(data: VisualShapeData, offset: ParameterValue): ExtrudeExtent {
+export function toObjectExtentOf(
+    data: VisualShapeData,
+    offset: ParameterValue,
+): Extract<ExtrudeExtent, { type: "toObject" }> {
     const node = data.owner.node;
     const owned: IFace[] = [];
     try {

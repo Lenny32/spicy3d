@@ -911,6 +911,7 @@ export const I18N_KEYS = [
     "option.command.repeat",
     "option.command.fromFace",
     "option.command.pickStartFace",
+    "prompt.select.extrusionStartFace",
     "option.command.startOffset",
     "option.command.symmetric",
     "option.command.thickness",

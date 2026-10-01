@@ -898,7 +898,7 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             const sides = this.sweepSidesOf(node, normal, dist, end.value);
             if (!this.fromFace)
                 return ExtrudeFeatureCommand.buildPrisms(faces, sides, this.offsetVectorOf(node, normal));
-            if (!this._startFace) return Result.err("Select the extrusion starting face");
+            if (!this._startFace) return Result.err(I18n.translate("prompt.select.extrusionStartFace"));
             const copies: IFace[] = [];
             const start = worldFaceOf(this._startFace, copies);
             owned.push(...copies);
@@ -1144,7 +1144,8 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
             const offset = this.resolveParameter(this.extentOffset, LENGTH_UNITS);
             if (!offset.isOk) return offset.error;
         }
-        if (this.fromFace && this._startFace === undefined) return "Select the extrusion starting face";
+        if (this.fromFace && this._startFace === undefined)
+            return I18n.translate("prompt.select.extrusionStartFace");
         if (this.extent === EXTENT_TO_OBJECT) {
             if (this._extentFace === undefined) return I18n.translate("option.command.extentFace.none");
             const offset = this.resolveParameter(this.extentOffset, LENGTH_UNITS);
@@ -1164,7 +1165,6 @@ export class ExtrudeFeatureCommand extends MultistepCommand {
 
     private startFaceData(): NonNullable<ExtrudeFeatureData["startFace"]> {
         const picked = toObjectExtentOf(this._startFace!, 0);
-        if (picked.type !== "toObject") throw new Error("The starting object is not a face");
         return { nodeId: picked.nodeId, face: picked.face };
     }
 

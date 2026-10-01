@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { rs } from "@rstest/core";
 import {
     type AsyncController,
+    I18n,
     type IEventHandler,
     type IFace,
     type IPicker,
@@ -361,7 +362,9 @@ describe("the create command's associative starting face", () => {
             commit();
             expect(
                 pub.mock.calls.some(
-                    (call) => call[0] === "showToast" && call[2] === "Select the extrusion starting face",
+                    (call) =>
+                        call[0] === "showToast" &&
+                        call[2] === I18n.translate("prompt.select.extrusionStartFace"),
                 ),
             ).toBe(true);
         } finally {

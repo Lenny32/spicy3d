@@ -275,7 +275,6 @@ export class ExtrudeEditCommand extends CancelableCommand {
         if (!this.fromFace) return undefined;
         if (!this._pickedStartFace) return this._storedStartFace;
         const picked = toObjectExtentOf(this._pickedStartFace, 0);
-        if (picked.type !== "toObject") throw new Error("The starting object is not a face");
         return { nodeId: picked.nodeId, face: picked.face };
     }
 
@@ -506,7 +505,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
     ): ExtrudePreview {
         const edited = this.editedFeature(feature);
         if (this.fromFace && !this.hasStartFace) {
-            showPreviewProblem("Select the extrusion starting face");
+            showPreviewProblem(I18n.translate("prompt.select.extrusionStartFace"));
             return { meshes: [] };
         }
         if (this.extent === EXTENT_TO_OBJECT && !this.hasExtentFace) {
@@ -724,7 +723,11 @@ export class ExtrudeEditCommand extends CancelableCommand {
             return;
         }
         if (this.fromFace && !this.hasStartFace) {
-            PubSub.default.pub("showToast", "error.default:{0}", "Select the extrusion starting face");
+            PubSub.default.pub(
+                "showToast",
+                "error.default:{0}",
+                I18n.translate("prompt.select.extrusionStartFace"),
+            );
             return;
         }
         if (this.extent === EXTENT_TO_OBJECT && !this.hasExtentFace) {

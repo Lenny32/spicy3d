@@ -964,6 +964,7 @@ export default {
         "option.command.repeat": "Repeat",
         "option.command.fromFace": "Start from face",
         "option.command.pickStartFace": "Choose starting face",
+        "prompt.select.extrusionStartFace": "Select the extrusion starting face",
         "option.command.startOffset": "Start Offset",
         "option.command.symmetric": "Symmetric",
         "option.command.thickness": "Thickness",
