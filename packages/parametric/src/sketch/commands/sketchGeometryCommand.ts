@@ -60,7 +60,11 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                     ? extendCurve(source, target, uv)
                     : Result.err("The extension target no longer exists");
             }
-            return offsetCurve(source, this.offsetDistance * offsetSide(source, uv));
+            try {
+                return offsetCurve(source, this.offsetDistance * offsetSide(source, uv));
+            } catch (e) {
+                return Result.err(e instanceof Error ? e.message : String(e));
+            }
         };
         try {
             while (!this.isCanceled) {

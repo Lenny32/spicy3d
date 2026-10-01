@@ -58,7 +58,7 @@ export function offsetBSpline(source: SketchEntityData, distance: number): Resul
         // Include knot boundaries in the regularity check even when uniform samples miss them.
         curve.knots.forEach(offsetAt);
         for (
-            let count = Math.max(16, 2 * (curve.knots.length - 1));
+            let count = Math.min(MAX_POINTS, Math.max(16, 2 * (curve.knots.length - 1)));
             count <= MAX_POINTS;
             count = Math.min(MAX_POINTS, count * 2)
         ) {

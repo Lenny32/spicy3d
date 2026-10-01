@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type ICameraController, Plane, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
+import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
@@ -384,6 +384,26 @@ describe("geometry command interaction", () => {
         expect(copy.type).toBe("bspline");
         expect(copy.id).not.toBe(spline.id);
         for (let i = 1; i < copy.params.length; i += 2) expect(copy.params[i]).toBeCloseTo(-5, 8);
+    });
+
+    test("offset reports malformed B-spline geometry instead of aborting", async () => {
+        const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 0, 0, 100, 0] };
+        const { node, move, click, pressEscape } = setup({ entities: [spline], constraints: [] });
+        const errors = rs.fn();
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            const run = command.executeAsync();
+            await click(20);
+            expect(() => move(20, -20)).not.toThrow();
+            await click(20, -20);
+            expect(errors).toHaveBeenCalled();
+            pressEscape();
+            await run;
+            expect(node.data.entities).toEqual([spline]);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
     });
 
     test("split cancellation removes preview meshes without changing geometry", async () => {

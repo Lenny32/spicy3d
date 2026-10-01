@@ -96,6 +96,17 @@ test("control NURBS offset becomes a fit curve without inheriting source weights
     }
 });
 
+test("offsets fit curves with more points than half the fit budget", () => {
+    const points = Array.from({ length: 300 }, (_, i) => {
+        const angle = (2 * Math.PI * i) / 300;
+        return [30 * Math.cos(angle), 50 * Math.sin(angle)];
+    });
+    const source: SketchEntityData = { id: 1, type: "bspline", params: points.flat(), periodic: true };
+    const result = offsetCurve(source, 1);
+    expect(result.isOk).toBe(true);
+    expect(result.value.pieces[0].params.length / 2).toBeGreaterThanOrEqual(300);
+});
+
 test.each([
     0,
     Number.NaN,

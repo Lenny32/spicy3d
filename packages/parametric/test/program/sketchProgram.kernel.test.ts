@@ -510,6 +510,19 @@ describe("sketch actions", () => {
         expect(doc.modelManager.findNodes((node) => node instanceof SketchNode)).toEqual([]);
     });
 
+    test.each([undefined, null, ""])("offset without a usable distance (%s) names the field", (distance) => {
+        const doc = newDoc();
+        const error = runExpectingFailure(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [{ type: "line", params: [0, 0, 10, 0] }],
+                actions: [{ action: "offset", entity: 1, distance } as never],
+            },
+        ]);
+        expect(error).toContain('"distance" must be a finite number or a length expression');
+    });
+
     test("move, rotate and mirror transform entities; mirror copies stay symmetric", () => {
         const doc = newDoc();
         const result = run(doc, [

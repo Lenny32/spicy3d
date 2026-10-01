@@ -387,6 +387,12 @@ export class SketchSession {
                 return;
             }
             case "offset": {
+                if (
+                    !(typeof action.distance === "number" && Number.isFinite(action.distance)) &&
+                    !(typeof action.distance === "string" && action.distance.trim() !== "")
+                ) {
+                    throw new Error(`"distance" must be a finite number or a length expression`);
+                }
                 const distance = resolveUnitSpec(action.distance, this.scope, LENGTH_UNITS);
                 if (!distance.isOk) throw new Error(distance.error);
                 const edit = offsetCurve(this.editableEntity(action.entity), distance.value);
