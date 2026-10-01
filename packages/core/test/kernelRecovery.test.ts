@@ -3,6 +3,7 @@
 
 import { rs } from "@rstest/core";
 import {
+    DocumentRebuilds,
     FolderNode,
     type IKernelRecoveryContext,
     KernelRecoveryCheckpoints,
@@ -150,4 +151,31 @@ test("candidate run refuses an asynchronous turn and restores live lookup immedi
     expect(doc.modelManager.rootNode).toBe(root);
     expect(doc.history.disabled).toBe(false);
     graph.dispose();
+});
+
+test("a crash during a post-commit rebuild directs the user to reload without reading native data", async () => {
+    const doc = document();
+    const stop = KernelRecoveryCheckpoints.observe(doc);
+    let finish!: () => void;
+    const settled = new Promise<void>((resolve) => {
+        finish = resolve;
+    });
+    const release = DocumentRebuilds.add(doc, { settled, flush() {} });
+    const serialize = rs.spyOn(doc, "serialize");
+    try {
+        Transaction.execute(doc, "crashing edit", () => {
+            doc.modelManager.findNode((node) => node.id === "stable-feature")!.name = "crashing edit";
+        });
+        KernelState.current.markCrashed("post-commit rebuild crash");
+        release();
+        finish();
+        await settled;
+        expect(() => KernelRecoveryCheckpoints.read(doc)).toThrow("reload the page");
+        expect(serialize).not.toHaveBeenCalled();
+    } finally {
+        release();
+        finish();
+        stop();
+        serialize.mockRestore();
+    }
 });

@@ -92,7 +92,9 @@ export class KernelRecoveryCheckpoints {
     static read(document: IDocument): KernelRecoveryCheckpoint {
         const checkpoint = KernelRecoveryCheckpoints.checkpoints.get(document);
         if (!checkpoint || checkpoint.position !== document.history.position()) {
-            throw new Error("No checkpoint for the current committed document state");
+            throw new Error(
+                "No healthy checkpoint for the current committed document state; reload the page to reopen the last saved document",
+            );
         }
         return { ...checkpoint, dirty: document.isDirty, data: structuredClone(checkpoint.data) };
     }
