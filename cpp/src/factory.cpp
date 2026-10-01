@@ -2926,6 +2926,28 @@ public:
         return "BRepOffset_UnknownError";
     }
 
+    // A rebuilt container can differ in identity while retaining exactly the input's faces.
+    // A real thickening adds offset/rim faces even when it also retains the original skin.
+    static bool thickSolidUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& result)
+    {
+        if (result.IsSame(input)) {
+            return true;
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputFaces;
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+        TopExp::MapShapes(input, TopAbs_FACE, inputFaces);
+        TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
+        if (inputFaces.IsEmpty() || inputFaces.Extent() != resultFaces.Extent()) {
+            return false;
+        }
+        for (const auto& face : inputFaces) {
+            if (!resultFaces.Contains(face)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static ShapeResult makeThickSolidBySimple(const TopoDS_Shape& shape, double thickness)
     {
         std::string inputError = thickSolidInputError(shape);
@@ -2937,7 +2959,7 @@ public:
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
-        if (makeThickSolid.Shape().IsSame(shape)) {
+        if (thickSolidUnchanged(shape, makeThickSolid.Shape())) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
@@ -2972,7 +2994,8 @@ public:
         }
         // IsDone and BRepCheck can both pass when the offset collapses and OCCT
         // rebuilds the input solid. A shell must actually remove its closing faces.
-        if (makeThickSolid.Shape().IsSame(shape)) {
+        if (makeThickSolid.Shape().IsSame(shape)
+            || (shapesList.IsEmpty() && thickSolidUnchanged(shape, makeThickSolid.Shape()))) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
