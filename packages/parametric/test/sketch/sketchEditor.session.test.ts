@@ -11,6 +11,7 @@ import {
     Plane,
     PubSub,
     Result,
+    Transaction,
     XYZ,
 } from "@spicy3d/core";
 import {
@@ -141,6 +142,76 @@ test.each([-20, -30])("session entry follows a pending tilt 30 -> %s change", (d
         node.dispose();
     } finally {
         SketchEditor.exit();
+        restoreFactory();
+        doc.dispose();
+    }
+});
+
+test.each([
+    { initial: 30, edited: -30, redo: false, next: -20 },
+    { initial: 30, edited: -30, redo: true, next: 20 },
+    { initial: -30, edited: 30, redo: false, next: 20 },
+    { initial: -30, edited: 30, redo: true, next: -20 },
+])("session angle follows parameter replay: %j", ({ initial, edited, redo, next }) => {
+    const { doc, restoreFactory } = setup();
+    const variable = { id: "tilt", name: "tilt", type: "angle" as const, expression: String(initial) };
+    const start = { entityId: 1, pointIndex: 0 };
+    const end = { entityId: 1, pointIndex: 1 };
+    const radians = (initial * Math.PI) / 180;
+    Object.assign(shapeFactory, { line: () => Result.ok(new MockShape()) });
+    let node: SketchNode | undefined;
+    try {
+        doc.variables.setItems([variable]);
+        node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [
+                    { id: 1, type: "line", params: [0, 0, 10 * Math.cos(radians), 10 * Math.sin(radians)] },
+                ],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                    },
+                ],
+            },
+        });
+        const editor = SketchEditor.enter(node);
+        const undoCount = doc.history.undoCount();
+        const changeTilt = (degrees: number) =>
+            Transaction.execute(doc, "Edit tilt", () =>
+                doc.variables.setItems([{ ...variable, expression: String(degrees) }]),
+            );
+        changeTilt(edited);
+        expect(doc.history.undoCount()).toBe(undoCount + 1);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((edited * Math.PI) / 180), 6);
+        doc.history.undo();
+        expect(doc.variables.evaluate().scope.get("tilt")?.value).toBe(initial);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin(radians), 6);
+        expect(doc.history.undoCount()).toBe(undoCount);
+        if (redo) doc.history.redo();
+        const restored = redo ? edited : initial;
+        expect(doc.variables.evaluate().scope.get("tilt")?.value).toBe(restored);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((restored * Math.PI) / 180), 6);
+        changeTilt(next);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((next * Math.PI) / 180), 6);
+        // A replay must also update the node's solved scope for the next session.
+        doc.history.undo();
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((restored * Math.PI) / 180), 6);
+        editor.exit();
+        const reopened = SketchEditor.enter(node);
+        expect(reopened.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((restored * Math.PI) / 180), 6);
+        changeTilt(next);
+        expect(reopened.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((next * Math.PI) / 180), 6);
+        expect(node.data.entities[0].params[3]).toBeCloseTo(10 * Math.sin((next * Math.PI) / 180), 6);
+    } finally {
+        SketchEditor.exit();
+        node?.dispose();
         restoreFactory();
         doc.dispose();
     }

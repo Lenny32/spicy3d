@@ -633,8 +633,17 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         const scope = this.document.variables.evaluate().scope;
         const solver = new SketchSolver(this.plane, data, this._solvedScope);
         if (solver.setScope(scope)) solver.solve(true);
+        // This tracks the target scope even if solving fails; callers must re-solve or
+        // commit the solver's data afterwards to keep it aligned with stored geometry.
         this._solvedScope = scope;
         return solver;
+    }
+
+    /** After history replay, the restored table is the scope of the restored geometry. */
+    resetScopedSolver(solver: SketchSolver): void {
+        const scope = this.document.variables.evaluate().scope;
+        solver.reset(this.data, scope);
+        this._solvedScope = scope;
     }
 
     /** `IVariableConsumer`: sketches re-solve before the bodies that read them. */

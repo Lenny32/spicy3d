@@ -378,6 +378,9 @@ export class SketchEditor implements IDisposable {
             this.annotations = this.createAnnotations();
             teardown.push(() => this.annotations.dispose());
 
+            this.document.history.onAfterReplay.sub(this.afterHistoryReplay);
+            teardown.push(() => this.document.history.onAfterReplay.remove(this.afterHistoryReplay));
+
             node.onPropertyChanged(this.onNodeDataChanged);
             teardown.push(() => this.node.removePropertyChanged(this.onNodeDataChanged));
 
@@ -587,6 +590,11 @@ export class SketchEditor implements IDisposable {
      */
     private readonly handleVariablesChanged = (property: string) => {
         if (property !== "variablesJson" || this.disposed) return;
+        const history = this.document.history;
+        if (history.isUndoing || history.isRedoing) {
+            this.replaySyncPending = true;
+            return;
+        }
         if (!this.solver.setScope(this.variableScope())) {
             // Nothing moved, but a datum that just stopped resolving (its parameter was
             // deleted or renamed) is only visible on its own annotation — redraw them so
@@ -598,17 +606,26 @@ export class SketchEditor implements IDisposable {
         this.commit();
     };
 
+    private replaySyncPending = false;
+
+    private readonly afterHistoryReplay = () => {
+        if (!this.replaySyncPending || this.disposed) return;
+        this.replaySyncPending = false;
+        // dataJson and variablesJson can replay in either order. Infer a legacy side only
+        // after both are restored, using the scope the restored geometry was solved at.
+        this.node.resetScopedSolver(this.solver);
+        this.loadAnchors(this.node.data);
+        this.annotations.clearConstraintSelection();
+        this.refreshExternalDisplay();
+        this.solve(true);
+    };
+
     /** Undo/redo rewrites the node data behind the solver's back — resync from it. */
     private readonly onNodeDataChanged = (property: string) => {
         if (property !== "dataJson" || this.disposed) return;
         const history = this.document.history;
         if (history.isUndoing || history.isRedoing) {
-            const data = this.node.data;
-            this.solver.reset(data);
-            this.loadAnchors(data);
-            this.annotations.clearConstraintSelection();
-            this.refreshExternalDisplay();
-            this.solve(true);
+            this.replaySyncPending = true;
             return;
         }
         // A source-part rebuild re-resolves the external references on the node behind
@@ -1167,6 +1184,7 @@ export class SketchEditor implements IDisposable {
     }
 
     private teardownSession(): void {
+        this.document.history.onAfterReplay.remove(this.afterHistoryReplay);
         this.document.variables.removePropertyChanged(this.handleVariablesChanged);
         this.eventHandler.dispose();
         this.annotations.dispose();

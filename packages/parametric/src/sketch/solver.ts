@@ -1104,8 +1104,9 @@ export class SketchSolver implements ExternalEntityHost {
         this.system.free();
     }
 
-    /** Replaces all state with `data` — undo/redo rewrites the node data behind the solver. */
-    reset(data: SketchData): void {
+    /** Replaces all state with `data`; replay callers supply the scope of the restored geometry. */
+    reset(data: SketchData, solvedScope: Scope = this._scope): void {
+        this._scope = solvedScope;
         this.system.free();
         this.system = newSolverSystem();
         this.entityTypes.clear();
@@ -1800,13 +1801,15 @@ export class SketchSolver implements ExternalEntityHost {
             // Older unsigned literals and expressions used the geometry's side. Recover
             // it before the first solve, without adding anything to the saved payload.
             // Only infer from geometry solved at this magnitude: stale geometry must not
-            // override an edited datum. Old unsigned literals were never negative.
+            // override an edited datum. Old unsigned datums never evaluated negative.
+            // A positive literal edit merged with geometry still at the opposite side is
+            // indistinguishable from a legacy unsigned literal. It can recover that side;
+            // distinguishing them requires a persisted marker, but the save format is frozen.
             // Near 0/180 degrees the geometry cannot reliably tell us which side it used.
             if (legacySides !== undefined) {
                 record.legacySide = legacySides.get(constraint.id);
             } else if (
-                value !== 0 &&
-                !(typeof constraint.datum === "number" && constraint.datum < 0) &&
+                value > 0 &&
                 Math.abs(Math.abs(sweep) - Math.abs(value)) < 1e-7 &&
                 Math.abs(Math.sin(sweep)) > 1e-8 &&
                 Math.sign(sweep) !== Math.sign(value)

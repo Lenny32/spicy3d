@@ -251,6 +251,42 @@ describe("signed Angle datums", () => {
         }
     });
 
+    test.each(["tilt", "-tilt"])("negative expression %s never infers a legacy side", (datum) => {
+        const { solver, line } = orientedLine(toStorageDatum(ConstraintKind.Angle, 30), 30);
+        let loaded: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, 30);
+            const data = solver.toData();
+            data.constraints.find((c) => c.kind === ConstraintKind.Angle)!.datum = datum;
+            loaded = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(datum === "tilt" ? -30 : 30) }));
+            expectOrientation(loaded, line, -30);
+            expect(loaded.setScope(scopeOf({ tilt: angle(datum === "tilt" ? 20 : -20) }))).toBe(true);
+            expectOrientation(loaded, line, 20);
+        } finally {
+            loaded?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("reset with a stale negative scope does not pin an expression to its restored side", () => {
+        const { solver, line, id } = orientedLine(toStorageDatum(ConstraintKind.Angle, 30), 30);
+        try {
+            solver.setScope(scopeOf({ tilt: angle(30) }));
+            expect(solver.setDatumSource(id, "tilt").isOk).toBe(true);
+            expectOrientation(solver, line, 30);
+            const at30 = solver.toData();
+            expect(solver.setScope(scopeOf({ tilt: angle(-30) }))).toBe(true);
+            expectOrientation(solver, line, -30);
+            solver.reset(at30);
+            expect(solver.setScope(scopeOf({ tilt: angle(30) }))).toBe(true);
+            expectOrientation(solver, line, 30);
+            expect(solver.setScope(scopeOf({ tilt: angle(-20) }))).toBe(true);
+            expectOrientation(solver, line, -20);
+        } finally {
+            solver.dispose();
+        }
+    });
+
     test.each([
         [Math.PI / 6, "literal"],
         [Math.PI / 6, "source"],
