@@ -211,6 +211,25 @@ function validThickSolid(
             shape.dispose();
             return Result.err(`${op} failed: the offset did not remove an opening face`);
         }
+    } else {
+        // A rebuilt shell/solid can have a new container but exactly the input's faces.
+        // Simple thickening keeps the original skin too, so require the whole face set to match.
+        const faces = shape.findSubShapes(ShapeTypes.face);
+        const inputFaces = input.findSubShapes(ShapeTypes.face);
+        let unchanged: boolean;
+        try {
+            unchanged =
+                faces.length > 0 &&
+                faces.length === inputFaces.length &&
+                faces.every((face) => inputFaces.some((original) => face.isSame(original)));
+        } finally {
+            for (const face of faces) face.dispose();
+            for (const face of inputFaces) face.dispose();
+        }
+        if (unchanged) {
+            shape.dispose();
+            return Result.err(`${op} failed: the offset returned the input shape unchanged`);
+        }
     }
     if (!containsSolid(shape)) {
         const type = ShapeTypeUtils.stringValue(shape.shapeType);
