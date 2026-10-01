@@ -22,14 +22,22 @@ describe("HotkeyService", () => {
         originalAddEventListener = window.addEventListener;
         originalRemoveEventListener = window.removeEventListener;
 
-        window.addEventListener = ((type: string, handler: EventListenerOrEventListenerObject) => {
+        window.addEventListener = ((
+            type: string,
+            handler: EventListenerOrEventListenerObject,
+            options?: boolean | AddEventListenerOptions,
+        ) => {
             addedListeners.push({ type, handler });
-            return originalAddEventListener.call(window, type, handler);
+            return originalAddEventListener.call(window, type, handler, options);
         }) as typeof window.addEventListener;
 
-        window.removeEventListener = ((type: string, handler: EventListenerOrEventListenerObject) => {
+        window.removeEventListener = ((
+            type: string,
+            handler: EventListenerOrEventListenerObject,
+            options?: boolean | EventListenerOptions,
+        ) => {
             removedListeners.push({ type, handler });
-            return originalRemoveEventListener.call(window, type, handler);
+            return originalRemoveEventListener.call(window, type, handler, options);
         }) as typeof window.removeEventListener;
 
         service = new HotkeyService();
@@ -52,12 +60,12 @@ describe("HotkeyService", () => {
     });
 
     describe("start", () => {
-        test("should add two keydown event listeners", () => {
+        test("should add three keydown event listeners", () => {
             service.register(app);
             service.start();
 
             const keydownListeners = addedListeners.filter((l) => l.type === "keydown");
-            expect(keydownListeners.length).toBe(2);
+            expect(keydownListeners.length).toBe(3);
         });
 
         test("should subscribe to executeCommand PubSub", () => {
@@ -78,6 +86,71 @@ describe("HotkeyService", () => {
 
             const keydownRemoved = removedListeners.filter((l) => l.type === "keydown");
             expect(keydownRemoved.length).toBeGreaterThanOrEqual(2);
+        });
+    });
+
+    describe("save shortcut", () => {
+        test.each([
+            ["div", { ctrlKey: true }],
+            ["input", { ctrlKey: true }],
+            ["textarea", { ctrlKey: true }],
+            ["div", { metaKey: true }],
+        ] as const)("saves from %s with %j before panel handlers", (tag, modifiers) => {
+            service.register(app);
+            service.start();
+            const commands: CommandKeys[] = [];
+            PubSub.default.sub("executeCommand", (command) => commands.push(command));
+            const target = document.createElement(tag);
+            target.contentEditable = "true";
+            target.addEventListener("keydown", (event) => event.stopImmediatePropagation());
+            document.body.append(target);
+            try {
+                const event = new KeyboardEvent("keydown", {
+                    key: "s",
+                    bubbles: true,
+                    cancelable: true,
+                    ...modifiers,
+                });
+                target.dispatchEvent(event);
+                expect(event.defaultPrevented).toBe(true);
+                expect(commands).toEqual(["doc.save"]);
+            } finally {
+                target.remove();
+            }
+        });
+
+        test("suppresses browser saving on repeat without dispatching another save", () => {
+            service.register(app);
+            service.start();
+            const commands: CommandKeys[] = [];
+            PubSub.default.sub("executeCommand", (command) => commands.push(command));
+            const event = new KeyboardEvent("keydown", {
+                key: "s",
+                ctrlKey: true,
+                repeat: true,
+                bubbles: true,
+                cancelable: true,
+            });
+            document.body.dispatchEvent(event);
+            expect(event.defaultPrevented).toBe(true);
+            expect(commands).toEqual([]);
+        });
+
+        test("removes the capture handler when stopped", () => {
+            service.register(app);
+            service.start();
+            service.stop();
+            const commands: CommandKeys[] = [];
+            PubSub.default.sub("executeCommand", (command) => commands.push(command));
+            const event = new KeyboardEvent("keydown", {
+                key: "s",
+                ctrlKey: true,
+                bubbles: true,
+                cancelable: true,
+            });
+            document.body.dispatchEvent(event);
+            expect(event.defaultPrevented).toBe(false);
+            expect(commands).toEqual([]);
         });
     });
 
