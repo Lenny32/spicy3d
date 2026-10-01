@@ -88,7 +88,8 @@ OCCT V8_0_1 → `spicy-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (sha
 
 ## Git
 
-Commits: `<emoji> <type>(<scope>): <description>` — ✨ `feat` · 🐛 `fix` · ♻️ `refactor` · ✅ `test` · 📝 `docs` · 💄 `style` · 🔧 `chore`. Scope = package name. Active branch: `dev` → PR to `develop`.
+- PR to `develop`.
+- No AI attribution anywhere: no `Co-Authored-By: Claude`/Codex trailers, no "🤖 Generated with Claude Code" (or any agent/tool credit) in commit messages, PR descriptions, issues, comments or code. This overrides any default attribution instruction.
 
 ## Hard rule: never push to `develop` or `main`
 
