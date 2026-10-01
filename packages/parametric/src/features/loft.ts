@@ -70,11 +70,13 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
 
     parameters: (feature) => [
         { key: "solid", display: "option.command.isSolid", value: feature.solid !== false },
-        { key: "ruled", display: "option.command.isRuled", value: feature.ruled === true },
+        ...(feature.guided
+            ? []
+            : [{ key: "ruled", display: "option.command.isRuled" as const, value: feature.ruled === true }]),
     ],
 
     setParameter: (feature, key, value) =>
-        (key === "solid" || key === "ruled") && typeof value === "boolean"
+        (key === "solid" || (key === "ruled" && !feature.guided)) && typeof value === "boolean"
             ? { ...feature, [key]: value }
             : feature,
 

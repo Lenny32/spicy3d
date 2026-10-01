@@ -30,3 +30,10 @@ test.each([
     expect(handler.setParameter(feature, key, "true")).toBe(feature);
     expect(handler.setParameter(feature, key, true)).toEqual({ ...feature, [key]: true });
 });
+
+test("guided lofts hide and reject the ruled option", () => {
+    const feature = { id: "stable", type: "loft", guided: { spine: {}, boundary: {} } };
+    const handler = featureHandler("loft")!;
+    expect(handler.parameters(feature).map((parameter) => parameter.key)).toEqual(["solid"]);
+    expect(handler.setParameter(feature, "ruled", true)).toBe(feature);
+});
