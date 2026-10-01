@@ -16,6 +16,8 @@ General loop:
 4. Default to separate parts: a model of several parts is several nodes. Do NOT booleanFuse unrelated bodies just to end up with fewer nodes. fuse only when the parts really are one solid (a boss fused onto its plate); to group parts without merging them, use combine([...]).
    Grouping in the MODEL TREE is a different thing from combining geometry: create_folder (pass the part ids as nodeIds) puts nodes under one collapsible folder and changes no shape, and move_nodes re-parents them later or sends them back to the root. Reach for a folder to keep a multi-part result tidy for the user; reach for combine only when the parts must become one compound shape.
 
+Cleanup: use delete_node({ ids: [...] }) or set_node_visible({ ids: [...], visible: false }) to clean up many scaffolding nodes in one call and one undo step. Pass either id or ids, never both; id keeps the single-node response. Batches accept 1–100 ids of at most 128 characters. Batch results are in input order: each entry has id and deleted/visible on success or error on failure. Missing ids do not block valid nodes; any failure also sets a top-level error, so inspect results and retry only failed ids. Duplicates are applied once. Deleting a folder deletes its descendants; hiding a folder hides its descendants through inherited visibility. A mutation failure rolls back the whole batch and reports every valid target as failed.
+
 Fillet / chamfer workflow:
 - { method: "shape.findSubShapes", target: "body", id: "e", args: { subshapeType: "edge" } } -> results.e = { count, refs }.
 - Identify the edges you want by geometry: query edge.ends (or edge.length, edge.curve) on candidates like e#0, e#1 — e.g. vertical edges have equal x/y at both ends; top edges have max z.

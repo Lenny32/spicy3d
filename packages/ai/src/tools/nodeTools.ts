@@ -41,19 +41,107 @@ const TRANSFORM_NODE_PARAMETERS = {
     required: ["id"],
 };
 
+// Bound per-id replies so a cleanup batch stays small enough for the relay.
+const MAX_NODE_BATCH = 100;
+const MAX_BATCH_ID_LENGTH = 128;
+const NODE_TARGET_PROPERTIES = {
+    id: { type: "string", description: "Single node id; mutually exclusive with ids" },
+    ids: {
+        type: "array",
+        items: { type: "string", minLength: 1, maxLength: MAX_BATCH_ID_LENGTH },
+        minItems: 1,
+        maxItems: MAX_NODE_BATCH,
+        description: "Batch node ids; mutually exclusive with id. Duplicates are applied once.",
+    },
+};
+const NODE_TARGET_SCHEMA = [{ required: ["id"] }, { required: ["ids"] }];
+const NODE_BATCH_DESCRIPTION =
+    " Pass exactly one of id or ids (1–100 ids, at most 128 characters each). Batch results are in input order; missing ids fail individually while valid nodes are changed together in one undo step. Duplicate ids are applied once. A batch with any failures includes a top-level error; inspect results before retrying.";
+
+function validateNodeTargets(args: Record<string, unknown>): string | undefined {
+    if ((args["id"] !== undefined) === (args["ids"] !== undefined)) {
+        return "Pass exactly one of id or ids";
+    }
+    if (args["id"] !== undefined) {
+        return typeof args["id"] === "string" && args["id"].length > 0
+            ? undefined
+            : "id must be a non-empty string";
+    }
+    const ids = args["ids"];
+    if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.length > MAX_NODE_BATCH ||
+        ids.some((id) => typeof id !== "string" || id.length === 0 || id.length > MAX_BATCH_ID_LENGTH)
+    ) {
+        return "ids must contain 1–100 non-empty strings of at most 128 characters";
+    }
+    return undefined;
+}
+
+function applyNodeBatch(doc: IDocument, ids: string[], visible?: boolean): string {
+    // Resolve the snapshot first: an ancestor's deletion must not make its requested children missing.
+    const nodes = new Map<string, INode>();
+    const errors = new Map<string, string>();
+    for (const id of ids) {
+        if (nodes.has(id) || errors.has(id)) continue;
+        const node = findNode(doc, id);
+        if (!node) errors.set(id, "node not found; call get_document_state for current ids");
+        else if (visible === undefined && !node.parent)
+            errors.set(id, "cannot delete a node without a parent");
+        else nodes.set(id, node);
+    }
+    if (nodes.size > 0) {
+        try {
+            Transaction.execute(
+                doc,
+                visible === undefined ? "AI delete nodes" : "AI set nodes visible",
+                () => {
+                    for (const node of nodes.values()) {
+                        if (visible !== undefined) node.visible = visible;
+                        else {
+                            // Removing only the selected ancestors preserves the subtree for undo/redo.
+                            let ancestor = node.parent;
+                            while (ancestor && !nodes.has(ancestor.id)) ancestor = ancestor.parent;
+                            if (!ancestor) node.parent?.remove(node);
+                        }
+                    }
+                },
+            );
+        } catch {
+            for (const id of nodes.keys()) errors.set(id, "batch could not be applied; changes rolled back");
+        }
+        doc.visual.update();
+    }
+    return JSON.stringify({
+        ...(errors.size > 0 && { error: "Some node ids failed; inspect results before retrying" }),
+        results: ids.map((id) =>
+            errors.has(id)
+                ? { id, error: errors.get(id) }
+                : visible === undefined
+                  ? { id, deleted: id }
+                  : { id, visible },
+        ),
+    });
+}
+
 function deleteNodeTool(): Tool {
     return {
         name: "delete_node",
-        description:
-            "Delete a node by id (ids come from get_document_state or run_program's created[].nodeId).",
+        description: `Delete nodes (ids come from get_document_state or run_program's created[].nodeId). Deleting a folder also deletes its descendants.${NODE_BATCH_DESCRIPTION}`,
         parameters: {
             type: "object",
-            properties: { id: { type: "string", description: "Node id" } },
-            required: ["id"],
+            properties: NODE_TARGET_PROPERTIES,
+            oneOf: NODE_TARGET_SCHEMA,
         },
         handler: async (args) => {
             const doc = requireDocument();
             if (typeof doc === "string") return doc;
+            const validation = validateNodeTargets(args);
+            if (validation) return JSON.stringify({ error: validation });
+            if (args["ids"] !== undefined) {
+                return applyNodeBatch(doc, args["ids"] as string[]);
+            }
             const id = args["id"] as string;
             const node = requireNode(doc, id);
             if (typeof node === "string") return node;
@@ -69,18 +157,27 @@ function deleteNodeTool(): Tool {
 function setNodeVisibleTool(): Tool {
     return {
         name: "set_node_visible",
-        description: "Show or hide a node by id. visible=true shows it, false hides it.",
+        description: `Show or hide nodes. visible=true shows them, false hides them. A hidden folder also hides its descendants.${NODE_BATCH_DESCRIPTION}`,
         parameters: {
             type: "object",
             properties: {
-                id: { type: "string", description: "Node id" },
+                ...NODE_TARGET_PROPERTIES,
                 visible: { type: "boolean", description: "true to show, false to hide" },
             },
-            required: ["id", "visible"],
+            required: ["visible"],
+            oneOf: NODE_TARGET_SCHEMA,
         },
         handler: async (args) => {
             const doc = requireDocument();
             if (typeof doc === "string") return doc;
+            const validation = validateNodeTargets(args);
+            if (validation) return JSON.stringify({ error: validation });
+            if (typeof args["visible"] !== "boolean") {
+                return JSON.stringify({ error: "visible must be a boolean" });
+            }
+            if (args["ids"] !== undefined) {
+                return applyNodeBatch(doc, args["ids"] as string[], args["visible"] as boolean);
+            }
             const id = args["id"] as string;
             const node = requireNode(doc, id);
             if (typeof node === "string") return node;
