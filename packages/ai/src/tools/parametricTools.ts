@@ -715,7 +715,8 @@ export async function runParametric(
                         owner,
                         progress,
                     );
-                    if (signal?.aborted) throw new Error("Parametric program cancelled; edits rolled back");
+                    // No abort check here: the program checks between steps and restores its refs
+                    // when it throws. A cancel arriving after it returned leaves the job completed.
                     owner.run(() => {
                         document.selection.clearSelection();
                         document.visual.update();
@@ -724,11 +725,15 @@ export async function runParametric(
                 owner,
             );
         } finally {
-            // Rollback may enqueue restoration work. Keep ownership until it has settled.
-            await DocumentRebuilds.settled(document);
-            releaseSnapshot();
-            owner.release();
-            releaseAutosave();
+            // Rollback may enqueue restoration work. Keep ownership until it has settled,
+            // and release it even if waiting fails, or the document would stay held.
+            try {
+                await DocumentRebuilds.settled(document);
+            } finally {
+                releaseSnapshot();
+                owner.release();
+                releaseAutosave();
+            }
         }
         return JSON.stringify(result);
     }

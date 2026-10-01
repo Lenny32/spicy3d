@@ -1937,6 +1937,27 @@ test("consecutive boolean-tool sketch edits rebuild their owner once and reuse i
     }
 });
 
+test("an owner sketch edit queued before its tools' edits still rebuilds the owner once", () => {
+    const doc = newDoc();
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        PerformanceTrace.enable();
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: "base-sketch",
+                actions: [{ action: "move", entities: [1, 2, 3, 4], delta: [0.5, 0] }],
+            },
+            ...edits,
+        ]);
+        expect(bodyReplays(body)).toHaveLength(1);
+        expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+    } finally {
+        PerformanceTrace.disable();
+        doc.dispose();
+    }
+});
+
 test.each([
     false,
     true,
@@ -1984,6 +2005,96 @@ test.each([
         expect(DocumentMutations.isHeld(doc)).toBe(false);
     } finally {
         PerformanceTrace.disable();
+        rs.unstubAllGlobals();
+        doc.dispose();
+    }
+});
+
+test("a program cancel stops only the rebuilds started under its own mutation scope", async () => {
+    const doc = newDoc();
+    try {
+        const { body } = booleanEditModel(doc);
+        // Toggling an early feature invalidates the cached tail, so the rebuild runs as a job.
+        let suppressed = false;
+        const rebuild = () => {
+            suppressed = !suppressed;
+            const features = JSON.parse(body.featuresJson);
+            features[3].suppressed = suppressed;
+            body.featuresJson = JSON.stringify(features);
+        };
+        rebuild();
+        expect(body.isRebuilding).toBe(true);
+        const owner = DocumentMutations.hold(doc);
+        try {
+            body.cancelProgramRebuild(owner);
+            expect(body.isRebuilding).toBe(true);
+            owner.run(rebuild);
+            expect(body.isRebuilding).toBe(true);
+            owner.run(() => body.cancelProgramRebuild(owner));
+            expect(body.isRebuilding).toBe(false);
+        } finally {
+            owner.release();
+        }
+    } finally {
+        await DocumentRebuilds.settled(doc);
+        doc.dispose();
+    }
+});
+
+test("deferred rebuilds that keep re-triggering fail the program instead of hanging", () => {
+    const doc = newDoc();
+    try {
+        const { body, edits } = booleanEditModel(doc);
+        const node = body as unknown as {
+            generateShape(trigger?: string): unknown;
+            rebuildFromUpstream(trigger?: string): void;
+        };
+        const generate = node.generateShape.bind(node);
+        const spy = rs.spyOn(node, "generateShape").mockImplementation((trigger?: string) => {
+            const result = generate(trigger);
+            // Re-queue itself on every drain pass, like two bodies that notify each other forever.
+            if (trigger === "batched-upstream") node.rebuildFromUpstream("upstream");
+            return result;
+        });
+        try {
+            expect(() => run(doc, edits.slice(0, 1))).toThrow("Rebuilds did not settle");
+        } finally {
+            spy.mockRestore();
+        }
+    } finally {
+        doc.dispose();
+    }
+});
+
+test("a background program releases its document hold when the final settle fails", async () => {
+    const doc = newDoc();
+    const app = createMockApplication();
+    app.activeView = { document: doc } as never;
+    doc.selection = createMockSelection();
+    rs.stubGlobal("app", app);
+    const settled = DocumentRebuilds.settled.bind(DocumentRebuilds);
+    let finished = false;
+    const spy = rs
+        .spyOn(DocumentRebuilds, "settled")
+        .mockImplementation((document) =>
+            finished ? Promise.reject(new Error("settle failed")) : settled(document),
+        );
+    try {
+        const { edits } = booleanEditModel(doc);
+        const running = runParametric(
+            { ops: edits.slice(0, 1), responseMode: "compact" },
+            undefined,
+            ({ completed, total }) => {
+                finished = completed === total;
+            },
+            doc,
+        );
+        await expect(running).rejects.toThrow("settle failed");
+        expect(finished).toBe(true);
+        expect(DocumentMutations.isHeld(doc)).toBe(false);
+    } finally {
+        spy.mockRestore();
+        await DocumentRebuilds.settled(doc);
         rs.unstubAllGlobals();
         doc.dispose();
     }

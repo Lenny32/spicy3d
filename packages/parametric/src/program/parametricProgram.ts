@@ -517,7 +517,7 @@ export async function runParametricProgramAsync(
     const cancel = () =>
         owner.run(() => {
             for (const node of document.modelManager.findNodes()) {
-                if (node instanceof ParametricBodyNode) node.cancelProgramRebuild();
+                if (node instanceof ParametricBodyNode) node.cancelProgramRebuild(owner);
             }
         });
     options.signal?.addEventListener("abort", cancel, { once: true });

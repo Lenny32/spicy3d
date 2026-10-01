@@ -12,6 +12,9 @@ import { ParametricBodyNode } from "../src/parametricBodyNode";
 import "./sketch/setup";
 
 // Download the attachment linked in #127 and point this variable at the local file.
+// Opt-in on purpose: loading and replaying the 65-feature body takes about six minutes, too slow
+// for every CI run; the fast synthetic boolean-chain tests in parametricProgram.kernel.test.ts
+// cover the same batching on every run.
 // The report gives complete actions for these two sketches; the other four are abbreviated.
 test.skipIf(!process.env["SPICY3D_ISSUE_127_MODEL"])(
     "issue 127 snapshot coalesces the published sketch edits into one owner replay",

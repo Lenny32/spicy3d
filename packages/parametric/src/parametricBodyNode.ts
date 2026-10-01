@@ -12,6 +12,7 @@ import {
     type I18nKeys,
     type IAsyncShapeOperation,
     type IDocument,
+    type IDocumentMutationScope,
     type IEqualityComparer,
     type IFeatureListNode,
     type INode,
@@ -193,6 +194,9 @@ export class ParametricBodyNode
     /** False until the first evaluation; see the `shape` getter. */
     private _evaluated = false;
     private _job?: RebuildJob;
+    /** The mutation scope `_job` was started under; a program cancels only its own rebuilds. */
+    private _jobScope?: IDocumentMutationScope;
+    private _drainingUpstream = false;
     private _run?: RebuildRun;
     private _forceSynchronous = false;
     private _preparedCorner?: {
@@ -221,6 +225,7 @@ export class ParametricBodyNode
     private static readonly ASYNC_FEATURE_THRESHOLD = 12;
     private static readonly synchronousDocuments = new WeakMap<IDocument, number>();
 
+    private static readonly MAX_DEFERRED_PASSES = 64;
     private static readonly deferredUpstream = new WeakMap<
         IDocument,
         Map<ParametricBodyNode, INode | undefined>
@@ -233,7 +238,19 @@ export class ParametricBodyNode
         ParametricBodyNode.deferredUpstream.set(document, pending);
         try {
             const result = action();
-            while (pending.size) pending.keys().next().value?.drainDeferredUpstream();
+            // A body drained before one of its upstream bodies is queued again; bodies that keep
+            // re-triggering each other would never empty the queue. Fail (and roll back) instead.
+            const passes = new Map<ParametricBodyNode, number>();
+            while (pending.size) {
+                const body = pending.keys().next().value as ParametricBodyNode;
+                const count = (passes.get(body) ?? 0) + 1;
+                if (count > ParametricBodyNode.MAX_DEFERRED_PASSES)
+                    throw new Error(
+                        `Rebuilds did not settle: "${body.name}" was re-triggered ${ParametricBodyNode.MAX_DEFERRED_PASSES} times`,
+                    );
+                passes.set(body, count);
+                body.drainDeferredUpstream();
+            }
             return result;
         } finally {
             ParametricBodyNode.deferredUpstream.delete(document);
@@ -241,16 +258,24 @@ export class ParametricBodyNode
     }
 
     private drainDeferredUpstream(): void {
+        // Installing the result reads `shape` again; a body queued anew meanwhile waits for the
+        // drain loop (which caps the passes) instead of recursing through its own getter.
+        if (this._drainingUpstream) return;
         const pending = ParametricBodyNode.deferredUpstream.get(this.document);
         if (!pending?.has(this)) return;
         const source = pending.get(this);
         pending.delete(this);
-        this.rebuildFromUpstream("batched-upstream", source, true);
+        this._drainingUpstream = true;
+        try {
+            this.rebuildFromUpstream("batched-upstream", source, true);
+        } finally {
+            this._drainingUpstream = false;
+        }
     }
 
-    /** Cancel ephemeral work before the owning program rolls its edits back. */
-    cancelProgramRebuild(): void {
-        this.cancelRebuild("program-cancelled");
+    /** Cancel ephemeral work started by `owner` before that program rolls its edits back. */
+    cancelProgramRebuild(owner: IDocumentMutationScope): void {
+        if (this._job && this._jobScope === owner) this.cancelRebuild("program-cancelled");
     }
 
     /**
@@ -817,6 +842,7 @@ export class ParametricBodyNode
                 },
             );
             this._job = job;
+            this._jobScope = mutationScope;
             job.start(first.value);
             return this._shape;
         } catch (error) {
