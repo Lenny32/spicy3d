@@ -1,0 +1,7 @@
+# PR #107 CodeQL comment audit
+
+These findings were checked against the actual C++ scopes and uses. OCCT `Handle(...)` macros and function boundaries were misclassified by the scanning extraction. The native build compiles these declarations as locals/types. Runtime code is retained where the warning would remove required geometry or diagnostics.
+
+| Comment | Finding | Source evidence / disposition |
+| --- | --- | --- |
+| [4144597375](https://github.com/Lenny32/spicy3d/pull/107#discussion_r4144597375) | Unused static variable | False positive. `vertices` is a local in `filletBuildFailure`, read by both `vertices > 0` and the final `faulty == 0 && vertices == 0` diagnostic. |
