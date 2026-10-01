@@ -678,9 +678,9 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     }
     for (const auto& face : retained)
         sewing.Add(face);
-    for (const auto& patch : patches) {
-        sewing.Add(patch);
-        Origin origin { patch, { }, { }, true };
+    for (const auto& patchFace : patches) {
+        sewing.Add(patchFace);
+        Origin origin { patchFace, { }, { }, true };
         for (const auto& item : boundary) {
             const auto found = std::find_if(reconstructionHistory.begin(), reconstructionHistory.end(), [&](const Origin& source) { return source.shape.IsSame(item.support); });
             if (found != reconstructionHistory.end()) {
@@ -690,7 +690,7 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
         }
         if (origin.faces.size() != 3 || origin.edges.size() != 3)
             return failure("corner boundary derivation history is incomplete or ambiguous");
-        addOrigin(reconstructionHistory, patch, origin);
+        addOrigin(reconstructionHistory, patchFace, origin);
     }
     sewing.Perform();
     if (sewing.NbFreeEdges() != 0 || sewing.SewedShape().ShapeType() != TopAbs_SHELL)
