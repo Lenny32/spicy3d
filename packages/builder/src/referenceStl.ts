@@ -66,8 +66,8 @@ export function parseReferenceStl(buffer: ArrayBuffer, scale = 1): Result<Mesh> 
             const y = az * bx - ax * bz;
             const z = ax * by - ay * bx;
             const length = Math.hypot(x, y, z);
-            if (length === 0 || !Number.isFinite(length))
-                return Result.err("STL contains a degenerate triangle");
+            if (!Number.isFinite(length)) return Result.err("STL contains a degenerate triangle");
+            if (length === 0) continue; // Keep scan geometry; zero-area facets have no normal.
             for (let j = 0; j < 9; j += 3) normals.set([x / length, y / length, z / length], i + j);
         }
         return Result.ok(new Mesh({ meshType: "surface", position: positions, normal: normals }));

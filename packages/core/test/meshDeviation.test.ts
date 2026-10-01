@@ -238,3 +238,14 @@ describe("mesh deviation", () => {
         }
     });
 });
+
+test("zero-area scan and tessellation triangles are retained but skipped for sampling", async () => {
+    const model = { position: new Float32Array([...new Float32Array(9), ...square(2).position]) };
+    const reference = { position: new Float32Array([...square().position, ...new Float32Array(9)]) };
+    const result = await measureMeshDeviation(model, reference, { sampleCount: 64 });
+    expect(result.isOk).toBe(true);
+    expect(result.value.meanDeviation).toBeCloseTo(2, 10);
+    expect(result.value.modelTriangleCount).toBe(3);
+    expect(result.value.referenceTriangleCount).toBe(3);
+    expect(result.value.accuracy).toContain("Skipped 1 zero-area model triangles");
+});

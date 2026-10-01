@@ -98,7 +98,6 @@ describe("reference STL import", () => {
         ["missing end", ascii.replace("endsolid scan", "")],
         ["missing vertex", ascii.replace("vertex 0 1 0", "")],
         ["non-finite", ascii.replace("vertex 1 0 0", "vertex 1e999 0 0")],
-        ["degenerate", ascii.replace("vertex 0 1 0", "vertex 0 0 0")],
         ["empty", "solid scan\nendsolid scan"],
         ["garbage", "not an stl"],
     ])("rejects %s without adding a node or material", async (_name, content) => {
@@ -189,4 +188,13 @@ describe("reference STL import", () => {
         expect(document.modelManager.materials.length).toBe(0);
         expect(exchange.referenceMeshFormats()).toEqual([".stl"]);
     });
+});
+
+test("scan facets with zero area preserve their vertices and use zero normals", () => {
+    const result = parseReferenceStl(
+        new TextEncoder().encode(ascii.replace("vertex 0 1 0", "vertex 0 0 0")).buffer,
+    );
+    expect(result.isOk).toBe(true);
+    expect(result.value.position.length).toBe(9);
+    expect(Array.from(result.value.normal!)).toEqual(Array(9).fill(0));
 });

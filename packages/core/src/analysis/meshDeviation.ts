@@ -31,7 +31,12 @@ export interface MeshDeviationResult {
     readonly accuracy: string;
 }
 
-type TriangleData = { coordinates: Float64Array; cumulativeArea: Float64Array; count: number };
+type TriangleData = {
+    coordinates: Float64Array;
+    cumulativeArea: Float64Array;
+    count: number;
+    skipped: number;
+};
 type Bounds = [number, number, number, number, number, number];
 type BvhNode = { bounds: Bounds; start: number; end: number; left?: BvhNode; right?: BvhNode };
 const MAX_TRIANGLES = 1_000_000;
@@ -66,6 +71,7 @@ export async function measureMeshDeviation(
         await checkpoint();
         const source = await triangles(model, checkpoint);
         const target = await triangles(reference, checkpoint);
+        if (source.cumulativeArea.at(-1) === 0) throw new Error("Model mesh has no non-degenerate triangles");
         const ids = Array.from({ length: target.count }, (_, i) => i);
         const build = async (start: number, end: number): Promise<BvhNode> => {
             const bounds: Bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
@@ -116,7 +122,7 @@ export async function measureMeshDeviation(
         const area = source.cumulativeArea.at(-1)!;
         for (let sample = 0; sample < sampleCount; sample++) {
             const targetArea = ((sample + 0.5) / sampleCount) * area;
-            while (triangle < source.count - 1 && source.cumulativeArea[triangle] < targetArea) triangle++;
+            while (triangle < source.count - 1 && source.cumulativeArea[triangle] <= targetArea) triangle++;
             const [a, b, c] = vertices(source.coordinates, triangle);
             const u = Math.sqrt(radicalInverse(sample + 1, 2));
             const v = radicalInverse(sample + 1, 3);
@@ -171,6 +177,7 @@ export async function measureMeshDeviation(
             maxSampledDeviation: maximum,
             worstSample,
             accuracy:
+                `Skipped ${source.skipped} zero-area model triangles for sampling; retained ${target.skipped} zero-area reference triangles for nearest-point search. ` +
                 "Unsigned sampled distances to reference triangles. Model uses its current tessellation; no certified CAD-surface error bound. Maximum is sampled, not a continuous maximum or Hausdorff distance. Reference regions absent from the model are not measured.",
         });
     } catch (error) {
@@ -187,6 +194,7 @@ async function triangles(mesh: DeviationMesh, checkpoint: () => Promise<void>): 
     const coordinates = new Float64Array(count * 9);
     const cumulativeArea = new Float64Array(count);
     let area = 0;
+    let skipped = 0;
     for (let triangle = 0; triangle < count; triangle++) {
         for (let vertex = 0; vertex < 3; vertex++) {
             const index = mesh.index?.[triangle * 3 + vertex] ?? triangle * 3 + vertex;
@@ -202,14 +210,15 @@ async function triangles(mesh: DeviationMesh, checkpoint: () => Promise<void>): 
         }
         const [a, b, c] = vertices(coordinates, triangle);
         const triangleArea = b.sub(a).cross(c.sub(a)).length() / 2;
-        if (!(triangleArea > 0) || !Number.isFinite(triangleArea))
+        if (!Number.isFinite(triangleArea))
             throw new Error("Mesh contains degenerate or non-finite triangles");
+        if (triangleArea === 0) skipped++;
         area += triangleArea;
         cumulativeArea[triangle] = area;
         if ((triangle & 2047) === 0) await checkpoint();
     }
     if (!Number.isFinite(area)) throw new Error("Mesh area overflow");
-    return { coordinates, cumulativeArea, count };
+    return { coordinates, cumulativeArea, count, skipped };
 }
 
 function vertices(coordinates: Float64Array, triangle: number): [XYZ, XYZ, XYZ] {
@@ -246,6 +255,20 @@ function boundsDistance(point: XYZ, bounds: Bounds): number {
 function closestTrianglePoint(p: XYZ, a: XYZ, b: XYZ, c: XYZ): XYZ {
     const ab = b.sub(a);
     const ac = c.sub(a);
+    if (ab.cross(ac).lengthSq() === 0) {
+        const segment = (start: XYZ, end: XYZ) => {
+            const direction = end.sub(start);
+            const length = direction.lengthSq();
+            return length === 0
+                ? start
+                : start.add(
+                      direction.multiply(Math.max(0, Math.min(1, p.sub(start).dot(direction) / length))),
+                  );
+        };
+        return [segment(a, b), segment(a, c), segment(b, c)].reduce((best, point) =>
+            point.sub(p).lengthSq() < best.sub(p).lengthSq() ? point : best,
+        );
+    }
     const ap = p.sub(a);
     const d1 = ab.dot(ap);
     const d2 = ac.dot(ap);
