@@ -2929,6 +2929,9 @@ public:
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
+        if (makeThickSolid.Shape().IsSame(shape)) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
+        }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
         if (!resultError.empty()) {
             return ShapeResult { TopoDS_Shape(), false, resultError };
@@ -2951,13 +2954,25 @@ public:
 
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
         makeThickSolid.MakeThickSolidByJoin(shape, shapesList, thickness, 1e-6, mode, intersection, false, joinType);
-        if (!makeThickSolid.IsDone()) {
+        if (!makeThickSolid.IsDone() || makeThickSolid.MakeOffset().Error() != BRepOffset_NoError) {
             return ShapeResult { TopoDS_Shape(), false,
                 std::string("Failed to create thick solid: ") + offsetErrorName(makeThickSolid.MakeOffset().Error()) };
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
         if (!resultError.empty()) {
             return ShapeResult { TopoDS_Shape(), false, resultError };
+        }
+        // IsDone and BRepCheck can both pass when the offset collapses and OCCT
+        // rebuilds the input solid. A shell must actually remove its closing faces.
+        if (makeThickSolid.Shape().IsSame(shape)) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+        TopExp::MapShapes(makeThickSolid.Shape(), TopAbs_FACE, resultFaces);
+        for (const auto& face : shapesList) {
+            if (resultFaces.Contains(face)) {
+                return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset did not remove an opening face" };
+            }
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }
