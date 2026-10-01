@@ -93,9 +93,9 @@ describe("OffsetCommand", () => {
     }
 
     describe("executeMainTask (edge path)", () => {
-        test("should add an EditableShapeNode carrying the offset shape to the root", () => {
+        test("should add an EditableShapeNode carrying the offset shape through the model insertion target", () => {
             const cmd = new OffsetCommand();
-            const { doc } = wireCommand(cmd);
+            const { addedNodes } = wireCommand(cmd);
 
             const offsetShape = { shapeType: ShapeTypes.wire };
             const edgeShape = makeEdgeShape(Result.ok(offsetShape as any));
@@ -107,9 +107,8 @@ describe("OffsetCommand", () => {
 
             (cmd as any).executeMainTask();
 
-            const root = doc.modelManager.rootNode as any;
-            expect(root.added).toHaveLength(1);
-            const node = root.added[0];
+            expect(addedNodes).toHaveLength(1);
+            const node = addedNodes[0];
             expect(node).toBeInstanceOf(EditableShapeNode);
             expect((node as any).shape.value).toBe(offsetShape);
         });

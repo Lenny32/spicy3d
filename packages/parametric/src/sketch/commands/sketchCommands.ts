@@ -179,11 +179,11 @@ async function pickPlane(
         const activeMember =
             active?.kind === "datum" && active.nodeId === selectedDatum.id ? active.member : undefined;
         const member = ucsMember ?? (activeMember === "YZ" || activeMember === "ZX" ? activeMember : "XY");
-        const constructionRef: ConstructionRef = {
-            kind: "datum",
-            nodeId: selectedDatum.id,
-            ...(selectedDatum.definition.kind === "ucs" ? { member } : {}),
-        };
+        const reference = selectedDatum.reference;
+        const constructionRef: ConstructionRef =
+            reference.kind === "datum" && selectedDatum.definition.kind === "ucs"
+                ? { ...reference, member }
+                : reference;
         const resolved = resolveConstructionRef(document, constructionRef);
         if (resolved.isOk && resolved.value.kind === "plane") {
             return { plane: resolved.value.plane, constructionRef };

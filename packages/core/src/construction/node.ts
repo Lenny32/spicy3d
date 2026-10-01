@@ -141,6 +141,11 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
         return "common.name";
     }
 
+    /** Captures a persistent reference; runtime datums override this with a world reference. */
+    get reference(): ConstructionRef {
+        return { kind: "datum", nodeId: this.id };
+    }
+
     get icon(): string {
         switch (this.definition.kind) {
             case "ucs":

@@ -13,13 +13,26 @@ export * from "./sketchNode";
 export * from "./solver";
 import "./commands";
 
-import { MergePathRevealers, PubSub } from "@spicy3d/core";
+import { BrowserProviders, MergePathRevealers, PubSub } from "@spicy3d/core";
 import { SketchEditor } from "./editor/sketchEditor";
 import { sketchMergeRevealer } from "./mergeReveal";
 import { SketchNode } from "./sketchNode";
 
 // A conflict about a sketch entity, selected in the conflict panel, selects that entity.
 MergePathRevealers.register(sketchMergeRevealer);
+
+BrowserProviders.register({
+    describe: (node) =>
+        node instanceof SketchNode
+            ? {
+                  type: "sketch",
+                  category: "sketches",
+                  icon: node.icon,
+                  editLabel: "browser.editSketch",
+                  edit: (sketch) => PubSub.default.pub("nodeDoubleClicked", sketch),
+              }
+            : undefined,
+});
 
 // Double-clicking a sketch node in the project tree enters its editing session.
 PubSub.default.sub("nodeDoubleClicked", (node) => {

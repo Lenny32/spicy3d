@@ -2,6 +2,23 @@
 // See LICENSE file in the project root for full license information.
 
 export const I18N_KEYS = [
+    "browser.title",
+    "browser.bodies",
+    "browser.sketches",
+    "browser.construction",
+    "browser.objects",
+    "browser.settings",
+    "browser.views",
+    "browser.origin",
+    "browser.activate",
+    "browser.active",
+    "browser.newComponent",
+    "browser.component",
+    "browser.expand",
+    "browser.collapse",
+    "browser.properties",
+    "browser.viewActivate",
+    "browser.editSketch",
     "ai.ask.notAnswered",
     "ai.error.missingParam",
     "ai.error.noDocument",

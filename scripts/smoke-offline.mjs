@@ -203,6 +203,8 @@ async function open(browser, url) {
 async function checkApp(browser, url, { expectServer = false, withPlugin = false } = {}) {
     console.log(`\n${url}`);
     const run = await open(browser, url);
+    // The core singleton becomes available before the asynchronous chrome initialization finishes.
+    await run.page.locator("spicy-project-view").waitFor({ state: "attached", timeout: STARTUP_TIMEOUT_MS });
     const result = await run.page.evaluate(async () => {
         const core = globalThis.Spicy3DCore;
         const app = core.getCurrentApplication();
@@ -214,6 +216,42 @@ async function checkApp(browser, url, { expectServer = false, withPlugin = false
         document.modelManager.addNode(
             new core.EditableShapeNode({ document, name: "box", shape: box.value }),
         );
+        const panel = globalThis.document.querySelector("spicy-browser");
+        if (!panel || panel.document !== document)
+            return { error: "Browser is not attached to the active document" };
+        const component = new core.FolderNode({ document, name: "Base" });
+        const child = new core.FolderNode({ document, name: "Shell" });
+        document.modelManager.addNode(component);
+        component.add(child);
+        const body = document.modelManager.findNode((node) => node.name === "box");
+        if (!panel.actions.move([panel.model.entries.get(body.id)], panel.model.entries.get(child.id)))
+            return { error: "Browser move failed" };
+        panel.reveal(body.id);
+        const bodyRow = panel.querySelector(`[data-key="${body.id}"]`);
+        bodyRow?.click();
+        const selected = document.selection.getSelectedNodes().includes(body);
+        bodyRow?.querySelector("[data-visibility]")?.click();
+        const hidden = !body.visible;
+        document.history.undo();
+        const restoredVisibility = body.visible;
+        const activated = panel.actions.activate(panel.model.entries.get(child.id));
+        const originKey = `${child.id}:origin:4`;
+        const beforeOrigin = JSON.stringify(document.modelManager.serialize());
+        panel.reveal(originKey);
+        panel.querySelector(`[data-key="${originKey}"]`)?.click();
+        const origin = panel.model.entries.get(originKey)?.node;
+        const runtimeOrigin = origin?.visible && origin.reference.kind === "origin-plane";
+        const unchangedSave = beforeOrigin === JSON.stringify(document.modelManager.serialize());
+        const browserChecks = {
+            selected,
+            hidden,
+            restoredVisibility,
+            activated,
+            runtimeOrigin,
+            unchangedSave,
+        };
+        if (Object.values(browserChecks).some((value) => value !== true))
+            return { error: `Browser interaction failed: ${JSON.stringify(browserChecks)}` };
         // Signed out, a new document belongs to the browser's storage (repositories.local).
         const saved = await document.save();
         if (!saved.isOk) return { error: `save: ${saved.error}` };
@@ -225,7 +263,7 @@ async function checkApp(browser, url, { expectServer = false, withPlugin = false
         const reopenedVolume = shape?.isOk ? shape.value.volume() : undefined;
         await reopened?.close({ discardChanges: true });
         await app.repositories.local.delete(id);
-        return { volume, reopened: reopened !== undefined, reopenedVolume };
+        return { volume, reopened: reopened !== undefined, reopenedVolume, browserChecks };
     });
     check(
         result.error === undefined,
@@ -237,6 +275,10 @@ async function checkApp(browser, url, { expectServer = false, withPlugin = false
     );
     check(result.reopened, "a document saved to browser storage opens again");
     check(Math.abs((result.reopenedVolume ?? 0) - 6000) < 1e-6, "the reopened document has its box");
+    check(
+        result.browserChecks?.unchangedSave === true,
+        "Browser selection, move, activation, visibility, and runtime origin work without changing the save format",
+    );
 
     const insecure = expectsInsecure(url);
     if (insecure)

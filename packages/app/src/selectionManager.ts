@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    FolderNode,
     type IDisposable,
     type IDocument,
     type INode,
@@ -20,8 +21,55 @@ export class SelectionManager implements ISelection, IDisposable {
 
     private readonly selectedSet = new Set<INode>();
     private selectedShapeSet = [] as [VisualShapeData, VisualState][];
+    private readonly highlightedNodes = new Set<VisualNode>();
+    private readonly watchedNodes = new Set<INode>();
 
-    constructor(readonly document: IDocument) {}
+    constructor(readonly document: IDocument) {
+        document.modelManager.addNodeObserver(this.refreshNodeHighlights);
+    }
+
+    private readonly refreshNodeHighlights = () => {
+        const desired = new Set<VisualNode>();
+        const watched = new Set<INode>();
+        const pending = [...this.selectedSet];
+        while (pending.length) {
+            const node = pending.pop()!;
+            watched.add(node);
+            if (node instanceof FolderNode) pending.push(...node.children());
+            else if (node instanceof VisualNode && node.visible && node.parentVisible) desired.add(node);
+        }
+        for (const node of this.watchedNodes)
+            if (!watched.has(node)) node.removePropertyChanged(this.onHighlightPropertyChanged);
+        for (const node of watched)
+            if (!this.watchedNodes.has(node)) node.onPropertyChanged(this.onHighlightPropertyChanged);
+        this.watchedNodes.clear();
+        for (const node of watched) this.watchedNodes.add(node);
+        for (const node of this.highlightedNodes) {
+            if (desired.has(node)) continue;
+            const visual = this.document.visual.context.getVisual(node);
+            if (visual)
+                this.document.visual.highlighter.removeState(
+                    visual,
+                    VisualStates.edgeSelected,
+                    ShapeTypes.shape,
+                );
+        }
+        for (const node of desired) {
+            if (this.highlightedNodes.has(node)) continue;
+            const visual = this.document.visual.context.getVisual(node);
+            if (visual)
+                this.document.visual.highlighter.addState(
+                    visual,
+                    VisualStates.edgeSelected,
+                    ShapeTypes.shape,
+                );
+        }
+        this.highlightedNodes.clear();
+        for (const node of desired) this.highlightedNodes.add(node);
+    };
+    private readonly onHighlightPropertyChanged = (property: string) => {
+        if (property === "visible" || property === "parentVisible") this.refreshNodeHighlights();
+    };
 
     setSelectedNodes(nodes: INode[], toggle: boolean): number {
         if (toggle) {
@@ -42,7 +90,11 @@ export class SelectionManager implements ISelection, IDisposable {
     }
 
     getSelectedVisualNodes(): VisualNode[] {
-        return Array.from(this.selectedSet.values().filter((x): x is VisualNode => x instanceof VisualNode));
+        return Array.from(
+            this.selectedSet
+                .values()
+                .filter((x): x is VisualNode => x instanceof VisualNode && !x.isTransient),
+        );
     }
 
     getSelectedNodeLength(): number {
@@ -115,40 +167,23 @@ export class SelectionManager implements ISelection, IDisposable {
 
     private addSelectedNode(nodes: INode[], publish: boolean): void {
         for (const node of nodes) {
-            if (node instanceof VisualNode) {
-                const visual = this.document.visual.context.getVisual(node);
-                if (visual) {
-                    this.document.visual.highlighter.addState(
-                        visual,
-                        VisualStates.edgeSelected,
-                        ShapeTypes.shape,
-                    );
-                }
-            }
             this.selectedSet.add(node);
         }
+        this.refreshNodeHighlights();
         if (publish) this.onNodeChanged.emit(Array.from(this.selectedSet));
     }
 
     private removeSelectedNodes(nodes: INode[] | Set<INode>, publish: boolean): void {
         for (const node of nodes) {
-            if (node instanceof VisualNode) {
-                const visual = this.document.visual.context.getVisual(node);
-                if (visual) {
-                    this.document.visual.highlighter.removeState(
-                        visual,
-                        VisualStates.edgeSelected,
-                        ShapeTypes.shape,
-                    );
-                }
-            }
             this.selectedSet.delete(node);
         }
+        this.refreshNodeHighlights();
         if (publish) this.onNodeChanged.emit(Array.from(this.selectedSet));
     }
 
     dispose(): void {
         this.clearSelection();
+        this.document.modelManager.removeNodeObserver(this.refreshNodeHighlights);
         this.onNodeChanged.dispose();
         this.onShapeChanged.dispose();
     }
