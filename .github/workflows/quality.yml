@@ -71,7 +71,11 @@ jobs:
                   persist-credentials: false
 
             - name: Install Semgrep
-              run: pipx install semgrep
+              run: |
+                  pipx install semgrep
+                  # OpenTelemetry still imports pkg_resources, removed in setuptools 82.
+                  pipx inject semgrep 'setuptools<82'
+                  semgrep --version
 
             - name: Scan
               run: >
@@ -84,7 +88,7 @@ jobs:
                   --text
 
             - name: Upload SARIF to code scanning
-              if: always() && github.event.pull_request.head.repo.fork != true
+              if: always() && hashFiles('semgrep.sarif') != '' && github.event.pull_request.head.repo.fork != true
               uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
               with:
                   sarif_file: semgrep.sarif
