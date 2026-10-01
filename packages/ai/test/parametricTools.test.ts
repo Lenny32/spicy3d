@@ -74,6 +74,14 @@ describe("parametricTools", () => {
         expect(properties.selector.properties.geometry.properties.elevation.required).toEqual(["value"]);
     });
 
+    test("corner insertion and historical edge queries advertise a nonnegative integer position", () => {
+        const index = (opsSchema() as any).properties.index;
+        expect(index.type).toBe("integer");
+        expect(index.minimum).toBe(0);
+        expect(index.description).toContain("fillet/chamfer");
+        expect(index.description).toContain("edges");
+    });
+
     test("the sketch schema offers every entity type and every engine action", () => {
         const properties = (opsSchema() as any).properties;
         expect(properties.entities.items.properties.type.enum).toEqual([

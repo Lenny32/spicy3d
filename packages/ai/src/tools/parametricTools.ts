@@ -274,7 +274,7 @@ const EDGE_SELECTOR_SCHEMA = {
             minItems: 1,
             items: { type: "object" },
             description:
-                "Persistent reference objects returned by edges. Resolve to current topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
+                "Persistent reference objects returned by edges. Resolve to the queried timeline topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
         },
         geometry: {
             type: "object",
@@ -556,7 +556,7 @@ const OPS_SCHEMA = {
             type: "array",
             items: { type: "number" },
             description:
-                "fillet/chamfer/projection: indexes into the current source edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
+                "fillet/chamfer: edge indexes at the insertion position (final shape when index is omitted). Projection: indexes into the current source edge list. Alternative to edgeRefs. edges query: optional subset at the queried position (omit for all). Query with run_parametric edges for indexes plus persistent references.",
         },
         radius: { description: "Fillet radius in mm" },
         radiusLaw: {
@@ -610,7 +610,12 @@ const OPS_SCHEMA = {
         featureId: { type: "string", description: "The feature's id, as reported by the `features` op" },
         key: { type: "string", description: 'setParameter: the parameter name, e.g. "depth"' },
         value: { description: "setParameter: the new value; suppress: true/false; rename: the new name" },
-        index: { type: "number", description: "moveTo: the feature's absolute index in the list" },
+        index: {
+            type: "integer",
+            minimum: 0,
+            description:
+                "fillet/chamfer: insert before this zero-based feature index (omit to append). edges: query the input shape at this index. Edge indexes and references are resolved there. moveTo: the feature's absolute index in the list.",
+        },
         definition: {
             type: "object",
             description:

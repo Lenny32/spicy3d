@@ -109,7 +109,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
 - { op: "editLoft", body, featureId, sections?, solid?, ruled?, continuity?, guided? }
   changes the loft inputs/options as one undo step. guided:null clears both paths and restores
   ordinary lofting; replacing the guided group must supply both spine and boundary.
-- { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "edges", body, id?, index?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
 - { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
   Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at
   the path start, perpendicular to its tangent; this operation does not relocate a misplaced profile.
@@ -124,7 +124,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   Re-picks or changes a face-sweep feature. Omitted fields keep their previous value. Invalid picks fail
   the whole call and leave the previous committed model and undo position intact.
 
-- { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
+- { op: "fillet", id, body, index?, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, index?, edgeIndexes?, edgeRefs?, distance }
   Fillets also accept radiusLaw: [{position:0,radius:"noseRadius"}, {position:1,radius:"tailRadius"}].
   Use 2–64 increasing samples with endpoints 0 and 1; radii are positive lengths/expressions.
   Positions are normalized selected-edge arc length in its natural curve direction, not world-space
@@ -367,6 +367,15 @@ Example — the same skin as an open loft, thickened into a 1.5 mm wall driven b
  [ ...the construct and the two sketches above...,
    { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false },
    { op: "thicken", id: "b1", body: "b1", thickness: "wall_t" } ]
+
+Fillet/chamfer creation accepts optional index, a zero-based insertion position in the
+feature list (0..feature count; omitted appends). Edge selection resolves against the
+shape entering that position. Query { op: "edges", body, index: 1, selector: ... } for
+edges after feature 0, then use { op: "fillet", id, body, index: 1, edgeRefs, radius }.
+This can round a loft before downstream cuts make its final faces unsuitable for filleting.
+The later chain rebuilds in the same undo step; a failure rolls back the whole program.
+Persistent references picked on the final body are also allowed when they resolve
+unambiguously at the insertion position. Edges created later cannot be selected there.
 
 Limits and recovery:
 - Only whole sketches are extruded; individual profiles of a sketch cannot be selected (a hole in a

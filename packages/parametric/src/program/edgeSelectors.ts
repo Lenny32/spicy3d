@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IEdge, type IFace, ShapeTypes, XYZ } from "@spicy3d/core";
+import type { FeatureTimelineState } from "../features/bodyTracking";
 import { matchEdgesAnchored } from "../features/edgeMatcher";
 import type { EdgeRef } from "../features/edgeRef";
 import { ID_COMPONENT_SEPARATOR, idsOverlap } from "../features/trackedId";
@@ -112,6 +113,7 @@ function faceIndexes(
     faces: IFace[],
     given: FaceSelection[],
     name: string,
+    timeline?: FeatureTimelineState,
 ): Set<number> {
     nonemptyArray(given, name);
     const selected = new Set<number>();
@@ -121,7 +123,10 @@ function faceIndexes(
                 throw new Error(`${name}: face index ${ref} is out of range`);
             selected.add(ref);
         } else if (typeof ref === "string" && ref.length > 0) {
-            const indexes = body.faceIndexesOfId(ref);
+            const indexes =
+                timeline === undefined
+                    ? body.faceIndexesOfId(ref)
+                    : (timeline.faceIds ?? []).flatMap((id, index) => (idsOverlap(id, ref) ? [index] : []));
             if (indexes.length === 0) throw new Error(`${name}: face id "${ref}" is missing`);
             for (const index of indexes) selected.add(index);
         } else throw new Error(`${name}: use current face indexes or tracked face ids`);
@@ -180,41 +185,51 @@ export function selectEdgeIndexes(
     refs: (EdgeRef | undefined)[],
     selector: EdgeSelector,
     validatedCurves?: EdgeRef[],
+    timeline?: FeatureTimelineState,
 ): number[] {
     validateEdgeSelector(selector);
-    const shape = body.shape;
-    if (!shape.isOk) throw new Error(`body has no valid shape: ${shape.error}`);
+    const current = body.shape;
+    if (!current.isOk) throw new Error(`body has no valid shape: ${current.error}`);
+    const shape = timeline?.shape ?? current.value;
     const tolerance = selector.tolerance ?? 1e-6;
     const origins =
         selector.featureIds === undefined ? undefined : originLeaves(body, selector.featureIds, refs);
     let curves: EdgeRef[] | undefined;
     if (validatedCurves !== undefined) {
         const resolved = matchEdgesAnchored(
-            shape.value,
+            shape,
             validatedCurves,
-            edges.map((_, index) => body.edgeIdAt(index) ?? ""),
+            timeline === undefined
+                ? edges.map((_, index) => body.edgeIdAt(index) ?? "")
+                : (timeline.edgeIds ?? []),
         );
         if (!resolved.isOk) throw new Error(`curve selection is missing or ambiguous: ${resolved.error}`);
         curves = resolved.value.indexes.flatMap((index) => (refs[index] === undefined ? [] : [refs[index]]));
     }
-    const faces = shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+    const faces = shape.findSubShapes(ShapeTypes.face) as IFace[];
     const outlines: IEdge[] = [];
     try {
         const adjoining = selector.adjoiningFaces;
         const all =
             adjoining?.all === undefined
                 ? undefined
-                : faceIndexes(body, faces, adjoining.all, "adjoiningFaces.all");
+                : faceIndexes(body, faces, adjoining.all, "adjoiningFaces.all", timeline);
         const any =
             adjoining?.any === undefined
                 ? undefined
-                : faceIndexes(body, faces, adjoining.any, "adjoiningFaces.any");
+                : faceIndexes(body, faces, adjoining.any, "adjoiningFaces.any", timeline);
         const exact =
             adjoining?.exact === undefined
                 ? undefined
-                : faceIndexes(body, faces, adjoining.exact, "adjoiningFaces.exact");
+                : faceIndexes(body, faces, adjoining.exact, "adjoiningFaces.exact", timeline);
         if (selector.outlineOfFaces !== undefined) {
-            for (const index of faceIndexes(body, faces, selector.outlineOfFaces, "outlineOfFaces")) {
+            for (const index of faceIndexes(
+                body,
+                faces,
+                selector.outlineOfFaces,
+                "outlineOfFaces",
+                timeline,
+            )) {
                 const wire = faces[index].outerWire();
                 try {
                     outlines.push(...(wire.findSubShapes(ShapeTypes.edge) as IEdge[]));
@@ -256,7 +271,7 @@ export function selectEdgeIndexes(
                 exact !== undefined ||
                 g?.cylinderRadius !== undefined
             ) {
-                const ancestors = edge.findAncestor(ShapeTypes.face, shape.value) as IFace[];
+                const ancestors = edge.findAncestor(ShapeTypes.face, shape) as IFace[];
                 try {
                     const adjacent = new Set(
                         faces.flatMap((face, i) =>
