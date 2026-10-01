@@ -25,7 +25,12 @@ import { promptControlBSpline } from "../../src/sketch/editor/controlBSplineProm
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
 import { promptSketchText } from "../../src/sketch/editor/textPrompt";
-import { ConstraintKind, type SketchData } from "../../src/sketch/sketchModel";
+import {
+    axisLineRefs,
+    ConstraintKind,
+    SKETCH_X_AXIS_ID,
+    type SketchData,
+} from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import { copySketchSelection } from "../../src/sketch/utilityOperations";
 import "./setup";
@@ -101,6 +106,45 @@ function setup(): TestContext {
         restoreFactory: mockShapeFactory(),
     };
 }
+
+test.each([-20, -30])("session entry follows a pending tilt 30 -> %s change", (degrees) => {
+    const { doc, restoreFactory } = setup();
+    const variable = { id: "tilt", name: "tilt", type: "angle" as const, expression: "30" };
+    Object.assign(shapeFactory, { line: () => Result.ok(new MockShape()) });
+    try {
+        doc.variables.setItems([variable]);
+        const start = { entityId: 1, pointIndex: 0 };
+        const end = { entityId: 1, pointIndex: 1 };
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [{ id: 1, type: "line", params: [0, 0, 5 * Math.sqrt(3), 5] }],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                    },
+                ],
+            },
+        });
+        // Not attached to the tree: enter with geometry still at the previous table's value.
+        doc.variables.setItems([{ ...variable, expression: String(degrees) }]);
+        const editor = SketchEditor.enter(node);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((degrees * Math.PI) / 180), 6);
+        expect(editor.solver.toData().constraints.find((c) => c.id === 4)?.datum).toBe("tilt");
+        editor.exit();
+        node.dispose();
+    } finally {
+        SketchEditor.exit();
+        restoreFactory();
+        doc.dispose();
+    }
+});
 
 const DATA: SketchData = {
     entities: [{ id: 1, type: "line", params: [0, 0, 10, 0] }],

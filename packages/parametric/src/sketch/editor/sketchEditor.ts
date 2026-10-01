@@ -39,7 +39,7 @@ import {
 } from "../sketchModel";
 import type { SketchNode } from "../sketchNode";
 import { computeSketchRollback, rollbackRestoreOrder } from "../sketchRollback";
-import { SketchSolver, type SolveOutcome } from "../solver";
+import type { SketchSolver, SolveOutcome } from "../solver";
 import type { SketchTransform } from "../utilityOperations";
 import * as datumPrompt from "./datumPrompt";
 import { type DimensionAnchor, toDisplayDatum } from "./dimensionLayout";
@@ -517,7 +517,7 @@ export class SketchEditor implements IDisposable {
 
     private createSessionSolver(): SketchSolver {
         const data = this.node.data;
-        const solver = new SketchSolver(this.node.plane, data, this.variableScope());
+        const solver = this.node.createScopedSolver(data);
         // the anchor of the face the sketch sits on outlives its boundary refs
         solver.planeOwnerNodeId = this.node.planeRef?.nodeId;
         this.loadAnchors(data);

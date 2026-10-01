@@ -253,6 +253,7 @@ export class SketchSolver implements ExternalEntityHost {
         data?: SketchData,
         scope: Scope = EMPTY_SCOPE,
         private readonly ids: SketchIdAllocator = defaultSketchIds(),
+        legacySides?: ReadonlyMap<number, number | undefined>,
     ) {
         this.plane = plane;
         this._scope = scope;
@@ -260,7 +261,7 @@ export class SketchSolver implements ExternalEntityHost {
         this.seedDatum();
         if (data !== undefined) {
             try {
-                this.loadData(data);
+                this.loadData(data, legacySides);
             } catch (error) {
                 this.system.free();
                 throw error;
@@ -395,7 +396,7 @@ export class SketchSolver implements ExternalEntityHost {
         data.entities[data.entities.findIndex((item) => item.id === id)] = replacement;
         let trial: SketchSolver | undefined;
         try {
-            trial = new SketchSolver(this.plane, data, this._scope);
+            trial = new SketchSolver(this.plane, data, this._scope, this.ids, this.legacySides());
             const outcome = trial.solve(true);
             if (!outcome.result.startsWith("Ok"))
                 return Result.err(`Control B-spline edit failed: ${outcome.result}`);
@@ -761,7 +762,12 @@ export class SketchSolver implements ExternalEntityHost {
 
     /** Independent trial system retaining document expression scope. Caller owns disposal. */
     fork(): SketchSolver {
-        return new SketchSolver(this.plane, this.toData(), this._scope, this.ids);
+        return new SketchSolver(this.plane, this.toData(), this._scope, this.ids, this.legacySides());
+    }
+
+    /** Include undefined entries so trials never infer a side for a signed datum. */
+    private legacySides(): ReadonlyMap<number, number | undefined> {
+        return new Map([...this.constraints.values()].map((record) => [record.id, record.legacySide]));
     }
 
     /** Translate native tags, including helper equations, back to persistent constraint IDs. */
@@ -1762,7 +1768,7 @@ export class SketchSolver implements ExternalEntityHost {
         }
     }
 
-    private loadData(data: SketchData): void {
+    private loadData(data: SketchData, legacySides?: ReadonlyMap<number, number | undefined>): void {
         this.textRecords = structuredClone(data.texts ?? []);
         // The constraints are rebuilt below, so their datum errors are too.
         this._datumErrors.clear();
@@ -1793,9 +1799,21 @@ export class SketchSolver implements ExternalEntityHost {
             const sweep = this.currentSweep(constraint.refs);
             // Older unsigned literals and expressions used the geometry's side. Recover
             // it before the first solve, without adding anything to the saved payload.
+            // Only infer from geometry solved at this magnitude: stale geometry must not
+            // override an edited datum. Old unsigned literals were never negative.
             // Near 0/180 degrees the geometry cannot reliably tell us which side it used.
-            if (Math.abs(Math.sin(sweep)) > 1e-8 && Math.sign(sweep) !== Math.sign(value)) {
+            if (legacySides !== undefined) {
+                record.legacySide = legacySides.get(constraint.id);
+            } else if (
+                value !== 0 &&
+                !(typeof constraint.datum === "number" && constraint.datum < 0) &&
+                Math.abs(Math.abs(sweep) - Math.abs(value)) < 1e-7 &&
+                Math.abs(Math.sin(sweep)) > 1e-8 &&
+                Math.sign(sweep) !== Math.sign(value)
+            ) {
                 record.legacySide = Math.sign(sweep);
+            }
+            if (record.legacySide !== undefined) {
                 this.system.set_param(paramId, Math.abs(value) * record.legacySide);
             }
         }

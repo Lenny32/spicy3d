@@ -1,8 +1,9 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ANGLE_UNITS, type EvaluatedValue, LENGTH_UNITS, Plane, type Scope } from "@spicy3d/core";
-import { TestDocument } from "@spicy3d/core/test-utils";
+import { rs } from "@rstest/core";
+import { ANGLE_UNITS, type EvaluatedValue, LENGTH_UNITS, Plane, Result, type Scope } from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
 import {
     axisLineRefs,
     ConstraintKind,
@@ -279,7 +280,7 @@ describe("signed Angle datums", () => {
 
     test.each([Math.PI / 6, "tilt"])("applyVariables preserves the stored side of %s", (datum) => {
         const { data, line, id } = legacyClockwiseData(datum);
-        const document = new TestDocument();
+        const document = new TestDocument({ application: createMockApplication() });
         const variables = [
             { id: "tilt", name: "tilt", type: "angle" as const, expression: "30" },
             { id: "unused", name: "unused", type: "length" as const, expression: "5" },
@@ -291,6 +292,134 @@ describe("signed Angle datums", () => {
         const storedLine = node.data.entities.find((e) => e.id === line)!;
         expect(storedLine.params[3] - storedLine.params[1]).toBeCloseTo(-5, 6);
         expect(node.data.constraints.find((c) => c.id === id)?.datum).toBe(datum);
+    });
+
+    test.each(["tilt", "-tilt"])("fresh solver follows a sign-flipped variable in %s", (datum) => {
+        const { solver, line, id } = orientedLine();
+        let fresh: SketchSolver | undefined;
+        try {
+            solver.setScope(scopeOf({ tilt: angle(30) }));
+            expect(solver.setDatumSource(id, datum).isOk).toBe(true);
+            expectOrientation(solver, line, datum === "tilt" ? 30 : -30);
+            fresh = new SketchSolver(Plane.XY, solver.toData(), scopeOf({ tilt: angle(-20) }));
+            expectOrientation(fresh, line, datum === "tilt" ? -20 : 20);
+            expect(fresh.toData().constraints.find((c) => c.id === id)?.datum).toBe(datum);
+        } finally {
+            fresh?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test.each([
+        ["fork", -40],
+        ["fork", -30],
+        ["reload", -40],
+        ["reload", -30],
+    ] as const)("%s before solve retains a %s degree literal edit", (method, degrees) => {
+        const { solver, line, id } = orientedLine(toStorageDatum(ConstraintKind.Angle, 30));
+        let fresh: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, 30);
+            // Include equal magnitudes: negative literals cannot be legacy unsigned datums.
+            solver.setDatum(id, toStorageDatum(ConstraintKind.Angle, degrees));
+            fresh = method === "fork" ? solver.fork() : new SketchSolver(Plane.XY, solver.toData());
+            expectOrientation(fresh, line, degrees);
+        } finally {
+            fresh?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("fork before solve retains a legacy expression side after its magnitude changes", () => {
+        const { data, line } = legacyClockwiseData("tilt");
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
+        let trial: SketchSolver | undefined;
+        try {
+            expect(solver.setScope(scopeOf({ tilt: angle(20) }))).toBe(true);
+            trial = solver.fork();
+            expectOrientation(trial, line, -20);
+        } finally {
+            trial?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("fork before solve copies explicit expression semantics at equal magnitude", () => {
+        const { data, line, id } = legacyClockwiseData("tilt");
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
+        let trial: SketchSolver | undefined;
+        try {
+            expect(solver.setDatumSource(id, "tilt").isOk).toBe(true);
+            trial = solver.fork();
+            expectOrientation(trial, line, 30);
+        } finally {
+            trial?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("merged negative datum wins over another device's positive geometry", () => {
+        const { solver, line, id } = orientedLine(toStorageDatum(ConstraintKind.Angle, 30));
+        let loaded: SketchSolver | undefined;
+        try {
+            expectOrientation(solver, line, 30);
+            const geometrySide = solver.toData();
+            solver.setDatum(id, toStorageDatum(ConstraintKind.Angle, -40));
+            const datumSide = solver.toData();
+            const merged = { ...geometrySide, constraints: datumSide.constraints };
+            loaded = new SketchSolver(Plane.XY, merged);
+            expectOrientation(loaded, line, -40);
+        } finally {
+            loaded?.dispose();
+            solver.dispose();
+        }
+    });
+
+    test("zero expression is never assigned a legacy side", () => {
+        const { data, line } = legacyClockwiseData("tilt");
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(0) }));
+        try {
+            expectOrientation(solver, line, 0);
+            expect(solver.setScope(scopeOf({ tilt: angle(20) }))).toBe(true);
+            expectOrientation(solver, line, 20);
+        } finally {
+            solver.dispose();
+        }
+    });
+
+    test.each([-20, -30])("applyVariables follows tilt 30 -> %s through a fresh solver", (degrees) => {
+        const { solver, line, id } = orientedLine();
+        const application = createMockApplication();
+        application.shapeProvider.factory.line = () => Result.err("No kernel in this test");
+        rs.stubGlobal("app", application);
+        const document = new TestDocument({ application });
+        const variable = { id: "tilt", name: "tilt", type: "angle" as const, expression: "30" };
+        try {
+            document.variables.setItems([variable]);
+            solver.setScope(document.variables.evaluate().scope);
+            expect(solver.setDatumSource(id, "tilt").isOk).toBe(true);
+            expectOrientation(solver, line, 30);
+            const node = new SketchNode({ document, plane: Plane.XY, data: solver.toData() });
+            document.variables.setItems([{ ...variable, expression: String(degrees) }]);
+            node.applyVariables();
+            const storedLine = node.data.entities.find((e) => e.id === line)!;
+            expect(storedLine.params[3] - storedLine.params[1]).toBeCloseTo(
+                10 * Math.sin((degrees * Math.PI) / 180),
+                6,
+            );
+            expect(node.data.constraints.find((c) => c.id === id)?.datum).toBe("tilt");
+            const session = node.createScopedSolver();
+            try {
+                expectOrientation(session, line, degrees);
+            } finally {
+                session.dispose();
+                node.dispose();
+            }
+        } finally {
+            solver.dispose();
+            document.dispose();
+            rs.unstubAllGlobals();
+        }
     });
 
     test.each([

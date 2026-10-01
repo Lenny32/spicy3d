@@ -19,6 +19,7 @@ import {
     PubSub,
     Result,
     resolveConstructionRef,
+    type Scope,
     serializable,
     serialize,
 } from "@spicy3d/core";
@@ -230,11 +231,13 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         const danglingIds = danglingProfileRefIds(this.data.externalRefs ?? []);
         this._danglingProfileCount = danglingIds.length;
         this._danglingSignature = danglingIds.join(",");
+        this._solvedScope = options.document.variables.evaluate().scope;
         ensureVariableSync(options.document);
         options.document.modelManager.addNodeObserver(this.handleConstructionTreeChanged);
     }
 
     setDataEmitShapeChanged(data: SketchData): void {
+        this._solvedScope = this.document.variables.evaluate().scope;
         this.setPropertyEmitShapeChanged("dataJson", JSON.stringify(data));
     }
 
@@ -622,6 +625,18 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     /** The parameter-table revision this sketch last re-solved against (see `applyVariables`). */
     private _variableRevision: number | undefined;
 
+    /** Scope used by the stored geometry; runtime only, initialized from the table on load. */
+    private _solvedScope: Scope;
+
+    /** Load against the previous scope before applying a changed table (including sign-only edits). */
+    createScopedSolver(data: SketchData = this.data): SketchSolver {
+        const scope = this.document.variables.evaluate().scope;
+        const solver = new SketchSolver(this.plane, data, this._solvedScope);
+        if (solver.setScope(scope)) solver.solve(true);
+        this._solvedScope = scope;
+        return solver;
+    }
+
     /** `IVariableConsumer`: sketches re-solve before the bodies that read them. */
     readonly variableSyncOrder = 0;
 
@@ -720,10 +735,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     private solveWithScope(data: SketchData): SketchData | undefined {
         let solved: SketchData;
         try {
-            // No explicit solve here: the constructor's loadData already ends with the
-            // full solve that pulls constrained entities onto the moved external
-            // geometry — a second solve(true) on unchanged state is a no-op.
-            const solver = new SketchSolver(this.plane, data, this.document.variables.evaluate().scope);
+            const solver = this.createScopedSolver(data);
             try {
                 solved = solver.toData();
             } finally {
