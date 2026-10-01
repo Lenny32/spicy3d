@@ -900,6 +900,13 @@ describe("automatic next-face extents", () => {
         expect(errors(boss)).toEqual([undefined]);
         expect(volume(boss)).toBeCloseTo(750, 4);
         expect(boss.features[0]).toMatchObject({ extent: { type: "next", nodeIds: candidateIds } });
+        Transaction.execute(doc, "delete unused candidate", () => near.parent!.remove(near));
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
+        doc.history.undo();
+        expect(doc.modelManager.findNode((node) => node.id === near.id)).toBe(near);
+        expect(errors(boss)).toEqual([undefined]);
+        expect(volume(boss)).toBeCloseTo(750, 4);
     });
 
     test("same-host next cuts resolve against the state entering the feature", () => {
@@ -939,7 +946,7 @@ describe("automatic next-face extents", () => {
         });
         doc.modelManager.addNode(body);
         expect(body.shape.isOk).toBe(false);
-        expect(errors(body)[0]).toMatch(/next.*deleted-candidate|deleted-candidate.*next/i);
+        expect(errors(body)[0]).toContain("Next-face extent has no valid candidates");
     });
 });
 

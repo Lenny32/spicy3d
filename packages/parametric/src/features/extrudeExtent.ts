@@ -6,6 +6,7 @@ import {
     type IFace,
     type IShape,
     LENGTH_UNITS,
+    Logger,
     Matrix4,
     Result,
     resolveUnitSpec,
@@ -290,14 +291,23 @@ function resolveNextCandidates(
     const ids = [...new Set([env.toolHost.id, ...extent.nodeIds])];
     for (const id of ids) {
         const context = extentFaceContext(env, feature.id, id);
-        if (!context.isOk) return Result.err(`Next-face candidate ${id}: ${context.error}`);
+        if (!context.isOk) {
+            Logger.warn(`Skipping next-face candidate ${id}: ${context.error}`);
+            continue;
+        }
         if (id === env.toolHost.id && context.value.host.id === id && context.value.input === undefined)
             continue;
         const faces = resolveSourceFaces({ nodeId: id, profiles: [] }, context.value);
-        if (!faces.isOk) return Result.err(`Next-face candidate ${id}: ${faces.error}`);
+        if (!faces.isOk) {
+            Logger.warn(`Skipping next-face candidate ${id}: ${faces.error}`);
+            continue;
+        }
         try {
             const combined = shapeFactory.combine(faces.value.worldFaces);
-            if (!combined.isOk) return Result.err(`Next-face candidate ${id}: ${combined.error}`);
+            if (!combined.isOk) {
+                Logger.warn(`Skipping next-face candidate ${id}: ${combined.error}`);
+                continue;
+            }
             owned.push(combined.value);
             const local = combined.value.transformedMul(
                 env.toolHost.worldTransform().invert() ?? Matrix4.identity(),
@@ -308,7 +318,7 @@ function resolveNextCandidates(
             faces.value.owned.forEach((face) => face.dispose());
         }
     }
-    return Result.ok(result);
+    return result.length ? Result.ok(result) : Result.err("Next-face extent has no valid candidates");
 }
 
 /**
