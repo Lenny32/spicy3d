@@ -131,18 +131,21 @@ describe("interactive associative sweep (real kernel)", () => {
     test("cancel restores visibility/history and leaves feature payload untouched", async () => {
         const state = await create();
         const visibility = rs.spyOn(state.doc.visual.context, "setVisible");
-        const before = JSON.stringify(state.body.features);
-        const position = state.doc.history.position();
-        const { session, done } = await edit(state);
-        session.solid = false;
-        await session.cancel();
-        await done;
-        expect(JSON.stringify(state.body.features)).toBe(before);
-        expect(state.doc.history.position()).toBe(position);
-        expect(state.doc.history.disabled).toBe(false);
-        expect([state.section.visible, state.path.visible]).toEqual([false, true]);
-        expect(visibility).toHaveBeenCalledWith(state.section, false);
-        visibility.mockRestore();
+        try {
+            const before = JSON.stringify(state.body.features);
+            const position = state.doc.history.position();
+            const { session, done } = await edit(state);
+            session.solid = false;
+            await session.cancel();
+            await done;
+            expect(JSON.stringify(state.body.features)).toBe(before);
+            expect(state.doc.history.position()).toBe(position);
+            expect(state.doc.history.disabled).toBe(false);
+            expect([state.section.visible, state.path.visible]).toEqual([false, true]);
+            expect(visibility).toHaveBeenCalledWith(state.section, false);
+        } finally {
+            visibility.mockRestore();
+        }
     });
 
     test("a disconnected repick cannot commit through Confirm; cancel preserves the valid feature", async () => {
