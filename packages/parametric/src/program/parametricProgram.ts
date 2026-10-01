@@ -1079,7 +1079,9 @@ function guidedLoftInput(
             return { nodeId: node.id, edges: persistentEdges(given.edgeRefs, node) };
         }
         const indexes = given.edgeIndexes;
-        const count = node.shape.value.findSubShapes(ShapeTypes.edge).length;
+        const pathEdges = node.shape.value.findSubShapes(ShapeTypes.edge);
+        const count = pathEdges.length;
+        for (const edge of pathEdges) edge.dispose();
         if (
             !Array.isArray(indexes) ||
             !indexes.length ||
