@@ -2,8 +2,8 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IDisposable, type IFace, type IShell, ShapeTypes, XYZ } from "@spicy3d/core";
-import type { TopoDS_Shape } from "../lib/spicy-wasm";
-import { OccShape, SELF_INTERSECTION_UNAVAILABLE } from "../src/shape";
+import type { ShapeResult, TopoDS_Shape } from "../lib/spicy-wasm";
+import { type OccFace, OccShape, SELF_INTERSECTION_UNAVAILABLE } from "../src/shape";
 import { createBox, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
 
@@ -43,6 +43,89 @@ function occBox(dx?: number, dy?: number, dz?: number): OccShape {
 type ShapeClass = { checkSelfIntersection?: (shape: TopoDS_Shape) => boolean };
 
 describe("thick solid results are checked", () => {
+    test.each(["native", "wrapper"])("%s refuses a collapsed offset of a free-form skin", (api) => {
+        // Cubic skin with a 3.025 mm radius at its crown. A 5 mm inward offset
+        // collapses; OCCT reports IsDone and rebuilds the original 8790 mm³ solid.
+        const points = [
+            { x: -10, y: 0, z: 0 },
+            { x: -1, y: 15, z: 0 },
+            { x: 1, y: 15, z: 0 },
+            { x: 10, y: 0, z: 0 },
+        ];
+        const curve = keep(unwrapOk(factory.bezier(points)));
+        const corners = [points[3], { x: 10, y: -15, z: 0 }, { x: -10, y: -15, z: 0 }, points[0]];
+        const edges = [curve, ...corners.slice(1).map((p, i) => keep(unwrapOk(factory.line(corners[i], p))))];
+        const wire = keep(unwrapOk(factory.wire(edges)));
+        const face = keep(unwrapOk(factory.face([wire])));
+        const input = keep(unwrapOk(factory.prism(face, new XYZ(0, 0, 20)))) as OccShape;
+        const faces = input.findSubShapes(ShapeTypes.face) as OccFace[];
+        owned.push(...faces);
+        const openings = faces.filter((face) => face.surface().isPlanar());
+        expect(input.checkShape()).toBe(true);
+        expect(input.volume()).toBeCloseTo(8790, 6);
+        expect(openings).toHaveLength(5);
+
+        if (api === "native") {
+            const result = wasm.ShapeFactory.makeThickSolidByJoin(
+                input.shape,
+                openings.map((face) => face.shape),
+                -5,
+                wasm.GeomAbs_JoinType.GeomAbs_Arc,
+                wasm.BRepOffset_Mode.BRepOffset_Skin,
+                false,
+            );
+            try {
+                expect(result.isOk).toBe(false);
+                expect(result.error).toContain("offset did not remove an opening face");
+            } finally {
+                result.delete();
+            }
+        } else {
+            const result = factory.makeThickSolidByJoin(input, openings, -5, "arc");
+            expect(result.isOk).toBe(false);
+            expect(result.error).toContain("offset did not remove an opening face");
+        }
+        expect(input.checkShape()).toBe(true);
+        expect(input.volume()).toBeCloseTo(8790, 6);
+    });
+
+    test.each(["simple", "join"])("%s rejects an older kernel returning the input as success", (api) => {
+        const input = occBox();
+        // ShapeResult's getter returns a value handle; an embind clone would alias
+        // the input's C++ object and be moved from by TopoDS.solid during wrapping.
+        const native = wasm.Shape.findSubShapes(input.shape, wasm.TopAbs_ShapeEnum.TopAbs_SOLID)[0];
+        const release = rs.fn(() => {});
+        const result = { isOk: true, error: "", shape: native, delete: release } as unknown as ShapeResult;
+        const binding = rs
+            .spyOn(wasm.ShapeFactory, api === "simple" ? "makeThickSolidBySimple" : "makeThickSolidByJoin")
+            .mockReturnValue(result);
+        const output =
+            api === "simple"
+                ? factory.makeThickSolidBySimple(input, 1)
+                : factory.makeThickSolidByJoin(input, [], -1, "arc");
+        expect(binding).toHaveBeenCalledOnce();
+        expect(output.isOk).toBe(false);
+        expect(output.error).toContain("offset returned the input shape unchanged");
+        expect(release).toHaveBeenCalledOnce();
+        expect(input.checkShape()).toBe(true);
+        expect(input.volume()).toBeCloseTo(6000, 6);
+    });
+
+    test("an older kernel's rebuilt solid retaining an opening face is refused", () => {
+        const input = occBox();
+        const faces = input.findSubShapes(ShapeTypes.face);
+        owned.push(...faces);
+        // A different container around the same input faces: comparing only the
+        // top-level shape identity would miss this form of silent pass-through.
+        const rebuilt = wasm.ShapeFactory.combine([input.shape]);
+        rs.spyOn(wasm.ShapeFactory, "makeThickSolidByJoin").mockReturnValue(rebuilt);
+        const result = factory.makeThickSolidByJoin(input, [faces[0]], -1, "arc");
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("offset did not remove an opening face");
+        expect(input.checkShape()).toBe(true);
+        expect(input.volume()).toBeCloseTo(6000, 6);
+    });
+
     test("a thick solid of a closed box (one face opened) passes", () => {
         const box = keep(createBox(factory));
         const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
