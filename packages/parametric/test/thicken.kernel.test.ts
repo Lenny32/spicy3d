@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IEdge, type IFace, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
+import { type IEdge, type IFace, type IShape, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
@@ -328,7 +328,13 @@ const mouseSkirtSections = JSON.parse(
     readFileSync(path.resolve(import.meta.dirname, "fixtures/mouseSkirt.json"), "utf8"),
 ) as { z: number; data: SketchData }[];
 
-function mouseSkirt(doc: TestDocument): ParametricBodyNode {
+const INCONSISTENT_OFFSET_ERROR =
+    "Failed to create thick solid: offset edge curves are inconsistent with their surfaces " +
+    "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the " +
+    "thickness or the sections";
+
+/** The issue's skirt: a ruled loft between two periodic bsplines, z = 0 to 10. */
+function mouseSkirt(doc: TestDocument, solid = false): ParametricBodyNode {
     const sketches = mouseSkirtSections.map(({ z, data }) => {
         const sketch = new SketchNode({ document: doc, plane: planeAt(z), data });
         doc.modelManager.addNode(sketch);
@@ -341,60 +347,106 @@ function mouseSkirt(doc: TestDocument): ParametricBodyNode {
                 id: "loft",
                 type: "loft",
                 sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
-                solid: false,
+                solid,
                 ruled: true,
             },
         ],
     });
     doc.modelManager.addNode(body);
+    expect(body.shape.isOk).toBe(true);
     return body;
 }
 
+/** The body's planar faces at height `z`, as the thicken command captures them. */
+function planarFaceRefsAt(body: ParametricBodyNode, z: number) {
+    const all = faces(body);
+    const refs = all.flatMap((face, index) => {
+        if (!face.surface().isPlanar() || Math.abs(face.normal(0, 0)[0].z - z) > 1e-6) return [];
+        const id = body.faceIdAt(index);
+        return [captureExtentFaceRef(face, id, body.faceIdIsShared(id))];
+    });
+    expect(refs).toHaveLength(1);
+    return refs[0];
+}
+
+/** `wall` minus the box from `corner` (200 mm each way): a valid solid, its volume returned. */
+function trimmedVolume(wall: IShape, corner: XYZ): number {
+    const plane = new Plane({ origin: corner, normal: XYZ.unitZ, xvec: XYZ.unitX });
+    const box = shapeFactory.box(plane, 200, 200, 200);
+    expect(box.isOk).toBe(true);
+    try {
+        const cut = shapeFactory.booleanCut([wall], [box.value]);
+        expect(cut.isOk).toBe(true);
+        try {
+            expect(cut.value.checkShape()).toBe(true);
+            return cut.value.volume();
+        } finally {
+            cut.value.dispose();
+        }
+    } finally {
+        box.value.dispose();
+    }
+}
+
+/** Half of a wall symmetric about x = 0 trimmed away. */
+function expectHalfTrim(wall: IShape) {
+    expect(trimmedVolume(wall, new XYZ(0, -100, -100))).toBeCloseTo(wall.volume() / 2, 1);
+}
+
 describe("periodic ruled loft thickening (issue #126)", () => {
-    test.each([1.9, -1.9])("refuses inconsistent offset edge geometry at thickness %d", (thickness) => {
+    test.each([1.9, -1.9])("refuses inconsistent offset edge geometry at thickness %s", (thickness) => {
         const body = mouseSkirt(newDoc());
-        expect(body.shape.isOk).toBe(true);
         const skin = body.shape.value;
         expect(skin.checkShape()).toBe(true);
         const converter = new OccShapeConverter();
         const before = converter.convertToBrep(skin);
         expect(before.isOk).toBe(true);
 
-        const result = shapeFactory.makeThickSolidBySimple(skin, thickness);
-
-        expect(result.isOk).toBe(false);
-        expect(result.error).toBe(
-            "Failed to create thick solid: offset edge curves are inconsistent with their surfaces (exact BRepCheck_Analyzer)",
-        );
-        // The failed kernel operation must not add p-curves or change tolerances on the loft.
-        const after = converter.convertToBrep(skin);
-        expect(after.isOk).toBe(true);
-        expect(after.value).toBe(before.value);
-
         thicken(body, { thickness });
-        expect(errorOf(body, "t1")).toBe(result.error);
+
+        expect(errorOf(body, "t1")).toBe(INCONSISTENT_OFFSET_ERROR);
         expect(body.featureItems().find((item) => item.id === "loft")?.error).toBeUndefined();
+        // The feature thickens a copy: the cached loft keeps its p-curves and tolerances.
+        expect(converter.convertToBrep(skin).value).toBe(before.value);
+        // ... which the kernel call alone does not guarantee: it modifies the shape it reads.
+        const probe = skin.clone();
+        try {
+            const probeBefore = converter.convertToBrep(probe).value;
+            expect(shapeFactory.makeThickSolidBySimple(probe, thickness).error).toBe(
+                INCONSISTENT_OFFSET_ERROR,
+            );
+            expect(converter.convertToBrep(probe).value).not.toBe(probeBefore);
+        } finally {
+            probe.dispose();
+        }
     });
 
-    test.each([2, -2])("a valid shelled box still supports a trim at thickness %d", (thickness) => {
+    test("the error's advice works: the solid loft shelled through its caps trims", () => {
+        const body = mouseSkirt(newDoc(), true);
+        thicken(body, {
+            thickness: -1.9,
+            openFaces: [planarFaceRefsAt(body, 0), planarFaceRefsAt(body, 10)],
+        });
+        expect(errorOf(body, "t1")).toBeUndefined();
+        const wall = body.shape.value;
+        expect(wall.checkShape()).toBe(true);
+        // Trimmed above z = 6: a real trim, neither nothing nor everything removed.
+        const trimmed = trimmedVolume(wall, new XYZ(-100, -100, 6));
+        expect(trimmed).toBeGreaterThan(wall.volume() * 0.4);
+        expect(trimmed).toBeLessThan(wall.volume() * 0.8);
+    });
+
+    test.each([2, -2])("a valid shelled box still supports a trim at thickness %s", (thickness) => {
         const body = boxBody(newDoc());
         thicken(body, { thickness, joinType: "intersection", openFaces: [topFaceRef(body)] });
         expect(errorOf(body, "t1")).toBeUndefined();
-        const wall = body.shape.value;
-        const plane = new Plane({ origin: new XYZ(0, -20, -10), normal: XYZ.unitZ, xvec: XYZ.unitX });
-        const box = shapeFactory.box(plane, 40, 40, 40);
-        expect(box.isOk).toBe(true);
-        try {
-            const cut = shapeFactory.booleanCut([wall], [box.value]);
-            expect(cut.isOk).toBe(true);
-            try {
-                expect(cut.value.checkShape()).toBe(true);
-                expect(cut.value.volume()).toBeCloseTo(wall.volume() / 2, 1);
-            } finally {
-                cut.value.dispose();
-            }
-        } finally {
-            box.value.dispose();
-        }
+        expectHalfTrim(body.shape.value);
+    });
+
+    test.each([2, -2])("a valid thickened open skin still supports a trim at thickness %s", (thickness) => {
+        const body = tubeBody(newDoc());
+        thicken(body, { thickness });
+        expect(errorOf(body, "t1")).toBeUndefined();
+        expectHalfTrim(body.shape.value);
     });
 });

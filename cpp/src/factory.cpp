@@ -2864,22 +2864,27 @@ public:
         return "";
     }
 
-    // The sampled BRepCheck test can miss an offset edge whose p-curve disagrees with
-    // its 3D curve between sample points (periodic ruled lofts, for example). Such a
-    // solid can pass checkShape and self-interference checks yet break every boolean.
-    // Use the exact curve-on-surface test before handing a thick solid to consumers.
+    // Empty text = the thick solid is valid. The sampled curve-on-surface test of the default
+    // BRepCheck_Analyzer can miss an offset edge whose p-curve disagrees with its 3D curve between
+    // sample points (periodic ruled lofts, issue #126): such a solid passes checkShape and the
+    // self-interference checks yet breaks every boolean. Only the exact test runs (it covers the
+    // sampled one); the sampled one runs again only to word a failure. Re-parameterizing the
+    // edges (BRepLib::SameParameter, ShapeFix) does not repair such a result: the offset geometry
+    // itself is off, so it is refused.
     static std::string thickSolidResultError(const TopoDS_Shape& result)
     {
         if (result.IsNull()) {
             return "Failed to create thick solid: empty result";
         }
+        if (BRepCheck_Analyzer(result, true, false, true).IsValid()) {
+            return "";
+        }
         if (!BRepCheck_Analyzer(result).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
-        if (!BRepCheck_Analyzer(result, true, false, true).IsValid()) {
-            return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces (exact BRepCheck_Analyzer)";
-        }
-        return "";
+        return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
+               "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the "
+               "thickness or the sections";
     }
 
     static const char* offsetErrorName(BRepOffset_Error error)
@@ -2928,10 +2933,7 @@ public:
             return ShapeResult { TopoDS_Shape(), false, inputError };
         }
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
-        // BuildMissingWalls adds p-curves and repairs edge tolerances on the source
-        // faces. Keep those mutations local, including when validation refuses the result.
-        BRepBuilderAPI_Copy ownedInput(shape, true, false);
-        makeThickSolid.MakeThickSolidBySimple(ownedInput.Shape(), thickness);
+        makeThickSolid.MakeThickSolidBySimple(shape, thickness);
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
