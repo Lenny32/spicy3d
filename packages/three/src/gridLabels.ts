@@ -52,6 +52,7 @@ export function gridLabels(camera: Camera, plane: Plane, width: number, height: 
         const start = Math.ceil(Math.min(...coordinates) / step);
         const end = Math.floor(Math.max(...coordinates) / step);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end - start > 200) continue;
+        const candidates: GridLabel[] = [];
         for (let index = start; index <= end; index++) {
             if (index === 0) continue;
             const point = project(origin.clone().addScaledVector(direction, index * step));
@@ -60,8 +61,18 @@ export function gridLabels(camera: Camera, plane: Plane, width: number, height: 
             if (point.z < -1 || point.z > 1 || x < 30 || x > width - 30 || y < 12 || y > height - 12) {
                 continue;
             }
-            labels.push({ text: String(index * step), x, y, z: point.z, axis });
+            candidates.push({ text: String(index * step), x, y, z: point.z, axis });
         }
+        // Keep nearby ticks first, then skip crowded ticks rather than cutting the axis labels off.
+        candidates.sort((a, b) => Math.abs(Number(a.text)) - Math.abs(Number(b.text)));
+        const visible: GridLabel[] = [];
+        for (const candidate of candidates) {
+            if (visible.some((label) => Math.hypot(candidate.x - label.x, candidate.y - label.y) < 65)) {
+                continue;
+            }
+            visible.push(candidate);
+        }
+        labels.push(...visible.sort((a, b) => Number(a.text) - Number(b.text)));
     }
     return labels;
 }

@@ -66,6 +66,24 @@ describe("grid coordinates", () => {
         expect(gridLabels(cameraOn(Plane.YZ), Plane.XY, 800, 800)).toEqual([]);
     });
 
+    test.each([-1, 1])("thins perspective labels while continuing along the axis (%s)", (sign) => {
+        const camera = new PerspectiveCamera(60, 1, 0.1, 2000);
+        camera.position.set(0, -200 * sign, 200);
+        camera.lookAt(0, 0, 0);
+        const labels = gridLabels(camera, Plane.XY, 1200, 1200);
+        const receding = labels.filter((label) => label.axis === "y" && Number(label.text) * sign > 0);
+        const values = receding.map((label) => Number(label.text) * sign);
+        expect(values).toContain(50);
+        expect(Math.max(...values)).toBeGreaterThanOrEqual(300);
+        expect(receding.length).toBeLessThan(Math.max(...values) / 50);
+        expect(receding.length).toBeGreaterThan(1);
+        for (let index = 1; index < receding.length; index++) {
+            const previous = receding[index - 1];
+            const current = receding[index];
+            expect(Math.hypot(current.x - previous.x, current.y - previous.y)).toBeGreaterThanOrEqual(65);
+        }
+    });
+
     test("grid follows an offset vertical workplane", () => {
         const plane = Plane.YZ.translateTo(new XYZ(30, 70, -20));
         const grid = new ThreeGrid();
