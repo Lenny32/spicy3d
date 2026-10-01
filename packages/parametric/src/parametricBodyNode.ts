@@ -1029,7 +1029,10 @@ export class ParametricBodyNode
                                     faceIds,
                                     edgeIds,
                                     nextCache,
-                                    asynchronous && !run.synchronous,
+                                    asynchronous &&
+                                        (!run.synchronous ||
+                                            (feature.type === "fillet" &&
+                                                feature.cornerSetbacks !== undefined)),
                                     features.slice(index + 1, stop).every((feature) => feature.suppressed),
                                 );
                             },
@@ -1383,6 +1386,7 @@ export class ParametricBodyNode
         return {
             pending,
             finish: (synchronous) => {
+                if (pending?.canFallback === false) synchronous = false;
                 if (synchronous) pending?.cancel();
                 const parked = pending !== undefined && !synchronous;
                 const evaluationStart = parked ? started : performance.now();

@@ -8,7 +8,7 @@ export interface IDocumentRebuild {
     readonly settled: Promise<void>;
     /** Last yielded feature index, when the implementation knows it; never a fabricated percentage. */
     readonly featureIndex?: number;
-    /** Must finish synchronously: an RPC-backed job cancels/takes over locally, never waits or spins. */
+    /** Finish synchronously when a local fallback exists; worker-only work stays parked. */
     flush(): void;
 }
 
@@ -51,7 +51,9 @@ export class DocumentRebuilds {
         // Completing a source can enqueue its dependents.
         const jobs = DocumentRebuilds.jobs.get(document);
         while (jobs?.size) {
-            for (const job of [...jobs]) job.flush();
+            const batch = [...jobs];
+            for (const job of batch) job.flush();
+            if (batch.every((job) => jobs.has(job))) break;
         }
     }
 

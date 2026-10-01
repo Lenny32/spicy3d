@@ -60,6 +60,9 @@ test("a live two-feature corner body prepares asynchronously below the ordinary 
         await started;
         expect(prepare).toHaveBeenCalledTimes(1);
         expect(synchronous).not.toHaveBeenCalled();
+        DocumentRebuilds.flush(cadDocument);
+        expect(node.isRebuilding).toBe(true);
+        expect(synchronous).not.toHaveBeenCalled();
         finish();
         await node.whenRebuilt();
         expect(node.shape.isOk).toBe(true);

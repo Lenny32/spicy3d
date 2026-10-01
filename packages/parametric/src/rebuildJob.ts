@@ -4,7 +4,9 @@
 import { AutosaveHolds, DocumentRebuilds, type IDocument, type IShape, type Result } from "@spicy3d/core";
 
 /** A yield is BEFORE a kernel cache miss. Hits run through synchronously. */
-export type RebuildPause = number | { readonly ready: Promise<void>; cancel(): void };
+export type RebuildPause =
+    | number
+    | { readonly ready: Promise<void>; readonly canFallback?: boolean; cancel(): void };
 export type RebuildSteps = Generator<RebuildPause, Result<IShape>, void>;
 
 /** Owns a suspended replay and its timer; cancellation runs the replay's disposal finally. */
@@ -79,6 +81,7 @@ export class RebuildJob {
     }
 
     flush(): void {
+        if (this.workerOnly) return;
         // Keep the generator's already-built prefix. Cancel only the in-flight operation, then
         // resume this same feature synchronously; later misses also stay local for this replay.
         this.forceSynchronous();
@@ -87,7 +90,12 @@ export class RebuildJob {
         while (!this.done) {
             clearTimeout(this.timer);
             this.tick();
+            if (this.workerOnly) return;
         }
+    }
+
+    private get workerOnly(): boolean {
+        return this.waiting?.canFallback === false;
     }
 
     cancel(): void {
