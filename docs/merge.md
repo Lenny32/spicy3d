@@ -691,7 +691,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 `ParametricBodyNode.featuresJson` (`FeatureData[]`). The timeline: order is geometry. Parameters one by one; a selection (edges, profiles, tools, a source face) is one value — the user picked it as a whole. A feature type this build does not know merges its base fields and treats the rest as one value each. Paths below `node/<id>`.
 
 - list of `feature` by `id` (timeline order)
-  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, sweep, faceSweep, projection, thicken, extrudeTarget, any other)
+  - union on `type` (extrude, revolve, fillet, chamfer, boolean, loft, sweep, faceSweep, projection, emboss, thicken, extrudeTarget, any other)
     - `type: "extrude"`
       - `id`: scalar
       - `type`: scalar
@@ -810,6 +810,17 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `source`: atomic { nodeId: ref → node; edges: atomic of ref → edge }
       - `target`: atomic { nodeId: ref → node; face: ref → profile }
       - `direction`: atomic
+    - `type: "emboss"`
+      - `id`: scalar
+      - `type`: scalar
+      - `suppressed`: scalar
+      - `name`: scalar
+      - `sketchId`: ref → node
+      - `profiles`: atomic of ref → profile
+      - `faces`: atomic of ref → profile
+      - `depth`: expression
+      - `deboss`: scalar
+      - group `input` (one value): `sketchId`, `profiles`
     - `type: "thicken"`
       - `id`: scalar
       - `type`: scalar

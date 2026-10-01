@@ -7,6 +7,7 @@ export * from "./cornerSetbacks";
 export * from "./edgeCorner";
 export * from "./edgeMatcher";
 export * from "./edgeRef";
+export * from "./emboss";
 export * from "./extrude";
 export * from "./extrudeTarget";
 export * from "./faceSweep";

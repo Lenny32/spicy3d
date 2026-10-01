@@ -131,7 +131,12 @@ export function summarizeChanges(
             const feature = Array.isArray(list) ? list[index] : undefined;
             if (!isRecord(feature)) continue;
             if (typeof feature["name"] === "string" && feature["name"] !== "") return feature["name"];
-            const kind = feature["type"] === "boolean" ? feature["operation"] : feature["type"];
+            const kind =
+                feature["type"] === "boolean"
+                    ? feature["operation"]
+                    : feature["type"] === "emboss" && feature["deboss"] === true
+                      ? "deboss"
+                      : feature["type"];
             const key = `command.feature.${String(kind)}`;
             return `${I18n.isI18nKey(key) ? I18n.translate(key) : String(kind)} ${index + 1}`;
         }

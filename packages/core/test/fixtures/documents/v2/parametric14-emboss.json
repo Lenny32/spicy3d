@@ -1,0 +1,112 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 14,
+        "sketch": 3
+    },
+    "id": "fixture-parametric14-emboss",
+    "name": "Fixture parametric v14: selected sketch-profile relief",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":101,\"type\":\"line\",\"params\":[0,0,40,0]},{\"id\":102,\"type\":\"line\",\"params\":[40,0,40,40]},{\"id\":103,\"type\":\"line\",\"params\":[40,40,0,40]},{\"id\":104,\"type\":\"line\",\"params\":[0,40,0,0]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-base",
+                "name": "Base sketch",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 35,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":201,\"type\":\"line\",\"params\":[10,10,20,10]},{\"id\":202,\"type\":\"line\",\"params\":[20,10,20,20]},{\"id\":203,\"type\":\"line\",\"params\":[20,20,10,20]},{\"id\":204,\"type\":\"line\",\"params\":[10,20,10,10]}],\"constraints\":[]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-relief",
+                "name": "Relief sketch",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            },
+            {
+                "featuresJson": "[{\"id\":\"base\",\"type\":\"extrude\",\"sketchId\":\"sketch-base\",\"depth\":20},{\"id\":\"emboss\",\"type\":\"emboss\",\"sketchId\":\"sketch-relief\",\"profiles\":[{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":20,\"y\":20,\"z\":35},\"end\":{\"x\":10,\"y\":20,\"z\":35}},{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":20,\"z\":35},\"end\":{\"x\":10,\"y\":10,\"z\":35}},{\"kind\":\"line\",\"start\":{\"x\":10,\"y\":10,\"z\":35},\"end\":{\"x\":20,\"y\":10,\"z\":35}},{\"kind\":\"line\",\"start\":{\"x\":20,\"y\":10,\"z\":35},\"end\":{\"x\":20,\"y\":20,\"z\":35}}],\"entities\":[201,202,203,204],\"center\":{\"x\":15,\"y\":15,\"z\":35},\"area\":99.99999999999999}],\"faces\":[{\"edges\":[{\"kind\":\"line\",\"start\":{\"x\":40,\"y\":40,\"z\":20},\"end\":{\"x\":0,\"y\":40,\"z\":20}},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":40,\"z\":20},\"end\":{\"x\":0,\"y\":0,\"z\":20}},{\"kind\":\"line\",\"start\":{\"x\":0,\"y\":0,\"z\":20},\"end\":{\"x\":40,\"y\":0,\"z\":20}},{\"kind\":\"line\",\"start\":{\"x\":40,\"y\":0,\"z\":20},\"end\":{\"x\":40,\"y\":40,\"z\":20}}],\"splitPiece\":false,\"id\":\"sketch:sketch-base:e101.102.103.104:top\",\"normal\":{\"x\":0,\"y\":0,\"z\":1},\"center\":{\"x\":20,\"y\":20,\"z\":20},\"area\":1599.9999999999998}],\"depth\":2,\"deboss\":false}]",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "body-emboss",
+                "name": "Embossed plate",
+                "visible": true,
+                "__cla$$__": "ParametricBodyNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {}
+}

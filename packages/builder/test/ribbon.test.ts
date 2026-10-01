@@ -148,6 +148,7 @@ describe("mergeRibbonProfiles", () => {
             "feature.cornerSetback",
             "feature.chamfer",
             "feature.thicken",
+            "feature.emboss",
             "feature.fuse",
             "feature.cut",
             "feature.common",

@@ -368,7 +368,9 @@ export class ProfileReselectSession {
         const profiles =
             faces.length > 0 ? faces.map((x) => captureProfileRef(x.shape as unknown as IFace)) : undefined;
         this.host.setFeaturesEmitShapeChanged(
-            this.host.features.map((x) => (x.id === feature.id ? { ...x, profiles } : x)),
+            this.host.features.map((x) =>
+                x.id === feature.id && x.type === "extrude" ? { ...x, profiles } : x,
+            ),
         );
         this.host.document.visual.update();
     }

@@ -46,7 +46,8 @@ export type FeatureData =
     | ProjectionFeatureData
     | SweepFeatureData
     | FaceSweepFeatureData
-    | ThickenFeatureData;
+    | ThickenFeatureData
+    | EmbossFeatureData;
 
 /** Associative whole-curve projection along positive rays of a fixed world-space vector. */
 export interface ProjectionFeatureData extends FeatureBase {
@@ -223,6 +224,20 @@ export interface ThickenFeatureData extends FeatureBase {
      * shell (open input).
      */
     readonly openFaces?: ProfileRef[];
+}
+
+/** Relief projected from selected sketch profiles onto the entering body's faces (format 14). */
+export interface EmbossFeatureData extends FeatureBase {
+    readonly type: "emboss";
+    readonly sketchId: string;
+    /** Explicit nonempty profile selection; resolved sketch faces retain their holes. */
+    readonly profiles: ProfileRef[];
+    /** Host-local anchors on the entering shape, with tracked identity and split-piece semantics. */
+    readonly faces: ProfileRef[];
+    /** Finite positive relief depth, in millimetres or a length expression. */
+    readonly depth: ParameterValue;
+    /** False raises along outward normals; true recesses inward. */
+    readonly deboss: boolean;
 }
 
 export interface FilletFeatureData extends FeatureBase {

@@ -617,7 +617,9 @@ export class ParametricBodyNode
 
         Transaction.execute(this.document, "reselect profiles", () => {
             const features = this.features.map((x) =>
-                x.id === feature.id ? { ...x, profiles: profiles.length > 0 ? profiles : undefined } : x,
+                x.id === feature.id && x.type === "extrude"
+                    ? { ...x, profiles: profiles.length > 0 ? profiles : undefined }
+                    : x,
             );
             this.setFeaturesEmitShapeChanged(features);
             this.document.visual.update();
