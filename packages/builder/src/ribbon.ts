@@ -206,8 +206,12 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                     "feature.extrude",
                     "feature.revolve",
                     "feature.loft",
-                    "feature.sweep",
-                    "feature.faceSweep",
+                    {
+                        type: "pulldown",
+                        display: "command.create.sweep",
+                        icon: "icon-sweep",
+                        items: ["feature.sweep", "feature.faceSweep"],
+                    },
                     "feature.projection",
                 ],
             },
@@ -223,7 +227,7 @@ export const ParametricRibbonProfiles: RibbonProfileExtra[] = [
                 collapsedItems: ["feature.variable"],
             },
         ],
-        supersedes: ["create.loft", "modify.shell"],
+        supersedes: ["create.loft", "create.sweep", "modify.shell"],
     },
 ];
 
