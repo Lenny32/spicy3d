@@ -162,6 +162,7 @@ function buildEmbossTools(
     const origin = hostInvert.ofPoint(sketch.plane.origin);
     const owned: IShape[] = targets.value.map(({ face }) => face);
     const pieces: EmbossTool[] = [];
+    const nextSeed = uniqueSeeds();
     let success = false;
     try {
         const local = localProfiles(
@@ -202,7 +203,10 @@ function buildEmbossTools(
                         feature.deboss ? -depth : depth,
                         local[profileIndex],
                         profiles.value[profileIndex].face,
-                        `${feature.id}:relief:${targetSeed}:${profiles.value[profileIndex].seed}`,
+                        () =>
+                            nextSeed(
+                                `${feature.id}:relief:${targetSeed}:${profiles.value[profileIndex].seed}`,
+                            ),
                     );
                     if (!thickened.isOk) {
                         return Result.err(thickened.error);
@@ -236,12 +240,10 @@ function resolveTargetFaces(
     const faces = input.findSubShapes(ShapeTypes.face) as IFace[];
     let retained: number[] = [];
     try {
-        const ids = context.tracking?.inputFaceIds;
-        const matched = matchSourceFaceIndexes(
-            faces,
-            ids?.length === faces.length ? ids : undefined,
-            feature.faces,
-        );
+        // Ids not aligned with the faces would anchor a ref to another face's id.
+        const tracked = context.tracking?.inputFaceIds;
+        const ids = tracked?.length === faces.length ? tracked : undefined;
+        const matched = matchSourceFaceIndexes(faces, ids, feature.faces);
         if (!matched.isOk) return Result.err(matched.error);
         const anchors = matched.value.indexes.map((index, k) =>
             captureEmbossFaceRef(
@@ -267,6 +269,21 @@ function resolveTargetFaces(
             if (!retained.includes(index)) face.dispose();
         });
     }
+}
+
+/**
+ * Relief seeds made unique within one evaluation: the pieces of a split cylinder, several patches
+ * of one target/profile pair and two picked pieces of one split face (same anchor id) would
+ * otherwise name their relief faces and edges alike. A seed's first use keeps it as is, so the
+ * common single-patch case keeps its ids; repeats get `:2`, `:3`, … in evaluation order.
+ */
+function uniqueSeeds(): (seed: string) => string {
+    const used = new Map<string, number>();
+    return (seed) => {
+        const count = (used.get(seed) ?? 0) + 1;
+        used.set(seed, count);
+        return count === 1 ? seed : `${seed}:${count}`;
+    };
 }
 
 /** Host-local fingerprint with an outward-normal gate for planar target faces only. */
@@ -396,7 +413,7 @@ function thickenPatches(
     thickness: number,
     profile: IFace,
     originalProfile: IFace,
-    seed: string,
+    nextSeed: () => string,
 ): Result<EmbossTool[]> {
     const common = shapeFactory.booleanCommon([face], [clip]);
     if (!common.isOk)
@@ -416,7 +433,7 @@ function thickenPatches(
             try {
                 pieces.push({
                     shape: thick.value,
-                    ...reliefIds(thick.value, patch, profile, originalProfile, normal, seed),
+                    ...reliefIds(thick.value, patch, profile, originalProfile, normal, nextSeed()),
                 });
             } catch (error) {
                 thick.value.dispose();
