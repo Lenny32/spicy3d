@@ -13,6 +13,13 @@ import {
     type ImageFormat,
 } from "./imageEncoding";
 
+const screenshotTools = new WeakSet<Tool>();
+
+/** Only the built-in screenshot reads rendered geometry while an atomic program is suspended. */
+export function isScreenshotTool(tool: Tool): boolean {
+    return screenshotTools.has(tool);
+}
+
 const Z_UP: XYZLike = { x: 0, y: 0, z: 1 };
 
 /** The gray a node shows when no colour was ever set. */
@@ -127,7 +134,7 @@ export function parseImageOptions(args: Record<string, unknown>): ImageEncodeOpt
 }
 
 function captureScreenshotTool(): Tool {
-    return {
+    const tool: Tool = {
         name: "capture_screenshot",
         description:
             "Capture the current viewport as an image so you can see the model's current state. Lossless PNG, longest side 1568 px (never enlarged), by default; pass format jpeg/webp and/or maxSize to get a smaller image.",
@@ -162,6 +169,8 @@ function captureScreenshotTool(): Tool {
             return imageResult(view, { ok: true }, options);
         },
     };
+    screenshotTools.add(tool);
+    return tool;
 }
 
 function setMaterialTool(): Tool {
