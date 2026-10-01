@@ -147,7 +147,7 @@ describe("GroupCommand", () => {
             const restoreTx = stubTransactionRun();
             try {
                 const cmd = new GroupCommand();
-                const { doc } = wireCommand(cmd);
+                const { doc, addedNodes } = wireCommand(cmd);
                 // Add components array (GroupCommand pushes to it)
                 const components: Component[] = [];
                 (doc.modelManager as any).components = components;
@@ -178,7 +178,7 @@ describe("GroupCommand", () => {
                 expect(components[0].name).toBe("MyGroup");
 
                 // A ComponentNode should be added to root when convertInstance=true
-                expect(rootNode.added.length).toBe(1);
+                expect(addedNodes.length).toBe(1);
             } finally {
                 restoreTx();
             }

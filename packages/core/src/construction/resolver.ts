@@ -506,7 +506,7 @@ export function captureConstructionRef(
     node: INode,
     shape?: IShape,
 ): Result<ConstructionRef> {
-    if (isConstructionNode(node)) return Result.ok({ kind: "datum", nodeId: node.id });
+    if (isConstructionNode(node)) return Result.ok(node.reference);
     if (!(node instanceof ShapeNode) || !shape)
         return Result.err("Select a face, edge, vertex, or construction object");
     const kind = shapeKind(shape);

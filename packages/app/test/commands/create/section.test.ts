@@ -27,9 +27,9 @@ describe("Section", () => {
     });
 
     describe("executeMainTask", () => {
-        test("should compute shape.section(path) and add an EditableShapeNode to the root", () => {
+        test("should compute shape.section(path) and use the model insertion target", () => {
             const cmd = new Section();
-            const { doc } = wireCommand(cmd);
+            const { addedNodes } = wireCommand(cmd);
             const sectionResult = { shapeType: ShapeTypes.wire, isSectionResult: true } as unknown as IShape;
             seedStepDatas(cmd, [
                 shapeStepResult([
@@ -45,9 +45,8 @@ describe("Section", () => {
 
             (cmd as any).executeMainTask();
 
-            const root = doc.modelManager.rootNode as any;
-            expect(root.added).toHaveLength(1);
-            const node = root.added[0];
+            expect(addedNodes).toHaveLength(1);
+            const node = addedNodes[0];
             expect(node).toBeInstanceOf(EditableShapeNode);
             // The node's shape should be the value returned by shape.section().
             expect((node as any).shape.value).toBe(sectionResult);

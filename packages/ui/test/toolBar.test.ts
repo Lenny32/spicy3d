@@ -37,7 +37,6 @@ rs.mock("../src/project/tree/treeItemGroup", () => ({
 }));
 
 import { ToolBar } from "../src/project/toolBar";
-import { TreeGroup } from "../src/project/tree/treeItemGroup";
 import { mustQuery } from "./_helpers/domHelpers";
 
 describe("ToolBar", () => {
@@ -98,6 +97,7 @@ describe("ToolBar", () => {
             const pv = createMockProjectView() as any;
             const tb = new ToolBar(pv);
 
+            (pv as any).activeTree = () => ({ actions: { editable: true } });
             const firstSvg = mustQuery<SVGElement>(tb, "svg");
             const onclick = (firstSvg as any)._onclick as (() => void) | undefined;
             expect(onclick).toBeDefined();
@@ -141,9 +141,11 @@ describe("ToolBar", () => {
         test("expandAll should set isExpanded on tree group items", () => {
             // TreeGroup is mocked above with a zero-arg class; cast through any
             // because tsc still sees the real constructor signature
-            const item = new (TreeGroup as any)() as { isExpanded: boolean };
+            const item = { isExpanded: false };
             const mockTree = {
-                treeItem: () => item,
+                setExpanded: (expanded: boolean) => {
+                    item.isExpanded = expanded;
+                },
             };
 
             // Mock activeTree to return our mock

@@ -59,7 +59,7 @@ import "./_helpers/mockElement";
 
 // Mock tree/index.ts — use plain classes (not extending HTMLElement) since Happy-DOM
 // forbids `new` on custom elements registered via customElements.define().
-rs.mock("../src/project/tree/index", () => {
+rs.mock("../src/project/browser", () => {
     class TreeItem {
         _doc: unknown;
         constructor(doc: unknown) {
@@ -74,6 +74,7 @@ rs.mock("../src/project/tree/index", () => {
     }
 
     class Tree {
+        actions = { editable: true };
         _doc: unknown;
         disposed = false;
         removed = false;
@@ -89,9 +90,10 @@ rs.mock("../src/project/tree/index", () => {
         treeItem(_node: unknown) {
             return undefined;
         }
+        setExpanded(_expanded: boolean) {}
     }
 
-    return { Tree, TreeItem, TreeModel };
+    return { Browser: Tree, TreeItem, TreeModel };
 });
 
 // treeItemGroup is imported by toolBar.ts — define inline
@@ -101,8 +103,8 @@ rs.mock("../src/project/tree/treeItemGroup", () => ({
     },
 }));
 
+import { Browser as Tree } from "../src/project/browser";
 import { ProjectView } from "../src/project/projectView";
-import { Tree } from "../src/project/tree";
 
 describe("ProjectView", () => {
     beforeEach(() => {

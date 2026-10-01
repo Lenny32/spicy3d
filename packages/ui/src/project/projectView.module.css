@@ -1,6 +1,7 @@
 .root {
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .headerPanel {
@@ -15,7 +16,8 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
+    min-height: 0;
     border-top: 2px solid transparent;
     border-bottom: 2px solid transparent;
     background-color: var(--panel-background-color);
