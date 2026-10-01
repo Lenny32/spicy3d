@@ -2928,15 +2928,15 @@ public:
 
     // A rebuilt container can differ in identity while retaining exactly the input's faces.
     // A real thickening adds offset/rim faces even when it also retains the original skin.
-    static bool thickSolidUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& result)
+    static bool thickSolidUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& thickenedShape)
     {
-        if (result.IsSame(input)) {
+        if (thickenedShape.IsSame(input)) {
             return true;
         }
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputFaces;
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
         TopExp::MapShapes(input, TopAbs_FACE, inputFaces);
-        TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
+        TopExp::MapShapes(thickenedShape, TopAbs_FACE, resultFaces);
         if (inputFaces.IsEmpty() || inputFaces.Extent() != resultFaces.Extent()) {
             return false;
         }
