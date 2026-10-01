@@ -118,6 +118,18 @@ describe("PropertyView", () => {
     });
 
     describe("handleShowProperties", () => {
+        test("runtime origin references show their names without editable property controls", () => {
+            const pv = new PropertyView({ className: "test-panel" });
+            const doc = createMockDocument();
+            const handler = pubSubRecorder.handlers.get("showProperties");
+            expect(handler).toBeDefined();
+            const origin = Object.assign(new TestNode(), { name: "XY Plane", isTransient: true });
+            handler!(doc, [origin as unknown as INode]);
+            const panel = mustQuery(pv, ".pv-panel");
+            expect(panel.textContent).toBe("XY Plane");
+            expect(panel.querySelectorAll(".mock-property-control")).toHaveLength(0);
+            expect(panel.querySelectorAll("input")).toHaveLength(0);
+        });
         test("should clear existing properties when called with empty nodes", () => {
             const pv = new PropertyView({ className: "test-panel" });
             const doc = createMockDocument();

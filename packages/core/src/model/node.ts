@@ -30,7 +30,15 @@ export interface INodeLinkedList extends INode {
     move(child: INode, newParent: this, newPreviousSibling?: INode): void;
 }
 
+/** Runtime references can be selected, but must never become stored document children. */
+export function isTransientNode(node: INode): boolean {
+    return (node as INode & { readonly isTransient?: boolean }).isTransient === true;
+}
+
 export abstract class Node extends HistoryObservable implements INode {
+    get isTransient(): boolean {
+        return false;
+    }
     parent: INodeLinkedList | undefined;
     previousSibling: INode | undefined;
     nextSibling: INode | undefined;

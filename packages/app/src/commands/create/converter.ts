@@ -38,7 +38,7 @@ abstract class ConvertCommand extends CancelableCommand {
             if (!node.isOk) {
                 PubSub.default.pub("showToast", "error.default:{0}", node.error);
             } else {
-                this.document.modelManager.rootNode.add(node.value);
+                this.document.modelManager.addNode(node.value);
                 models.forEach((x) => x.parent?.remove(x));
                 this.document.visual.update();
                 PubSub.default.pub("showToast", "toast.success");

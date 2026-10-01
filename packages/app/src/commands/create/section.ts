@@ -26,7 +26,7 @@ export class Section extends MultistepCommand {
             name: I18n.translate("command.create.section"),
             shape: section,
         });
-        this.document.modelManager.rootNode.add(node);
+        this.document.modelManager.addNode(node);
         this.document.visual.update();
     }
 

@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "@rstest/core";
 import { FolderNode, PubSub, Transaction } from "@spicy3d/core";
-import { createMockDocument } from "@spicy3d/core/test-utils";
+import { createMockDocument, createMockSelection, TestDocument } from "@spicy3d/core/test-utils";
 import { Delete } from "../../src/commands/delete";
 
 /** A free node's parent: plain recorder with a FolderNode prototype for instanceof checks. */
@@ -95,15 +95,10 @@ describe("Delete", () => {
     });
 
     test("deleteChosen should clear current node if it is in deleted nodes", async () => {
-        const doc = createMockDocument();
-        const nodeToDelete = { id: "target", parent: folderParent([]) };
-        doc.modelManager.currentNode = nodeToDelete as any;
-        doc.modelManager.rootNode = { id: "root" } as any;
-
-        const originalExecute = Transaction.execute;
-        Transaction.execute = ((_doc: unknown, _label: string, fn: () => void) => {
-            fn();
-        }) as typeof Transaction.execute;
+        const doc = new TestDocument({ selection: createMockSelection() });
+        const nodeToDelete = new FolderNode({ document: doc, name: "Target" });
+        doc.modelManager.addNode(nodeToDelete);
+        doc.modelManager.currentNode = nodeToDelete;
 
         try {
             const cmd = new Delete();
@@ -113,7 +108,7 @@ describe("Delete", () => {
 
             expect(doc.modelManager.currentNode).toBe(doc.modelManager.rootNode);
         } finally {
-            Transaction.execute = originalExecute;
+            doc.dispose();
         }
     });
 

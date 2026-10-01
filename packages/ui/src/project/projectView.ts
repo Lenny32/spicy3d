@@ -3,12 +3,12 @@
 
 import { type IDocument, type IView, Localize, PubSub } from "@spicy3d/core";
 import { div, span } from "@spicy3d/element";
+import { Browser } from "./browser";
 import style from "./projectView.module.css";
 import { ToolBar } from "./toolBar";
-import { Tree } from "./tree";
 
 export class ProjectView extends HTMLElement {
-    private readonly _documentTreeMap = new Map<IDocument, Tree>();
+    private readonly _documentTreeMap = new Map<IDocument, Browser>();
 
     private _activeDocument: IDocument | undefined;
     get activeDocument() {
@@ -35,7 +35,7 @@ export class ProjectView extends HTMLElement {
                 { className: style.headerPanel },
                 span({
                     className: style.header,
-                    textContent: new Localize("items.header"),
+                    textContent: new Localize("browser.title"),
                 }),
                 new ToolBar(this),
             ),
@@ -66,7 +66,7 @@ export class ProjectView extends HTMLElement {
         if (view) {
             let tree = this._documentTreeMap.get(view.document);
             if (!tree) {
-                tree = new Tree(view.document);
+                tree = new Browser(view.document);
                 this._documentTreeMap.set(view.document, tree);
             }
             this.panel.append(tree);

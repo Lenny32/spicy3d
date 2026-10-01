@@ -30,7 +30,7 @@ describe("NewFolder", () => {
 
         expect(addedNodes.length).toBe(1);
         expect(addedNodes[0] instanceof FolderNode).toBe(true);
-        expect((addedNodes[0] as FolderNode).name).toBe(`${I18n.translate("command.create.folder")}1`);
+        expect((addedNodes[0] as FolderNode).name).toBe(`${I18n.translate("browser.component")}1`);
     });
 
     test("folder names should increment within a document", async () => {
@@ -42,8 +42,8 @@ describe("NewFolder", () => {
         await new NewFolder().execute(app);
 
         expect(doc.modelManager.findNodes().map((node) => node.name)).toEqual([
-            `${I18n.translate("command.create.folder")}1`,
-            `${I18n.translate("command.create.folder")}2`,
+            `${I18n.translate("browser.component")}1`,
+            `${I18n.translate("browser.component")}2`,
         ]);
     });
 

@@ -4,7 +4,7 @@
 import type { IDocument } from "../document";
 import { DocumentMutations } from "../documentMutations";
 import { Logger, type NodeRecord } from "../foundation";
-import type { INode, INodeLinkedList } from "./node";
+import { type INode, type INodeLinkedList, isTransientNode } from "./node";
 
 type ChildOwner = INodeLinkedList & { readonly document: IDocument };
 
@@ -57,6 +57,8 @@ export class NodeChildList {
 
     add(...items: INode[]): void {
         DocumentMutations.assertWritable(this.owner.document);
+        items = items.filter((item) => !isTransientNode(item));
+        if (!items.length) return;
         // newPrevious is computed per item (not once up front) so records match the
         // actual sibling order when several nodes are added in one call.
         const records: NodeRecord[] = [];
@@ -119,6 +121,7 @@ export class NodeChildList {
     }
 
     insertBefore(target: INode | undefined, node: INode): void {
+        if (isTransientNode(node)) return;
         DocumentMutations.assertWritable(this.owner.document);
         if (target && !this.validateChild(target)) return;
 
@@ -143,6 +146,7 @@ export class NodeChildList {
     }
 
     insertAfter(target: INode | undefined, node: INode): void {
+        if (isTransientNode(node)) return;
         DocumentMutations.assertWritable(this.owner.document);
         if (target && !this.validateChild(target)) return;
 

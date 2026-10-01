@@ -653,9 +653,11 @@ class ConstructionSession {
                         }).execute(this.model, controller);
                         const node = picked?.nodes?.[0];
                         if (node instanceof ConstructionNode) {
-                            ref = { kind: "datum", nodeId: node.id };
-                            if (mode.startsWith("UCS-")) ref.member = mode.slice(4) as "XY" | "YZ" | "ZX";
-                            else if (["X", "Y", "Z"].includes(mode)) ref.member = mode as "X" | "Y" | "Z";
+                            ref = node.reference;
+                            if (ref.kind === "datum" && mode.startsWith("UCS-"))
+                                ref.member = mode.slice(4) as "XY" | "YZ" | "ZX";
+                            else if (ref.kind === "datum" && ["X", "Y", "Z"].includes(mode))
+                                ref.member = mode as "X" | "Y" | "Z";
                         }
                     } else {
                         const requestedType =
@@ -965,7 +967,7 @@ export class EditConstructionCommand extends CancelableCommand {
         const node = this.document.selection
             .getSelectedNodes()
             .find((item) => item instanceof ConstructionNode);
-        if (!(node instanceof ConstructionNode)) return;
+        if (!(node instanceof ConstructionNode) || node.reference.kind !== "datum") return;
         const toolName = Object.keys(TOOLS).find((key) => TOOLS[key].kind === node.definition.kind);
         if (!toolName) return;
         this.session = new ConstructionSession(this.document, TOOLS[toolName], node.name, node.definition);
@@ -995,7 +997,7 @@ abstract class ActivateConstructionPlane implements ICommand {
         const geometry = result.value;
         if (geometry.kind === "plane") {
             view.workplane = geometry.plane;
-            setActiveConstructionPlane(view, { kind: "datum", nodeId: node.id });
+            setActiveConstructionPlane(view, node.reference);
         } else if (geometry.kind === "ucs" && this.member) {
             const { origin, x, y, z } = geometry;
             view.workplane =

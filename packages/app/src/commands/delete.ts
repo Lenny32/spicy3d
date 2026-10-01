@@ -41,7 +41,7 @@ export class Delete extends MultistepCommand {
 
         // Consumed boolean tools belong to the owning body's feature list — deleting
         // one would leave a dangling tool id behind. Remove the boolean feature instead.
-        const deletable = nodes.filter((x) => !isConsumedTool(x));
+        const deletable = nodes.filter((x) => x.parent !== undefined && !isConsumedTool(x));
         if (deletable.length < nodes.length) {
             PubSub.default.pub("showToast", "toast.consumedTool.forbidden");
         }
@@ -51,13 +51,6 @@ export class Delete extends MultistepCommand {
     }
 
     private deleteNodes(deletable: INode[]) {
-        if (
-            this.document.modelManager.currentNode &&
-            deletable.includes(this.document.modelManager.currentNode)
-        ) {
-            this.document.modelManager.currentNode = this.document.modelManager.rootNode;
-        }
-
         this.document.selection.clearSelection();
         Transaction.execute(this.document, "delete", () => {
             deletable.forEach((model) => model.parent?.remove(model));

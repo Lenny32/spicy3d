@@ -4,6 +4,7 @@
 export * from "./analysis";
 export * from "./application";
 export * from "./autosave";
+export * from "./browser";
 export * from "./command";
 export * from "./config";
 export * from "./constants";

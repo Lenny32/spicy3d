@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { BrowserModel } from "./browser";
 import type { IDocument } from "./document";
 import {
     type CollectionChangedArgs,
@@ -159,6 +160,12 @@ export class ModelManager extends Observable {
         }
     }
 
+    private _browser?: BrowserModel;
+    /** Runtime document view; intentionally absent from serialize(). */
+    get browser(): BrowserModel {
+        this._browser ??= new BrowserModel(this.document);
+        return this._browser;
+    }
     private readonly _nodeChangedObservers = new Set<OnNodeChanged>();
     private _deserializing = false;
     /** Records collected while {@link applyContent} runs, dispatched once when it is done. */
@@ -250,6 +257,17 @@ export class ModelManager extends Observable {
             this._batch.push(...records);
             return;
         }
+        // Activation is model state. Removing its container restores the nearest live ancestor.
+        let active = this._currentNode;
+        const belongsToRoot = (node: INode): boolean => {
+            let ancestor: INode | undefined = node;
+            while (ancestor?.parent) ancestor = ancestor.parent;
+            return ancestor === this.rootNode;
+        };
+        while (active && !belongsToRoot(active)) {
+            active = active.parent ?? records.find((record) => record.node === active)?.oldParent;
+        }
+        if (this._currentNode && active !== this._currentNode) this.currentNode = active ?? this.rootNode;
         Transaction.add(this.document, new NodeLinkedListHistoryRecord(records));
         this._nodeChangedObservers.forEach((x) => {
             x(records);
@@ -365,6 +383,9 @@ export class ModelManager extends Observable {
             return parentId === targetRoot ? rootId : parentId;
         };
 
+        const activePath: string[] = [];
+        for (let node: INode | undefined = this._currentNode; node; node = node.parent)
+            activePath.push(node.id);
         this._batch = [];
         try {
             // Removed or replaced nodes first (their subtrees hold no kept node): ids never repeat.
@@ -373,8 +394,6 @@ export class ModelManager extends Observable {
                 const parent = node.parent;
                 if (parent !== undefined && kept.has(parent.id)) parent.remove(node);
             }
-            if (this._currentNode !== undefined && !kept.has(this._currentNode.id))
-                this.currentNode = undefined;
             // Then every node in pre-order after the previous sibling it has in `data`.
             const live = new Map<string, INode>([[rootId, this.rootNode]]);
             for (const id of kept) live.set(id, current.get(id)!.node);
@@ -401,6 +420,12 @@ export class ModelManager extends Observable {
                     live.set(id, node);
                 }
                 lastChild.set(parent.id, node);
+            }
+            if (activePath.length) {
+                const active = activePath
+                    .map((id) => live.get(id))
+                    .find((node) => node instanceof FolderNode);
+                this.currentNode = active instanceof FolderNode ? active : this.rootNode;
             }
         } finally {
             const records = this._batch;
@@ -459,6 +484,8 @@ export class ModelManager extends Observable {
     }
 
     override disposeInternal(): void {
+        this._browser?.dispose();
+        this._browser = undefined;
         super.disposeInternal();
         this._nodeChangedObservers.clear();
         this.materials.removeCollectionChanged(this.handleMaterialChanged);

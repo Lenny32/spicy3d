@@ -13,6 +13,7 @@ import {
     type INode,
     type IView,
     isFeatureListNode,
+    isTransientNode,
     Localize,
     Node,
     PropertyUtils,
@@ -86,6 +87,16 @@ export class PropertyView extends HTMLElement {
     private readonly handleShowProperties = (document: IDocument, nodes: INode[]) => {
         this.removeProperties();
         this.watch(nodes.length === 0 ? undefined : { document, nodes: [...nodes] });
+        if (nodes.length && nodes.every(isTransientNode)) {
+            this.panel.append(
+                div(
+                    { className: style.properties },
+                    ...nodes.map((node) => label({ textContent: node.name })),
+                ),
+            );
+            this.updateCollapsed();
+            return;
+        }
         if (nodes.length > 0) {
             this.addModel(document, nodes);
             this.addGeometry(nodes, document);
