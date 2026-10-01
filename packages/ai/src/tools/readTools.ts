@@ -17,6 +17,11 @@ const committed = new WeakMap<
     { summary: ReturnType<typeof documentSummary>; selected: ReturnType<typeof summarizeNode>[] }
 >();
 
+export function hasDocumentReadSnapshot(): boolean {
+    const doc = getDocument();
+    return doc !== undefined && committed.has(doc);
+}
+
 /** Metadata-only snapshot; holds no geometry wrappers and is released after commit/rollback. */
 export function holdDocumentReadSnapshot(doc: IDocument): () => void {
     if (committed.has(doc)) throw new Error("A modeling program is already running");

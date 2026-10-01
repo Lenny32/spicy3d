@@ -22,7 +22,7 @@ import { buildCloudTools, documentStorageInfo, forgetCloudCaller } from "../tool
 import { withImageByteBudget } from "../tools/imageEncoding";
 import { takeSlowOpWarnings } from "../tools/opBudget";
 import { forgetProgramJobs, isProgramJobTool } from "../tools/programJobs";
-import { documentSnapshot, isMetadataReadTool } from "../tools/readTools";
+import { documentSnapshot, hasDocumentReadSnapshot, isMetadataReadTool } from "../tools/readTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
 
@@ -258,7 +258,9 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             return result;
         };
         // These built-ins read only the committed metadata snapshot while mutations stay FIFO.
-        return isMetadataReadTool(tool) || isProgramJobTool(tool) ? invoke() : queue.run(invoke);
+        return (isMetadataReadTool(tool) && hasDocumentReadSnapshot()) || isProgramJobTool(tool)
+            ? invoke()
+            : queue.run(invoke);
     });
 
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({
