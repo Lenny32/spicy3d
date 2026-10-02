@@ -238,6 +238,7 @@ export class SketchSolver implements ExternalEntityHost {
     /** Expression datums that failed to resolve, by constraint id — the editor surfaces them. */
     private readonly _datumErrors = new Map<number, string>();
     private derivingOffsets = false;
+    private loadingConstraints = false;
     private readonly offsetInputs = new Map<number, string>();
 
     /** Generated targets are leaves: detach the relation before editing/constraining one. */
@@ -1451,10 +1452,10 @@ export class SketchSolver implements ExternalEntityHost {
     private addConstraintWithId(id: number, constraint: Omit<SketchConstraintData, "id">): void {
         if (constraint.kind === ConstraintKind.Offset) {
             const proposed = { ...constraint, id };
-            validateOffsetRelations({
-                ...this.toData(),
-                constraints: [...this.toData().constraints, proposed],
-            });
+            if (!this.loadingConstraints) {
+                const data = this.toData();
+                validateOffsetRelations({ ...data, constraints: [...data.constraints, proposed] });
+            }
             const targetId = constraint.refs[1].entityId;
             // A derived B-spline is a cache, not another free interpolating curve in PlaneGCS.
             const curve = this.bsplineCurves.get(targetId);
@@ -1485,7 +1486,10 @@ export class SketchSolver implements ExternalEntityHost {
             }
             return;
         }
-        if ([...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)) {
+        if (
+            !this.loadingConstraints &&
+            [...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)
+        ) {
             const data = this.toData();
             validateOffsetRelations({ ...data, constraints: [...data.constraints, { ...constraint, id }] });
         }
@@ -2019,11 +2023,16 @@ export class SketchSolver implements ExternalEntityHost {
             }
             if (entity.construction) this.constructionEntities.add(entity.id);
         }
-        for (const constraint of data.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
-            this.addConstraintWithId(constraint.id, constraint);
-        }
-        for (const constraint of data.constraints.filter((c) => c.kind !== ConstraintKind.Offset)) {
-            this.addConstraintWithId(constraint.id, constraint);
+        this.loadingConstraints = true;
+        try {
+            for (const constraint of data.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+                this.addConstraintWithId(constraint.id, constraint);
+            }
+            for (const constraint of data.constraints.filter((c) => c.kind !== ConstraintKind.Offset)) {
+                this.addConstraintWithId(constraint.id, constraint);
+            }
+        } finally {
+            this.loadingConstraints = false;
         }
         // Freeze owners before adding joins, while preserving the snapshot's incidental
         // constraint order so reopening does not record a phantom dataJson change.
