@@ -3,6 +3,7 @@
 
 import { rs } from "@rstest/core";
 import {
+    type BoundedShapeQuery,
     EditableShapeNode,
     GroupNode,
     I18n,
@@ -25,6 +26,17 @@ class SourceNode extends ShapeNode {
     }
 }
 const factory = createTestFactory();
+// Exercise the real analyzer on these small known fixtures; emulate only the worker bridge.
+// Deadline and cancellation behavior are covered by inspectionPrecheck/boundedWorker tests.
+Object.defineProperty(factory, "boundedOperations", {
+    value: {
+        shapeQuery: (request: BoundedShapeQuery) => ({
+            ready: Promise.resolve(),
+            take: () => request.shape.checkSelfIntersection!(),
+            cancel: () => {},
+        }),
+    },
+});
 let doc: TestDocument;
 beforeEach(() => {
     rs.stubGlobal("shapeFactory", factory);

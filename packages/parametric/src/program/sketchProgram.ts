@@ -1147,7 +1147,7 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
             redundant: diagnosis.redundant,
             suggestedDimensions: suggestDimensions(solver).map((s) => s.label),
         };
-        if (solver.datumErrors.size) info.warning = [...solver.datumErrors.values()].join("; ");
+        if (solver.offsetErrors.size) info.warning = [...solver.offsetErrors.values()].join("; ");
         else if (node.warningCount > 0)
             info.warning = String(node.constructionPlaneError ?? "dangling profile reference");
         return info;

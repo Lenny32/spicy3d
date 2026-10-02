@@ -22,6 +22,7 @@ import {
     VisualConfig,
 } from "@spicy3d/core";
 import { evaluateFeature, type LoftFeatureData, type LoftSection } from "../features/feature";
+import { resolveProfiles } from "../features/profileBuilder";
 import { captureProfileRef } from "../features/profileRef";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { SketchNode } from "../sketch/sketchNode";
@@ -134,6 +135,13 @@ export class LoftFeatureCommand extends CancelableCommand {
                 const sketch = picked.nodes?.[0];
                 const shape = picked.shapes[0]?.shape;
                 if (!(sketch instanceof SketchNode) || shape === undefined) continue;
+                if (shape.shapeType === ShapeTypes.edge) {
+                    const profiles = resolveProfiles(sketch);
+                    if (profiles.isOk && profiles.value.length > 1) {
+                        showPreviewProblem("Select a profile face: this sketch has several closed profiles");
+                        continue;
+                    }
+                }
                 this.sections.push({
                     section: {
                         sketchId: sketch.id,

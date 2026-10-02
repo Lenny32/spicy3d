@@ -287,12 +287,50 @@ describe("chunked export delivery", () => {
                 .error,
         ).toContain("not found");
         const second = await create();
+        const read = JSON.parse(
+            (await reader.handler({ exportId: second.exportId }, undefined, owner)) as string,
+        );
+        expect(read.data).toBe(btoa("abc"));
         const now = Date.now();
         rs.spyOn(Date, "now").mockReturnValue(now + 600001);
         expect(
             JSON.parse((await reader.handler({ exportId: second.exportId }, undefined, owner)) as string)
                 .error,
         ).toContain("expired");
+    });
+
+    test("successful reads extend expiry, but rejected reads do not", async () => {
+        const owner = { caller: "chunks-test" };
+        const clock = rs.spyOn(Date, "now").mockReturnValue(1000);
+        const metadata = JSON.parse(
+            await retainExport(
+                new Blob(["abc"]),
+                { filename: "a.step", mimeType: "model/step", bytes: 3 },
+                3,
+                owner.caller,
+            ),
+        );
+        const reader = buildExportChunkTool();
+        clock.mockReturnValue(500000);
+        const first = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId }, undefined, owner)) as string,
+        );
+        expect(first.data).toBe(btoa("abc"));
+        clock.mockReturnValue(700000);
+        const second = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId }, undefined, owner)) as string,
+        );
+        expect(second.data).toBe(first.data);
+        clock.mockReturnValue(1200000);
+        const rejected = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId, offset: -1 }, undefined, owner)) as string,
+        );
+        expect(rejected.error).toContain("offset");
+        clock.mockReturnValue(1300001);
+        const expired = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId }, undefined, owner)) as string,
+        );
+        expect(expired.error).toContain("expired");
     });
 
     test("rejects size, cache and relay limits without inline bytes", async () => {
@@ -334,9 +372,10 @@ describe("chunked export delivery", () => {
         const details = { filename: "big.step", mimeType: "model/step", bytes: full.size };
         forgetExports(owner.caller);
         const first = JSON.parse(await retainExport(full, details, full.size, owner.caller));
-        const second = JSON.parse(await retainExport(full, details, full.size, owner.caller));
+        const second = JSON.parse(await retainExport(full, details, full.size, "other-agent"));
         expect(first.delivery).toBe("chunks");
         expect(second.delivery).toBe("chunks");
+        forgetExports("other-agent");
         expect(
             JSON.parse(await retainExport(new Blob(["x"]), { ...details, bytes: 1 }, 1, owner.caller)).error,
         ).toContain("cache is full");

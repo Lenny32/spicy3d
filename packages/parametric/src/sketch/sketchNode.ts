@@ -3,6 +3,7 @@
 
 import {
     type ConstructionRef,
+    I18n,
     type I18nKeys,
     type IDocument,
     type IEdge,
@@ -217,7 +218,10 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     }
 
     get warningTooltipArgs(): readonly unknown[] {
-        return [this.warningCount, this._offsetWarnings.join("; ")];
+        const messages = [...this._offsetWarnings];
+        if (this._danglingProfileCount)
+            messages.unshift(I18n.translate("sketch.externalRefsLost{0}", this._danglingProfileCount));
+        return [this.warningCount, messages.join("; ")];
     }
 
     /** Shared by off-session solves and the editor, including passes that move no geometry. */

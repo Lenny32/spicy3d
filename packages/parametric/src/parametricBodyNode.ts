@@ -193,7 +193,7 @@ export class ParametricBodyNode
     private readonly _watched = new Map<string, INode>();
     private readonly _featureErrors = new Map<string, string>();
     /** Non-fatal conditions surfaced on the feature row (e.g. a sketch's dangling external refs). */
-    private readonly _featureWarnings = new Map<string, string>();
+    private readonly _featureWarnings = new Map<string, string[]>();
     /** What the last successful run produced — cache entries and per-index chain states. */
     private readonly _timeline = new BodyTimeline();
     /** Guards against re-entrant evaluation when a watched node generates mid-evaluation. */
@@ -499,7 +499,7 @@ export class ParametricBodyNode
                 icon: typeof icon === "function" ? icon(feature) : icon,
                 suppressed: feature.suppressed === true,
                 error: this._featureErrors.get(feature.id),
-                warning: this._featureWarnings.get(feature.id),
+                warning: this._featureWarnings.get(feature.id)?.join("; "),
                 reselectable: handler?.reselectable === true,
                 editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
@@ -1164,7 +1164,7 @@ export class ParametricBodyNode
                               cacheHit: true,
                           })
                         : undefined;
-                    if (cached.warning) this._featureWarnings.set(feature.id, cached.warning);
+                    if (cached.warning?.length) this._featureWarnings.set(feature.id, [...cached.warning]);
                     nextCache.push(cached);
                     step = Result.ok(cached);
                     if (featureTrace) PerformanceTrace.end(featureTrace);
@@ -1460,6 +1460,12 @@ export class ParametricBodyNode
         );
     }
 
+    private addFeatureWarning(id: string, message: string): void {
+        const warnings = this._featureWarnings.get(id) ?? [];
+        if (!warnings.includes(message)) warnings.push(message);
+        this._featureWarnings.set(id, warnings);
+    }
+
     /**
      * Surfaces dangling profile-role external refs of consumed sketches as a feature-level
      * warning.
@@ -1496,7 +1502,7 @@ export class ParametricBodyNode
                 }
                 return found;
             });
-            if (dangling) this._featureWarnings.set(feature.id, "Sketch has unresolved external references");
+            if (dangling) this.addFeatureWarning(feature.id, "Sketch has unresolved external references");
         }
     }
 
@@ -1520,10 +1526,10 @@ export class ParametricBodyNode
             outputEdgeIds: [],
         };
         const variables = trackVariableScope(scope);
-        let warning: string | undefined;
+        const warning: string[] = [];
         const context = {
             warn: (message: string) => {
-                warning = message;
+                if (!warning.includes(message)) warning.push(message);
             },
             document: this.document,
             host: this,
@@ -1577,7 +1583,7 @@ export class ParametricBodyNode
                     resolvedEdges: tracking.resolvedEdges,
                     resolvedFaces: tracking.resolvedFaces,
                 };
-                if (warning) this._featureWarnings.set(feature.id, warning);
+                for (const message of warning) this.addFeatureWarning(feature.id, message);
                 const variableDependencies = variables.dependencies();
                 nextCache.push({
                     json: this.cacheKey(feature, scope, variableDependencies),

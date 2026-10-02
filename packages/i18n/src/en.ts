@@ -1133,6 +1133,7 @@ export default {
         "sketch.externalRefAssociativeOnly": "External references only accept associative constraints",
         "sketch.externalRefsLost{0}":
             "{0} sketch external references lost their source; profiles use frozen geometry",
+        "sketch.offsetWarnings{0}{1}": "Sketch warnings ({0}): {1}",
         "sketch.externalRefTypeChanged": "External reference type changed — its constraints were removed",
         "sketch.fullyConstrained": "Fully constrained",
         "sketch.noProjectableEdges": "No coplanar edges could be projected",
@@ -1508,7 +1509,6 @@ export default {
         "cloud.merge.value.absent": "Not there",
         "cloud.merge.value.associativeOffset": "Associative offset",
         "cloud.merge.value.detached": "Detached",
-        "sketch.offsetWarnings{0}{1}": "{0} sketch warnings: {1}",
         "cloud.merge.value.clockwise": "clockwise",
         "cloud.merge.value.counterclockwise": "counterclockwise",
         "cloud.merge.value.changed": "Changed",

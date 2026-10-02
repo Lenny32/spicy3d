@@ -84,7 +84,7 @@ describe("thick solid results are checked", () => {
             const result = factory.makeThickSolidByJoin(input, openings, -5, "arc");
             expect(result.isOk).toBe(false);
             expect(result.error).toContain("offset did not remove an opening face");
-            expect(result.error).toContain("likely offset collapse on input face index");
+            expect(result.error).toContain("possible offset collapse on input face index");
             expect(result.error).toContain("sampled curvature radius 3.025 mm <= |thickness| 5 mm");
         }
         expect(input.checkShape()).toBe(true);

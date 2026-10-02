@@ -118,6 +118,13 @@ describe("labels and values", () => {
             { datum: "tilt", angleSide: -1 },
             "tilt° (cloud.merge.value.clockwise)",
         ],
+        ["whole constraint", conflict("node/a/constraint/c"), { type: "Angle", datum: Math.PI / 4 }, "Angle"],
+        [
+            "Angle datum without angleSide",
+            conflict("node/a/constraint/c/datum", { base: { datum: Math.PI / 6, angleSide: -1 } }),
+            { datum: Math.PI / 4 },
+            "45°",
+        ],
         ["an expression", conflict("variable/v/expression"), "w * 2", "w * 2"],
         [
             "a blob",

@@ -26,7 +26,6 @@ import {
     ellipsePoint,
     entityPointCount,
     isDatumEntityId,
-    isExternalEntityId,
     originRef,
     SKETCH_EDGE_LINE_WIDTH,
     SKETCH_X_AXIS_ID,

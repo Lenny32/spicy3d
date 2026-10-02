@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IFace, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { type IFace, Plane, Result, ShapeTypes, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import type { LoftFeatureData } from "../src/features/feature";
@@ -445,4 +445,26 @@ describe("loft feature (real kernel)", () => {
         expect(body.shape.isOk).toBe(false);
         expect(body.featureItems()[0].error).toContain(message);
     });
+});
+
+test("a failed wire build falls back to valid closed profiles for a surface loft", () => {
+    const { doc, body } = setup(
+        [
+            { z: 0, data: square(20) },
+            { z: 20, data: square(10) },
+        ],
+        { solid: false },
+    );
+    expect(body.shape.isOk).toBe(true);
+    const wire = rs.spyOn(shapeFactory, "wire").mockReturnValue(Result.err("Wire build refused"));
+    try {
+        body.setFeaturesEmitShapeChanged(body.features.map((feature) => ({ ...feature, name: "rebuild" })));
+        expect(wire).toHaveBeenCalled();
+        expect(body.shape.isOk).toBe(true);
+        expect(body.featureItems()[0].error).toBeUndefined();
+        expect(body.shape.value.checkShape()).toBe(true);
+    } finally {
+        wire.mockRestore();
+        doc.dispose();
+    }
 });

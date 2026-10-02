@@ -10,6 +10,8 @@ import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/serve
 import { SKILLS } from "../src/skills";
 import { buildTools } from "../src/tools";
 import { buildAskUserTool } from "../src/tools/askUser";
+import { buildCloudTools } from "../src/tools/cloudTools";
+import { buildExportChunkTool, retainExport } from "../src/tools/exportChunks";
 import { imageByteBudget } from "../src/tools/imageEncoding";
 import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
 import { buildReadTools } from "../src/tools/readTools";
@@ -95,7 +97,7 @@ describe("createMcpServer", () => {
     });
 
     test("every registry tool advertises an input schema without top-level combinators", async () => {
-        const registry = buildTools();
+        const registry = [...buildTools(), ...buildCloudTools()];
         expect(registry.length).toBeGreaterThan(0);
         const { client } = await connect(registry);
         try {
@@ -340,4 +342,32 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
         queued.mockRestore();
         rs.unstubAllGlobals();
     }
+});
+
+test("server close forgets the connection's retained exports", async () => {
+    let caller: string | undefined;
+    const retain = tool("retain", async (_args, _signal, context) => {
+        caller = context?.caller;
+        return retainExport(
+            new Blob(["abc"]),
+            { filename: "test.step", mimeType: "model/step", bytes: 3 },
+            3,
+            caller,
+        );
+    });
+    const { server, client } = await connect([retain, buildExportChunkTool()]);
+    const reply = await client.callTool({ name: "retain", arguments: {} });
+    const metadata = JSON.parse((reply.content as { text: string }[])[0].text);
+    const before = await client.callTool({
+        name: "read_export_chunk",
+        arguments: { exportId: metadata.exportId },
+    });
+    expect(JSON.parse((before.content as { text: string }[])[0].text).data).toBe(btoa("abc"));
+    await server.close();
+    const connectionReader = buildExportChunkTool();
+    const after = JSON.parse(
+        (await connectionReader.handler({ exportId: metadata.exportId }, undefined, { caller })) as string,
+    );
+    expect(after.error).toContain("not found");
+    await client.close();
 });

@@ -21,6 +21,7 @@ import {
 } from "../src/mcp/remote";
 import { RemoteMcpSession, relayRetryDelay } from "../src/mcp/remoteSession";
 import { createMcpServer, SerialQueue } from "../src/mcp/server";
+import { buildExportChunkTool, retainExport } from "../src/tools/exportChunks";
 
 type Message = JSONRPCMessage & {
     id?: string | number;
@@ -665,6 +666,35 @@ describe("RemoteMcpSession", () => {
         ]);
         expect(state.current.agents[0].pairing).toBe("allow");
         expect(state.current.calls.map((c) => c.name)).toEqual(["extrude"]);
+        session.close();
+    });
+
+    test("agent departure forgets its retained exports", async () => {
+        const { session } = setup();
+        session.start();
+        const socket = FakeSocket.all[0];
+        socket.open();
+        socket.deliver({ jsonrpc: "2.0", method: RELAY.agents, params: { agents: [AGENT] } });
+        await settle();
+        const metadata = JSON.parse(
+            await retainExport(
+                new Blob(["abc"]),
+                { filename: "a.step", mimeType: "model/step", bytes: 3 },
+                3,
+                "a1",
+            ),
+        );
+        const reader = buildExportChunkTool();
+        const before = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId }, undefined, { caller: "a1" })) as string,
+        );
+        expect(before.data).toBe(btoa("abc"));
+        socket.deliver({ jsonrpc: "2.0", method: RELAY.agents, params: { agents: [] } });
+        await settle();
+        const after = JSON.parse(
+            (await reader.handler({ exportId: metadata.exportId }, undefined, { caller: "a1" })) as string,
+        );
+        expect(after.error).toContain("not found");
         session.close();
     });
 

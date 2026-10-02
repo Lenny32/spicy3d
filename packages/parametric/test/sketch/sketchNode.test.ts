@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import {
     BoundingBox,
+    I18n,
     type IDocument,
     Matrix4,
     Plane,
@@ -22,6 +23,7 @@ import {
 } from "@spicy3d/core/test-utils";
 import { type ExternalRefData, SKETCH_PROFILE_OPACITY, type SketchData } from "../../src/sketch/sketchModel";
 import { danglingProfileRefs, SketchNode } from "../../src/sketch/sketchNode";
+import type { SketchSolver } from "../../src/sketch/solver";
 
 function fakeShape(name: string) {
     return { name, isEqual: () => false } as any;
@@ -432,6 +434,36 @@ describe("SketchNode", () => {
         node.setShowProfileFaces(true);
         expect(node.mesh.faces).toBeDefined();
         expect(node.mesh.faces!.range.length).toBe(1);
+    });
+
+    test("the warning tooltip lists dangling profiles together with offset diagnostics", () => {
+        const node = new SketchNode({
+            document: doc,
+            plane,
+            data: {
+                entities: [],
+                constraints: [],
+                externalRefs: [
+                    {
+                        entityId: -100,
+                        nodeId: "missing",
+                        edge: { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x: 1, y: 0, z: 0 } },
+                        role: "profile",
+                        snapshot: [0, 0, 1, 0],
+                        type: "line",
+                        dangling: true,
+                    },
+                ],
+            },
+        });
+        const message = "Offset constraint 30: collapse";
+        node.syncOffsetWarnings({ offsetErrors: new Map([[30, message]]) } as unknown as SketchSolver);
+        expect(node.warningCount).toBe(2);
+        expect(node.warningTooltip).toBe("sketch.offsetWarnings{0}{1}");
+        expect(node.warningTooltipArgs).toEqual([
+            2,
+            `${I18n.translate("sketch.externalRefsLost{0}", 1)}; ${message}`,
+        ]);
     });
 
     test("danglingProfileRefs returns only refs that are both dangling and profile-role", () => {

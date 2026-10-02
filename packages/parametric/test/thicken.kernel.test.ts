@@ -18,7 +18,7 @@ import { createMockApplication, createMockVisualWithDocument, TestDocument } fro
 import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
-import type { FeatureData, ThickenFeatureData } from "../src/features/feature";
+import { evaluateFeature, type FeatureData, type ThickenFeatureData } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { runParametricProgram } from "../src/program/parametricProgram";
 import { type SketchData, SketchNode } from "../src/sketch";
@@ -575,4 +575,31 @@ test.each([2, -2])("open skin -> thicken -> common trim stays valid at thickness
     expect(errorOf(body, "trim")).toBeUndefined();
     expect(body.shape.value.checkShape()).toBe(true);
     expect(body.shape.value.volume()).toBeCloseTo(before / 2, 3);
+});
+
+test("an expression thickness preserves the kernel's limiting input face diagnostic", () => {
+    const doc = newDoc();
+    setWallThickness(doc, "3.75");
+    const sphere = shapeFactory.sphere(XYZ.zero, 2);
+    expect(sphere.isOk).toBe(true);
+    const host = new ParametricBodyNode({ document: doc, features: [] });
+    try {
+        const result = evaluateFeature(
+            { id: "diagnostic", type: "thicken", thickness: "-wall_t" },
+            {
+                document: doc,
+                host,
+                input: sphere.value,
+                scope: doc.variables.evaluate().scope,
+            },
+        );
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("input face index");
+        expect(result.error).toContain("|thickness| 3.75 mm");
+        expect(sphere.value.checkShape()).toBe(true);
+    } finally {
+        sphere.value.dispose();
+        host.dispose();
+        doc.dispose();
+    }
 });

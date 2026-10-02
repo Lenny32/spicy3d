@@ -306,6 +306,26 @@ describe("loft edit session (real kernel)", () => {
         expect(body.features[0]).toEqual(feature);
     });
 
+    test("confirming a valid loft edit permits a downstream feature failure", async () => {
+        const { app, doc, base, top } = setup();
+        const body = loftBody(doc, base, top);
+        body.setFeaturesEmitShapeChanged([
+            ...body.features,
+            { id: "bad", type: "extrude", sketchId: "missing", depth: 1 },
+        ]);
+        expect(body.featureItems()[1].error).toBe("Sketch not found");
+        const before = doc.history.undoCount();
+        await editWith(app, body, (session) => {
+            session.ruled = true;
+            session.confirm();
+        });
+        expect(body.features[0]).toMatchObject({ ruled: true });
+        expect(body.featureItems()[1].error).toBe("Sketch not found");
+        expect(doc.history.undoCount()).toBe(before + 1);
+        doc.history.undo();
+        expect(body.features[0]).not.toHaveProperty("ruled");
+    });
+
     test("cancelling leaves the feature untouched", async () => {
         const { app, doc, base, top } = setup();
         const body = loftBody(doc, base, top);

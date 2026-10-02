@@ -1305,9 +1305,9 @@ async function precheckInspection(
     const target = resolved.entry.value as IShape;
     const inputs =
         op.method === "shape.inspectionCommonVolume" ? [target, resolved.args[0] as IShape] : [target];
-    // The common-volume binding refuses either invalid input before running the analyzer.
+    // Both inspection bindings refuse invalid inputs before running the analyzer.
     if (
-        op.method === "shape.inspectionCommonVolume" &&
+        (op.method === "shape.inspectionCommonVolume" || op.method === "shape.inspectionSectionCaps") &&
         owner.run(() => inputs.some((shape) => !shape.checkShape()))
     ) {
         return resolved;

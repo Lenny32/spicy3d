@@ -43,7 +43,7 @@ import type {
     RevolveFeatureData,
 } from "../src/features/feature";
 
-import { type FeatureContext, registerFeature } from "../src/features/feature";
+import { type FeatureContext, featureHandler, registerFeature } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../src/sketch";
 
@@ -281,9 +281,23 @@ describe("ParametricBodyNode", () => {
                 },
             ],
         });
+        const handler = featureHandler("extrude")!;
+        const original = handler.evaluate;
+        const evaluation = rs.spyOn(handler, "evaluate").mockImplementation((feature, context) => {
+            context.warn?.("Operation warning one");
+            context.warn?.("Operation warning two");
+            context.warn?.("Operation warning one");
+            return original(feature, context);
+        });
         const body = bodyWith([extrudeFeature(sketch.id)]);
-        expect(body.shape.isOk).toBe(true);
-        expect(body.featureItems()[0].warning).toBe("Sketch has unresolved external references");
+        try {
+            expect(body.shape.isOk).toBe(true);
+        } finally {
+            evaluation.mockRestore();
+        }
+        const expected =
+            "Operation warning one; Operation warning two; Sketch has unresolved external references";
+        expect(body.featureItems()[0].warning).toBe(expected);
 
         // A failure in a later, unrelated feature must not wipe that warning.
         body.setFeaturesEmitShapeChanged([
@@ -293,7 +307,7 @@ describe("ParametricBodyNode", () => {
 
         const items = body.featureItems();
         expect(items[1].error).toBe("Sketch not found");
-        expect(items[0].warning).toBe("Sketch has unresolved external references");
+        expect(items[0].warning).toBe(expected);
     });
 
     test("fails when the referenced sketch is missing", () => {

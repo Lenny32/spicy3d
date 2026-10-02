@@ -164,7 +164,8 @@ export interface RevolveFeatureData extends FeatureBase {
 /** One cross-section of a loft: a closed profile of a sketch. */
 export interface LoftSection {
     readonly sketchId: string;
-    /** Fingerprint of the picked profile (`profileRef.ts`); absent = the sketch's only outer profile. */
+    /** Fingerprint of the picked profile (`profileRef.ts`); absent = the sketch's only outer profile
+     * or, with solid:false, its only open wire. */
     readonly profile?: ProfileRef;
 }
 

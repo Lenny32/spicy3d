@@ -126,7 +126,9 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
                 sectionsOf(feature).some((section) => section.profile !== undefined)
             ) {
                 // Only closed sections can carry picked profile refs.
-                tracking.resolvedProfiles = sections.value.map(({ face }) => captureProfileRef(face!));
+                tracking.resolvedProfiles = sections.value.flatMap(({ face }) =>
+                    face ? [captureProfileRef(face)] : [],
+                );
             }
             const lofted = shapeFactory.loft(
                 sections.value.map(({ wire }) => wire),
@@ -182,9 +184,9 @@ function resolveLoftSections(
                     );
             } else {
                 const built = shapeFactory.wire(edges);
-                if (!built.isOk) return Result.err(built.error);
-                owned.add(built.value);
-                if (!built.value.isClosed()) {
+                if (!built.isOk && !profiles.isOk) return Result.err(built.error);
+                if (built.isOk) owned.add(built.value);
+                if (built.isOk && !built.value.isClosed()) {
                     if (needsKernelSplit(edges))
                         return Result.err("An open loft section must not self-intersect");
                     // The existing binding answers true when the wire is free of self-intersection.
@@ -262,14 +264,14 @@ function trackLoft(
     tracking: ShapeTracking,
 ): void {
     const closedSections = sections.filter((section) => section.face !== undefined);
-    const inputFaces = closedSections.map(({ face }) => face!);
+    const inputFaces = closedSections.flatMap(({ face }) => (face ? [face] : []));
     const inputEdges: IEdge[] = [];
     const edgeSeeds: string[] = [];
     for (const { face, wire, seed, edgeSeeds: openSeeds } of sections) {
         const edges = (face ?? wire).findSubShapes(ShapeTypes.edge) as IEdge[];
         inputEdges.push(...edges);
         // Entity-derived edge seeds survive wire re-enumeration (see profileEdgeSeeds).
-        edgeSeeds.push(...(openSeeds ?? profileEdgeSeeds(face!, seed, edges)));
+        edgeSeeds.push(...(openSeeds ?? (face ? profileEdgeSeeds(face, seed, edges) : [])));
     }
     const outputFaces = shape.findSubShapes(ShapeTypes.face) as IFace[];
     const outputEdges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];

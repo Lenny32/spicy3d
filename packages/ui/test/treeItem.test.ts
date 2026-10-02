@@ -257,7 +257,7 @@ describe("TreeModel (TreeItem)", () => {
                 warningTooltipArgs: [1, message],
             });
             expect(item.warningBadge.classList.contains("ti-hidden")).toBe(false);
-            expect(item.warningBadge.title).toContain(message);
+            expect(item.warningBadge.title).toBe(I18n.translate("sketch.offsetWarnings{0}{1}", 1, message));
         });
 
         test("a warning count without a tooltip key fails the guard and stays hidden", () => {

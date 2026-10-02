@@ -181,7 +181,7 @@ export class LoftEditCommand extends CancelableCommand {
             return;
         }
         const result = this.preview.evaluate(edited, false);
-        this.valid = result.shape !== undefined && result.error === undefined;
+        this.valid = result.shape !== undefined && (!edited.guided || result.error === undefined);
         showPreviewProblem(result.error);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);
         const context = this.document.visual.context;

@@ -239,3 +239,27 @@ test.each([0, 1])("common volume skips all pre-checks when input %s is invalid",
         doc.dispose();
     }
 });
+
+test("section caps skips the worker for invalid input", async () => {
+    const { doc, tool, factory, inspection, shapeQuery } = setup("hang");
+    const originalBox = factory.box;
+    rs.spyOn(factory, "box").mockImplementation(() => {
+        const result = originalBox();
+        rs.spyOn(result.value, "checkShape").mockReturnValue(false);
+        result.value.inspectionSectionCaps = rs.fn(() => {
+            inspection();
+            return Result.err("Section caps: the shape is invalid (checkShape is false)");
+        });
+        return result;
+    });
+    try {
+        await expect(tool.handler({ ops: ops("shape.inspectionSectionCaps") })).rejects.toThrow(
+            "checkShape is false",
+        );
+        expect(shapeQuery).not.toHaveBeenCalled();
+        expect(inspection).toHaveBeenCalledTimes(1);
+        expect(doc.history.undoCount()).toBe(0);
+    } finally {
+        doc.dispose();
+    }
+});

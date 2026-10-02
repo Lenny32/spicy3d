@@ -51,7 +51,7 @@ export interface FeatureCacheEntry {
      */
     readonly evaluationMs?: number;
     /** Runtime-only operation warning retained across cache hits. */
-    readonly warning?: string;
+    readonly warning?: readonly string[];
 }
 
 /** Which of the two tracked id arrays a query addresses. */

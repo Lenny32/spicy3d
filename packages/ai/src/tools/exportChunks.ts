@@ -7,23 +7,40 @@ import { imageByteBudget } from "./imageEncoding";
 
 export const MAX_CHUNK_EXPORT_BYTES = 32 * 1024 * 1024;
 const CACHE_BYTES = 64 * 1024 * 1024;
+const CALLER_CACHE_BYTES = 32 * 1024 * 1024;
 const LIFETIME_MS = 10 * 60 * 1000;
 const CHUNK_BYTES = 48 * 1024;
 
-const exports = new Map<string, { blob: Blob; caller?: string; expiresAt: number }>();
+const retained = new Map<string, { blob: Blob; caller?: string; expiresAt: number }>();
 
 function prune(): number {
     let bytes = 0;
-    for (const [id, entry] of exports) {
-        if (entry.expiresAt <= Date.now()) exports.delete(id);
+    for (const [id, entry] of retained) {
+        if (entry.expiresAt <= Date.now()) retained.delete(id);
         else bytes += entry.blob.size;
     }
     return bytes;
 }
 
+function cacheFull(size: number, caller?: string): boolean {
+    const total = prune();
+    let ownBytes = 0;
+    for (const entry of retained.values()) {
+        if (entry.caller === caller) ownBytes += entry.blob.size;
+    }
+    return total + size > CACHE_BYTES || ownBytes + size > CALLER_CACHE_BYTES;
+}
+
+function base64(bytes: Uint8Array): string {
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 4096)
+        binary += String.fromCharCode(...bytes.subarray(index, index + 4096));
+    return btoa(binary);
+}
+
 export function forgetExports(caller: string): void {
-    for (const [id, entry] of exports) {
-        if (entry.caller === caller) exports.delete(id);
+    for (const [id, entry] of retained) {
+        if (entry.caller === caller) retained.delete(id);
     }
 }
 
@@ -39,7 +56,7 @@ export async function retainExport(
 ): Promise<string> {
     if (blob.size > maxBytes)
         return JSON.stringify({ error: "Export exceeds maxBytes", bytes: blob.size, maxBytes });
-    if (prune() + blob.size > CACHE_BYTES)
+    if (cacheFull(blob.size, caller))
         return JSON.stringify({
             error: "Temporary export cache is full; release an export or wait for expiry",
         });
@@ -48,7 +65,9 @@ export async function retainExport(
     if (metadata.mimeType === "model/stl") {
         const count = bytes.length >= 84 ? new DataView(bytes.buffer).getUint32(80, true) : undefined;
         triangles =
-            count !== undefined && 84 + count * 50 === bytes.length
+            count !== undefined &&
+            new TextDecoder().decode(bytes.subarray(0, 5)).toLowerCase() !== "solid" &&
+            84 + count * 50 === bytes.length
                 ? count
                 : (new TextDecoder().decode(bytes).match(/\bfacet\s+normal\b/g) ?? []).length;
     }
@@ -67,11 +86,11 @@ export async function retainExport(
     if (budget !== undefined && responseSize(result) > budget)
         return JSON.stringify({ error: "Export metadata exceeds the relay response limit" });
     // Recheck after hashing: other callers may have retained exports in the meantime.
-    if (prune() + blob.size > CACHE_BYTES)
+    if (cacheFull(blob.size, caller))
         return JSON.stringify({
             error: "Temporary export cache is full; release an export or wait for expiry",
         });
-    exports.set(exportId, { blob, caller, expiresAt });
+    retained.set(exportId, { blob, caller, expiresAt });
     return result;
 }
 
@@ -79,7 +98,7 @@ export function buildExportChunkTool(): Tool {
     return {
         name: "read_export_chunk",
         description:
-            "Read exact bytes from export_nodes delivery=chunks. Use a client script to decode base64 straight to disk; do not put chunks into model context. Offset/length are decoded bytes. Responses may be shorter to fit relay limits: advance by returned bytes until eof, verify sha256 from export metadata. release=true deletes the temporary export without returning bytes. Exports expire after 10 minutes and belong to the calling session.",
+            "Read exact bytes from export_nodes delivery=chunks. Use a client script to decode base64 straight to disk; do not put chunks into model context. Offset/length are decoded bytes. Responses may be shorter to fit relay limits: advance by returned bytes until eof, verify sha256 from export metadata. release=true deletes the temporary export without returning bytes. Exports expire after 10 minutes without a successful read and belong to the calling session.",
         parameters: {
             type: "object",
             properties: {
@@ -93,7 +112,7 @@ export function buildExportChunkTool(): Tool {
         handler: async (args, _signal, context) => {
             prune();
             const id = args["exportId"];
-            const entry = typeof id === "string" ? exports.get(id) : undefined;
+            const entry = typeof id === "string" ? retained.get(id) : undefined;
             if (!entry || entry.caller !== context?.caller)
                 return JSON.stringify({ error: "Export not found or expired; export again in this session" });
             const offset = args["offset"] === undefined ? 0 : args["offset"];
@@ -101,7 +120,7 @@ export function buildExportChunkTool(): Tool {
             if (args["release"] !== undefined && typeof args["release"] !== "boolean")
                 return JSON.stringify({ error: "release must be a boolean" });
             if (args["release"] === true) {
-                exports.delete(id as string);
+                retained.delete(id as string);
                 return JSON.stringify({ ok: true, released: true });
             }
             if (
@@ -124,9 +143,12 @@ export function buildExportChunkTool(): Tool {
                     bytes: size,
                     eof: offset + size === entry.blob.size,
                     encoding: "base64",
-                    data: btoa(String.fromCharCode(...bytes)),
+                    data: base64(bytes),
                 });
-                if (budget === undefined || responseSize(result) <= budget) return result;
+                if (budget === undefined || responseSize(result) <= budget) {
+                    entry.expiresAt = Date.now() + LIFETIME_MS;
+                    return result;
+                }
                 if (size <= 1)
                     return JSON.stringify({ error: "Export chunk cannot fit the relay response limit" });
                 size = Math.floor(size / 2);

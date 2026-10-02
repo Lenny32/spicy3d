@@ -130,9 +130,14 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
                     ? "cloud.merge.value.associativeOffset"
                     : "cloud.merge.value.detached",
             );
-        if ("datum" in record) {
+        if (field === "datum" && "datum" in record) {
             const datum = formatConflictValue(conflict, record["datum"], names);
-            if (record["angleSide"] === -1 || record["angleSide"] === 1) {
+            const angular =
+                "angleSide" in record ||
+                [conflict.base, conflict.ours, conflict.theirs].some(
+                    (side) => side !== null && typeof side === "object" && "angleSide" in side,
+                );
+            if (angular) {
                 const side = I18n.translate(
                     record["angleSide"] === -1
                         ? "cloud.merge.value.clockwise"
@@ -142,7 +147,9 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
                     typeof record["datum"] === "number"
                         ? String(Number(((record["datum"] * 180) / Math.PI).toFixed(6)))
                         : datum;
-                return `${angle}° (${side})`;
+                return record["angleSide"] === -1 || record["angleSide"] === 1
+                    ? `${angle}° (${side})`
+                    : `${angle}°`;
             }
             return datum;
         }

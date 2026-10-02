@@ -79,7 +79,7 @@ Failed thickening in the main factory and the bounded MCP worker bridge retains 
 kernel/validation error. Using existing surface D2, face normal and trimmed-domain queries,
 TypeScript samples a 5 × 5 interior UV grid on at most 64 input faces, excluding opening faces
 and points outside the face trim. When a principal curvature in the signed offset direction
-has radius no greater than the requested thickness, the error names the likely input face
+has radius no greater than the requested thickness, the error names the possible input face
 index (zero-based), position in local shape coordinates (mm), sampled radius and a suggestion
 to reduce absolute thickness below that radius or smooth the region. The parametric thicken
 feature forwards these errors, including when thickness is a live expression.
@@ -89,7 +89,8 @@ miss a narrow crease; collisions between distant faces and offset trimming failu
 causes. Uninformative offset statuses with no sampled limit get a qualified hint instead of an
 invented failing face. Successful results and the existing validity/opening-face checks are
 unchanged. Diagnostics never retry the offset; worker cancellation/timeouts and native traps
-do not trigger sampling.
+do not trigger sampling. If more than 64 faces exist, diagnostics explicitly say
+“sampled the first 64 of N faces”. Validation failures describe a possible offset collapse.
 
 The curvature-tolerant envelope mode remains blocked under the frozen save format and offline
 WASM constraints. Open skins already use `MakeThickSolidBySimple`. The existing Join binding
@@ -141,10 +142,11 @@ absence of self-intersection.
 
 Before `run_program` calls `inspectionCommonVolume` or `inspectionSectionCaps`, it runs the
 same bounded worker query on each applicable input.
-Common volume checks both shapes, but skips all pre-checks when either input fails
-`checkShape()`, letting the binding return its existing invalid-input error immediately.
+Common volume checks both shapes; section caps checks its input. Both skip pre-checks
+when any input fails `checkShape()`, letting the binding return its existing invalid-input error immediately.
 Timeout, cancellation, or worker failure refuses the inspection with an error and never
-calls its main-thread binding; a detected self-intersection returns the inspection's unavailable-result error. Missing bounded worker
+calls its main-thread binding; a detected self-intersection returns the inspection's
+unavailable-result error. Missing bounded worker
 support also refuses an inspection that needs the pre-check. Feature detection skips the
 pre-check when the self-intersection binding is unavailable, and inputs with at least 200
 unique faces skip it because the kernel's bounded inspection analyzer already skips those

@@ -46,13 +46,14 @@ export function thickenFailureDiagnostic(
     } finally {
         if (!trapped) for (const face of faces) disposeDiagnostic(face);
     }
+    const sampled = faces.length > MAX_FACES ? ` (sampled the first 64 of ${faces.length} faces)` : "";
     if (!region) {
         // Keep validation errors verbatim; only an uninformative kernel offset status needs a hint.
         if (!/BRepOffset_|^Failed to create thick solid$/.test(error)) return error;
-        return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling; reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
+        return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled}; reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
     }
     const { point, radius, faceIndex } = region;
-    return `${error}; likely offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region. This sampled local limit is not a guaranteed maximum successful thickness.`;
+    return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
 }
 
 function number(value: number): string {
