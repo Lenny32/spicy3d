@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import { ANGLE_UNITS, type EvaluatedValue, LENGTH_UNITS, Plane, Result, type Scope } from "@spicy3d/core";
 import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
+import { migrateAngleSides } from "../../src/angleMigration";
 import {
     axisLineRefs,
     ConstraintKind,
@@ -206,20 +207,24 @@ describe("signed Angle datums", () => {
         expect(y2 - y1).toBeCloseTo(10 * Math.sin(radians), 6);
     }
 
-    function legacyClockwiseData(datum: number | string) {
+    function legacyClockwiseData(datum: number | string, scope = scopeOf({ tilt: angle(30) })) {
         const { solver, line, id } = orientedLine(undefined, -30);
         try {
             expectOrientation(solver, line, -30);
             const data = solver.toData();
             const constraint = data.constraints.find((c) => c.id === id)!;
             constraint.datum = datum;
-            return { data, line, id };
+            delete constraint.angleSide;
+            return { data: migrateAngleSides(data, scope), line, id };
         } finally {
             solver.dispose();
         }
     }
 
-    test.each([Math.PI / 6, "tilt"])("loaded positive datum %s preserves clockwise geometry", (datum) => {
+    test.each([
+        Math.PI / 6,
+        "tilt",
+    ])("migrated positive datum %s preserves clockwise geometry and its marker", (datum) => {
         const { data, line, id } = legacyClockwiseData(datum);
         const stored = structuredClone(data);
         const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
@@ -232,26 +237,24 @@ describe("signed Angle datums", () => {
             expect(solver.toData().constraints.find((c) => c.id === id)?.datum).toEqual(
                 typeof datum === "string" ? datum : -Math.PI / 6,
             );
-            // The flag itself is never saved; the saved geometry recovers it next time.
+            // The migrated side is ordinary stored data and survives reloading.
             expect(solver.toData().constraints.find((c) => c.id === id)).toEqual({
                 ...stored.constraints.find((c) => c.id === id),
                 datum: typeof datum === "string" ? datum : -Math.PI / 6,
             });
             reloaded = new SketchSolver(Plane.XY, solver.toData(), scopeOf({ tilt: angle(30) }));
             expectOrientation(reloaded, line, -30);
-            if (typeof datum === "string") {
-                expect(solver.setScope(scopeOf({ tilt: angle(45) }))).toBe(true);
-                expectOrientation(solver, line, -45);
-                expect(solver.setScope(scopeOf({ tilt: angle(-20) }))).toBe(true);
-                expectOrientation(solver, line, -20);
-            }
+            expect(solver.setScope(scopeOf({ tilt: angle(45) }))).toBe(typeof datum === "string");
+            expectOrientation(solver, line, typeof datum === "string" ? -45 : -30);
+            expect(solver.setScope(scopeOf({ tilt: angle(-20) }))).toBe(typeof datum === "string");
+            expectOrientation(solver, line, typeof datum === "string" ? -20 : -30);
         } finally {
             reloaded?.dispose();
             solver.dispose();
         }
     });
 
-    test.each(["tilt", "-tilt"])("negative expression %s never infers a legacy side", (datum) => {
+    test.each(["tilt", "-tilt"])("signed negative expression %s follows the variable sign", (datum) => {
         const { solver, line } = orientedLine(toStorageDatum(ConstraintKind.Angle, 30), 30);
         let loaded: SketchSolver | undefined;
         try {
@@ -306,6 +309,7 @@ describe("signed Angle datums", () => {
                     );
                 }
                 expectOrientation(solver, line, degrees);
+                expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(1);
                 expect(solver.setScope(scopeOf({ tilt: angle(30), unrelated: length(5) }))).toBe(false);
                 expectOrientation(solver, line, degrees);
             }
@@ -366,7 +370,7 @@ describe("signed Angle datums", () => {
         }
     });
 
-    test("fork before solve retains a legacy expression side after its magnitude changes", () => {
+    test("fork before solve retains the migrated expression marker after its magnitude changes", () => {
         const { data, line } = legacyClockwiseData("tilt");
         const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
         let trial: SketchSolver | undefined;
@@ -411,8 +415,8 @@ describe("signed Angle datums", () => {
         }
     });
 
-    test("zero expression is never assigned a legacy side", () => {
-        const { data, line } = legacyClockwiseData("tilt");
+    test("signed zero expression follows a later positive variable", () => {
+        const { data, line } = legacyClockwiseData("tilt", scopeOf({ tilt: angle(0) }));
         const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(0) }));
         try {
             expectOrientation(solver, line, 0);
@@ -444,7 +448,7 @@ describe("signed Angle datums", () => {
                 6,
             );
             expect(node.data.constraints.find((c) => c.id === id)?.datum).toBe("tilt");
-            const session = node.createScopedSolver();
+            const session = node.createSolver();
             try {
                 expectOrientation(session, line, degrees);
             } finally {

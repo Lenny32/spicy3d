@@ -200,7 +200,7 @@ test.each([
         expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((restored * Math.PI) / 180), 6);
         changeTilt(next);
         expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((next * Math.PI) / 180), 6);
-        // A replay must also update the node's solved scope for the next session.
+        // Reopening must use the restored parameter table and persisted angle semantics.
         doc.history.undo();
         expect(editor.solver.pointOf(end)[1]).toBeCloseTo(10 * Math.sin((restored * Math.PI) / 180), 6);
         editor.exit();
@@ -281,7 +281,7 @@ test.each([
         expectTilt(editor, next);
         doc.history.undo();
         expectTilt(editor, restored);
-        // Reopen after replay to exercise the node's remembered solved scope too.
+        // Reopen after replay with the restored parameter table.
         editor.exit();
         const reopened = SketchEditor.enter(node);
         expectTilt(reopened, restored);

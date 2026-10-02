@@ -281,6 +281,18 @@ function transformConstraint(
         (c.kind === ConstraintKind.Angle || c.kind === ConstraintKind.P2LDistance) &&
         c.datum !== undefined
     ) {
+        if (c.kind === ConstraintKind.Angle) {
+            // Mirroring a migrated clockwise magnitude creates a signed positive magnitude.
+            const datum =
+                c.angleSide === -1
+                    ? typeof c.datum === "number"
+                        ? Math.abs(c.datum)
+                        : `abs(${c.datum})`
+                    : typeof c.datum === "number"
+                      ? -c.datum
+                      : `-(${c.datum})`;
+            return Result.ok({ ...c, datum, angleSide: 1 });
+        }
         return Result.ok({ ...c, datum: typeof c.datum === "number" ? -c.datum : `-(${c.datum})` });
     }
     return Result.ok(c);

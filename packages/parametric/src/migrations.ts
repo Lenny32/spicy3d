@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { registerDocumentModule, registerMigration } from "@spicy3d/core";
+import { migrateSketchAngles } from "./angleMigration";
 
 /**
  * Format of a `ParametricBodyNode`'s stored feature list (`features`, the feature records and the
@@ -32,8 +33,9 @@ export const PARAMETRIC_FORMAT_VERSION = 14;
  * only v1 knows neither and could not solve or build those sketches.
  * 3: optional control definition; params are control poles when present, fit points otherwise.
  * 4: optional editable text records with frame/layout settings and stable contour identities.
+ * 5: explicit Angle datum semantics; migrated clockwise magnitudes retain their stored side.
  */
-export const SKETCH_FORMAT_VERSION = 4;
+export const SKETCH_FORMAT_VERSION = 5;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -91,3 +93,6 @@ registerMigration("parametric", 12, (document) => document);
 
 // parametric 13 → 14: emboss is new; existing feature records retain their meaning verbatim.
 registerMigration("parametric", 13, (document) => document);
+
+// sketch 4 → 5: persist the side previously inferred by the solver at load time.
+registerMigration("sketch", 4, migrateSketchAngles);

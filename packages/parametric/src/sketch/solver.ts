@@ -135,8 +135,8 @@ interface ConstraintRecord {
      */
     datumSources?: ParameterValue[];
     direction?: [number, number];
-    /** Loaded geometry's side for old unsigned/expression angles; never persisted. */
-    legacySide?: number;
+    /** Persisted datum semantics; -1 preserves a migrated clockwise unsigned angle. */
+    angleSide?: -1 | 1;
     helperParams?: number[];
     helperConstraints?: number[];
     blockedParams?: number[];
@@ -253,7 +253,6 @@ export class SketchSolver implements ExternalEntityHost {
         data?: SketchData,
         scope: Scope = EMPTY_SCOPE,
         private readonly ids: SketchIdAllocator = defaultSketchIds(),
-        legacySides?: ReadonlyMap<number, number | undefined>,
     ) {
         this.plane = plane;
         this._scope = scope;
@@ -261,7 +260,7 @@ export class SketchSolver implements ExternalEntityHost {
         this.seedDatum();
         if (data !== undefined) {
             try {
-                this.loadData(data, legacySides);
+                this.loadData(data);
             } catch (error) {
                 this.system.free();
                 throw error;
@@ -295,10 +294,7 @@ export class SketchSolver implements ExternalEntityHost {
                     continue;
                 }
                 const current = this.system.get_params(new Uint32Array([paramIds[index]]))[0];
-                const value =
-                    record.legacySide === undefined
-                        ? resolved.value
-                        : Math.abs(resolved.value) * record.legacySide;
+                const value = record.angleSide !== -1 ? resolved.value : -Math.abs(resolved.value);
                 if (current === value) continue;
                 this.system.set_param(paramIds[index], value);
                 changed = true;
@@ -324,7 +320,7 @@ export class SketchSolver implements ExternalEntityHost {
         if (!resolved.isOk) return Result.err(resolved.error);
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = source;
-        record.legacySide = undefined;
+        if (record.kind === ConstraintKind.Angle) record.angleSide = 1;
         this._datumErrors.delete(constraintId);
         this.system.set_param(paramId, resolved.value);
         return Result.ok(undefined);
@@ -396,7 +392,7 @@ export class SketchSolver implements ExternalEntityHost {
         data.entities[data.entities.findIndex((item) => item.id === id)] = replacement;
         let trial: SketchSolver | undefined;
         try {
-            trial = new SketchSolver(this.plane, data, this._scope, this.ids, this.legacySides());
+            trial = new SketchSolver(this.plane, data, this._scope, this.ids);
             const outcome = trial.solve(true);
             if (!outcome.result.startsWith("Ok"))
                 return Result.err(`Control B-spline edit failed: ${outcome.result}`);
@@ -697,7 +693,7 @@ export class SketchSolver implements ExternalEntityHost {
         if (record === undefined || paramId === undefined) {
             throw new Error(`Constraint ${constraintId} has no datum ${index}`);
         }
-        record.legacySide = undefined;
+        if (record.kind === ConstraintKind.Angle) record.angleSide = 1;
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = value;
         this.system.set_param(paramId, value);
@@ -762,12 +758,7 @@ export class SketchSolver implements ExternalEntityHost {
 
     /** Independent trial system retaining document expression scope. Caller owns disposal. */
     fork(): SketchSolver {
-        return new SketchSolver(this.plane, this.toData(), this._scope, this.ids, this.legacySides());
-    }
-
-    /** Include undefined entries so trials never infer a side for a signed datum. */
-    private legacySides(): ReadonlyMap<number, number | undefined> {
-        return new Map([...this.constraints.values()].map((record) => [record.id, record.legacySide]));
+        return new SketchSolver(this.plane, this.toData(), this._scope, this.ids);
     }
 
     /** Translate native tags, including helper equations, back to persistent constraint IDs. */
@@ -1072,6 +1063,7 @@ export class SketchSolver implements ExternalEntityHost {
             const sources = this.persistedDatums(record);
             if (record.blockedParams) data.blockedParams = [...record.blockedParams];
             if (record.direction) data.direction = [...record.direction];
+            if (record.angleSide !== undefined) data.angleSide = record.angleSide;
             if (sources !== undefined) {
                 if (sources.length === 1) {
                     data.datum = sources[0];
@@ -1104,9 +1096,9 @@ export class SketchSolver implements ExternalEntityHost {
         this.system.free();
     }
 
-    /** Replaces all state with `data`; replay callers supply the scope of the restored geometry. */
-    reset(data: SketchData, solvedScope: Scope = this._scope): void {
-        this._scope = solvedScope;
+    /** Replaces all state with `data` resolved against the supplied parameter table. */
+    reset(data: SketchData, scope: Scope = this._scope): void {
+        this._scope = scope;
         this.system.free();
         this.system = newSolverSystem();
         this.entityTypes.clear();
@@ -1308,6 +1300,11 @@ export class SketchSolver implements ExternalEntityHost {
             helperConstraints,
             blockedParams,
         } = this.buildConstraintParams(constraint, id);
+        if (constraint.kind === ConstraintKind.Angle && constraint.angleSide === -1) {
+            const paramId = datumParamIds![0];
+            const value = this.system.get_params(new Uint32Array([paramId]))[0];
+            this.system.set_param(paramId, -Math.abs(value));
+        }
         const solverId = this.system.add_constraint(
             solverKind ?? constraint.kind,
             new Uint32Array(params),
@@ -1324,6 +1321,7 @@ export class SketchSolver implements ExternalEntityHost {
             datumParamIds,
             datumSources,
             direction: constraint.direction ? [...constraint.direction] : undefined,
+            angleSide: constraint.kind === ConstraintKind.Angle ? (constraint.angleSide ?? 1) : undefined,
             helperParams,
             helperConstraints,
         });
@@ -1769,7 +1767,7 @@ export class SketchSolver implements ExternalEntityHost {
         }
     }
 
-    private loadData(data: SketchData, legacySides?: ReadonlyMap<number, number | undefined>): void {
+    private loadData(data: SketchData): void {
         this.textRecords = structuredClone(data.texts ?? []);
         // The constraints are rebuilt below, so their datum errors are too.
         this._datumErrors.clear();
@@ -1793,32 +1791,6 @@ export class SketchSolver implements ExternalEntityHost {
         }
         for (const constraint of data.constraints) {
             this.addConstraintWithId(constraint.id, constraint);
-            if (constraint.kind !== ConstraintKind.Angle || constraint.datum === undefined) continue;
-            const record = this.constraints.get(constraint.id)!;
-            const paramId = record.datumParamIds![0];
-            const value = this.system.get_params(new Uint32Array([paramId]))[0];
-            const sweep = this.currentSweep(constraint.refs);
-            // Older unsigned literals and expressions used the geometry's side. Recover
-            // it before the first solve, without adding anything to the saved payload.
-            // Only infer from geometry solved at this magnitude: stale geometry must not
-            // override an edited datum. Old unsigned datums never evaluated negative.
-            // A positive literal edit merged with geometry still at the opposite side is
-            // indistinguishable from a legacy unsigned literal. It can recover that side;
-            // distinguishing them requires a persisted marker, but the save format is frozen.
-            // Near 0/180 degrees the geometry cannot reliably tell us which side it used.
-            if (legacySides !== undefined) {
-                record.legacySide = legacySides.get(constraint.id);
-            } else if (
-                value > 0 &&
-                Math.abs(Math.abs(sweep) - Math.abs(value)) < 1e-7 &&
-                Math.abs(Math.sin(sweep)) > 1e-8 &&
-                Math.sign(sweep) !== Math.sign(value)
-            ) {
-                record.legacySide = Math.sign(sweep);
-            }
-            if (record.legacySide !== undefined) {
-                this.system.set_param(paramId, Math.abs(value) * record.legacySide);
-            }
         }
         this.legacyCounters = {};
         if (data.entityIdSeq !== undefined) this.legacyCounters.entityIdSeq = data.entityIdSeq;

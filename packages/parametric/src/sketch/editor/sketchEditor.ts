@@ -520,7 +520,7 @@ export class SketchEditor implements IDisposable {
 
     private createSessionSolver(): SketchSolver {
         const data = this.node.data;
-        const solver = this.node.createScopedSolver(data);
+        const solver = this.node.createSolver(data);
         // the anchor of the face the sketch sits on outlives its boundary refs
         solver.planeOwnerNodeId = this.node.planeRef?.nodeId;
         this.loadAnchors(data);
@@ -592,7 +592,7 @@ export class SketchEditor implements IDisposable {
         if (property !== "variablesJson" || this.disposed) return;
         const history = this.document.history;
         if (history.isUndoing || history.isRedoing) {
-            this.replayVariablesChanged = true;
+            this.replayPending = true;
             return;
         }
         if (!this.solver.setScope(this.variableScope())) {
@@ -606,31 +606,25 @@ export class SketchEditor implements IDisposable {
         this.commit();
     };
 
-    private replayDataChanged = false;
-    private replayVariablesChanged = false;
+    private replayPending = false;
 
     private readonly afterHistoryReplay = () => {
-        if (this.disposed || this.document.history.isUndoing || this.document.history.isRedoing) return;
-        const dataChanged = this.replayDataChanged;
-        const variablesChanged = this.replayVariablesChanged;
-        this.replayDataChanged = false;
-        this.replayVariablesChanged = false;
-        if (dataChanged) {
-            // dataJson and variablesJson can replay in either order. Infer a legacy side
-            // only after both are restored, against the restored geometry's scope.
-            this.node.resetScopedSolver(this.solver);
-            this.loadAnchors(this.node.data);
-            this.annotations.clearConstraintSelection();
-            this.refreshExternalDisplay();
-            this.solve(true);
-        } else if (variablesChanged) {
-            // Off-session parameter edits record only the table: the solver still has
-            // geometry at its previous scope, so preserve its side through setScope.
-            this.solver.setScope(this.variableScope());
-            this.solve(true);
-            // Replay has re-enabled history. A transacted commit would discard redo.
-            this.node.persistScopedSolver(this.solver);
-        }
+        if (
+            this.disposed ||
+            this.document.history.isUndoing ||
+            this.document.history.isRedoing ||
+            !this.replayPending
+        )
+            return;
+        this.replayPending = false;
+        // Restore both data and variables before solving, regardless of replay order.
+        this.solver.reset(this.node.data, this.variableScope());
+        this.loadAnchors(this.node.data);
+        this.annotations.clearConstraintSelection();
+        this.refreshExternalDisplay();
+        this.solve(true);
+        // Variable-only replay also needs derived geometry persisted without discarding redo.
+        this.node.persistSolver(this.solver);
     };
 
     /** Undo/redo rewrites the node data behind the solver's back — resync from it. */
@@ -638,7 +632,7 @@ export class SketchEditor implements IDisposable {
         if (property !== "dataJson" || this.disposed) return;
         const history = this.document.history;
         if (history.isUndoing || history.isRedoing) {
-            this.replayDataChanged = true;
+            this.replayPending = true;
             return;
         }
         // A source-part rebuild re-resolves the external references on the node behind

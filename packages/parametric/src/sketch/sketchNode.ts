@@ -19,7 +19,6 @@ import {
     PubSub,
     Result,
     resolveConstructionRef,
-    type Scope,
     serializable,
     serialize,
 } from "@spicy3d/core";
@@ -231,13 +230,11 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         const danglingIds = danglingProfileRefIds(this.data.externalRefs ?? []);
         this._danglingProfileCount = danglingIds.length;
         this._danglingSignature = danglingIds.join(",");
-        this._solvedScope = options.document.variables.evaluate().scope;
         ensureVariableSync(options.document);
         options.document.modelManager.addNodeObserver(this.handleConstructionTreeChanged);
     }
 
     setDataEmitShapeChanged(data: SketchData): void {
-        this._solvedScope = this.document.variables.evaluate().scope;
         this.setPropertyEmitShapeChanged("dataJson", JSON.stringify(data));
     }
 
@@ -625,33 +622,16 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     /** The parameter-table revision this sketch last re-solved against (see `applyVariables`). */
     private _variableRevision: number | undefined;
 
-    /** Scope used by the stored geometry; runtime only, initialized from the table on load. */
-    private _solvedScope: Scope;
-
-    /** Load against the previous scope before applying a changed table (including sign-only edits). */
-    createScopedSolver(data: SketchData = this.data): SketchSolver {
-        const scope = this.document.variables.evaluate().scope;
-        const solver = new SketchSolver(this.plane, data, this._solvedScope);
-        if (solver.setScope(scope)) solver.solve(true);
-        // This tracks the target scope even if solving fails; callers must re-solve or
-        // commit the solver's data afterwards to keep it aligned with stored geometry.
-        this._solvedScope = scope;
-        return solver;
-    }
-
-    /** After geometry replays, reset against the restored parameter table. */
-    resetScopedSolver(solver: SketchSolver): void {
-        const scope = this.document.variables.evaluate().scope;
-        solver.reset(this.data, scope);
-        this._solvedScope = scope;
+    /** Creates a solver using the current parameter table and persisted angle semantics. */
+    createSolver(data: SketchData = this.data): SketchSolver {
+        return new SketchSolver(this.plane, data, this.document.variables.evaluate().scope);
     }
 
     /** Persists a session's variable-only replay as derived geometry, preserving redo. */
-    persistScopedSolver(solver: SketchSolver): void {
+    persistSolver(solver: SketchSolver): void {
         const solved = solver.toData();
         const anchors = this.data.anchors;
         if (anchors !== undefined) solved.anchors = anchors;
-        this._solvedScope = this.document.variables.evaluate().scope;
         this.withoutHistory(() => {
             this.setProperty("dataJson", JSON.stringify(solved));
             this.setShape(this.generateShape());
@@ -756,7 +736,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     private solveWithScope(data: SketchData): SketchData | undefined {
         let solved: SketchData;
         try {
-            const solver = this.createScopedSolver(data);
+            const solver = this.createSolver(data);
             try {
                 solved = solver.toData();
             } finally {

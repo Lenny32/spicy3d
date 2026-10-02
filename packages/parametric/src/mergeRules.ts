@@ -373,6 +373,7 @@ registerMergePayload("sketch.data", {
                             },
                         },
                         datum: expression,
+                        angleSide: scalar,
                         datums: { kind: "atomic", of: expression },
                         blockedParams: atomic,
                         direction: atomic,
@@ -422,7 +423,7 @@ registerMergePayload("sketch.data", {
         "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
         "references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), " +
         "a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` " +
-        "one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, " +
+        "one value that must resolve. Angle datum semantics (`angleSide`) merge independently of geometry. The resolution results of an external reference (`type`, `snapshot`, " +
         "`dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min.",
 });
 

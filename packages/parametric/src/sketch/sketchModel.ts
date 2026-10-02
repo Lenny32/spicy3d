@@ -106,6 +106,8 @@ export interface SketchConstraintData {
      * that resolves against the document's parameters (`resolveDatumSource`).
      */
     datum?: ParameterValue;
+    /** 1: signed datum (CCW positive); -1: migrated clockwise magnitude, including expressions. */
+    angleSide?: -1 | 1;
     /** Datum values for multi-datum kinds (Fix = [x, y]); mutually exclusive with `datum`. */
     datums?: ParameterValue[];
     /** Independent entity parameter indexes pinned by Block; stable across reloads. */

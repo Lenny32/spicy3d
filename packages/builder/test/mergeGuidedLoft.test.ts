@@ -129,6 +129,6 @@ test("cloud featuresJson blobs and device exports preserve the complete version1
     expect(feature(decoded.value).guided).toEqual(feature(b).guided);
     expect(decoded.value["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 4,
+        sketch: 5,
     });
 });
