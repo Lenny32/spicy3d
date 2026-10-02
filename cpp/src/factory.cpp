@@ -2977,7 +2977,7 @@ public:
         BRepGProp::VolumeProperties(result, resultVolume);
         BRepGProp::SurfaceProperties(input, inputArea);
         BRepGProp::SurfaceProperties(result, resultArea);
-        return std::abs(inputVolume.Mass() - resultVolume.Mass()) <= 1e-7 * std::max(1.0, std::abs(inputVolume.Mass()))
+        return std::abs(std::abs(inputVolume.Mass()) - std::abs(resultVolume.Mass())) <= 1e-7 * std::max(1.0, std::abs(inputVolume.Mass()))
             && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-7 * std::max(1.0, inputArea.Mass());
     }
 
@@ -3124,8 +3124,14 @@ public:
                 BRepAlgoAPI_Cut wall(thickness < 0 ? shape : cavity, thickness < 0 ? cavity : shape);
                 wall.SetNonDestructive(true);
                 wall.Build();
-                if (wall.IsDone() && !wall.HasErrors() && thickSolidResultError(wall.Shape()).empty())
-                    return ShapeResult { wall.Shape(), true, "" };
+                if (wall.IsDone() && !wall.HasErrors() && thickSolidResultError(wall.Shape()).empty()) {
+                    GProp_GProps wallMass;
+                    BRepGProp::VolumeProperties(wall.Shape(), wallMass);
+                    if (std::isfinite(wallMass.Mass()) && wallMass.Mass() > 0
+                        && !thickSolidGeometricallyUnchanged(shape, wall.Shape())
+                        && (thickness > 0 || wallMass.Mass() < sourceVolume * (1 - 1e-7)))
+                        return ShapeResult { wall.Shape(), true, "" };
+                }
             }
         }
         // OCCT's incomplete all-parallel trimming is not a free-form crease envelope.

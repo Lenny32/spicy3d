@@ -218,3 +218,12 @@ test("closed all-fillet collapse also refuses the unchanged input", () => {
     expect(result.error).toContain("Tolerant envelope wall boolean failed");
     expect(result.error).toContain("input face index");
 });
+
+test.each([-1, -3.75])("closed box ordinary recovery yields the exact wall at %s", (thickness) => {
+    const input = keep(createBox(factory, 30, 30, 20));
+    const result = keep(unwrapOk(factory.makeThickSolidTolerant(input, [], thickness)));
+    const cavity = (30 + 2 * thickness) ** 2 * (20 + 2 * thickness);
+    expect(result.volume()).toBeCloseTo(input.volume() - cavity, 6);
+    expect(result.checkShape()).toBe(true);
+    expect(result.volume()).toBeLessThan(input.volume() * 0.99);
+});

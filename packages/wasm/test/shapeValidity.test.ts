@@ -76,14 +76,14 @@ describe("thick solid results are checked", () => {
             );
             try {
                 expect(result.isOk).toBe(false);
-                expect(result.error).toContain("offset did not remove an opening face");
+                expect(result.error).toContain("input shape unchanged");
             } finally {
                 result.delete();
             }
         } else {
             const result = factory.makeThickSolidByJoin(input, openings, -5, "arc");
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("offset did not remove an opening face");
+            expect(result.error).toContain("input shape unchanged");
             expect(result.error).toContain("possible offset collapse on input face index");
             expect(result.error).toContain("sampled curvature radius 3.025 mm <= |thickness| 5 mm");
         }
