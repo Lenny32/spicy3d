@@ -54,6 +54,7 @@ afterEach(() => {
     testHybrid?.dispose();
     testHybrid = undefined;
     rs.unstubAllGlobals();
+    rs.restoreAllMocks();
 });
 
 const square: SketchData = {
