@@ -695,7 +695,23 @@ export async function runParametric(
         parametric.SketchEditor.exit();
 
     let result: ProgramResult | undefined;
-    if (capturedDocument) {
+    const needsAsyncRebuild =
+        ops.some(
+            (op) =>
+                (op as { op?: string; tolerant?: boolean }).op === "thicken" &&
+                (op as { tolerant?: boolean }).tolerant === true,
+        ) ||
+        document.modelManager
+            .findNodes()
+            .some(
+                (node) =>
+                    node instanceof parametric.ParametricBodyNode &&
+                    node.features.some(
+                        (feature) =>
+                            feature.type === "thicken" && feature.tolerant === true && !feature.suppressed,
+                    ),
+            );
+    if (capturedDocument || needsAsyncRebuild) {
         const assertIdle = () => {
             if (globalThis.app.executingCommand || Transaction.isActive(document))
                 throw new Error(

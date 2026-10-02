@@ -465,6 +465,8 @@ interface State {
     readonly changed: Map<ParametricBodyNode, Set<string>>;
     /** Entity/constraint names given in this program, per sketch node id. */
     readonly sketchNames: Map<string, SketchNames>;
+    deferValidation: boolean;
+    readonly pendingChecks: Map<ParametricBodyNode, Set<string> | undefined>;
 }
 
 /**
@@ -520,7 +522,7 @@ export async function runParametricProgramAsync(
 ): Promise<ProgramResult> {
     const refs = refsFor(document);
     const previousRefs = new Map(refs);
-    const steps = evaluateProgram(document, ops, options);
+    const steps = evaluateProgram(document, ops, options, true);
     const cancel = () =>
         owner.run(() => {
             for (const node of document.modelManager.findNodes()) {
@@ -552,6 +554,7 @@ function* evaluateProgram(
     document: IDocument,
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
+    asynchronous = false,
 ): Generator<number, ProgramResult, void> {
     if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
         throw new Error('"responseMode" must be "full" or "compact"');
@@ -565,6 +568,8 @@ function* evaluateProgram(
         touched: new Set(),
         changed: new Map(),
         sketchNames: new Map(),
+        deferValidation: false,
+        pendingChecks: new Map(),
     };
     const bodies = () =>
         document.modelManager
@@ -595,10 +600,25 @@ function* evaluateProgram(
                 while (index < ops.length && ops[index].op === "editSketch");
             });
         } else {
-            // Topology-dependent operations must validate before the next operation reads it.
-            ParametricBodyNode.withSynchronousEvaluation(document, run);
+            // Tolerant steps require the bounded worker, including upstream edits.
+            state.deferValidation =
+                asynchronous &&
+                ((ops[index].op === "thicken" && (ops[index] as ThickenOp).tolerant === true) ||
+                    bodies().some((body) =>
+                        body.features.some(
+                            (feature) =>
+                                feature.type === "thicken" &&
+                                feature.tolerant === true &&
+                                !feature.suppressed,
+                        ),
+                    ));
+            if (state.deferValidation) run();
+            else ParametricBodyNode.withSynchronousEvaluation(document, run);
         }
         yield index;
+        state.deferValidation = false;
+        for (const [body, before] of state.pendingChecks) checkBody(state, body, before);
+        state.pendingChecks.clear();
     }
     // Checked once all ops ran, so a later op may repair what an earlier sketch edit broke downstream.
     for (const body of bodies()) {
@@ -1854,6 +1874,13 @@ function appendFeature(
 }
 
 function checkBody(state: State, body: ParametricBodyNode, before: Set<string> | undefined): void {
+    if (state.deferValidation) {
+        // Reading shape starts a lazy rebuild; validation resumes after settled().
+        void body.shape;
+        if (!state.pendingChecks.has(body)) state.pendingChecks.set(body, before);
+        state.touched.add(body);
+        return;
+    }
     // A newly created body can still be lazy. Evaluate before inspecting its feature failures.
     const shape = body.shape;
     const failed = body

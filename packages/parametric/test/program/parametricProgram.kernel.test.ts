@@ -40,6 +40,9 @@ import { buildParametricTools, runParametric } from "../../../ai/src/tools/param
 import { buildParametricJobTools, buildProgramJobTools } from "../../../ai/src/tools/programJobs";
 import { buildReadTools } from "../../../ai/src/tools/readTools";
 import { waitForTerminalJob } from "../../../ai/test/_helpers/waitForTerminalJob";
+import { HybridShapeFactory } from "../../../wasm/src/hybridShapeFactory";
+import { KernelWorkerClient } from "../../../wasm/src/workerClient";
+import { NativeWorkerTransport } from "../../../wasm/test/workerHarness";
 import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
@@ -736,6 +739,103 @@ describe("thicken", () => {
             doc.variables.setItems([{ id: "v1", name: "wall_t", expression, type: "length" }]);
         });
     }
+
+    test("MCP tolerant thicken and upstream parameter edits await the worker and roll back failures", async () => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        rs.stubGlobal("app", app);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        try {
+            const tool = buildParametricTools()[0];
+            const result = run(doc, plate(20));
+            const body = createdBody(doc, result, "b1");
+            await tool.handler({
+                ops: [
+                    {
+                        op: "thicken",
+                        id: "t1",
+                        body: body.id,
+                        thickness: -2,
+                        tolerant: true,
+                        openFaceIndexes: [topFaceIndex(body)],
+                    },
+                ],
+            });
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 20 - 36 * 26 * 18, 3);
+            const edit = (value: number) =>
+                tool.handler({
+                    ops: [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "setParameter",
+                            key: "depth",
+                            value,
+                        },
+                    ],
+                });
+            await edit(30);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+            await expect(edit(0)).rejects.toThrow();
+            expect(body.features[0]).toMatchObject({ depth: 30 });
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test.each([
+        "timeout",
+        "cancel",
+    ])("MCP tolerant %s reports the failure and restores the body", async (failure) => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        const controller = new AbortController();
+        let requests = 0;
+        const hybrid = new HybridShapeFactory(() => {
+            const transport = new NativeWorkerTransport();
+            transport.hold = true;
+            const post = transport.postMessage.bind(transport);
+            transport.postMessage = (message) => {
+                requests++;
+                post(message);
+                if (failure === "cancel") setTimeout(() => controller.abort(), 0);
+            };
+            return new KernelWorkerClient(transport, 50);
+        });
+        rs.stubGlobal("app", app);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        try {
+            const body = createdBody(doc, run(doc, plate(20)), "b1");
+            const before = body.features;
+            await expect(
+                runParametric(
+                    { ops: [{ op: "thicken", id: "t1", body: body.id, thickness: -2, tolerant: true }] },
+                    controller.signal,
+                ),
+            ).rejects.toThrow(failure === "cancel" ? /cancelled/i : /timed out/i);
+            expect(requests).toBe(1);
+            expect(body.features).toEqual(before);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 20, 3);
+            expect(DocumentMutations.isHeld(doc)).toBe(false);
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            rs.unstubAllGlobals();
+        }
+    });
 
     test("shells a body open at the picked face, following the thickness variable", () => {
         const doc = newDoc();
