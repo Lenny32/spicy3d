@@ -1676,6 +1676,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "surface.isAnalytic",
+        name: "isAnalytic",
+        owner: "surface",
+        family: "surface",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "surface.isUClosed",
         name: "isUClosed",
         owner: "surface",
@@ -2298,6 +2306,7 @@ surface.* (target must be a surface (or a subtype of it)):
   surface.uIso(target, u: number) -> curve ref (registered under the op id)
   surface.vIso(target, v: number) -> curve ref (registered under the op id)
   surface.isPlanar(target) -> boolean
+  surface.isAnalytic(target) -> boolean
   surface.isUClosed(target) -> boolean
   surface.isVClosed(target) -> boolean
   surface.isUPeriodic(target) -> boolean
