@@ -16,6 +16,7 @@ import { HeadlessDocumentEvaluator } from "../../app/src/mergeEvaluator";
 import { FeatureChainPreview } from "../src/commands/featureEditPreview";
 import { featureHandler, registerFeature, type SweepFeatureData } from "../src/features/feature";
 import {
+    prepareValidatedFeature,
     SELF_INTERSECTION_SKIPPED,
     validateSelfIntersection,
 } from "../src/features/selfIntersectionValidation";
@@ -225,4 +226,83 @@ test("undo and redo cancel pending validation and validate replayed features", a
     expect(node.features[0]).toEqual({ ...feature, roundCorner: true });
     expect(node.shape.isOk).toBe(true);
     expect(node.featureItems()[0].error).toBeUndefined();
+});
+
+test("missing worker refuses validation and disposes output without a synchronous retry", async () => {
+    rs.stubGlobal("shapeFactory", { combine: () => Result.ok(new MockShape()) });
+    const node = body();
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(node.featureItems()[0].error).toBe("Self-intersection validation requires a bounded worker");
+    expect(outputs[0].dispose).toHaveBeenCalledTimes(1);
+    expect(queries).toHaveLength(0);
+});
+
+test("headless evaluation cancellation terminates pending validation", async () => {
+    const source = new Document(createMockApplication(), "cancel");
+    source.modelManager.addNode(
+        new ParametricBodyNode({ document: source, featuresJson: JSON.stringify([feature]) }),
+    );
+    const stored = source.serialize();
+    source.dispose();
+    queries = [];
+    const abort = new AbortController();
+    const evaluation = new HeadlessDocumentEvaluator(createMockApplication()).evaluate(stored, {
+        signal: abort.signal,
+    });
+    await start();
+    expect(queries).toHaveLength(1);
+    abort.abort();
+    await start();
+    const report = await evaluation;
+    expect(report.isOk).toBe(false);
+    expect(report.error).toEqual({ kind: "cancelled" });
+    expect(queries[0].cancel).toHaveBeenCalled();
+});
+
+test("temporary tool and boolean output must both pass before acceptance", async () => {
+    const tool = Object.assign(new MockShape(), { dispose: rs.fn(() => {}) });
+    const output = Object.assign(new MockShape(), { dispose: rs.fn(() => {}) });
+    const host = new ParametricBodyNode({ document, featuresJson: "[]" });
+    try {
+        const pending = prepareValidatedFeature(
+            (context) => {
+                context.deferSelfIntersection!(tool);
+                tool.dispose();
+                context.deferSelfIntersection!(output);
+                return Result.ok(output);
+            },
+            { document, host, scope: new Map() },
+        );
+        expect(queries.map((query) => query.shape)).toEqual([tool, output]);
+        expect(tool.dispose).toHaveBeenCalledTimes(1);
+        queries[0].complete(Result.ok(true));
+        queries[1].complete(Result.ok(false));
+        await pending.ready;
+        expect(pending.take().error).toBe("Shape intersects itself");
+        expect(output.dispose).toHaveBeenCalledTimes(1);
+        pending.cancel();
+        expect(output.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+        host.dispose();
+    }
+});
+
+test("failed handler cancels already captured checks immediately", async () => {
+    const host = new ParametricBodyNode({ document, featuresJson: "[]" });
+    try {
+        const pending = prepareValidatedFeature(
+            (context) => {
+                context.deferSelfIntersection!(new MockShape());
+                return Result.err("boolean failed");
+            },
+            { document, host, scope: new Map() },
+        );
+        await pending.ready;
+        expect(queries[0].cancel).toHaveBeenCalled();
+        expect(pending.take().error).toBe("boolean failed");
+        pending.cancel();
+    } finally {
+        host.dispose();
+    }
 });

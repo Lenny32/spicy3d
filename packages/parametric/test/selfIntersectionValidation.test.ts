@@ -9,6 +9,7 @@ import {
 
 test.each([
     [true, 1, 1, true],
+    [true, 1, 1e-12, true], // a small positive solid is not invalid by size
     [true, 0, 0, true], // shells need not enclose volume
     [false, 1, 1, false],
     [true, 1, 0, false],

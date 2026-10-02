@@ -17,7 +17,7 @@ export function validateSelfIntersection(
     const volume = shape.volume();
     const solids = shape.findSubShapes(ShapeTypes.solid);
     try {
-        if (!Number.isFinite(volume) || (solids.length > 0 && volume <= 1e-8))
+        if (!Number.isFinite(volume) || (solids.length > 0 && volume <= 0))
             return Result.err("Shape has invalid volume");
     } finally {
         for (const solid of solids) solid.dispose();
@@ -58,13 +58,16 @@ export function prepareValidatedFeature(
         for (const check of checks) check.cancel();
         result = Result.err(error instanceof Error ? error.message : String(error));
     }
+    if (!result.isOk) for (const check of checks) check.cancel();
     let consumed = false;
     const disposeOutput = () => {
         if (result.isOk && result.value !== context.input) result.value.dispose();
     };
     return {
         canFallback: false,
-        ready: Promise.all(checks.map((check) => check.ready)).then(() => {}),
+        ready: result.isOk
+            ? Promise.all(checks.map((check) => check.ready)).then(() => {})
+            : Promise.resolve(),
         cancel: () => {
             for (const check of checks) check.cancel();
             if (!consumed) {
