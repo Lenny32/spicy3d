@@ -1314,8 +1314,17 @@ export class ShapeFactory implements IShapeFactory {
         const refused = refuseIntersectionJoin(shape, "intersection", true);
         if (refused) {
             const ordinary = this.makeThickSolidByJoin(shape, openingFaces, thickness, "arc");
-            if (ordinary.isOk) return ordinary;
-            return Result.err(refused);
+            if (!ordinary.isOk) return Result.err(refused);
+            if (openingFaces.length > 0) return ordinary;
+            // Closed ordinary offsets describe the cavity/outer envelope. Return the
+            // material between it and the source, as the native tolerant path does.
+            try {
+                return thickness < 0
+                    ? this.booleanCut([shape], [ordinary.value])
+                    : this.booleanCut([ordinary.value], [shape]);
+            } finally {
+                ordinary.value.dispose();
+            }
         }
         const result = convertShapeResult(
             binding,

@@ -282,3 +282,21 @@ test("42-face perforated box preserves the ordinary arc wall", async () => {
     expect(bounded.checkShape()).toBe(true);
     expect(bounded.volume()).toBeCloseTo(ordinary.volume(), 6);
 });
+
+test("many-face closed ordinary recovery returns material around the cavity", () => {
+    const points = Array.from(
+        { length: 41 },
+        (_, index) =>
+            new XYZ(20 * Math.cos((index * Math.PI) / 20), 20 * Math.sin((index * Math.PI) / 20), 0),
+    );
+    const wire = keep(unwrapOk(factory.polygon(points)));
+    const face = keep(unwrapOk(factory.face([wire])));
+    const input = keep(unwrapOk(factory.prism(face, new XYZ(0, 0, 10))));
+    const faces = input.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    expect(faces).toHaveLength(42);
+    const cavity = keep(unwrapOk(factory.makeThickSolidByJoin(input, [], -0.5, "arc")));
+    const wall = keep(unwrapOk(factory.makeThickSolidTolerant(input, [], -0.5)));
+    expect(wall.checkShape()).toBe(true);
+    expect(wall.volume()).toBeCloseTo(input.volume() - cavity.volume(), 6);
+});
