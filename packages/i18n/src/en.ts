@@ -1092,6 +1092,7 @@ export default {
             "Select section profiles in loft order, one per sketch (open curves with Solid off); Confirm when done",
         "prompt.select.thickenOpenFaces":
             "Select the faces to open, none for a closed hollow or a thickened surface; Confirm when done",
+        "prompt.thicken.backgroundResult": "Result is computed in the background after you confirm",
         "prompt.thicken.openFacesSolidOnly":
             "Open faces apply to solids only; this surface is thickened whole. Confirm when done",
         "prompt.select.shape": "Please select shape",

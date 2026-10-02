@@ -6,6 +6,7 @@ import {
     CancelableCommand,
     Combobox,
     command,
+    I18n,
     type I18nKeys,
     type INode,
     LENGTH_UNITS,
@@ -69,7 +70,10 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("joinType", value, () => this.refreshPreview());
     }
 
-    @property("option.command.offsetMode", { combobox: Combobox.from([...THICKEN_MODES]) })
+    @property("option.command.offsetMode", {
+        combobox: Combobox.from([...THICKEN_MODES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get mode(): I18nKeys {
         return this.getPrivateValue("mode", "option.command.offsetMode.skin");
     }
@@ -138,7 +142,7 @@ export class ThickenEditCommand extends CancelableCommand {
         return {
             ...rest,
             thickness: this.thickness,
-            ...thickenOptions(this.joinType, this.mode),
+            ...thickenOptions(this.joinType, this.tolerant ? "option.command.offsetMode.skin" : this.mode),
             ...(this.tolerant ? { tolerant: true } : {}),
         };
     }
@@ -147,6 +151,13 @@ export class ThickenEditCommand extends CancelableCommand {
         const body = this.body;
         if (body === undefined || this.feature === undefined || this.preview === undefined) return;
         this.clearPreview();
+        if (this.tolerant) {
+            PubSub.default.pub("showFloatTip", {
+                level: "info",
+                msg: I18n.translate("prompt.thicken.backgroundResult"),
+            });
+            return;
+        }
         const result = this.preview.evaluate(this.edited(this.feature), false);
         showPreviewProblem(result.error ?? result.warning);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);

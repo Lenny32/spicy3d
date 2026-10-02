@@ -184,12 +184,20 @@ describe("thicken command (real kernel)", () => {
         const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
         testHybrid = hybrid;
         rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        const publish = rs.spyOn(PubSub.default, "pub");
         const command = new ThickenFeatureCommand();
         pickFaces(doc, command, body, [topFacePick(body)], () => {
             command.thickness = -2;
+            command.mode = "option.command.offsetMode.pipe";
             command.tolerant = true;
         });
         await command.execute(app);
+        expect(publish).toHaveBeenCalledWith("showFloatTip", {
+            level: "info",
+            msg: I18n.translate("prompt.thicken.backgroundResult"),
+        });
+        publish.mockRestore();
+        expect(body.features[1]).not.toHaveProperty("mode");
         expect(body.features[1]).toMatchObject({ type: "thicken", thickness: -2, tolerant: true });
         await body.whenRebuilt();
         expect(body.shape.isOk).toBe(true);
@@ -324,10 +332,18 @@ describe("thicken edit session (real kernel)", () => {
         const { app, body } = thickened();
         testHybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
         rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, testHybrid));
+        const publish = rs.spyOn(PubSub.default, "pub");
         await editWith(app, body, (session) => {
+            session.mode = "option.command.offsetMode.pipe";
             session.tolerant = true;
             session.confirm();
         });
+        expect(publish).toHaveBeenCalledWith("showFloatTip", {
+            level: "info",
+            msg: I18n.translate("prompt.thicken.backgroundResult"),
+        });
+        publish.mockRestore();
+        expect(body.features[1]).not.toHaveProperty("mode");
         expect(body.features[1]).toMatchObject({ tolerant: true, thickness: -2 });
         await body.whenRebuilt();
         expect(body.shape.isOk).toBe(true);

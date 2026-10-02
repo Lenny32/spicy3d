@@ -106,13 +106,17 @@ each opening with `BRepClass3d_SolidClassifier`: it must be outside the result. 
 results retain their existing opening semantics: a sufficiently thick tapered tip can fill
 its small opening (the r20→r3, height 20 mm loft at −3.75 mm is one such case). A universal
 opening-point rejection would reject that existing 7751 mm³ wall, so it applies only to envelope
-recovery. The normal many-face trimming limit still applies, with a tolerant-specific message.
+recovery. The direct synchronous factory applies the many-face limit only after ordinary arc
+fails. The bounded worker accepts larger solids under its fixed deadline.
 
 This is a limited envelope mode, **not a general solution for free-form creases**.
+The free-form crease collapse reported in #121 remains unsupported; tolerant mode does not
+resolve that reporter’s case.
 Tested supported classes are full spheres, ring tori at cavity collapse, plain boxes, and
-prismatic solids with vertical fillets smaller than the wall. Analytic rolling-ball creases
-are the supported scope; boxes filleted on every edge currently fail clearly at the tested
-−3.75 mm wall thickness (radii 1, 2, 3.5 and 5 mm). Free-form crease recovery on B-spline lofts
+prismatic solids with vertical-edge fillets smaller than the wall, without corner blends.
+Only those vertical fillets were verified; general analytic rolling-ball creases are not
+supported. Boxes filleted on every edge fail in both modes, including at −0.5 mm; the regression
+tests also cover −3.75 mm (radii 1, 2, 3.5 and 5 mm). Free-form crease recovery on B-spline lofts
 or extrusions is refused, while an ordinary offset that succeeds is still usable. Open skins,
 multiple solids, pipe mode and unrecognized cavity collapse remain errors. OCCT 8.0.1's local
 `BRepOffsetAPI_MakeThickSolid.hxx` documents SelfInter removal as unimplemented and all-parallel
@@ -123,15 +127,18 @@ Tolerant thicken features use `prepareAsync` and the bounded replica worker on t
 rebuilds, including document open and undo/redo. A newer rebuild cancels and terminates the
 previous operation. The fixed 30-second deadline is a **build error** (“Tolerant thicken timed
 out after 30000 ms”); there is no result to accept with a warning and no synchronous fallback.
-Synchronous feature previews, explicit synchronous program scopes, nested evaluations and
+Explicit synchronous program scopes, nested evaluations and
 headless paths that cannot await refuse with “Tolerant thicken is unavailable in synchronous
 evaluation; rebuild with the bounded geometry worker”. Async headless evaluation can await
-the scheduled operation. MCP `thicken { tolerant: true }` in a synchronous feature program
-receives this same clear refusal; the generated `run_program` factory edit operation
-`makeThickSolidTolerant` uses the bounded worker. Direct synchronous factory calls remain
-main-thread callers and retain the face-count guard; managed thicken features never call them.
+the scheduled operation. MCP `thicken { tolerant: true }` and edits to bodies containing
+tolerant steps await the bounded rebuild before validating geometry or running the next op;
+other feature operations retain synchronous evaluation. Cancellation and worker errors roll
+the program back. The generated `run_program` factory edit operation `makeThickSolidTolerant`
+also uses the bounded worker. Direct synchronous factory calls remain main-thread callers.
+Create/edit panels show a translated neutral note that the result is computed in the background
+after confirmation; tolerant mode has no interactive geometry preview.
 
-Join type is hidden when tolerant is enabled and ignored by the envelope implementation.
+Join type and mode are hidden when tolerant is enabled and ignored by the envelope implementation.
 Stored `joinType` values in v15 documents are retained for compatibility, including existing
 fixtures. Curvature-collapse diagnostics first classify the limiting surface as analytic
 (plane/cylinder/cone/sphere/torus via GeomAdaptor). Retry advice is narrower: only the tested
