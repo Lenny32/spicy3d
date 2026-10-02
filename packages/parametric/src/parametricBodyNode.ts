@@ -9,6 +9,7 @@ import {
     type FeatureItem,
     type FeatureReference,
     featureSketchIds,
+    I18n,
     type I18nKeys,
     type IAsyncShapeOperation,
     type IDocument,
@@ -574,38 +575,94 @@ export class ParametricBodyNode
         const from = features.findIndex((feature) => feature.id === featureId);
         if (from < 0) return Result.ok(undefined);
         const to = Math.max(0, Math.min(index, features.length - 1));
-        for (const sketch of this.anchoredSketches()) {
-            const anchor = sketch.data.refPositions![this.id];
-            if (from < anchor !== to < anchor) {
-                return Result.err(
-                    `Cannot move feature: sketch ${sketch.name} would lose its timeline prefix`,
-                );
-            }
-        }
+        const anchors = this.remapTimelinePositions((anchor) =>
+            from < anchor !== to < anchor ? undefined : anchor,
+        );
+        if (!anchors.isOk) return anchors;
         const [feature] = features.splice(from, 1);
         features.splice(to, 0, feature);
         this.setFeaturesEmitShapeChanged(features);
         return Result.ok(undefined);
     }
 
-    private anchoredSketches(): SketchNode[] {
-        return this.document.modelManager.findNodes(
-            (node) => node instanceof SketchNode && node.data.refPositions?.[this.id] !== undefined,
-        ) as SketchNode[];
+    /**
+     * All persisted positions name the state entering feature N. Collect writes first so a
+     * refused permutation cannot partially change another node or create an undo entry.
+     * Construction refs may be nested (paths, snaps, face points and definitions).
+     */
+    private remapTimelinePositions(map: (anchor: number) => number | undefined): Result<void> {
+        const writes: (() => void)[] = [];
+        const remap = (value: unknown): boolean => {
+            if (value === null || typeof value !== "object") return true;
+            const record = value as Record<string, unknown>;
+            if (record["nodeId"] === this.id && typeof record["featureIndex"] === "number") {
+                const next = map(record["featureIndex"]);
+                if (next === undefined) return false;
+                record["featureIndex"] = next;
+            }
+            return Object.values(record).every(remap);
+        };
+        for (const node of this.document.modelManager.findNodes(
+            (node) =>
+                node instanceof SketchNode ||
+                node instanceof ConstructionNode ||
+                node instanceof ParametricBodyNode,
+        )) {
+            if (node instanceof SketchNode) {
+                const data = node.data;
+                const anchor = data.refPositions?.[this.id];
+                if (anchor !== undefined) {
+                    const next = map(anchor);
+                    if (next === undefined) return this.timelineMoveRefused(node);
+                    if (next !== anchor) {
+                        data.refPositions![this.id] = next;
+                        writes.push(() => node.setDataEmitShapeChanged(data));
+                    }
+                }
+                const ref = node.constructionPlaneRef;
+                if (!remap(ref)) return this.timelineMoveRefused(node);
+                const json = ref === undefined ? undefined : JSON.stringify(ref);
+                if (json !== node.constructionPlaneRefJson)
+                    writes.push(() => {
+                        node.constructionPlaneRefJson = json;
+                    });
+            } else if (node instanceof ParametricBodyNode) {
+                // Revolves can carry a ConstructionRef directly, including a captured shape axis.
+                const features = node.features;
+                const before = JSON.stringify(features);
+                if (!remap(features)) return this.timelineMoveRefused(node);
+                if (JSON.stringify(features) !== before)
+                    writes.push(() => node.setFeaturesEmitShapeChanged(features));
+            } else if (node instanceof ConstructionNode) {
+                const definition = node.definition;
+                if (!remap(definition)) return this.timelineMoveRefused(node);
+                const json = JSON.stringify(definition);
+                if (json !== node.definitionJson)
+                    writes.push(() => {
+                        node.definitionJson = json;
+                    });
+            }
+        }
+        for (const write of writes) write();
+        return Result.ok(undefined);
+    }
+
+    private timelineMoveRefused(node: INode): Result<void> {
+        return Result.err(I18n.translate("error.parametric.timelinePrefix{0}", node.name));
+    }
+
+    insertFeatureAt(feature: FeatureData, index: number): void {
+        ParametricBodyNode.withDeferredUpstream(this.document, () => {
+            this.remapTimelinePositions((anchor) => (anchor > index ? anchor + 1 : anchor));
+            const features = [...this.features];
+            features.splice(index, 0, feature);
+            this.setFeaturesEmitShapeChanged(features);
+        });
     }
 
     private removeFeatureAt(index: number): void {
         ParametricBodyNode.withDeferredUpstream(this.document, () => {
-            for (const sketch of this.anchoredSketches()) {
-                const data = sketch.data;
-                const anchor = data.refPositions![this.id];
-                // At index, the sketch already saw the removed step's input. Later states
-                // lose one preceding step. The normal setters join the caller's transaction.
-                if (anchor > index) {
-                    data.refPositions![this.id] = anchor - 1;
-                    sketch.setDataEmitShapeChanged(data);
-                }
-            }
+            this.remapTimelinePositions((anchor) => (anchor > index ? anchor - 1 : anchor));
             this.setFeaturesEmitShapeChanged(this.features.filter((_, i) => i !== index));
         });
     }

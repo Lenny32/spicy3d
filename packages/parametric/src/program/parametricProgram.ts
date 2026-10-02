@@ -1832,26 +1832,7 @@ function appendFeature(
     index = body.features.length,
 ): void {
     const before = erroredFeatureIds(body);
-    const features = [...body.features];
-    features.splice(index, 0, feature);
-    ParametricBodyNode.withDeferredUpstream(state.document, () => {
-        if (index < body.features.length) {
-            // Anchors count features, not identities. Keep each sketch on the same timeline state
-            // when inserting upstream. An anchor at index already sees the new feature's input.
-            // Use the normal setter so the caller's transaction restores
-            // both the anchors and the feature list on failure or undo/redo.
-            for (const node of state.document.modelManager.findNodes((node) => node instanceof SketchNode)) {
-                const sketch = node as SketchNode;
-                const data = sketch.data;
-                const anchor = data.refPositions?.[body.id];
-                if (anchor !== undefined && anchor > index) {
-                    data.refPositions![body.id] = anchor + 1;
-                    sketch.setDataEmitShapeChanged(data);
-                }
-            }
-        }
-        body.setFeaturesEmitShapeChanged(features);
-    });
+    body.insertFeatureAt(feature, index);
     checkBody(state, body, before);
     markChanged(state, body, [feature.id]);
 }

@@ -528,6 +528,7 @@ export default {
         "sketch.text.value": "Text",
         "sketch.text.height": "Cap height (mm)",
         "prompt.pickTextPosition": "Pick the first corner of the text frame",
+        "error.parametric.timelinePrefix{0}": "Cannot move feature: {0} would lose its timeline prefix",
         "error.sketch.emptyText": "Enter text with at least one visible character",
         "error.sketch.invalidTextSize": "Text height must be positive and placement must be finite",
         "error.sketch.unsupportedTextCharacter":

@@ -121,7 +121,9 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
             const result = local.isOk
                 ? Result.ok(transformGeometry(local.value, this.completeTransform()))
                 : local;
-            if (!inFeature) {
+            // A timeline edit can notify while its replacement states are still being built.
+            // Retry failures on the next read instead of retaining that transient state.
+            if (!inFeature && result.isOk) {
                 this._cached = result;
                 this._cachedVariables = this.expressionVariables();
             }
@@ -224,7 +226,9 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
             property === "shape" ||
             property === "transform" ||
             property === "geometry" ||
-            property === "definitionJson"
+            property === "definitionJson" ||
+            // Suppressed steps can change timeline positions while reusing the displayed shape.
+            property === "featuresJson"
         )
             this.notifyGeometryChanged();
     };
