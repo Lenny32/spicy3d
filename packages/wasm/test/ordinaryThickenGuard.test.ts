@@ -37,6 +37,8 @@ test("ordinary arc thicken rejects the rebuilt unchanged all-fillet box", () => 
     const result = factory.makeThickSolidByJoin(input, [top!], -3.75, "arc");
     expect(result.isOk).toBe(false);
     expect(result.error).toContain("input shape unchanged");
+    expect(result.error).toContain("tolerant recovery has not been verified for this solid");
+    expect(result.error).not.toContain("retry with tolerant mode");
     expect(input.volume()).toBeCloseTo(before, 6);
     expect(input.checkShape()).toBe(true);
 });

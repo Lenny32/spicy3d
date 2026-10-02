@@ -2,12 +2,19 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IFace, type IShape, type ISurface, ShapeTypes, type XYZ } from "@spicy3d/core";
+import { OccSphericalSurface, OccToroidalSurface } from "./surface";
 
 const SAMPLE_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const MAX_FACES = 64;
 const NATIVE_TRAP = /aborted|RuntimeError|unreachable|out of bounds|signature mismatch|crashed/i;
 
-type CurvatureRegion = { faceIndex: number; radius: number; point: XYZ; analytic: boolean };
+type CurvatureRegion = {
+    faceIndex: number;
+    radius: number;
+    point: XYZ;
+    analytic: boolean;
+    cavityClass: boolean;
+};
 
 /**
  * Behavior-only diagnosis using the existing D2/trimmed-domain bindings. This is a local
@@ -57,7 +64,12 @@ export function thickenFailureDiagnostic(
         ? "the free-form crease envelope is not supported by tolerant mode"
         : /tolerant/i.test(error)
           ? "this analytic collapse was not resolved by tolerant mode"
-          : "retry with tolerant mode for supported analytic solids";
+          : input.shapeType === ShapeTypes.solid &&
+              faces.length === 1 &&
+              openingFaces.length === 0 &&
+              region.cavityClass
+            ? "retry with tolerant mode for supported analytic solids (complete spheres and ring tori)"
+            : "tolerant recovery has not been verified for this solid; do not rely on it for this collapse";
     return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
 }
 
@@ -107,6 +119,10 @@ function sampleFace(face: IFace, faceIndex: number, thickness: number): Curvatur
                             radius,
                             point: d.point,
                             analytic: surface.isAnalytic?.() === true,
+                            cavityClass:
+                                surface instanceof OccSphericalSurface ||
+                                (surface instanceof OccToroidalSurface &&
+                                    surface.majorRadius > surface.minorRadius),
                         };
                     }
                 } catch (failure) {

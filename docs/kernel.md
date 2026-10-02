@@ -133,8 +133,10 @@ main-thread callers and retain the face-count guard; managed thicken features ne
 
 Join type is hidden when tolerant is enabled and ignored by the envelope implementation.
 Stored `joinType` values in v15 documents are retained for compatibility, including existing
-fixtures. Curvature-collapse diagnostics suggest tolerant mode only for measured analytic
-surface classes (plane/cylinder/cone/sphere/torus via GeomAdaptor); other limiting surfaces
+fixtures. Curvature-collapse diagnostics first classify the limiting surface as analytic
+(plane/cylinder/cone/sphere/torus via GeomAdaptor). Retry advice is narrower: only the tested
+complete single-face sphere/ring-torus cavity class, with no openings. Other analytic solids
+receive a statement that recovery is not verified for that solid; free-form limiting surfaces
 say the free-form crease envelope is unsupported. Every tolerant failure can retain the
 sampled face/region diagnostic, except cancellation/timeouts and native traps. General
 free-form rolling-ball envelopes remain unfinished.
