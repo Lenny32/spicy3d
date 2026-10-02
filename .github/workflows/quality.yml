@@ -1,10 +1,24 @@
 name: Code Quality
 
+# Runs only what the change can affect. Documentation-only pushes and empty commits trigger nothing
+# (the `paths` filter: no changed file left once the docs are excluded = no run); otherwise job
+# `changes` sorts the changed files into areas and each job runs only for its area. The weekly
+# schedule and manual runs check everything.
 on:
     push:
         branches: ["main", "develop"]
+        paths: &code-paths
+            - "**"
+            - "!**.md"
+            - "!docs/**"
+            - "!tickets/**"
+            - "!screenshots/**"
+            - "!LICENSE"
+            - "!NOTICE"
+            - "!.vscode/**"
     pull_request:
         branches: ["main", "develop"]
+        paths: *code-paths
     schedule:
         # Weekly scan so new advisories / rules surface even without commits.
         - cron: "0 4 * * 1"
@@ -18,8 +32,83 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # Which areas the push or pull request touches. Keep the doc patterns in step with `paths` above.
+    # Everything is checked when the diff cannot be computed (new branch, force push to an unknown
+    # commit), when this workflow itself changes, and on schedule / manual runs.
+    changes:
+        name: Detect changed areas
+        runs-on: ubuntu-latest
+        outputs:
+            ts: ${{ steps.areas.outputs.ts }}
+            cpp: ${{ steps.areas.outputs.cpp }}
+            deps: ${{ steps.areas.outputs.deps }}
+            code: ${{ steps.areas.outputs.code }}
+            codeql: ${{ steps.areas.outputs.codeql }}
+        steps:
+            # Full history without file contents: enough for `git diff --name-only`.
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+                  fetch-depth: 0
+                  filter: blob:none
+
+            - id: areas
+              env:
+                  EVENT: ${{ github.event_name }}
+                  BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+              run: |
+                  ts=false cpp=false deps=false actions=false code=false everything=false
+                  if [[ "$EVENT" != push && "$EVENT" != pull_request ]]; then
+                      everything=true
+                  elif [[ -z "$BASE" || "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2> /dev/null; then
+                      everything=true
+                  else
+                      # Pull request: HEAD is the merge commit, so this is the pull request's diff.
+                      while IFS= read -r file; do
+                          case "$file" in
+                              "" | *.md | docs/* | tickets/* | screenshots/* | LICENSE | NOTICE | .vscode/*) continue ;;
+                          esac
+                          code=true
+                          case "$file" in
+                              .github/workflows/quality.yml) everything=true ;;
+                              .github/*) actions=true ;;
+                              cpp/*) cpp=true ;;
+                              packages/* | plugins/* | scripts/* | public/* | *.ts | *.js | *.mjs | *.cjs | *.css | *.json) ts=true ;;
+                          esac
+                          case "$file" in
+                              package.json | package-lock.json | */package.json) deps=true ;;
+                          esac
+                      done <<< "$(git diff --name-only "$BASE...HEAD")"
+                  fi
+                  if [[ "$everything" == true ]]; then
+                      ts=true cpp=true deps=true actions=true code=true
+                  fi
+                  languages=()
+                  [[ "$ts" == true ]] && languages+=(javascript-typescript)
+                  [[ "$cpp" == true ]] && languages+=(c-cpp)
+                  [[ "$actions" == true ]] && languages+=(actions)
+                  codeql=$(jq -cn '$ARGS.positional' --args "${languages[@]}")
+                  {
+                      echo "ts=$ts"
+                      echo "cpp=$cpp"
+                      echo "deps=$deps"
+                      echo "code=$code"
+                      echo "codeql=$codeql"
+                  } >> "$GITHUB_OUTPUT"
+                  {
+                      echo "| Area | Checked |"
+                      echo "| --- | --- |"
+                      echo "| TypeScript / JS | $ts |"
+                      echo "| C++ | $cpp |"
+                      echo "| Dependencies | $deps |"
+                      echo "| Workflows | $actions |"
+                      echo "| Any code (Semgrep) | $code |"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
     lint:
         name: Lint & format (Biome, clang-format)
+        needs: changes
+        if: needs.changes.outputs.ts == 'true' || needs.changes.outputs.cpp == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,13 +123,17 @@ jobs:
             - run: npm ci
 
             - name: Biome
+              if: needs.changes.outputs.ts == 'true'
               run: npx biome ci --reporter=github .
 
             - name: clang-format (cpp/src)
+              if: needs.changes.outputs.cpp == 'true'
               run: npx clang-format --style=Webkit --sort-includes --dry-run -Werror cpp/src/*
 
     typecheck:
         name: Typecheck (tsc)
+        needs: changes
+        if: needs.changes.outputs.ts == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,6 +154,8 @@ jobs:
 
     semgrep:
         name: Semgrep (SAST)
+        needs: changes
+        if: needs.changes.outputs.code == 'true'
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -103,6 +198,8 @@ jobs:
 
     codeql:
         name: CodeQL (${{ matrix.language }})
+        needs: changes
+        if: needs.changes.outputs.codeql != '[]'
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -110,10 +207,8 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                include:
-                    - language: javascript-typescript
-                    - language: c-cpp
-                    - language: actions
+                # javascript-typescript, c-cpp and actions, each only when its sources changed.
+                language: ${{ fromJSON(needs.changes.outputs.codeql) }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -137,6 +232,9 @@ jobs:
 
     dependencies:
         name: Dependency audit
+        # New advisories without a dependency change surface in the weekly scheduled run.
+        needs: changes
+        if: needs.changes.outputs.deps == 'true'
         runs-on: ubuntu-latest
         permissions:
             contents: read
