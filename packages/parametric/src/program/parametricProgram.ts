@@ -376,8 +376,8 @@ export interface EdgesReport {
  * with a closed void), an open shell or face becomes a solid.
  */
 export interface ThickenOp {
-    tolerant?: boolean;
     op: "thicken";
+    tolerant?: boolean;
     id: string;
     name?: string;
     body: string;

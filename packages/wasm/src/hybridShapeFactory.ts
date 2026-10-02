@@ -40,6 +40,7 @@ import type {
 } from "./workerProtocol";
 
 const SELF_INTERSECTION_DEADLINE_MS = 30_000;
+const TOLERANT_THICKEN_DEADLINE_MS = 30_000;
 
 type ResidentReplica = {
     source: OccShape;
@@ -129,6 +130,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     const refused = refuseIntersectionJoin(
                         request.shape,
                         request.method === "makeThickSolidTolerant" ? "intersection" : request.joinType,
+                        request.method === "makeThickSolidTolerant",
                     );
                     if (refused) throw new Error(refused);
                     const faces = request.shape.findSubShapes(ShapeTypes.face);
@@ -189,7 +191,11 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                       terminateOnAbort: true,
                       deadlineMs: queryDeadline,
                   })
-                : worker.request("boundedReplica", args, abort.signal, { terminateOnAbort: true });
+                : worker.request("boundedReplica", args, abort.signal, {
+                      terminateOnAbort: true,
+                      deadlineMs:
+                          args.method === "makeThickSolidTolerant" ? TOLERANT_THICKEN_DEADLINE_MS : undefined,
+                  });
         const ready = pending.then((result) => {
             signal?.removeEventListener("abort", onAbort);
             if (!consumed) reply = result;
@@ -212,7 +218,9 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     const message =
                         request.method === "checkSelfIntersection" && answer.error.code === "timeout"
                             ? `Self-intersection check timed out after ${queryDeadline} ms (result unknown)`
-                            : answer.error.message;
+                            : request.method === "makeThickSolidTolerant" && answer.error.code === "timeout"
+                              ? `Tolerant thicken timed out after ${TOLERANT_THICKEN_DEADLINE_MS} ms`
+                              : answer.error.message;
                     if (
                         (answer.error.code === "invalid" || answer.error.code === "geometry") &&
                         (request.method === "makeThickSolidBySimple" ||

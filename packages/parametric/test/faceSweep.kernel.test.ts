@@ -319,3 +319,28 @@ describe("associative groove/rib on a face", () => {
         }
     });
 });
+
+test.each([
+    ["validity", "Shape is invalid"],
+    ["volume", "Shape has invalid volume"],
+] as const)("face sweep preserves the %s gate diagnostic", (gate, expected) => {
+    const { document, body, feature } = fixture();
+    const original = shapeFactory.faceSweepTracked.bind(shapeFactory);
+    const build = rs.spyOn(shapeFactory, "faceSweepTracked").mockImplementation((...args) => {
+        const result = original(...args);
+        if (result.isOk) {
+            if (gate === "validity") rs.spyOn(result.value.shape, "checkShape").mockReturnValue(false);
+            else rs.spyOn(result.value.shape, "volume").mockReturnValue(NaN);
+        }
+        return result;
+    });
+    try {
+        body.setFeaturesEmitShapeChanged([body.features[0], { ...feature, roundCorner: true }]);
+        expect(build).toHaveBeenCalledOnce();
+        expect(body.featureItems()[1].error).toContain(expected);
+        expect(body.featureItems()[1].error).not.toContain("intersects itself");
+    } finally {
+        rs.restoreAllMocks();
+        document.dispose();
+    }
+});

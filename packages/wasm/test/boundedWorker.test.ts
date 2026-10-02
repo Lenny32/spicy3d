@@ -830,3 +830,86 @@ test("bounded tolerant thicken returns the filled sphere envelope without a main
         hybrid.dispose();
     }
 });
+
+test("tolerant thicken times out as a build error and terminates the worker", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const input = keep(createSphere(new ShapeFactory(), undefined, 2));
+    try {
+        const pending = hybrid.shapeOperation({
+            method: "makeThickSolidTolerant",
+            shape: input,
+            closingFaces: [],
+            thickness: -3.75,
+        });
+        await rs.advanceTimersByTimeAsync(30_000);
+        await pending.ready;
+        expect(pending.take().error).toBe("Tolerant thicken timed out after 30000 ms");
+        expect(pending.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+        expect(input.volume()).toBeCloseTo((4 / 3) * Math.PI * 8, 6);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("a superseding rebuild terminates tolerant feature work before caching it", async () => {
+    rs.useFakeTimers();
+    const transports: HungTransport[] = [];
+    const hybrid = new HybridShapeFactory(() => {
+        const transport = new HungTransport();
+        transports.push(transport);
+        return new KernelWorkerClient(transport);
+    });
+    const input = keep(createSphere(new ShapeFactory(), undefined, 2));
+    const document = new TestDocument({ application: createMockApplication() });
+    const original = featureHandler("sweep");
+    if (!original) throw new Error("Missing sweep handler");
+    try {
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        registerFeature("sweep", {
+            ...original,
+            nodeIds: () => [],
+            cacheKey: () => undefined,
+            evaluate: () => Result.ok(input.clone()),
+        });
+        const node = new ParametricBodyNode({
+            document,
+            featuresJson: JSON.stringify([
+                {
+                    id: "source",
+                    type: "sweep",
+                    section: { sketchId: "source-sketch", profiles: [] },
+                    path: { nodeId: "source-path", edges: [] },
+                },
+                { id: "wall", type: "thicken", thickness: -3.75, tolerant: true },
+            ]),
+        });
+        document.modelManager.addNode(node);
+        void node.shape;
+        await rs.advanceTimersByTimeAsync(100);
+        expect(node.featureItems()[0].error).toBeUndefined();
+        expect(node.featureItems()[1].error).toBeUndefined();
+        expect(transports).toHaveLength(1);
+        expect(transports[0].messages[0]).toMatchObject({
+            operation: "boundedReplica",
+            args: { method: "makeThickSolidTolerant" },
+        });
+        expect(DocumentRebuilds.pending(document)).toBe(true);
+        node.setFeatureParameter("wall", "thickness", -4);
+        await rs.advanceTimersByTimeAsync(100);
+        expect(transports[0].terminated).toBe(1);
+        expect(transports).toHaveLength(2);
+        await rs.advanceTimersByTimeAsync(30_000);
+        await DocumentRebuilds.settled(document);
+        expect(node.featureItems()[1].error).toContain("Tolerant thicken timed out after 30000 ms");
+        expect(node.featureItems()[1].warning).toBeUndefined();
+        expect(transports[1].terminated).toBe(1);
+    } finally {
+        document.dispose();
+        hybrid.dispose();
+        registerFeature("sweep", original);
+        rs.unstubAllGlobals();
+    }
+});

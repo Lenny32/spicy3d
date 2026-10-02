@@ -307,7 +307,8 @@ export interface IShapeFactory {
     /**
      * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
      * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
-     * Deferred validation requires the bounded worker; older kernels keep their internal analyzer.
+     * Deferred validation skips the internal analyzer: managed async rebuilds use a bounded worker,
+     * synchronous evaluation reports a skipped-check warning. Older kernels keep their internal analyzer.
      */
     loftGuidedTracked?(
         sections: IWire[],

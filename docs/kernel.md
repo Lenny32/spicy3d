@@ -96,22 +96,47 @@ material rather than a bare offset. With no option, old documents retain their e
 Closed full spheres and ring tori with inward thickness at least their sphere/tube radius
 have a proven empty cavity: the envelope is a copy of the entire input solid. Surface type,
 face count, area and volume identify the complete analytic shape; trimmed patches do not
-qualify. Smaller walls and other single solids use OCCT all-parallel intersection trimming
-with intersection joins and internal-edge removal, followed by the wall boolean, ShapeFix,
-UnifySameDomain, exact BRepCheck and finite positive component-volume checks. Inward material
-cannot exceed the source volume. The normal many-face intersection-join guard still applies.
+qualify. Otherwise tolerant mode first tries ordinary arc thickening and preserves a valid,
+changed wall, including circular tapered lofts. Only after ordinary failure does it try
+OCCT all-parallel intersection trimming with intersection joins and internal-edge removal,
+followed by the wall boolean, ShapeFix, UnifySameDomain and exact BRepCheck. Before repair,
+equal source/result volume and area reject rebuilt copies of the input. Inward opened walls
+must have strictly less volume than the source. Envelope recovery checks an interior point of
+each opening with `BRepClass3d_SolidClassifier`: it must be outside the result. Ordinary arc
+results retain their existing opening semantics: a sufficiently thick tapered tip can fill
+its small opening (the r20→r3, height 20 mm loft at −3.75 mm is one such case). A universal
+opening-point rejection would reject that existing 7751 mm³ wall, so it applies only to envelope
+recovery. The normal many-face trimming limit still applies, with a tolerant-specific message.
 
-This is a limited envelope mode, **not a general solution for scanned free-form creases**.
-Confirmed classes are full spheres, ring tori at cavity collapse, and opened planar box solids.
-Open skins, multiple solids, pipe mode and unrecognized cavity collapse remain errors; other
-solids may fail OCCT trimming or the validity gates. OCCT 8.0.1's local
+This is a limited envelope mode, **not a general solution for free-form creases**.
+Tested supported classes are full spheres, ring tori at cavity collapse, plain boxes, and
+prismatic solids with vertical fillets smaller than the wall. Analytic rolling-ball creases
+are the supported scope; boxes filleted on every edge currently fail clearly at the tested
+−3.75 mm wall thickness (radii 1, 2, 3.5 and 5 mm). Free-form crease recovery on B-spline lofts
+or extrusions is refused, while an ordinary offset that succeeds is still usable. Open skins,
+multiple solids, pipe mode and unrecognized cavity collapse remain errors. OCCT 8.0.1's local
 `BRepOffsetAPI_MakeThickSolid.hxx` documents SelfInter removal as unimplemented and all-parallel
 intersection as incomplete; enabling SelfInter would not provide the requested guarantee.
-The new binding is feature-detected; older binaries refuse the opt-in rather than changing
-its meaning. MCP `thicken { tolerant: true }` and the creation/edit panels expose the option.
-The generated `run_program` catalog also exposes `makeThickSolidTolerant` as an edit operation,
-using the bounded replica worker with no synchronous fallback. Curvature-collapse diagnostics
-suggest retrying tolerant mode for supported solids. General
+The binding is feature-detected; older binaries refuse the opt-in rather than changing its meaning.
+
+Tolerant thicken features use `prepareAsync` and the bounded replica worker on top-level
+rebuilds, including document open and undo/redo. A newer rebuild cancels and terminates the
+previous operation. The fixed 30-second deadline is a **build error** (“Tolerant thicken timed
+out after 30000 ms”); there is no result to accept with a warning and no synchronous fallback.
+Synchronous feature previews, explicit synchronous program scopes, nested evaluations and
+headless paths that cannot await refuse with “Tolerant thicken is unavailable in synchronous
+evaluation; rebuild with the bounded geometry worker”. Async headless evaluation can await
+the scheduled operation. MCP `thicken { tolerant: true }` in a synchronous feature program
+receives this same clear refusal; the generated `run_program` factory edit operation
+`makeThickSolidTolerant` uses the bounded worker. Direct synchronous factory calls remain
+main-thread callers and retain the face-count guard; managed thicken features never call them.
+
+Join type is hidden when tolerant is enabled and ignored by the envelope implementation.
+Stored `joinType` values in v15 documents are retained for compatibility, including existing
+fixtures. Curvature-collapse diagnostics suggest tolerant mode only for measured analytic
+surface classes (plane/cylinder/cone/sphere/torus via GeomAdaptor); other limiting surfaces
+say the free-form crease envelope is unsupported. Every tolerant failure can retain the
+sampled face/region diagnostic, except cancellation/timeouts and native traps. General
 free-form rolling-ball envelopes remain unfinished.
 
 ## Dead-kernel state
@@ -200,7 +225,9 @@ again after input changes. This cache lasts only for the session (#119/#120 poli
 A newer rebuild, job cancellation, undo/redo, or disposal cancels the pending checks and
 releases the unaccepted output. A synchronous scheduler drain cannot fall back to the
 analyzer. Document open and headless merge evaluation can await these scheduled rebuilds.
-No validation state or shape is stored in the document.
+No validation state or shape is stored in the document. Existing v13 guided-loft documents
+now show “Self-intersection check skipped in synchronous evaluation” on synchronous open
+paths; an asynchronous rebuild performs the bounded check.
 
 run_program feature ops evaluate synchronously (cheap gates + skip warning); editSketch-triggered
 rebuilds can await worker validation.

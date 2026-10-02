@@ -3,10 +3,12 @@
 
 import { type IDisposable, type IShape, Line, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
 import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
-import { evaluateFeature } from "../../parametric/src/features/feature";
+import { evaluateFeature, featureHandler } from "../../parametric/src/features/feature";
 import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
 import { ShapeFactory } from "../src/factory";
+import { HybridShapeFactory } from "../src/hybridShapeFactory";
 import { createBox, createSphere, unwrapOk } from "./helpers";
+import { NativeWorkerTransport } from "./workerHarness";
 import "./setup";
 import "../../parametric/src/features/thicken";
 
@@ -79,20 +81,30 @@ test("open skins and excessive unrecognized collapse remain errors", () => {
     expect(box.volume()).toBeCloseTo(1000, 6);
 });
 
-test("feature uses envelope as material directly and older bindings refuse the opt-in", () => {
+test("feature refuses synchronous evaluation and prepares a bounded envelope", async () => {
     const document = keep(new TestDocument({ application: createMockApplication() }));
     const host = keep(new ParametricBodyNode({ document, featuresJson: "[]" }));
     const input = keep(createSphere(factory, undefined, 2));
-    rs.stubGlobal("shapeFactory", factory);
+    const hybrid = keep(new HybridShapeFactory(() => new NativeWorkerTransport().client));
+    rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
     const feature = { id: "wall", type: "thicken" as const, thickness: -3.75, tolerant: true };
-    const result = keep(unwrapOk(evaluateFeature(feature, { document, host, input, scope: new Map() })));
+    const context = { document, host, input, scope: new Map() };
+    expect(evaluateFeature(feature, context).error).toContain("unavailable in synchronous evaluation");
+    const prepare = featureHandler("thicken")?.prepareAsync;
+    if (!prepare) throw new Error("Missing thicken prepareAsync");
+    const pending = prepare(feature, context);
+    if (!pending) throw new Error("Missing bounded thicken");
+    expect(pending.canFallback).toBe(false);
+    await pending.ready;
+    const result = keep(unwrapOk(pending.take()));
     expect(result.volume()).toBeCloseTo(input.volume(), 6);
     const binding = wasm.ShapeFactory.makeThickSolidTolerant;
     try {
         wasm.ShapeFactory.makeThickSolidTolerant = undefined as never;
-        expect(evaluateFeature(feature, { document, host, input, scope: new Map() }).error).toContain(
-            "not available in this kernel build",
-        );
+        const unavailable = prepare(feature, context);
+        if (!unavailable) throw new Error("Missing bounded thicken");
+        await unavailable.ready;
+        expect(unavailable.take().error).toContain("not available in this kernel build");
         const ordinary = evaluateFeature(
             { ...feature, tolerant: undefined, thickness: -1 },
             { document, host, input, scope: new Map() },
@@ -170,4 +182,39 @@ test.each([1, 2, 3.5, 5])("all-edge fillet radius %s never yields the unchanged 
     expect(result.isOk).toBe(false);
     expect(result.error).toContain("offset returned the input unchanged");
     expect(input.checkShape()).toBe(true);
+});
+
+test("vertical small fillets produce a real opened prismatic wall", () => {
+    const box = keep(createBox(factory, 30, 30, 20));
+    const edges = box.findSubShapes(ShapeTypes.edge);
+    owned.push(...edges);
+    const vertical = edges.flatMap((edge, index) => {
+        const bounds = edge.boundingBox();
+        return bounds.max.z - bounds.min.z > 19.9 ? [index] : [];
+    });
+    expect(vertical).toHaveLength(4);
+    const input = keep(unwrapOk(factory.fillet(box, vertical, 1)));
+    const wall = keep(unwrapOk(factory.makeThickSolidTolerant(input, [topOpening(input)], -3.75)));
+    expect(wall.checkShape()).toBe(true);
+    expect(wall.volume()).toBeGreaterThan(0);
+    expect(wall.volume()).toBeLessThan(input.volume() * 0.99);
+});
+
+test("closed all-fillet collapse also refuses the unchanged input", () => {
+    const box = keep(createBox(factory, 30, 30, 20));
+    const edges = box.findSubShapes(ShapeTypes.edge);
+    owned.push(...edges);
+    const input = keep(
+        unwrapOk(
+            factory.fillet(
+                box,
+                edges.map((_, index) => index),
+                1,
+            ),
+        ),
+    );
+    const result = factory.makeThickSolidTolerant(input, [], -3.75);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("Tolerant envelope wall boolean failed");
+    expect(result.error).toContain("input face index");
 });

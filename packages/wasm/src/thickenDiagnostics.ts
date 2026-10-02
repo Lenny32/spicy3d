@@ -49,13 +49,15 @@ export function thickenFailureDiagnostic(
     const sampled = faces.length > MAX_FACES ? ` (sampled the first 64 of ${faces.length} faces)` : "";
     if (!region) {
         // Keep validation errors verbatim; only an uninformative kernel offset status needs a hint.
-        if (!/BRepOffset_|^Failed to create thick solid$/.test(error)) return error;
+        if (!/BRepOffset_|^Failed to create thick solid$|Tolerant envelope/.test(error)) return error;
         return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled}; reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
     }
     const { point, radius, faceIndex } = region;
-    const remedy = region.analytic
-        ? "retry with tolerant mode for supported analytic solids"
-        : "the free-form crease envelope is not supported by tolerant mode";
+    const remedy = !region.analytic
+        ? "the free-form crease envelope is not supported by tolerant mode"
+        : /tolerant/i.test(error)
+          ? "this analytic collapse was not resolved by tolerant mode"
+          : "retry with tolerant mode for supported analytic solids";
     return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
 }
 

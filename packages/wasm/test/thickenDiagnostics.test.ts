@@ -154,5 +154,6 @@ test.each([
     expect(message).toContain(error);
     expect(message).toContain("input face index 0 near (");
     expect(message).toContain("curvature radius 2 mm");
-    expect(message).toContain("retry with tolerant mode for supported analytic solids");
+    expect(message).toContain("this analytic collapse was not resolved by tolerant mode");
+    expect(message).not.toContain("retry with tolerant mode");
 });

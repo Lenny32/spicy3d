@@ -460,6 +460,7 @@ export class ParametricBodyNode
                     !feature.suppressed &&
                     (feature.type === "sweep" ||
                         feature.type === "faceSweep" ||
+                        (feature.type === "thicken" && feature.tolerant === true) ||
                         (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
             )
         )
@@ -881,6 +882,7 @@ export class ParametricBodyNode
                                 feature.guided !== undefined &&
                                 shapeFactory.supportsDeferredGuidedLoft)) &&
                             shapeFactory.boundedOperations?.shapeQuery !== undefined) ||
+                            (feature.type === "thicken" && feature.tolerant === true) ||
                             (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
                 ));
         const revision = DocumentRebuilds.revision(this.document);
@@ -1226,6 +1228,7 @@ export class ParametricBodyNode
                                         (!run.synchronous ||
                                             feature.type === "sweep" ||
                                             feature.type === "faceSweep" ||
+                                            (feature.type === "thicken" && feature.tolerant === true) ||
                                             (feature.type === "fillet" &&
                                                 feature.cornerSetbacks !== undefined)),
                                     features.slice(index + 1, stop).every((feature) => feature.suppressed),

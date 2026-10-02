@@ -58,7 +58,10 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("thickness", value, () => this.refreshPreview());
     }
 
-    @property("option.command.joinType", { combobox: Combobox.from([...THICKEN_JOIN_TYPES]) })
+    @property("option.command.joinType", {
+        combobox: Combobox.from([...THICKEN_JOIN_TYPES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get joinType(): I18nKeys {
         return this.getPrivateValue("joinType", "option.command.joinType.arc");
     }

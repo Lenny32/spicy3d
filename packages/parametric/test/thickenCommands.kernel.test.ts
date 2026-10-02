@@ -25,6 +25,8 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory } from "../../wasm/src/hybridShapeFactory";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { ThickenFeatureCommand } from "../src/commands/thickenCommand";
 import type { ThickenEditCommand } from "../src/commands/thickenEditCommand";
 import type { ThickenFeatureData } from "../src/features/feature";
@@ -45,6 +47,13 @@ beforeAll(async () => {
         writable: true,
         configurable: true,
     });
+});
+
+let testHybrid: HybridShapeFactory | undefined;
+afterEach(() => {
+    testHybrid?.dispose();
+    testHybrid = undefined;
+    rs.unstubAllGlobals();
 });
 
 const square: SketchData = {
@@ -172,6 +181,9 @@ describe("thicken command (real kernel)", () => {
 
     test("tolerant checkbox persists the envelope option in one undo step", async () => {
         const { app, doc, body } = setup();
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        testHybrid = hybrid;
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
         const command = new ThickenFeatureCommand();
         pickFaces(doc, command, body, [topFacePick(body)], () => {
             command.thickness = -2;
@@ -179,6 +191,7 @@ describe("thicken command (real kernel)", () => {
         });
         await command.execute(app);
         expect(body.features[1]).toMatchObject({ type: "thicken", thickness: -2, tolerant: true });
+        await body.whenRebuilt();
         expect(body.shape.isOk).toBe(true);
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 8, 3);
         doc.history.undo();
@@ -309,11 +322,14 @@ describe("thicken edit session (real kernel)", () => {
 
     test("editing can enable and remove the stored tolerant option", async () => {
         const { app, body } = thickened();
+        testHybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, testHybrid));
         await editWith(app, body, (session) => {
             session.tolerant = true;
             session.confirm();
         });
         expect(body.features[1]).toMatchObject({ tolerant: true, thickness: -2 });
+        await body.whenRebuilt();
         expect(body.shape.isOk).toBe(true);
         await editWith(app, body, (session) => {
             expect(session.tolerant).toBe(true);

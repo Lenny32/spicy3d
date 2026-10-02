@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type IAsyncShapeOperation,
     type IEdge,
     type IFace,
     type IShape,
@@ -75,7 +76,59 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
             ? feature
             : { ...feature, openFaces: resolvedProfiles },
 
+    prepareAsync(feature, context) {
+        if (!feature.tolerant) return undefined;
+        const failed = (message: string): IAsyncShapeOperation<IShape> => ({
+            ready: Promise.resolve(),
+            canFallback: false,
+            cancel: () => {},
+            take: () => Result.err(message),
+        });
+        const input = context.input;
+        if (!input || input.isNull()) return failed("Thicken requires a preceding feature");
+        const thickness = resolveThickness(feature, context);
+        if (!thickness.isOk) return failed(thickness.error);
+        if (feature.mode === "pipe") return failed("Tolerant thicken requires skin mode");
+        const bounded = shapeFactory.boundedOperations;
+        if (!bounded)
+            return failed("Tolerant thicken requires the bounded geometry worker; it is unavailable");
+        const faces =
+            (feature.openFaces ?? []).length > 0
+                ? matchOpenFaces(feature, context, input)
+                : Result.ok<IFace[]>([]);
+        if (!faces.isOk) return failed(faces.error);
+        let pending: IAsyncShapeOperation<IShape>;
+        try {
+            pending = bounded.shapeOperation({
+                method: "makeThickSolidTolerant",
+                shape: input,
+                closingFaces: faces.value,
+                thickness: thickness.value,
+            });
+        } finally {
+            // Preparation captures replicas synchronously; these handles need not cross the await.
+            for (const face of faces.value) face.dispose();
+        }
+        return {
+            ready: pending.ready,
+            canFallback: false,
+            cancel: () => pending.cancel(),
+            take: () => {
+                const result = pending.take();
+                if (!result.isOk) return result;
+                const oriented = rightSideOut(result.value);
+                if (oriented.isOk && context.tracking)
+                    trackThicken(feature.id, input, oriented.value, context.tracking);
+                return oriented;
+            },
+        };
+    },
+
     evaluate(feature, context): Result<IShape> {
+        if (feature.tolerant)
+            return Result.err(
+                "Tolerant thicken is unavailable in synchronous evaluation; rebuild with the bounded geometry worker",
+            );
         const input = context.input;
         if (input === undefined || input.isNull()) return Result.err("Thicken requires a preceding feature");
         const thickness = resolveThickness(feature, context);
@@ -121,14 +174,6 @@ function thickenShape(
     thickness: number,
 ): Result<IShape> {
     const openFaces = feature.openFaces ?? [];
-    if (feature.tolerant) {
-        if (feature.mode === "pipe") return Result.err("Tolerant thicken requires skin mode");
-        if (!shapeFactory.makeThickSolidTolerant)
-            return Result.err("Tolerant thicken is not available in this kernel build");
-        const faces = openFaces.length > 0 ? matchOpenFaces(feature, context, input) : Result.ok([]);
-        if (!faces.isOk) return Result.err(faces.error);
-        return shapeFactory.makeThickSolidTolerant(input, faces.value, thickness);
-    }
     if (input.findSubShapes(ShapeTypes.solid).length === 0) {
         if (input.findSubShapes(ShapeTypes.face).length === 0) {
             return Result.err("Thicken needs faces or a solid");
