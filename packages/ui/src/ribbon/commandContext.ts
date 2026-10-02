@@ -51,6 +51,7 @@ import {
 import style from "./commandContext.module.css";
 
 export class CommandContext extends HTMLElement implements IDisposable {
+    private static nextControlId = 0;
     private readonly propMap: Map<string | number | symbol, [Property, HTMLElement][]> = new Map();
     /** Controls that redraw themselves when their property changes (node lists). */
     private readonly redraws: Map<string | number | symbol, () => void> = new Map();
@@ -62,7 +63,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
     constructor(readonly command: ICommand) {
         super();
         this.className = style.panel;
-        this.append(this.container);
+        this.setAttribute("role", "region");
         this.render();
     }
 
@@ -70,26 +71,36 @@ export class CommandContext extends HTMLElement implements IDisposable {
         const data = CommandStore.getComandData(this.command);
         const icon = createIcon(data!.icon);
         icon.classList.add(style.icon);
-        this.container.append(
-            div(
-                { className: style.command },
-                icon,
-                label({ className: style.title, textContent: new Localize(`command.${data!.key}`) }),
-            ),
-        );
+        const title = label({ className: style.title, textContent: new Localize(`command.${data!.key}`) });
+        title.id = `command-title-${CommandContext.nextControlId++}`;
+        this.setAttribute("aria-labelledby", title.id);
+        const header = div({ className: style.command }, icon, title);
+        if (isCancelableCommand(this.command)) {
+            const close = button(
+                {
+                    type: "button",
+                    className: style.closeButton,
+                    title: I18n.translate("common.cancel"),
+                    onclick: () => (this.command as ICancelableCommand).cancel(),
+                },
+                svg({ icon: "icon-cancel" }),
+            );
+            close.setAttribute("aria-label", I18n.translate("common.cancel"));
+            header.append(close);
+        }
+        this.append(header, this.container);
         this.initContext();
         if (isCancelableCommand(this.command)) {
             this.closeIcon = div(
                 { className: style.cancelButton },
-                div(
-                    {
-                        className: style.selectionButton,
-                        onclick: () => (this.command as CancelableCommand).cancel(),
-                    },
-                    svg({ icon: "icon-cancel" }),
-                ),
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton}`,
+                    textContent: new Localize("common.cancel"),
+                    onclick: () => (this.command as ICancelableCommand).cancel(),
+                }),
             );
-            this.container.append(this.closeIcon);
+            this.append(this.closeIcon);
         }
     }
 
@@ -100,24 +111,35 @@ export class CommandContext extends HTMLElement implements IDisposable {
         this.selectionControlContainer = div(
             { className: style.selectionControl },
             div(
-                { className: style.selectionInfo },
-                this.countDom(),
-                span({
-                    className: style.selectionCountLabel,
-                    textContent: new Localize("prompt.selectedCount"),
+                { className: style.selectionSummary },
+                div(
+                    { className: style.selectionInfo },
+                    span({
+                        className: style.selectionCountLabel,
+                        textContent: new Localize("prompt.selectedCount"),
+                    }),
+                    this.countDom(),
+                ),
+                ...(options?.nodes ? [this.selectedNodesDom()] : []),
+            ),
+            this.container,
+            div(
+                { className: style.footer },
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton}`,
+                    textContent: new Localize("common.cancel"),
+                    onclick: () => controller.cancel(),
+                }),
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton} ${style.primaryButton}`,
+                    textContent: new Localize("common.ok"),
+                    onclick: () => controller.success(),
                 }),
             ),
-            ...(options?.nodes ? [this.selectedNodesDom()] : []),
-            div(
-                { className: style.selectionButton, onclick: () => controller.success() },
-                svg({ icon: "icon-confirm" }),
-            ),
-            div(
-                { className: style.selectionButton, onclick: () => controller.cancel() },
-                svg({ icon: "icon-cancel" }),
-            ),
         );
-        this.container.append(this.selectionControlContainer);
+        this.insertBefore(this.selectionControlContainer, this.closeIcon ?? null);
     };
 
     private countDom() {
@@ -160,6 +182,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
     }
 
     private readonly clearSelectionControl = () => {
+        if (this.selectionControlContainer) {
+            this.insertBefore(this.container, this.selectionControlContainer);
+        }
         this.selectionControlContainer?.remove();
         this.selectionControlContainer = undefined;
         if (this.closeIcon) this.closeIcon.style.display = "";
@@ -210,6 +235,13 @@ export class CommandContext extends HTMLElement implements IDisposable {
 
             const group = this.findGroup(groupMap, property);
             const item = this.createItem(this.command, property);
+            item.classList.add(style.row);
+            const caption = item.querySelector("label");
+            const control = item.querySelector<HTMLInputElement | HTMLSelectElement>("input, select");
+            if (caption && control) {
+                control.id = `command-field-${CommandContext.nextControlId++}`;
+                caption.htmlFor = control.id;
+            }
             this.setVisible(item, property);
             this.cacheDependencies(item, property);
             group.append(item);
@@ -235,7 +267,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
                 }
             }
         }
-        control.style.display = visible ? "inherit" : "none";
+        control.style.display = visible ? "" : "none";
     }
 
     private findGroup(groupMap: Map<I18nKeys, HTMLDivElement>, prop: Property) {
@@ -441,8 +473,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
                 ...(fixed.has(node)
                     ? []
                     : [
-                          div(
+                          button(
                               {
+                                  type: "button",
                                   className: style.nodeRemove,
                                   title: I18n.translate("option.command.nodeList.remove"),
                                   onclick: (e: MouseEvent) => {

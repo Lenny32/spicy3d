@@ -719,6 +719,7 @@ export const I18N_KEYS = [
     "common.clone",
     "common.color",
     "common.confirm",
+    "common.ok",
     "common.count",
     "common.delete",
     "common.dir",

@@ -24,6 +24,11 @@ rs.mock("../src/ribbon/commandContext.module.css", () => ({
     command: "cc-command",
     icon: "cc-icon",
     title: "cc-title",
+    closeButton: "cc-close-button",
+    row: "cc-row",
+    footer: "cc-footer",
+    primaryButton: "cc-primary-button",
+    selectionSummary: "cc-selection-summary",
     cancelButton: "cc-cancel",
     selectionButton: "cc-selection-button",
     selectionControl: "cc-selection-control",
@@ -282,6 +287,30 @@ describe("CommandContext", () => {
     }
 
     describe("header", () => {
+        test("names the panel and associates every editable field with its label", () => {
+            const ctx = track(new CommandContext(new TestCommand()));
+            const title = mustQuery(ctx, ".cc-title");
+            expect(ctx.getAttribute("role")).toBe("region");
+            expect(ctx.getAttribute("aria-labelledby")).toBe(title.id);
+            const controls = ctx.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
+            expect(controls.length).toBe(6);
+            expect(new Set([...controls].map((control) => control.id)).size).toBe(6);
+            for (const control of controls) {
+                expect(control.id).not.toBe("");
+                expect(mustQuery<HTMLLabelElement>(control.parentElement!, "label").htmlFor).toBe(control.id);
+            }
+        });
+
+        test("the header close button cancels the active command", () => {
+            const command = new CancelableTestCommand();
+            const ctx = track(new CommandContext(command));
+            const close = mustQuery<HTMLButtonElement>(ctx, ".cc-close-button");
+            expect(close.type).toBe("button");
+            expect(close.getAttribute("aria-label")).toBe(I18n.translate("common.cancel"));
+            (close as unknown as { _onclick: () => void })._onclick();
+            expect(command.cancel).toHaveBeenCalledTimes(1);
+        });
+
         test("should render command icon and title", () => {
             const ctx = track(new CommandContext(new TestCommand()));
             expect(ctx.className).toBe("cc-panel");
@@ -536,7 +565,7 @@ describe("CommandContext", () => {
             expect(detailControl.style.display).toBe("none");
 
             command.mode = "b";
-            expect(detailControl.style.display).toBe("inherit");
+            expect(detailControl.style.display).toBe("");
 
             command.mode = "a";
             expect(detailControl.style.display).toBe("none");
@@ -555,6 +584,28 @@ describe("CommandContext", () => {
     });
 
     describe("selection control", () => {
+        test("keeps editable fields and their values across selection steps", () => {
+            const command = new TestCommand();
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+            const input = findInput(ctx, "text");
+            input.value = "7";
+            const controller = { success: rs.fn(() => {}), cancel: rs.fn(() => {}) };
+
+            PubSub.default.pub("showSelectionControl", controller as unknown as AsyncController);
+            expect(findInput(ctx, "text")).toBe(input);
+            expect(input.value).toBe("7");
+            (input as unknown as { _onblur: (e: { target: HTMLInputElement }) => void })._onblur({
+                target: input,
+            });
+            expect(command.size).toBe(7);
+
+            PubSub.default.pub("clearSelectionControl");
+            expect(findInput(ctx, "text")).toBe(input);
+            expect(mustQuery(ctx, ".cc-container").parentElement).toBe(ctx);
+            expect(input.value).toBe("7");
+        });
+
         test("should show selection control on pubsub event and call controller on confirm", () => {
             const command = new CancelableTestCommand();
             const ctx = track(new CommandContext(command));
@@ -571,7 +622,9 @@ describe("CommandContext", () => {
 
             const buttons = control!.querySelectorAll(".cc-selection-button");
             expect(buttons.length).toBe(2);
-            (buttons[0] as unknown as { _onclick: () => void })._onclick();
+            expect(buttons[1].tagName).toBe("BUTTON");
+            expect((buttons[1] as HTMLButtonElement).type).toBe("button");
+            (buttons[1] as unknown as { _onclick: () => void })._onclick();
             expect(controller.success).toHaveBeenCalledTimes(1);
 
             PubSub.default.pub("clearSelectionControl");
@@ -589,7 +642,8 @@ describe("CommandContext", () => {
 
             const buttons = ctx.querySelectorAll(".cc-selection-control .cc-selection-button");
             expect(buttons.length).toBe(2);
-            (buttons[1] as unknown as { _onclick: () => void })._onclick();
+            expect(buttons[0].tagName).toBe("BUTTON");
+            (buttons[0] as unknown as { _onclick: () => void })._onclick();
             expect(controller.cancel).toHaveBeenCalledTimes(1);
 
             PubSub.default.pub("clearSelectionControl");
@@ -678,6 +732,7 @@ describe("CommandContext", () => {
             clickWithEvent(control.querySelectorAll(".cc-node-remove")[0]);
             expect(command.deselect.mock.calls).toEqual([[[left], true]]);
             expect(listed()).toEqual(["Right"]);
+            expect(mustQuery(control, ".cc-selection-count").textContent).toBe("1");
             // Confirm and cancel stay the only selection buttons.
             expect(control.querySelectorAll(".cc-selection-button").length).toBe(2);
 

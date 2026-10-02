@@ -119,7 +119,7 @@
     position: absolute;
     height: 100%;
     top: 0;
-    right: 16px;
+    right: calc(16px + var(--viewport-navigation-offset, 0px));
     z-index: 999;
     pointer-events: none;
     padding-top: 160px;
@@ -169,6 +169,12 @@
             border-radius: 7.5px;
             color: inherit;
         }
+    }
+}
+
+@container (max-width: 480px) {
+    .viewControls {
+        display: none;
     }
 }
 

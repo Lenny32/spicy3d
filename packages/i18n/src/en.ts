@@ -713,6 +713,7 @@ export default {
         "common.clone": "Clone",
         "common.color": "Color",
         "common.confirm": "Confirm",
+        "common.ok": "OK",
         "common.count": "Count",
         "common.delete": "Delete",
         "common.dir": "Direction",

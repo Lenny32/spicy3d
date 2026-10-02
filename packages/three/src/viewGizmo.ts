@@ -68,7 +68,7 @@ export class ViewGizmo extends HTMLElement implements IViewGizmo {
         this.style.zIndex = "999";
         this.style.position = "absolute";
         this.style.top = "20px";
-        this.style.right = "20px";
+        this.style.right = "calc(20px + var(--viewport-navigation-offset, 0px))";
         this.style.borderRadius = "100%";
         this.style.cursor = "pointer";
         this.style.userSelect = "none";

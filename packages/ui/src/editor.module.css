@@ -47,6 +47,7 @@
 
     & .viewportContainer {
         position: relative;
+        container-type: size;
         background-color: var(--viewport-background-color);
         flex: 1 1 auto;
         height: 0;
@@ -54,6 +55,10 @@
         .viewport {
             height: 100%;
             position: relative;
+        }
+
+        &:has(command-context) {
+            --viewport-navigation-offset: 332px;
         }
     }
 
@@ -82,6 +87,12 @@
         background-color: var(--background-color);
         overflow: hidden;
         position: relative;
+    }
+}
+
+@container (max-width: 480px) {
+    .viewportContainer:has(command-context) view-gizmo {
+        display: none;
     }
 }
 
