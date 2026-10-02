@@ -243,15 +243,22 @@ export class SketchSolver implements ExternalEntityHost {
     /** Generated targets are leaves: detach the relation before editing/constraining one. */
     validateOffsetSource(id: number): void {
         if (
-            this.isFixed(id) ||
             [...this.constraints.values()].some(
                 (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === id,
             )
         )
             throw new Error("Associative offset chains are not supported; detach the existing offset first");
+        if (this.isFixed(id)) throw new Error("The source must be an editable sketch curve");
         const entity = this.entity(id);
         if (!entity || !["line", "arc", "circle", "bspline"].includes(entity.type))
             throw new Error("Associative offsets require an editable line, arc, circle or B-spline");
+    }
+
+    /** Only offset regeneration errors may affect derived geometry or its warnings. */
+    get offsetErrors(): ReadonlyMap<number, string> {
+        return new Map(
+            [...this._datumErrors].filter(([id]) => this.constraints.get(id)?.kind === ConstraintKind.Offset),
+        );
     }
 
     /** Full fitting runs only on fine solves, after the source has solved; no pointer-frame fitting. */
@@ -766,7 +773,7 @@ export class SketchSolver implements ExternalEntityHost {
         return removedConstraints;
     }
 
-    /** Whether the entity is fixed (datum or external): targetable, but never movable/deletable/editable. */
+    /** Native pins prevent movement. Offset targets still allow deletion and construction toggling. */
     isFixed(entityId: number): boolean {
         return this.fixedEntities.has(entityId);
     }

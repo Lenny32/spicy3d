@@ -115,6 +115,21 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
     if (Array.isArray(value)) return I18n.translate("cloud.merge.value.items{0}", value.length);
     if (typeof value === "object") {
         const record = value as Record<string, unknown>;
+        if (
+            typeof record["type"] === "string" &&
+            parseMergePath(conflict.path).includes("entity") &&
+            [conflict.base, conflict.ours, conflict.theirs].some(
+                (side) =>
+                    side !== null &&
+                    typeof side === "object" &&
+                    (side as Record<string, unknown>)["derivation"] === "offset",
+            )
+        )
+            return I18n.translate(
+                record["derivation"] === "offset"
+                    ? "cloud.merge.value.associativeOffset"
+                    : "cloud.merge.value.detached",
+            );
         if ("datum" in record) {
             const datum = formatConflictValue(conflict, record["datum"], names);
             if (record["angleSide"] === -1 || record["angleSide"] === 1) {

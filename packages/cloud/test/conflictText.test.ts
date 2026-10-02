@@ -132,6 +132,18 @@ describe("labels and values", () => {
         expect(formatConflictValue(c, value, names)).toBe(text);
     });
 
+    test.each([
+        [{ type: "circle", derivation: "offset" }, "cloud.merge.value.associativeOffset"],
+        [{ type: "circle" }, "cloud.merge.value.detached"],
+    ])("offset detachment shows distinct sides: %j", (value, text) => {
+        const c = conflict("node/sketch/entity/20", {
+            base: { type: "circle", derivation: "offset" },
+            ours: { type: "circle" },
+            theirs: { type: "circle", derivation: "offset" },
+        });
+        expect(formatConflictValue(c, value, names)).toBe(text);
+    });
+
     test("node names come from every side ", () => {
         expect(names.node("folder-a")).toBe("Folder A");
         expect(names.node("root")).toBe("FolderNode");

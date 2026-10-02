@@ -174,6 +174,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
 
     private _planeRefNode: INode | undefined;
     private _constructionPlaneError?: string;
+    private _offsetWarnings: string[] = [];
 
     /**
      * Derived, runtime-only warning state behind `INodeWarning` (the model-tree
@@ -191,7 +192,11 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
      * plane (which hides the sketch: `shape` reports the error) badge the model-tree row.
      */
     get warningCount(): number {
-        return this._danglingProfileCount + (this._constructionPlaneError === undefined ? 0 : 1);
+        return (
+            this._danglingProfileCount +
+            (this._constructionPlaneError === undefined ? 0 : 1) +
+            this._offsetWarnings.length
+        );
     }
 
     /**
@@ -199,9 +204,30 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
      * plane wins: it hides the whole sketch, the more severe of the two warnings.
      */
     get warningTooltip(): I18nKeys {
+        if (this._constructionPlaneError === undefined && this._offsetWarnings.length)
+            return "sketch.offsetWarnings{0}{1}";
         return this._constructionPlaneError === undefined
             ? "sketch.externalRefsLost{0}"
             : "sketch.constructionPlaneInvalid{0}";
+    }
+
+    /** Runtime diagnostics; never part of the saved sketch payload. */
+    get offsetWarnings(): readonly string[] {
+        return this._offsetWarnings;
+    }
+
+    get warningTooltipArgs(): readonly unknown[] {
+        return [this.warningCount, this._offsetWarnings.join("; ")];
+    }
+
+    /** Shared by off-session solves and the editor, including passes that move no geometry. */
+    syncOffsetWarnings(solver: SketchSolver): void {
+        const warnings = [...solver.offsetErrors.values()];
+        if (JSON.stringify(warnings) === JSON.stringify(this._offsetWarnings)) return;
+        const oldCount = this.warningCount;
+        this._offsetWarnings = warnings;
+        // A changed message must refresh the tooltip even when the count stays the same.
+        this.emitPropertyChanged("warningCount", oldCount);
     }
 
     /** The resolution error of the construction plane, undefined while it resolves (or is unset). */
@@ -336,8 +362,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
             try {
                 const solver = this.createSolver(data);
                 try {
-                    if (solver.datumErrors.size)
-                        return Result.err([...solver.datumErrors.values()].join("; "));
+                    this.syncOffsetWarnings(solver);
                     const solved = solver.toData();
                     if (data.anchors) solved.anchors = data.anchors;
                     if (JSON.stringify(solved) !== JSON.stringify(data))
@@ -349,6 +374,11 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
             } catch (error) {
                 return Result.err(String(error));
             }
+        }
+        if (!data.constraints.some((c) => c.kind === ConstraintKind.Offset) && this._offsetWarnings.length) {
+            const oldCount = this.warningCount;
+            this._offsetWarnings = [];
+            this.emitPropertyChanged("warningCount", oldCount);
         }
         this.syncExternalRefWatch(data.externalRefs ?? []);
 
@@ -648,6 +678,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
 
     /** Persists a session's variable-only replay as derived geometry, preserving redo. */
     persistSolver(solver: SketchSolver): void {
+        this.syncOffsetWarnings(solver);
         const solved = solver.toData();
         const anchors = this.data.anchors;
         if (anchors !== undefined) solved.anchors = anchors;
@@ -757,6 +788,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         try {
             const solver = this.createSolver(data);
             try {
+                this.syncOffsetWarnings(solver);
                 solved = solver.toData();
             } finally {
                 solver.dispose();

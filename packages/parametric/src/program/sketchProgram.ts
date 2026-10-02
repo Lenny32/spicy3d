@@ -320,8 +320,8 @@ export class SketchSession {
         }
         const outcome = this.solver.solve(true);
         if (outcome.result.startsWith("Ok")) return;
-        if (this.solver.datumErrors.size) {
-            const [id, message] = [...this.solver.datumErrors][0];
+        if (this.solver.offsetErrors.size) {
+            const [id, message] = [...this.solver.offsetErrors][0];
             throw new Error(`constraint ${id} has an unusable value: ${message}`);
         }
         const diagnosis = this.solver.diagnose();

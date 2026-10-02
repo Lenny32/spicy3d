@@ -96,6 +96,7 @@ interface PickRequest {
     kind: SketchPickKind;
     entityType?: SketchEntityTypeFilter;
     includeText?: boolean;
+    includeOffsetTargets?: boolean;
     /** Entity picks only: also allow picking the datum X/Y axes. */
     datum?: boolean;
     preview?: SketchPickPreview;
@@ -678,6 +679,7 @@ export class SketchEditor implements IDisposable {
               kind: SketchPickKind;
               entityType?: SketchEntityTypeFilter;
               includeText?: boolean;
+              includeOffsetTargets?: boolean;
               datum?: boolean;
               preview?: SketchPickPreview;
           }
@@ -696,11 +698,14 @@ export class SketchEditor implements IDisposable {
     pickEntity(
         prompt: I18nKeys,
         type?: SketchEntityTypeFilter,
-        options?: { datum?: boolean; includeText?: boolean },
+        options?: { datum?: boolean; includeText?: boolean; includeOffsetTargets?: boolean },
         controller?: AsyncController,
     ): Promise<number | undefined> {
         const pending = this.startPick<number>("entity", prompt, type, options?.datum, undefined, controller);
-        if (this.pickRequest) this.pickRequest.includeText = options?.includeText;
+        if (this.pickRequest) {
+            this.pickRequest.includeText = options?.includeText;
+            this.pickRequest.includeOffsetTargets = options?.includeOffsetTargets;
+        }
         return pending;
     }
 
@@ -846,6 +851,7 @@ export class SketchEditor implements IDisposable {
 
     solve(fine: boolean): SolveOutcome {
         const outcome = this.solver.solve(fine);
+        this.node.syncOffsetWarnings(this.solver);
         this.annotations.refresh();
         this.publishSolveStatus(outcome);
         this.feedback?.update(outcome, fine);

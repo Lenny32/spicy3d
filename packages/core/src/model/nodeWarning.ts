@@ -14,6 +14,8 @@ export interface INodeWarning {
     readonly warningCount: number;
     /** Badge tooltip key — `{0}` is replaced with `warningCount`. */
     readonly warningTooltip: I18nKeys;
+    /** Optional runtime details supplied to the tooltip translation. */
+    readonly warningTooltipArgs?: readonly unknown[];
 }
 
 export function isNodeWarning(node: unknown): node is INodeWarning {

@@ -111,7 +111,13 @@ export abstract class TreeItem extends HTMLElement {
         this.warningBadge.classList.toggle(style.hidden, count === 0);
         if (warning !== undefined && count > 0) {
             if (node instanceof AnalysisNode) this.warningBadge.title = node.warningTooltip;
-            else I18n.set(this.warningBadge, "title", warning.warningTooltip, count);
+            else
+                I18n.set(
+                    this.warningBadge,
+                    "title",
+                    warning.warningTooltip,
+                    ...(warning.warningTooltipArgs ?? [count]),
+                );
         }
     }
 

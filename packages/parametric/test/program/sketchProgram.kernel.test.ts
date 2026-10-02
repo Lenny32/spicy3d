@@ -10,14 +10,28 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConstructionNode, type IEdge, type IFace, Plane, ShapeTypes, Transaction } from "@spicy3d/core";
+import { Document } from "@spicy3d/app";
+import {
+    ConstructionNode,
+    DOCUMENT_FORMAT_VERSION,
+    DocumentMigrations,
+    decodeDocumentFile,
+    encodeDocumentFile,
+    type IEdge,
+    type IFace,
+    Plane,
+    ShapeTypes,
+    Transaction,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HeadlessDocumentEvaluator } from "../../../app/src/mergeEvaluator";
 import type { RevolveFeatureData } from "../../src/features/feature";
 import type { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
-import type { SketchInfo, SketchReport } from "../../src/program/sketchProgram";
+import { type SketchInfo, type SketchReport, SketchSession } from "../../src/program/sketchProgram";
 import { bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
+import { captureExternalRef } from "../../src/sketch/externalRef";
 import {
     axisLineRefs,
     ConstraintKind,
@@ -1106,7 +1120,7 @@ test("control NURBS authoring and later settings edit preserve pole and entity i
     expect(sketch.data).toEqual(previous);
 });
 
-test("associative offset loft follows variables and source edits with undo/redo and sketchInfo", () => {
+test("associative offset loft follows edits and retains geometry with warnings live and after reopening", async () => {
     const doc = newDoc();
     const variables = (gap: number) => [
         { id: "gap", name: "gap", expression: String(gap), type: "length" as const },
@@ -1172,9 +1186,167 @@ test("associative offset loft follows variables and source edits with undo/redo 
         ],
     });
     expect(info.solve).toMatch(/^Ok/);
+    const volume = body.shape.value.volume();
+    const maxX = body.shape.value.boundingBox().max.x;
     doc.variables.setItems(variables(-50));
     expect(top.data.entities[1].params).toEqual(edited.entities[1].params);
-    expect(top.generateShape().isOk).toBe(false);
-    const error = top.generateShape();
-    expect(error.error).toContain(`Offset constraint ${link.id}`);
+    expect(top.shape.isOk).toBe(true);
+    expect(body.shape.isOk).toBe(true);
+    expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+    expect(body.shape.value.boundingBox().max.x).toBeCloseTo(maxX, 5);
+    expect(top.warningCount).toBe(1);
+    expect(top.offsetWarnings[0]).toMatch(new RegExp(`Offset constraint ${link.id}:.*collapse`));
+    const stored = {
+        __cla$$__: "Document",
+        acts: [],
+        formatVersion: DOCUMENT_FORMAT_VERSION,
+        moduleVersions: DocumentMigrations.moduleVersions(),
+        id: doc.id,
+        name: doc.name,
+        models: doc.modelManager.serialize(),
+        variables: variables(-50),
+    };
+    const decoded = await decodeDocumentFile(await encodeDocumentFile(stored));
+    expect(decoded.isOk).toBe(true);
+    const reopened = newDoc();
+    reopened.variables.setItems(decoded.value["variables"]);
+    await reopened.modelManager.deserialize(decoded.value["models"]);
+    const reopenedTop = nodeById(reopened, top.id) as SketchNode;
+    const reopenedBody = nodeById(reopened, body.id) as ParametricBodyNode;
+    expect(reopenedTop.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.value.volume()).toBeCloseTo(volume, 5);
+    expect(reopenedBody.shape.value.boundingBox().max.x).toBeCloseTo(maxX, 5);
+    expect(reopenedTop.offsetWarnings).toEqual(top.offsetWarnings);
+    expect(reopenedTop.warningCount).toBe(1);
+    expect(reopened.modelManager.serialize()).toEqual(stored.models);
+    const evaluation = await new HeadlessDocumentEvaluator(createMockApplication()).evaluate(decoded.value);
+    expect(evaluation.isOk).toBe(true);
+    expect(evaluation.value.size).toBe(0);
+    const headless = await Document.loadHeadless(createMockApplication(), decoded.value);
+    expect(headless.isOk).toBe(true);
+    try {
+        const headlessTop = headless.value.modelManager.findNode((n) => n.id === top.id) as SketchNode;
+        const headlessBody = headless.value.modelManager.findNode(
+            (n) => n.id === body.id,
+        ) as ParametricBodyNode;
+        expect(headlessTop.shape.isOk).toBe(true);
+        expect(headlessBody.shape.isOk).toBe(true);
+        expect(headlessBody.shape.value.volume()).toBeCloseTo(volume, 5);
+        expect(headlessTop.offsetWarnings).toEqual(top.offsetWarnings);
+        expect(headlessTop.warningCount).toBe(1);
+    } finally {
+        headless.value.dispose();
+    }
+    reopened.variables.setItems(variables(3));
+    expect(reopenedTop.warningCount).toBe(0);
+    expect(reopenedTop.offsetWarnings).toEqual([]);
+    expect(reopenedBody.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.value.volume()).not.toBeCloseTo(volume, 2);
+});
+
+test("external-reference followers preserve a failed offset target and warn on the node", () => {
+    const doc = newDoc();
+    const source = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [{ id: 1, type: "circle", params: [0, 0, 10] }],
+            constraints: [],
+        },
+    });
+    doc.modelManager.addNode(source);
+    expect(source.shape.isOk).toBe(true);
+    const ref = captureExternalRef(
+        -100,
+        source.id,
+        Plane.XY,
+        source.shape.value as IEdge,
+        undefined,
+        "reference",
+    );
+    expect(ref).not.toBeUndefined();
+    const follower = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [
+                { id: 10, type: "circle", params: [0, 0, 10], construction: true },
+                { id: 20, type: "circle", params: [0, 0, 2], derivation: "offset" },
+            ],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    datum: -8,
+                    refs: [10, 20].map((entityId) => ({ entityId, pointIndex: 0 })),
+                },
+                {
+                    id: 31,
+                    kind: ConstraintKind.EqualRadius,
+                    refs: [10, -100].map((entityId) => ({ entityId, pointIndex: 0 })),
+                },
+            ],
+            externalRefs: [ref!],
+        },
+    });
+    doc.modelManager.addNode(follower);
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.warningCount).toBe(0);
+    source.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 5] }],
+        constraints: [],
+    });
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.data.entities[0].params[2]).toBeCloseTo(5, 6);
+    expect(follower.data.entities[1].params[2]).toBe(2);
+    expect(follower.warningCount).toBe(1);
+    expect(follower.offsetWarnings[0]).toMatch(/Offset constraint 30:.*collapse/);
+    source.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+        constraints: [],
+    });
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.data.entities[1].params[2]).toBeCloseTo(4, 6);
+    expect(follower.warningCount).toBe(0);
+});
+
+test("a non-offset datum discovered during a failing program solve preserves the diagnosis", () => {
+    const doc = newDoc();
+    const node = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [{ id: 10, type: "circle", params: [0, 0, 10] }],
+            constraints: [
+                { id: 40, kind: ConstraintKind.Radius, datum: 10, refs: [{ entityId: 10, pointIndex: 0 }] },
+            ],
+        },
+    });
+    const session = new SketchSession(
+        { resolveNode: () => node, resolveSketch: () => node },
+        node,
+        { entities: new Map(), constraints: new Map() },
+        new Map(),
+    );
+    const solve = rs.spyOn(session.solver, "solve").mockImplementation(() => {
+        (session.solver.datumErrors as Map<number, string>).set(40, "unrelated datum error");
+        return { result: "Unsolved constraints", dofs: 0 };
+    });
+    const diagnose = rs.spyOn(session.solver, "diagnose").mockReturnValue({
+        conflicting: [40],
+        redundant: [],
+        dofs: 0,
+    });
+    try {
+        expect(() => session.finish()).toThrow(
+            "the sketch does not solve (Unsolved constraints): conflicting constraints 40",
+        );
+        expect(diagnose).toHaveBeenCalledOnce();
+        expect(solve).toHaveBeenCalledOnce();
+    } finally {
+        solve.mockRestore();
+        diagnose.mockRestore();
+        session.dispose();
+    }
 });
