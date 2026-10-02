@@ -74,7 +74,10 @@ test.each([
     }
 });
 
-test("source deletion versus offset distance edit conflicts by ids and cannot keep a dangling link", () => {
+test.each([
+    "ours",
+    "theirs",
+] as const)("source deletion versus distance edit: %s cannot keep a dangling link", (choice) => {
     const base = fixture();
     const ours = edit(base, (p) => {
         p.entities.shift();
@@ -94,26 +97,24 @@ test("source deletion versus offset distance edit conflicts by ids and cannot ke
             "node/sketch-offset/entity/91827364555",
         ]),
     );
-    for (const choice of ["ours", "theirs"] as const) {
-        const resolved = resolveMerge(
-            merged.value,
-            merged.value.conflicts.map((c) => ({ path: c.path, choice })),
+    const resolved = resolveMerge(
+        merged.value,
+        merged.value.conflicts.map((c) => ({ path: c.path, choice })),
+    );
+    expect(resolved.isOk).toBe(true);
+    if (choice === "theirs") {
+        expect(resolved.value.conflicts.map((c) => [c.kind, c.path])).toEqual([
+            ["dangling-ref", "node/sketch-offset/constraint/527164938721/refs"],
+        ]);
+        expect(() => validateOffsetRelations(data(resolved.value.merged))).toThrow(
+            /Offset constraint .*missing/,
         );
-        expect(resolved.isOk).toBe(true);
-        if (choice === "theirs") {
-            expect(resolved.value.conflicts.map((c) => [c.kind, c.path])).toEqual([
-                ["dangling-ref", "node/sketch-offset/constraint/527164938721/refs"],
-            ]);
-            expect(() => validateOffsetRelations(data(resolved.value.merged))).toThrow(
-                /Offset constraint .*missing/,
-            );
-            continue;
-        }
+    } else {
         expect(resolved.value.conflicts).toEqual([]);
         const solver = new SketchSolver(Plane.XY, data(resolved.value.merged), scope);
         try {
-            expect(solver.toData().constraints).toHaveLength(choice === "ours" ? 0 : 1);
-            expect(solver.entity(91827364555)!.params[2]).toBe(choice === "ours" ? 12 : 13);
+            expect(solver.toData().constraints).toHaveLength(0);
+            expect(solver.entity(91827364555)!.params[2]).toBe(12);
         } finally {
             solver.dispose();
         }
