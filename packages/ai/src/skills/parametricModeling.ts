@@ -217,13 +217,17 @@ sketch re-solves after each action and a failing one rolls everything back):
     "at" between its neighbouring intersections (a circle needs two)
 - { action: "split", entity, at: [u, v] }                  splits at "at" (snaps to a nearby intersection)
 - { action: "extend", entity, to: boundary, end? = "end" } lengthens a line/arc to the boundary entity
-- { action: "offset", entity, distance, name? }            parallel copy; + = left of a line / outward
+- { action: "offset", entity, distance, associative?, name? }            parallel copy; + = left of a line / outward
   Supports lines, arcs, circles and open/periodic B-splines (fit or control mode). For open B-splines
   + is left along the curve; for periodic B-splines + is outward regardless of winding. B-splines
   are approximated to 0.001 mm at checked samples, with at most 512 fit points; collapsed, inverted
-  or crossing offsets are refused. distance takes mm or a length expression, evaluated ONCE.
-  The copy is not associative: later source/variable edits do not update it. Remove the pasted
-  source from a section sketch if only the offset outline should contribute to a loft.
+  or crossing offsets are refused. distance takes mm or a length expression. Default associative:false evaluates ONCE.
+  associative:true keeps an Offset constraint linking source and target; source edits and variable
+  changes regenerate on fine solve / commit, not each pointer frame. Keep the source as construction
+  geometry when only the offset outline should contribute to a loft. Removing the source or relation
+  detaches the target. Offset chains and extra constraints on generated targets are refused; detach
+  first to edit one. Move/rotate/mirror/copy/paste detach relations touching the transformed selection.
+  Pasted sources are snapshots of the other sketch, not cross-sketch links.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }
 - { action: "mirror", entities, axis: line|"xAxis"|"yAxis", copy? = true }   copies get Symmetric constraints
