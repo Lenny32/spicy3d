@@ -24,6 +24,7 @@ import { profileEdgeEntityIds } from "./profileEntities";
 import { collectEdges } from "./profileGeometry";
 import { captureProfileRef } from "./profileRef";
 import { MATCH_TOLERANCE } from "./refGeometry";
+import { validateSelfIntersection } from "./selfIntersectionValidation";
 import { ancestorInputs, combineIds } from "./trackedId";
 
 export interface SweepSection {
@@ -289,12 +290,14 @@ const handler: FeatureHandler<SweepFeatureData> = {
             );
             if (!swept.isOk) return Result.err(swept.error);
             const shape = swept.value.shape;
-            const faceCount = shape.findSubShapes(ShapeTypes.face).length;
+            const faces = shape.findSubShapes(ShapeTypes.face);
+            const faceCount = faces.length;
+            for (const face of faces) face.dispose();
             if (faceCount > 256) {
                 shape.dispose();
                 return Result.err("Sweep exceeds the 256-face validation limit");
             }
-            const clean = shape.checkSelfIntersection?.();
+            const clean = validateSelfIntersection(shape, context.warn);
             if (!clean?.isOk || !clean.value) {
                 shape.dispose();
                 return Result.err(

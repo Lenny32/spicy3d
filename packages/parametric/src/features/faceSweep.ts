@@ -22,6 +22,7 @@ import { pathReferenceDependencies, resolvePathReferences } from "./pathReferenc
 import { captureProfileRef } from "./profileRef";
 import { projectionTargetDependencies, resolveProjectionTarget } from "./projectionTargetReferences";
 import { isReusableTopologyIdentity } from "./reusableTopologyIdentity";
+import { validateSelfIntersection } from "./selfIntersectionValidation";
 import { resolveSweepSection, trackSweep } from "./sweep";
 import { ancestorInputs, combineIds } from "./trackedId";
 
@@ -250,7 +251,7 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
             const faceCount = sweptFaces.length;
             for (const face of sweptFaces) face.dispose();
             if (faceCount > 256) return Result.err("Face sweep exceeds the 256-face validation limit");
-            const clean = swept.value.shape.checkSelfIntersection?.();
+            const clean = validateSelfIntersection(swept.value.shape, context.warn);
             if (!clean?.isOk || !clean.value)
                 return Result.err("Face sweep intersects itself or cannot be validated");
             const ids = trackSweep(feature, section.value, path.value, swept.value);
@@ -318,7 +319,7 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
             } finally {
                 for (const face of outputFaces) face.dispose();
             }
-            const outputClean = output.checkSelfIntersection?.();
+            const outputClean = validateSelfIntersection(output, context.warn);
             if (!outputClean?.isOk || !outputClean.value)
                 return Result.err("Face sweep boolean intersects itself or cannot be validated");
             const tracked = trackBoolean(

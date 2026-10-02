@@ -409,6 +409,11 @@ export class AnalysisManager implements IDisposable {
         this.document.visual.update();
     }
 
+    cancelAnalysis(node: AnalysisNode): void {
+        this.cancel(node);
+        node.status = "idle";
+    }
+
     private cancel(node: AnalysisNode): void {
         const run = this.runs.get(node);
         if (!run) return;

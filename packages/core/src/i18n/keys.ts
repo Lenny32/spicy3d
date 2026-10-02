@@ -361,6 +361,8 @@ export const I18N_KEYS = [
     "command.inspect.similarComponents",
     "command.inspect.addToLibrary",
     "command.inspect.removeFromLibrary",
+    "analysis.inspectionTimedOut",
+    "analysis.inspectionRunning",
     "analysis.panel.name",
     "analysis.panel.visible",
     "analysis.panel.delete",

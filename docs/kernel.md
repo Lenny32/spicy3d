@@ -143,8 +143,8 @@ Before `run_program` calls `inspectionCommonVolume` or `inspectionSectionCaps`, 
 same bounded worker query on each applicable input.
 Common volume checks both shapes, but skips all pre-checks when either input fails
 `checkShape()`, letting the binding return its existing invalid-input error immediately.
-Timeout, cancellation, or worker failure refuses the inspection with an error and never calls its main-thread binding; a detected
-self-intersection returns the inspection's unavailable-result error. Missing bounded worker
+Timeout, cancellation, or worker failure refuses the inspection with an error and never
+calls its main-thread binding; a detected self-intersection returns the inspection's unavailable-result error. Missing bounded worker
 support also refuses an inspection that needs the pre-check. Feature detection skips the
 pre-check when the self-intersection binding is unavailable, and inputs with at least 200
 unique faces skip it because the kernel's bounded inspection analyzer already skips those
@@ -163,9 +163,19 @@ that known blocking path, not a hard deadline on the subsequent main-thread call
 intersection, mass calculations, topology validation, and replica capture can still block.
 Skipping an explicit self-intersection query does not bypass these inspection pre-checks.
 
-Known main-thread callers remain: feature validation in `sweep`, `faceSweep`, and
-`guidedLoft`; the factory analyzer in `cpp/src/factory.cpp` (around line 1574); and inspection
-calls in `packages/app/src/analysis/basic.ts`. Direct synchronous
+The analysis panel's section caps and interference queries use the same bounded pre-check,
+with progress and Cancel while running; a deadline reports “timed out (result unknown)”.
+The subsequent inspection binding still runs synchronously, with the limitations above.
+
+Feature validation in `sweep`, `faceSweep`, and `guidedLoft` retains the 256-face refusal.
+Their synchronous handlers run the analyzer only up to 32 faces and 64 edges; above either
+budget, `checkShape` and finite volume (positive for solids) must pass, and a runtime warning
+reports “Self-intersection check skipped for large shape”. These cheap checks do not prove
+absence of self-intersection. The async rebuild scheduler yields between handlers; moving
+tracked sweep construction and validation into its worker contract is a broader change.
+
+Known unrestricted main-thread callers remain: the analyzer in `loftGuidedTracked` in
+`cpp/src/factory.cpp`. Direct synchronous
 `IShape.checkSelfIntersection()` calls still use the existing binding. OCCT has no cooperative
 cancellation hook in this offline build; stopping a running check requires terminating its worker.
 

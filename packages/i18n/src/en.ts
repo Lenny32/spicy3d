@@ -373,6 +373,8 @@ export default {
         "command.inspect.similarComponents": "Similar Components",
         "command.inspect.addToLibrary": "Add to Component Library",
         "command.inspect.removeFromLibrary": "Remove from Component Library",
+        "analysis.inspectionTimedOut": "Inspection timed out (result unknown)",
+        "analysis.inspectionRunning": "Checking geometry…",
         "analysis.panel.name": "Name",
         "analysis.panel.visible": "Visible",
         "analysis.panel.delete": "Delete analysis",
