@@ -128,15 +128,17 @@ rebuilds, including document open and undo/redo. A newer rebuild cancels and ter
 previous operation. The fixed 30-second deadline is a **build error** (“Tolerant thicken timed
 out after 30000 ms”); there is no result to accept with a warning and no synchronous fallback.
 Explicit synchronous program scopes, nested evaluations and
-headless paths that cannot await refuse with “Tolerant thicken is unavailable in synchronous
-evaluation; rebuild with the bounded geometry worker”. Async headless evaluation can await
+headless paths that cannot await refuse with the translated background-result note.
+Async headless evaluation can await
 the scheduled operation. MCP `thicken { tolerant: true }` and edits to bodies containing
 tolerant steps await the bounded rebuild before validating geometry or running the next op;
 other feature operations retain synchronous evaluation. Cancellation and worker errors roll
 the program back. The generated `run_program` factory edit operation `makeThickSolidTolerant`
 also uses the bounded worker. Direct synchronous factory calls remain main-thread callers.
 Create/edit panels show a translated neutral note that the result is computed in the background
-after confirmation; tolerant mode has no interactive geometry preview.
+after confirmation; tolerant mode has no interactive geometry preview. Editing an upstream
+feature stops the preview before the first unsuppressed tolerant step, preserving the partial
+shape and showing that note at info level. Edge reselection also preserves the partial preview.
 
 Join type and mode are hidden when tolerant is enabled and ignored by the envelope implementation.
 Stored `joinType` values in v15 documents are retained for compatibility, including existing

@@ -145,7 +145,7 @@ export class SweepEditCommand extends CancelableCommand {
         this.clearPreview();
         const result = this.preview.evaluate(this.edited(), false);
         this.previewValid = result.error === undefined && result.shape !== undefined;
-        showPreviewProblem(result.error ?? result.warning);
+        showPreviewProblem(result.error ?? result.warning, result.note);
         const meshes = result.shape && previewMeshes(this.body, result.shape);
         if (meshes) {
             for (const mesh of meshes)

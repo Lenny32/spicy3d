@@ -226,7 +226,7 @@ export class ProjectionCommand extends CancelableCommand {
               });
         const shape = result?.shape ?? (standalone?.isOk ? standalone.value : undefined);
         const error = result?.error ?? (standalone && !standalone.isOk ? standalone.error : undefined);
-        showPreviewProblem(error);
+        showPreviewProblem(error, result?.note);
         if (shape) {
             this.valid = error === undefined;
             const meshes = this.body

@@ -597,7 +597,7 @@ const OPS_SCHEMA = {
         tolerant: {
             type: "boolean",
             description:
-                "Thicken only: opt-in trimmed material envelope. Closed spheres and ring tori tolerate inward cavity collapse; general solids attempt intersection trimming. Open skins and arbitrary free-form collapse remain unsupported. Default false.",
+                "Thicken only: opt-in trimmed material envelope. Closed spheres and ring tori tolerate inward cavity collapse. Ordinary arc thickening is tried first; intersection fallback is verified only for analytic solids with only vertical-edge fillets. Free-form collapse and open skins are refused. joinType/mode are ignored. Programs await the bounded worker with a 30 s deadline. Default false.",
         },
         openFaceIndexes: {
             type: "array",

@@ -614,7 +614,12 @@ function* evaluateProgram(
         }
         yield index;
         state.deferValidation = false;
-        for (const [body, before] of state.pendingChecks) checkBody(state, body, before);
+        try {
+            for (const [body, before] of state.pendingChecks) checkBody(state, body, before);
+        } catch (err) {
+            const opIndex = index - 1;
+            throw new Error(`op ${opIndex} ("${ops[opIndex].op}") failed: ${(err as Error).message}`);
+        }
         state.pendingChecks.clear();
     }
     // Checked once all ops ran, so a later op may repair what an earlier sketch edit broke downstream.

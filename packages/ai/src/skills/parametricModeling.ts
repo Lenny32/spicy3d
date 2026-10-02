@@ -148,8 +148,9 @@ guide coverage booleans remain synchronous.
 
 - { op: "thicken", id, body, thickness, joinType?, mode?, tolerant?, openFaceIndexes? }
   tolerant:true opts into a material envelope: closed spheres/ring tori can consume an inward
-  cavity entirely; other solids attempt intersection trimming with validity/volume gates.
-  Open skins and arbitrary free-form curvature collapse remain unsupported and return errors.
+  cavity entirely. Ordinary arc thickening is tried first; intersection fallback is verified only
+  for analytic solids with only vertical-edge fillets. Free-form collapse and open skins are refused.
+  joinType/mode are ignored. Programs await the bounded worker with a 30 s deadline.
   Intersection trimming retains the many-face guard; an older kernel reports unavailable.
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals

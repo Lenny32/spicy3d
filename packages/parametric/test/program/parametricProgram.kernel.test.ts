@@ -841,7 +841,7 @@ describe("thicken", () => {
                     { ops: [{ op: "thicken", id: "t1", body: body.id, thickness: -2, tolerant: true }] },
                     controller.signal,
                 ),
-            ).rejects.toThrow(failure === "cancel" ? /cancelled/i : /timed out/i);
+            ).rejects.toThrow(failure === "cancel" ? /cancelled/i : /op 0 \("thicken"\) failed:.*timed out/i);
             expect(requests).toBe(1);
             expect(body.features).toEqual(before);
             expectClean(body);

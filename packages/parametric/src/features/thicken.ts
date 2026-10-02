@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    I18n,
     type IAsyncShapeOperation,
     type IEdge,
     type IFace,
@@ -125,10 +126,7 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
     },
 
     evaluate(feature, context): Result<IShape> {
-        if (feature.tolerant)
-            return Result.err(
-                "Tolerant thicken is unavailable in synchronous evaluation; rebuild with the bounded geometry worker",
-            );
+        if (feature.tolerant) return Result.err(I18n.translate("prompt.thicken.backgroundResult"));
         const input = context.input;
         if (input === undefined || input.isNull()) return Result.err("Thicken requires a preceding feature");
         const thickness = resolveThickness(feature, context);

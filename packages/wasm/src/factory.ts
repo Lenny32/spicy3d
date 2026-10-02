@@ -1307,6 +1307,25 @@ export class ShapeFactory implements IShapeFactory {
             "Combine",
         ) as Result<ICompound>;
     }
+    private validTolerantWall(result: Result<IShape>, source: IShape, thickness: number): Result<IShape> {
+        if (!result.isOk) return result;
+        const wall = result.value;
+        if (wall.volume() < 0) wall.reserve();
+        const volume = wall.volume();
+        if (!wall.checkShape() || !containsSolid(wall)) {
+            wall.dispose();
+            return Result.err("Tolerant envelope produced an invalid solid");
+        }
+        if (
+            !Number.isFinite(volume) ||
+            volume <= 0 ||
+            (thickness < 0 && volume >= Math.abs(source.volume()) * (1 - 1e-7))
+        ) {
+            wall.dispose();
+            return Result.err("Tolerant envelope failed volume sanity check");
+        }
+        return result;
+    }
     makeThickSolidTolerant(shape: IShape, openingFaces: IShape[], thickness: number): Result<IShape> {
         const binding = wasm.ShapeFactory.makeThickSolidTolerant;
         if (typeof binding !== "function")
@@ -1315,13 +1334,15 @@ export class ShapeFactory implements IShapeFactory {
         if (refused) {
             const ordinary = this.makeThickSolidByJoin(shape, openingFaces, thickness, "arc");
             if (!ordinary.isOk) return Result.err(refused);
-            if (openingFaces.length > 0) return ordinary;
+            if (openingFaces.length > 0) return this.validTolerantWall(ordinary, shape, thickness);
             // Closed ordinary offsets describe the cavity/outer envelope. Return the
             // material between it and the source, as the native tolerant path does.
             try {
-                return thickness < 0
-                    ? this.booleanCut([shape], [ordinary.value])
-                    : this.booleanCut([ordinary.value], [shape]);
+                const wall =
+                    thickness < 0
+                        ? this.booleanCut([shape], [ordinary.value])
+                        : this.booleanCut([ordinary.value], [shape]);
+                return this.validTolerantWall(wall, shape, thickness);
             } finally {
                 ordinary.value.dispose();
             }

@@ -157,7 +157,7 @@ export class RevolveEditCommand extends CancelableCommand {
     ): ExtrudePreview {
         // The handle's number, not the stored expression: this is what the user is dragging.
         const result = preview.evaluate({ ...feature, angle }, dragging);
-        showPreviewProblem(result.error ?? result.warning);
+        showPreviewProblem(result.error ?? result.warning, result.note);
         if (result.shape === undefined) return { meshes: [] };
         const meshes = previewMeshes(body, result.shape);
         return meshes === undefined ? { meshes: [] } : { meshes, hide: [body] };

@@ -1,7 +1,17 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDisposable, type IShape, Line, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import {
+    Config,
+    I18n,
+    type IDisposable,
+    type IShape,
+    Line,
+    Plane,
+    Result,
+    ShapeTypes,
+    XYZ,
+} from "@spicy3d/core";
 import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
 import { evaluateFeature, featureHandler } from "../../parametric/src/features/feature";
 import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
@@ -89,7 +99,7 @@ test("feature refuses synchronous evaluation and prepares a bounded envelope", a
     rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
     const feature = { id: "wall", type: "thicken" as const, thickness: -3.75, tolerant: true };
     const context = { document, host, input, scope: new Map() };
-    expect(evaluateFeature(feature, context).error).toContain("unavailable in synchronous evaluation");
+    expect(evaluateFeature(feature, context).error).toBe(I18n.translate("prompt.thicken.backgroundResult"));
     const prepare = featureHandler("thicken")?.prepareAsync;
     if (!prepare) throw new Error("Missing thicken prepareAsync");
     const pending = prepare(feature, context);
@@ -299,4 +309,53 @@ test("many-face closed ordinary recovery returns material around the cavity", ()
     const wall = keep(unwrapOk(factory.makeThickSolidTolerant(input, [], -0.5)));
     expect(wall.checkShape()).toBe(true);
     expect(wall.volume()).toBeCloseTo(input.volume() - cavity.volume(), 6);
+});
+
+// Force the synchronous many-face branch while controlling the ordinary/cut outputs.
+// Native geometry supplies the source and verifies that negative orientation is repaired.
+test.each([
+    ["opened", "invalid"],
+    ["opened", "zero"],
+    ["opened", "source volume"],
+    ["closed", "invalid"],
+    ["closed", "zero"],
+    ["closed", "source volume"],
+    ["opened", "negative orientation"],
+    ["closed", "negative orientation"],
+])("many-face %s fallback validates %s", (kind, failure) => {
+    const limit = Config.instance.thickSolidIntersectionMaxFaces;
+    Config.instance.thickSolidIntersectionMaxFaces = 0;
+    const input = keep(createBox(factory, 10, 10, 10));
+    const wall = createBox(factory, 2, 2, 2);
+    const disposed = rs.spyOn(wall, "dispose");
+    if (failure === "negative orientation") wall.reserve();
+    if (failure === "invalid") rs.spyOn(wall, "checkShape").mockReturnValue(false);
+    if (failure === "zero") rs.spyOn(wall, "volume").mockReturnValue(0);
+    if (failure === "source volume") rs.spyOn(wall, "volume").mockReturnValue(input.volume());
+    const faces = input.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    const cavity = kind === "closed" ? createBox(factory, 8, 8, 8) : undefined;
+    const ordinary = rs.spyOn(factory, "makeThickSolidByJoin").mockReturnValue(Result.ok(cavity ?? wall));
+    const cut = rs.spyOn(factory, "booleanCut").mockReturnValue(Result.ok(wall));
+    try {
+        const result = factory.makeThickSolidTolerant(input, kind === "opened" ? [faces[0]] : [], -1);
+        if (failure === "negative orientation") {
+            expect(result.isOk).toBe(true);
+            expect(result.value).toBe(wall);
+            expect(result.value.volume()).toBeCloseTo(8, 6);
+            expect(result.value.checkShape()).toBe(true);
+            owned.push(wall);
+            expect(disposed).not.toHaveBeenCalled();
+        } else {
+            expect(result.isOk).toBe(false);
+            expect(result.error).toContain(failure === "invalid" ? "invalid solid" : "volume sanity check");
+            expect(disposed).toHaveBeenCalledTimes(1);
+        }
+        expect(cut).toHaveBeenCalledTimes(kind === "closed" ? 1 : 0);
+    } finally {
+        Config.instance.thickSolidIntersectionMaxFaces = limit;
+        ordinary.mockRestore();
+        cut.mockRestore();
+        rs.restoreAllMocks();
+    }
 });

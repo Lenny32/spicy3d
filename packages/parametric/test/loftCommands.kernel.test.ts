@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+    DocumentRebuilds,
     I18n,
     type IFace,
     type IPicker,
@@ -23,6 +24,8 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory } from "../../wasm/src/hybridShapeFactory";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { LoftFeatureCommand } from "../src/commands/loftCommand";
 import type { LoftEditCommand } from "../src/commands/loftEditCommand";
 import type { LoftFeatureData } from "../src/features/feature";
@@ -375,5 +378,47 @@ describe("loft edit session (real kernel)", () => {
         });
 
         expect(JSON.stringify(body.features)).toBe(before);
+    });
+
+    test("upstream edit panel shows a neutral note for the tolerant tail", async () => {
+        const originalFactory = shapeFactory;
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        const pub = rs.spyOn(PubSub.default, "pub");
+        globalThis.shapeFactory = new ShapeFactory(undefined, hybrid);
+        let document: TestDocument | undefined;
+        try {
+            const { app, doc, base, top } = setup();
+            const body = loftBody(doc, base, top);
+            document = doc;
+            body.setFeaturesEmitShapeChanged([
+                ...body.features,
+                { id: "wall", type: "thicken", thickness: -0.1, tolerant: true },
+            ]);
+            await DocumentRebuilds.settled(doc);
+            expect(body.featureItems().filter((item) => item.error !== undefined)).toEqual([]);
+            pub.mockClear();
+            const done = body.editFeature("l1");
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            const session = app.executingCommand as LoftEditCommand;
+            expect(session).not.toBeUndefined();
+            session.ruled = true;
+            session.cancel();
+            await done;
+            expect(pub.mock.calls.filter(([event]) => event === "showFloatTip")).toContainEqual([
+                "showFloatTip",
+                {
+                    level: "info",
+                    msg: I18n.translate("prompt.thicken.backgroundResult"),
+                },
+            ]);
+            expect(
+                JSON.stringify(pub.mock.calls.filter(([event]) => event === "showFloatTip")),
+            ).not.toContain("unavailable in synchronous evaluation");
+        } finally {
+            document?.dispose();
+            hybrid.dispose();
+            globalThis.shapeFactory = originalFactory;
+            pub.mockRestore();
+        }
     });
 });
