@@ -97,6 +97,7 @@ interface PickRequest {
     entityType?: SketchEntityTypeFilter;
     includeText?: boolean;
     includeOffsetTargets?: boolean;
+    includeOffsetEndpoints?: boolean;
     /** Entity picks only: also allow picking the datum X/Y axes. */
     datum?: boolean;
     preview?: SketchPickPreview;
@@ -680,6 +681,7 @@ export class SketchEditor implements IDisposable {
               entityType?: SketchEntityTypeFilter;
               includeText?: boolean;
               includeOffsetTargets?: boolean;
+              includeOffsetEndpoints?: boolean;
               datum?: boolean;
               preview?: SketchPickPreview;
           }
@@ -691,8 +693,18 @@ export class SketchEditor implements IDisposable {
         prompt: I18nKeys,
         preview?: SketchPickPreview,
         controller?: AsyncController,
+        includeOffsetEndpoints = false,
     ): Promise<SketchPointRef | undefined> {
-        return this.startPick("point", prompt, undefined, undefined, preview, controller);
+        const pending = this.startPick<SketchPointRef>(
+            "point",
+            prompt,
+            undefined,
+            undefined,
+            preview,
+            controller,
+        );
+        if (this.pickRequest) this.pickRequest.includeOffsetEndpoints = includeOffsetEndpoints;
+        return pending;
     }
 
     pickEntity(
@@ -790,13 +802,30 @@ export class SketchEditor implements IDisposable {
 
     // ------------------------------------------------------------------ Solving, commit and deletion
 
-    applyGeometryEdit(edit: GeometryEdit): boolean {
+    applyGeometryEdit(edit: GeometryEdit, offsetDatum?: number | string): boolean {
         if (this.disposed) return false;
         const before = this.solver.toData();
         const result = this.solver.applyGeometryEdit(edit);
         if (!result.isOk) {
             PubSub.default.pub("displayError", result.error);
             return false;
+        }
+        if (offsetDatum !== undefined) {
+            try {
+                this.solver.validateOffsetSource(edit.source.id);
+                this.solver.addConstraint({
+                    kind: ConstraintKind.Offset,
+                    refs: [edit.source.id, result.value.entityIds[0]].map((entityId) => ({
+                        entityId,
+                        pointIndex: 0,
+                    })),
+                    datum: offsetDatum,
+                });
+            } catch (error) {
+                this.solver.reset(before);
+                PubSub.default.pub("displayError", error instanceof Error ? error.message : String(error));
+                return false;
+            }
         }
         const outcome = this.solve(true);
         if (!outcome.result.startsWith("Ok")) {

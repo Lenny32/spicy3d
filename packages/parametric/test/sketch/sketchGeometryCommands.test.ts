@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
+import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XY, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
@@ -10,6 +10,7 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import * as bsplineOffset from "../../src/sketch/bsplineOffset";
+import { CoincidentConstraintCommand } from "../../src/sketch/commands/sketchConstraints";
 import { SketchCopyCommand } from "../../src/sketch/commands/sketchCopy";
 import { SketchExtendCommand } from "../../src/sketch/commands/sketchExtend";
 import { SketchMirrorCommand } from "../../src/sketch/commands/sketchMirror";
@@ -82,6 +83,7 @@ function setup(data: SketchData = { entities: [source, boundary, target], constr
 }
 
 afterEach(() => {
+    new SketchOffsetCommand().associative = false;
     sketchClipboard.value = undefined;
     SketchEditor.exit();
     rs.restoreAllMocks();
@@ -367,6 +369,158 @@ describe("geometry command interaction", () => {
         expect(node.data.constraints).toEqual([]);
     });
 
+    test.each([
+        false,
+        true,
+    ])("UI offset expression is one undo step (associative=%s)", async (associative) => {
+        const { node, doc, editor, click } = setup({ entities: [source], constraints: [] });
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "5", type: "length" }]);
+        const before = node.data;
+        const command = new SketchOffsetCommand();
+        command.associative = associative;
+        command.distance = "gap*2";
+        expect(new SketchOffsetCommand().associative).toBe(associative);
+        const run = command.executeAsync();
+        await click(20);
+        await click(20, -20);
+        await run;
+        const after = node.data;
+        expect(after.entities[1].params).toEqual([0, -10, 100, -10]);
+        expect(after.entities[1].id).not.toBe(source.id);
+        expect(after.constraints).toEqual(
+            associative
+                ? [
+                      {
+                          id: expect.any(Number),
+                          kind: ConstraintKind.Offset,
+                          datum: "-(gap*2)",
+                          refs: [source.id, after.entities[1].id].map((entityId) => ({
+                              entityId,
+                              pointIndex: 0,
+                          })),
+                      },
+                  ]
+                : [],
+        );
+        expect(after.entities[1].derivation).toBe(associative ? "offset" : undefined);
+        doc.history.undo();
+        expect(node.data).toEqual(before);
+        expect(editor.solver.toData()).toEqual(before);
+        doc.history.redo();
+        expect(node.data).toEqual(after);
+        expect(editor.solver.toData()).toEqual(after);
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "7", type: "length" }]);
+        expect(editor.solver.entity(after.entities[1].id)!.params).toEqual([
+            0,
+            associative ? -14 : -10,
+            100,
+            associative ? -14 : -10,
+        ]);
+    });
+
+    test.each([-1, -2, -3, -100, 20])("UI refuses unsupported associative source %s", async (id) => {
+        const data: SketchData = {
+            entities: [source, { id: 20, type: "line", params: [0, 2, 100, 2] }],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    refs: [
+                        { entityId: 1, pointIndex: 0 },
+                        { entityId: 20, pointIndex: 0 },
+                    ],
+                    datum: 2,
+                },
+            ],
+        };
+        const { editor, node } = setup(data);
+        if (id === -100)
+            editor.solver.addExternalEntity({
+                entityId: -100,
+                nodeId: "external",
+                role: "reference",
+                type: "line",
+                edge: { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x: 10, y: 0, z: 0 } },
+                snapshot: [0, 0, 10, 0],
+            });
+        const before = node.data;
+        rs.spyOn(editor, "pickEntity").mockResolvedValue(id);
+        rs.spyOn(editor, "pickPosition").mockResolvedValueOnce([20, 20]).mockResolvedValueOnce(undefined);
+        const errors = rs.fn((_message: string) => {});
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            command.associative = true;
+            await command.executeAsync();
+            expect(errors).toHaveBeenCalledWith(
+                id === 20
+                    ? "Associative offset chains are not supported; detach the existing offset first"
+                    : "The source must be an editable sketch curve",
+            );
+            expect(node.data).toEqual(before);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
+    });
+
+    test.each([
+        false,
+        true,
+    ])("offset source picking follows the associative toggle (%s)", async (associative) => {
+        const { editor } = setup();
+        const pick = rs.spyOn(editor, "pickEntity").mockResolvedValue(undefined);
+        const validate = rs.spyOn(editor.solver, "validateOffsetSource");
+        const command = new SketchOffsetCommand();
+        command.associative = associative;
+        await command.executeAsync();
+        expect(pick).toHaveBeenCalledWith(
+            "prompt.pickSketchEntity",
+            ["line", "arc", "circle", "bspline"],
+            associative ? { datum: true, includeOffsetTargets: true } : undefined,
+            expect.anything(),
+        );
+        expect(validate).not.toHaveBeenCalled();
+    });
+
+    test("plain offset ignores generated targets without an associative-chain warning", async () => {
+        const data: SketchData = {
+            entities: [source, { id: 20, type: "line", params: [0, 20, 100, 20] }],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    refs: [
+                        { entityId: 1, pointIndex: 0 },
+                        { entityId: 20, pointIndex: 0 },
+                    ],
+                    datum: 20,
+                },
+            ],
+        };
+        const { editor, node, click, pressEscape } = setup(data);
+        const before = node.data;
+        const validate = rs.spyOn(editor.solver, "validateOffsetSource");
+        const position = rs.spyOn(editor, "pickPosition");
+        const errors = rs.fn((_message: string) => {});
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            command.associative = false;
+            const run = command.executeAsync();
+            await click(20, 20);
+            await Promise.resolve();
+            expect(position).not.toHaveBeenCalled();
+            expect(editor.isPicking).toBe(true);
+            pressEscape();
+            await run;
+            expect(validate).not.toHaveBeenCalled();
+            expect(errors).not.toHaveBeenCalled();
+            expect(node.data).toEqual(before);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
+    });
+
     test("offset picks a B-spline and copies it on the chosen side", async () => {
         const spline: SketchEntityData = { id: 1, type: "bspline", params: [0, 0, 100, 0] };
         const { editor, node, move, click } = setup({ entities: [spline], constraints: [] });
@@ -443,4 +597,49 @@ describe("geometry command interaction", () => {
         expect(node.data).toEqual(before);
         expect(preview.mock.calls.at(-1)?.[0]).toEqual([]);
     });
+});
+
+test("Coincident UI picks offset endpoints and commits an undoable connector join", async () => {
+    const { node, doc, editor, click } = setup({
+        entities: [
+            source,
+            { id: 20, type: "line", derivation: "offset", params: [0, 5, 100, 5] },
+            { id: 40, type: "line", params: [20, 30, 40, 40] },
+        ],
+        constraints: [
+            {
+                id: 30,
+                kind: ConstraintKind.Offset,
+                refs: [
+                    { entityId: 1, pointIndex: 0 },
+                    { entityId: 20, pointIndex: 0 },
+                ],
+                datum: 5,
+            },
+        ],
+    });
+    rs.spyOn(doc.application.activeView!, "worldToScreen").mockImplementation(
+        (point) => new XY({ x: point.x + 400, y: 300 - point.y }),
+    );
+    const before = node.data;
+    const run = new CoincidentConstraintCommand().executeAsync();
+    await click(0, 5);
+    await click(20, 30);
+    await run;
+    expect(node.data.constraints.filter((c) => c.kind === ConstraintKind.P2PCoincident)).toEqual([
+        expect.objectContaining({
+            refs: [
+                { entityId: 20, pointIndex: 0 },
+                { entityId: 40, pointIndex: 0 },
+            ],
+        }),
+    ]);
+    expect(editor.solver.pointOf({ entityId: 40, pointIndex: 0 })).toEqual([0, 5]);
+    const after = node.data;
+    doc.history.undo();
+    expect(node.data).toEqual(before);
+    expect(editor.solver.toData()).toEqual(before);
+    doc.history.redo();
+    expect(node.data).toEqual(after);
+    expect(editor.solver.toData()).toEqual(after);
 });

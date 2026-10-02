@@ -502,6 +502,9 @@ export default {
         "prompt.sketchRotationCenter": "Pick rotation center",
         "prompt.sketchRotationReference": "Pick reference direction",
         "prompt.sketchMirrorAxis": "Pick mirror line",
+        "sketch.offsetAssociative": "Associative",
+        "tooltip.sketch.offset":
+            "Offset a curve; enable Associative to follow source edits and expression distances",
         "sketch.offsetDistance": "Offset distance",
         "prompt.sketchExtendTarget": "Select the boundary to extend to",
         "prompt.sketchEditCurve": "Click a curve near the portion to edit; Escape to finish",

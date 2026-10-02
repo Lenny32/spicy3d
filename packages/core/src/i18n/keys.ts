@@ -532,6 +532,8 @@ export const I18N_KEYS = [
     "prompt.sketchRotationReference",
     "prompt.sketchMirrorAxis",
     "sketch.offsetDistance",
+    "sketch.offsetAssociative",
+    "tooltip.sketch.offset",
     "prompt.sketchExtendTarget",
     "prompt.sketchEditCurve",
     "prompt.sketchOffsetSide",

@@ -353,3 +353,207 @@ test("moving only an offset target is refused without modifying the relation or 
         solver.dispose();
     }
 });
+
+test.each([
+    0, 2, 3, 5,
+])("open offset %s drives line and arc endpoints after regeneration and reload", (index) => {
+    const data = linked(sources[index]);
+    data.entities.push({ id: 40, type: "line", params: [20, 20, 30, 20] });
+    const end = index === 2 ? 2 : data.entities[1].params.length / 2 - 1;
+    data.constraints.push({
+        id: 50,
+        kind: ConstraintKind.P2PCoincident,
+        refs: [
+            { entityId: 20, pointIndex: end },
+            { entityId: 40, pointIndex: 0 },
+        ],
+    });
+    data.constraints.push({
+        id: 51,
+        kind: ConstraintKind.Horizontal,
+        refs: [0, 1].map((pointIndex) => ({ entityId: 40, pointIndex })),
+    });
+    const solver = new SketchSolver(Plane.XY, data, scope(2));
+    try {
+        const connectorEnd = () => solver.pointOf({ entityId: 40, pointIndex: 0 });
+        const targetEnd = () => solver.pointOf(solver.toData().constraints.find((c) => c.id === 50)!.refs[0]);
+        expect(connectorEnd()[0]).toBeCloseTo(targetEnd()[0], 7);
+        expect(connectorEnd()[1]).toBeCloseTo(targetEnd()[1], 7);
+        solver.setScope(scope(4));
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(connectorEnd()[0]).toBeCloseTo(targetEnd()[0], 7);
+        expect(connectorEnd()[1]).toBeCloseTo(targetEnd()[1], 7);
+        expect(solver.entity(40)!.params[3]).toBeCloseTo(targetEnd()[1], 7);
+        expect(solver.diagnose().conflicting).toEqual([]);
+        expect(solver.diagnose().redundant).toEqual([]);
+        const saved = JSON.parse(JSON.stringify(solver.toData()));
+        solver.reset(saved);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(connectorEnd()[0]).toBeCloseTo(targetEnd()[0], 7);
+        expect(connectorEnd()[1]).toBeCloseTo(targetEnd()[1], 7);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("joins refuse centers, interior points, fixed references, and offset feedback loops", () => {
+    const data = linked(sources[3]);
+    data.entities.push({ id: 40, type: "arc", params: [0, 0, 5, 0, 0, 5] });
+    const solver = new SketchSolver(Plane.XY, data, scope(2));
+    try {
+        for (const [entityId, pointIndex, targetPoint] of [
+            [40, 0, 0],
+            [-1, 0, 0],
+            [10, 0, 0],
+            [40, 1, 1],
+        ]) {
+            expect(() =>
+                solver.addConstraint({
+                    kind: ConstraintKind.P2PCoincident,
+                    refs: [
+                        { entityId: 20, pointIndex: targetPoint },
+                        { entityId, pointIndex },
+                    ],
+                }),
+            ).toThrow(/only endpoint Coincident/);
+        }
+        solver.addConstraint({
+            kind: ConstraintKind.P2PCoincident,
+            refs: [
+                { entityId: 40, pointIndex: 1 },
+                { entityId: 20, pointIndex: 0 },
+            ],
+        });
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        solver.setScope(scope(3));
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const arcEnd = solver.pointOf({ entityId: 40, pointIndex: 1 });
+        const targetEnd = solver.pointOf({ entityId: 20, pointIndex: 0 });
+        expect(arcEnd[0]).toBeCloseTo(targetEnd[0], 7);
+        expect(arcEnd[1]).toBeCloseTo(targetEnd[1], 7);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("a refit changing B-spline point count keeps the join on the actual end", () => {
+    const data = linked({ id: 10, type: "bspline", params: [0, 0, 5, 0, 10, 0] });
+    data.entities.push({ id: 40, type: "line", params: [10, 2, 10, 10] });
+    const oldEnd = data.entities[1].params.length / 2 - 1;
+    data.constraints.push({
+        id: 50,
+        kind: ConstraintKind.P2PCoincident,
+        refs: [
+            { entityId: 20, pointIndex: oldEnd },
+            { entityId: 40, pointIndex: 0 },
+        ],
+    });
+    const solver = new SketchSolver(Plane.XY, data, scope(2));
+    try {
+        const edited = solver.toData();
+        edited.entities.find((e) => e.id === 10)!.params = Array.from({ length: 25 }, (_, i) => [
+            (10 * i) / 24,
+            0,
+        ]).flat();
+        solver.reset(edited);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const newEnd = solver.entity(20)!.params.length / 2 - 1;
+        expect(newEnd).not.toBe(oldEnd);
+        expect(solver.toData().constraints.find((c) => c.id === 50)!.refs[0].pointIndex).toBe(newEnd);
+        const target = solver.pointOf({ entityId: 20, pointIndex: newEnd });
+        const connector = solver.pointOf({ entityId: 40, pointIndex: 0 });
+        expect(connector[0]).toBeCloseTo(target[0], 7);
+        expect(connector[1]).toBeCloseTo(target[1], 7);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("failed offset regeneration keeps the last good joined geometry and recovers", () => {
+    const data = linked(sources[2]);
+    data.entities.push({ id: 40, type: "line", params: [12, 0, 20, 3] });
+    data.constraints.push({
+        id: 50,
+        kind: ConstraintKind.P2PCoincident,
+        refs: [
+            { entityId: 20, pointIndex: 1 },
+            { entityId: 40, pointIndex: 0 },
+        ],
+    });
+    const solver = new SketchSolver(Plane.XY, data, scope(2));
+    try {
+        const before = [solver.entity(20), solver.entity(40)];
+        solver.setScope(scope(-50));
+        expect(solver.solve(true).result).toBe("Unsolved constraints");
+        expect([solver.entity(20), solver.entity(40)]).toEqual(before);
+        expect(solver.offsetErrors.get(30)).toMatch(/Offset constraint 30:.*collapse/);
+        solver.setScope(scope(4));
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.offsetErrors.size).toBe(0);
+        expect(solver.pointOf({ entityId: 40, pointIndex: 0 })).toEqual([14, 0]);
+        expect(() =>
+            solver.addConstraint({
+                kind: ConstraintKind.Fix,
+                refs: [{ entityId: 40, pointIndex: 0 }],
+                datums: [14, 0],
+            }),
+        ).toThrow(/endpoint must be movable/);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("arc creation structural constraints do not produce join redundancy diagnostics", () => {
+    const solver = new SketchSolver(Plane.XY);
+    try {
+        const source = solver.addArc(0, 0, 10, 0, 0, 10);
+        const edit = offsetCurve(solver.entity(source)!, 2);
+        expect(edit.isOk).toBe(true);
+        const applied = solver.applyGeometryEdit(edit.value);
+        expect(applied.isOk).toBe(true);
+        const target = applied.value.entityIds[0];
+        solver.addConstraint({
+            kind: ConstraintKind.Offset,
+            refs: [source, target].map((entityId) => ({ entityId, pointIndex: 0 })),
+            datum: 2,
+        });
+        const connector = solver.addLine(12, 0, 20, 5);
+        solver.addConstraint({
+            kind: ConstraintKind.P2PCoincident,
+            refs: [
+                { entityId: target, pointIndex: 1 },
+                { entityId: connector, pointIndex: 0 },
+            ],
+        });
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.diagnose().redundant).toEqual([]);
+        expect(solver.diagnose().conflicting).toEqual([]);
+        const snapshot = solver.toData();
+        solver.reset(snapshot);
+        expect(solver.toData()).toEqual(snapshot);
+
+        expect(
+            solver.setDatumSource(
+                solver.toData().constraints.find((c) => c.kind === ConstraintKind.Offset)!.id,
+                4,
+            ).isOk,
+        ).toBe(true);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.pointOf({ entityId: connector, pointIndex: 0 })).toEqual([14, 0]);
+        expect(solver.diagnose().redundant).toEqual([]);
+        const relation = solver.toData().constraints.find((c) => c.kind === ConstraintKind.Offset)!;
+        solver.removeConstraint(relation.id);
+        expect(solver.isFixed(target)).toBe(false);
+        solver.removeConstraintsOn(connector);
+        solver.setPointPosition({ entityId: target, pointIndex: 2 }, 0, 20);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const arc = solver.entity(target)!.params;
+        expect(Math.hypot(arc[2] - arc[0], arc[3] - arc[1])).toBeCloseTo(
+            Math.hypot(arc[4] - arc[0], arc[5] - arc[1]),
+            7,
+        );
+        expect(solver.diagnose().redundant).toEqual([]);
+    } finally {
+        solver.dispose();
+    }
+});

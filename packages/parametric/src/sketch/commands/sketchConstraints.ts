@@ -60,12 +60,17 @@ function addAndCommit(
 export class CoincidentConstraintCommand extends SketchConstraintCommand {
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
         this.controller = new AsyncController();
-        const p1 = await editor.pickPoint("prompt.pickSketchPoint", undefined, this.controller);
+        const p1 = await editor.pickPoint("prompt.pickSketchPoint", undefined, this.controller, true);
         if (p1 === undefined) return;
         this.controller = new AsyncController();
-        const p2 = await editor.pickPoint("prompt.pickSketchPoint", undefined, this.controller);
+        const p2 = await editor.pickPoint("prompt.pickSketchPoint", undefined, this.controller, true);
         if (p2 === undefined) return;
-        editor.solver.addConstraint({ kind: ConstraintKind.P2PCoincident, refs: [p1, p2] });
+        try {
+            editor.solver.addConstraint({ kind: ConstraintKind.P2PCoincident, refs: [p1, p2] });
+        } catch (error) {
+            PubSub.default.pub("displayError", error instanceof Error ? error.message : String(error));
+            return;
+        }
         editor.solve(true);
         editor.commit();
     }
