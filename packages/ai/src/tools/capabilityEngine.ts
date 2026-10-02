@@ -14,7 +14,6 @@ import {
     type IDocumentMutationScope,
     type IEdge,
     type IFace,
-    type IInspectionPrecheck,
     type INode,
     type IShape,
     type IShapeFactory,
@@ -25,6 +24,7 @@ import {
     Matrix4,
     NodeUtils,
     Plane,
+    precheckInspectionShapes,
     Result,
     resolveUnitSpec,
     type Scope,
@@ -1265,7 +1265,7 @@ async function runOp(
         return;
     }
     if (!cap) {
-        const resolved = INSPECTION_SELF_INTERSECTION_ERRORS[op.method]
+        const resolved = ["shape.inspectionCommonVolume", "shape.inspectionSectionCaps"].includes(op.method)
             ? await precheckInspection(op, doc, factory, localRefs, numeric, owner, signal)
             : undefined;
         owner.run(() => {
@@ -1276,12 +1276,6 @@ async function runOp(
     }
     await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner, signal);
 }
-
-// Common-volume and section-cap bindings repeat the analyzer below 200 faces.
-const INSPECTION_SELF_INTERSECTION_ERRORS: Record<string, string> = {
-    "shape.inspectionCommonVolume": "Intersection volume is unavailable",
-    "shape.inspectionSectionCaps": "Section caps are unavailable",
-};
 
 async function precheckInspection(
     op: Op,
@@ -1305,47 +1299,10 @@ async function precheckInspection(
     const target = resolved.entry.value as IShape;
     const inputs =
         op.method === "shape.inspectionCommonVolume" ? [target, resolved.args[0] as IShape] : [target];
-    // Both inspection bindings refuse invalid inputs before running the analyzer.
-    if (
-        (op.method === "shape.inspectionCommonVolume" || op.method === "shape.inspectionSectionCaps") &&
-        owner.run(() => inputs.some((shape) => !shape.checkShape()))
-    ) {
-        return resolved;
-    }
-    for (const shape of new Set(inputs)) {
-        if (
-            !owner.run(
-                () => (shape as IShape & Partial<IInspectionPrecheck>).needsInspectionSelfIntersectionCheck,
-            )
-        )
-            continue;
-        const bounded = (factory as IShapeFactory).boundedOperations;
-        if (!bounded?.shapeQuery) {
-            throw new Error(
-                `${op.method}: self-intersection pre-check requires a bounded geometry worker; inspection skipped`,
-            );
-        }
-        const pending = owner.run(() =>
-            bounded.shapeQuery({ method: "checkSelfIntersection", shape }, signal),
-        );
-        try {
-            await pending.ready;
-            owner.run(() => {
-                const result = pending.take();
-                if (!result.isOk) {
-                    const reason = result.error.replace(
-                        /^Self-intersection check/,
-                        "self-intersection pre-check",
-                    );
-                    throw new Error(`${op.method}: ${reason}; inspection skipped`);
-                }
-                if (signal?.aborted) throw new Error("Inspection cancelled; inspection skipped");
-                if (!result.value) throw new Error(INSPECTION_SELF_INTERSECTION_ERRORS[op.method]);
-            });
-        } finally {
-            pending.cancel();
-        }
-    }
+    const checked = await precheckInspectionShapes(inputs, factory as IShapeFactory, signal, (action) =>
+        owner.run(action),
+    );
+    if (!checked.isOk) throw new Error(`${op.method}: ${checked.error}; inspection skipped`);
     return resolved;
 }
 

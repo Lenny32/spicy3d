@@ -22,7 +22,7 @@ test.each([
         }),
         take: () =>
             mode === "timeout"
-                ? Result.err("Self-intersection check timed out")
+                ? Result.err("Self-intersection check timed out after 100 ms (result unknown)")
                 : Result.ok(mode !== "intersects"),
         cancel,
     }));
@@ -34,11 +34,11 @@ test.each([
     expect(result.isOk).toBe(mode === "success");
     expect(result.isOk ? undefined : result.error).toBe(
         mode === "timeout"
-            ? I18n.translate("analysis.inspectionTimedOut")
+            ? I18n.translate("analysis.inspectionTimedOutAfter{0}", 100)
             : mode === "intersects"
-              ? "Inspection input intersects itself"
+              ? I18n.translate("analysis.inspectionIntersects")
               : mode === "cancel"
-                ? "Inspection cancelled"
+                ? I18n.translate("analysis.inspectionCancelled")
                 : undefined,
     );
 });
@@ -48,6 +48,6 @@ test("invalid input skips the analyzer", async () => {
     rs.stubGlobal("shapeFactory", { boundedOperations: { shapeQuery: query } });
     const shape = { checkShape: () => false } as unknown as IShape;
     const result = await inspectionPrecheck([shape], new AbortController().signal);
-    expect(result.error).toBe("Inspection input is invalid");
+    expect(result.error).toBe(I18n.translate("analysis.inspectionInvalid"));
     expect(query).not.toHaveBeenCalled();
 });

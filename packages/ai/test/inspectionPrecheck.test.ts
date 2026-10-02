@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type BoundedShapeQuery, type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import { type BoundedShapeQuery, I18n, type IShape, Result, ShapeTypes } from "@spicy3d/core";
 import { createMockApplication, createMockDocument, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { buildCapabilityTools } from "../src/tools/capabilityEngine";
 
@@ -88,7 +88,7 @@ test.each(methods)("%s skips its main-thread binding when the pre-check hangs", 
     try {
         const running = tool.handler({ ops: ops(method) });
         const rejected = expect(running).rejects.toThrow(
-            "self-intersection pre-check timed out after 100 ms (result unknown); inspection skipped",
+            `${I18n.translate("analysis.inspectionTimedOutAfter{0}", 100)}; inspection skipped`,
         );
         await rs.advanceTimersByTimeAsync(100);
         await rejected;
@@ -148,7 +148,7 @@ test.each(["intersect", "fail"] as const)("a %s worker result refuses inspection
         const running = tool.handler({ ops: ops("shape.inspectionSectionCaps") });
         const rejected = expect(running).rejects.toThrow(
             mode === "intersect"
-                ? "Section caps are unavailable"
+                ? I18n.translate("analysis.inspectionIntersects")
                 : "Worker operation failed; inspection skipped",
         );
         await rs.advanceTimersByTimeAsync(1);
@@ -183,7 +183,7 @@ test.each([
     },
     {
         op: { method: "shape.inspectionSectionCaps", id: "caps", target: "source" },
-        error: "requires a bounded geometry worker; inspection skipped",
+        error: `${I18n.translate("analysis.inspectionWorkerRequired")}; inspection skipped`,
     },
 ])("bounded query rejects $error", async ({ op, error }) => {
     const { doc, tool, factory, inspection, shapeQuery } = setup();
@@ -229,10 +229,10 @@ test.each([0, 1])("common volume skips all pre-checks when input %s is invalid",
     });
     try {
         await expect(tool.handler({ ops: ops("shape.inspectionCommonVolume") })).rejects.toThrow(
-            "checkShape is false",
+            I18n.translate("analysis.inspectionInvalid"),
         );
         expect(shapeQuery).not.toHaveBeenCalled();
-        expect(inspection).toHaveBeenCalledTimes(1);
+        expect(inspection).not.toHaveBeenCalled();
         expect(doc.modelManager.findNodes(() => true)).toEqual([]);
         expect(doc.history.undoCount()).toBe(0);
     } finally {
@@ -254,10 +254,10 @@ test("section caps skips the worker for invalid input", async () => {
     });
     try {
         await expect(tool.handler({ ops: ops("shape.inspectionSectionCaps") })).rejects.toThrow(
-            "checkShape is false",
+            I18n.translate("analysis.inspectionInvalid"),
         );
         expect(shapeQuery).not.toHaveBeenCalled();
-        expect(inspection).toHaveBeenCalledTimes(1);
+        expect(inspection).not.toHaveBeenCalled();
         expect(doc.history.undoCount()).toBe(0);
     } finally {
         doc.dispose();

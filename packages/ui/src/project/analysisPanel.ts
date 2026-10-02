@@ -326,6 +326,12 @@ export class AnalysisPanel extends HTMLElement {
             cancel.textContent = I18n.translate("common.cancel");
             cancel.onclick = () => manager.cancelAnalysis(this.node);
             this.results.append(progress, cancel);
+        } else if (this.node.status === "idle" || this.node.status === "invalid") {
+            const run = document.createElement("button");
+            run.textContent = I18n.translate("analysis.panel.run");
+            run.disabled = !this.node.visible;
+            run.onclick = () => void manager.evaluate(this.node);
+            this.results.append(run);
         }
 
         for (const entry of manager.result(this.node)?.legend ?? []) {

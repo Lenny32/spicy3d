@@ -6,6 +6,7 @@ export * from "./filletCornerSetback";
 export * from "./filletRadiusLaw";
 export * from "./geometry";
 export * from "./geometryUtils";
+export * from "./inspectionPrecheck";
 export * from "./kernelState";
 export * from "./lineType";
 export * from "./meshData";

@@ -161,6 +161,36 @@ describe("inspection definition lifecycle", () => {
         expect(oldDisplay).not.toHaveBeenCalled();
     });
 
+    test.each([
+        "success",
+        "failure",
+    ] as const)("cancel leaves idle after a stale %s result", async (outcome) => {
+        let finish!: (result: Result<AnalysisResult>) => void;
+        let signal!: AbortSignal;
+        manager.registerEvaluator("fixture", (context) => {
+            signal = context.signal;
+            return new Promise((resolve) => {
+                finish = resolve;
+            });
+        });
+        const node = fixture();
+        expect(node.status).toBe("running");
+        expect(signal.aborted).toBe(false);
+        manager.cancelAnalysis(node);
+        expect(node.status).toBe("idle");
+        expect(node.error).toBeUndefined();
+        expect(signal.aborted).toBe(true);
+        const dispose = rs.fn(() => {});
+        const display = rs.fn(() => {});
+        finish(outcome === "success" ? Result.ok({ dispose, display }) : Result.err("stale failure"));
+        await flush();
+        expect(node.status).toBe("idle");
+        expect(node.error).toBeUndefined();
+        expect(manager.result(node)).toBeUndefined();
+        expect(display).not.toHaveBeenCalled();
+        expect(dispose).toHaveBeenCalledTimes(outcome === "success" ? 1 : 0);
+    });
+
     test("delete during evaluation aborts and disposes the eventual kernel result", async () => {
         let finish!: (result: Result<AnalysisResult>) => void;
         let signal!: AbortSignal;

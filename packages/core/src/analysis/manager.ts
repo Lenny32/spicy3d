@@ -411,6 +411,7 @@ export class AnalysisManager implements IDisposable {
 
     cancelAnalysis(node: AnalysisNode): void {
         this.cancel(node);
+        node.error = undefined;
         node.status = "idle";
     }
 
