@@ -10,6 +10,7 @@ import {
     type IMergeEvaluator,
     mergeDocuments,
     Plane,
+    resolveMerge,
     type Serialized,
     validateMerge,
 } from "@spicy3d/core";
@@ -119,62 +120,89 @@ const evaluator: IMergeEvaluator = {
     },
 };
 
-test.each([
-    false,
-    true,
-])("source vs connector edit merges and validates deterministically (reverse=%s)", async (reverse) => {
-    const doc = newDocument();
-    try {
-        const sketch = new SketchNode({ document: doc, id: "joined", plane: Plane.XY, data: joined() });
-        doc.modelManager.addNode(sketch);
-        const body = new ParametricBodyNode({
-            document: doc,
-            id: "body",
-            features: [{ id: "extrude", type: "extrude", sketchId: sketch.id, depth: 4 }],
-        });
-        doc.modelManager.addNode(body);
-        expect(volume(body)).toBeCloseTo(200, 6);
-        const fixture = loadDocumentFixtures().find((f) => f.name === "v2/sketch6-associative-offset.json");
-        expect(fixture).not.toBeUndefined();
-        const base: Serialized = {
-            ...structuredClone(fixture!.data),
-            models: doc.modelManager.serialize(),
-            variables: doc.variables.items,
-        };
-        const sourceEdit = structuredClone(base);
-        sourceEdit["variables"][0].expression = "7";
-        const connectorEdit = structuredClone(base);
-        const node = connectorEdit["models"].nodes.find((n: Serialized) => n["id"] === "joined");
-        expect(node).not.toBeUndefined();
-        const data: SketchData = JSON.parse(node["dataJson"]);
-        // A normal connector dimension controls the bottom, independently of the derived top.
-        data.constraints = data.constraints.filter((c) => c.id !== 4);
-        data.constraints.push(
-            { id: 9, kind: ConstraintKind.Fix, refs: [ref(42, 0)], datums: [0, -2] },
-            { id: 11, kind: ConstraintKind.Fix, refs: [ref(42, 1)], datums: [10, -2] },
-        );
-        node["dataJson"] = JSON.stringify(data);
-        const merged = mergeDocuments(
-            base,
-            reverse ? connectorEdit : sourceEdit,
-            reverse ? sourceEdit : connectorEdit,
-        );
-        expect(merged.isOk).toBe(true);
-        expect(merged.value.conflicts).toEqual([]);
-        const validated = await validateMerge(merged.value, { evaluator });
-        expect(validated.isOk).toBe(true);
-        expect(validated.value.conflicts).toEqual([]);
-        const loaded = newDocument();
+describe.each([false, true])("regenerated snapshots=%s", (savedSnapshots) => {
+    test.each([
+        false,
+        true,
+    ])("source vs connector edit merges and validates deterministically (reverse=%s)", async (reverse) => {
+        const doc = newDocument();
         try {
-            loaded.variables.setItems(validated.value.merged["variables"]);
-            await loaded.modelManager.deserialize(validated.value.merged["models"]);
-            expect(
-                volume(loaded.modelManager.findNode((n) => n.id === "body") as ParametricBodyNode),
-            ).toBeCloseTo(440, 6);
+            const sketch = new SketchNode({ document: doc, id: "joined", plane: Plane.XY, data: joined() });
+            doc.modelManager.addNode(sketch);
+            const body = new ParametricBodyNode({
+                document: doc,
+                id: "body",
+                features: [{ id: "extrude", type: "extrude", sketchId: sketch.id, depth: 4 }],
+            });
+            doc.modelManager.addNode(body);
+            expect(volume(body)).toBeCloseTo(200, 6);
+            const fixture = loadDocumentFixtures().find(
+                (f) => f.name === "v2/sketch6-associative-offset.json",
+            );
+            expect(fixture).not.toBeUndefined();
+            const base: Serialized = {
+                ...structuredClone(fixture!.data),
+                models: doc.modelManager.serialize(),
+                variables: doc.variables.items,
+            };
+            const sourceEdit = structuredClone(base);
+            sourceEdit["variables"][0].expression = "7";
+            const connectorEdit = structuredClone(base);
+            const node = connectorEdit["models"].nodes.find((n: Serialized) => n["id"] === "joined");
+            expect(node).not.toBeUndefined();
+            const data: SketchData = JSON.parse(node["dataJson"]);
+            // A normal connector dimension controls the bottom, independently of the derived top.
+            data.constraints = data.constraints.filter((c) => c.id !== 4);
+            data.constraints.push(
+                { id: 9, kind: ConstraintKind.Fix, refs: [ref(42, 0)], datums: [0, -2] },
+                { id: 11, kind: ConstraintKind.Fix, refs: [ref(42, 1)], datums: [10, -2] },
+            );
+            node["dataJson"] = JSON.stringify(data);
+            if (savedSnapshots) {
+                doc.variables.setItems(sourceEdit["variables"]);
+                sourceEdit["models"] = doc.modelManager.serialize();
+                const other = newDocument();
+                try {
+                    await other.modelManager.deserialize(connectorEdit["models"]);
+                    expect(
+                        volume(other.modelManager.findNode((n) => n.id === "body") as ParametricBodyNode),
+                    ).toBeCloseTo(280, 6);
+                    connectorEdit["models"] = other.modelManager.serialize();
+                } finally {
+                    other.dispose();
+                }
+                expect(volume(body)).toBeCloseTo(360, 6);
+            }
+            const merged = mergeDocuments(
+                base,
+                reverse ? connectorEdit : sourceEdit,
+                reverse ? sourceEdit : connectorEdit,
+            );
+            expect(merged.isOk).toBe(true);
+            expect(merged.value.conflicts.map((c) => c.path)).toEqual(
+                savedSnapshots ? ["node/joined/entity/40/params", "node/joined/entity/41/params"] : [],
+            );
+            const resolved = resolveMerge(
+                merged.value,
+                merged.value.conflicts.map((c) => ({ path: c.path, choice: "ours" as const })),
+            );
+            expect(resolved.isOk).toBe(true);
+            expect(resolved.value.conflicts).toEqual([]);
+            const validated = await validateMerge(resolved.value, { evaluator });
+            expect(validated.isOk).toBe(true);
+            expect(validated.value.conflicts).toEqual([]);
+            const loaded = newDocument();
+            try {
+                loaded.variables.setItems(validated.value.merged["variables"]);
+                await loaded.modelManager.deserialize(validated.value.merged["models"]);
+                expect(
+                    volume(loaded.modelManager.findNode((n) => n.id === "body") as ParametricBodyNode),
+                ).toBeCloseTo(440, 6);
+            } finally {
+                loaded.dispose();
+            }
         } finally {
-            loaded.dispose();
+            doc.dispose();
         }
-    } finally {
-        doc.dispose();
-    }
+    });
 });

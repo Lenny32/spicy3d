@@ -66,8 +66,12 @@ snapshot, but omit its redundant native equation; detaching restores it.
 Fitted B-spline end refs are remapped if the fit point count
 changes. A pass that fails, or whose connectors would move an offset source,
 restores the previous target/connector geometry and reports the runtime warning;
-it never iterates regeneration to chase a feedback loop. Independent source and
-connector edits merge normally and rebuild deterministically through validateMerge.
+it never iterates regeneration to chase a feedback loop. Source expressions and
+connector dimensions merge independently and rebuild through validateMerge. If
+both saved sides also changed the same connector's geometry, its existing atomic
+`params` rule raises the normal geometry conflict. Choose either side's connector
+geometry; the combined constraints still regenerate the endpoint during validation.
+This preserves the existing geometry merge policy and stored format.
 Closed-profile extraction and downstream extrusions use the joined geometry.
 
 Sketch module version 6 adds Offset and optional entity `derivation: "offset"`.
