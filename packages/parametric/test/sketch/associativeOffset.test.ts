@@ -528,6 +528,10 @@ test("arc creation structural constraints do not produce join redundancy diagnos
         expect(solver.solve(true).result).toMatch(/^Ok/);
         expect(solver.diagnose().redundant).toEqual([]);
         expect(solver.diagnose().conflicting).toEqual([]);
+        const snapshot = solver.toData();
+        solver.reset(snapshot);
+        expect(solver.toData()).toEqual(snapshot);
+
         expect(
             solver.setDatumSource(
                 solver.toData().constraints.find((c) => c.kind === ConstraintKind.Offset)!.id,

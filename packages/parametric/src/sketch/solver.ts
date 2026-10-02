@@ -2022,6 +2022,11 @@ export class SketchSolver implements ExternalEntityHost {
         for (const constraint of data.constraints.filter((c) => c.kind !== ConstraintKind.Offset)) {
             this.addConstraintWithId(constraint.id, constraint);
         }
+        // Freeze owners before adding joins, while preserving the snapshot's incidental
+        // constraint order so reopening does not record a phantom dataJson change.
+        const ordered = data.constraints.map((c) => this.constraints.get(c.id)!);
+        this.constraints.clear();
+        for (const constraint of ordered) this.constraints.set(constraint.id, constraint);
         this.legacyCounters = {};
         if (data.entityIdSeq !== undefined) this.legacyCounters.entityIdSeq = data.entityIdSeq;
         if (data.externalIdSeq !== undefined) this.legacyCounters.externalIdSeq = data.externalIdSeq;
