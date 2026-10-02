@@ -1032,6 +1032,7 @@ export const I18N_KEYS = [
     "prompt.select.section",
     "prompt.select.loftSection",
     "prompt.select.thickenOpenFaces",
+    "prompt.thicken.backgroundResult",
     "prompt.thicken.openFacesSolidOnly",
     "prompt.select.shape",
     "prompt.select.sketch",

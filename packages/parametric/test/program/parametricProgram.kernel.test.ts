@@ -782,7 +782,24 @@ describe("thicken", () => {
             await edit(30);
             expectClean(body);
             expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
-            await expect(edit(0)).rejects.toThrow();
+            const suppress = (value: boolean) =>
+                tool.handler({
+                    ops: [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[1].id,
+                            action: "suppress",
+                            value,
+                        },
+                    ],
+                });
+            await suppress(true);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30, 3);
+            await suppress(false);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+            await expect(edit(0)).rejects.toThrow(/extrude|depth|feature|body/i);
             expect(body.features[0]).toMatchObject({ depth: 30 });
             expectClean(body);
             expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);

@@ -706,10 +706,7 @@ export async function runParametric(
             .some(
                 (node) =>
                     node instanceof parametric.ParametricBodyNode &&
-                    node.features.some(
-                        (feature) =>
-                            feature.type === "thicken" && feature.tolerant === true && !feature.suppressed,
-                    ),
+                    node.features.some((feature) => feature.type === "thicken" && feature.tolerant === true),
             );
     if (capturedDocument || needsAsyncRebuild) {
         const assertIdle = () => {

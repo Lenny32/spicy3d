@@ -606,10 +606,7 @@ function* evaluateProgram(
                 ((ops[index].op === "thicken" && (ops[index] as ThickenOp).tolerant === true) ||
                     bodies().some((body) =>
                         body.features.some(
-                            (feature) =>
-                                feature.type === "thicken" &&
-                                feature.tolerant === true &&
-                                !feature.suppressed,
+                            (feature) => feature.type === "thicken" && feature.tolerant === true,
                         ),
                     ));
             if (state.deferValidation) run();
