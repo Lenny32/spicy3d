@@ -215,7 +215,7 @@ export class FaceSweepCommand extends CancelableCommand {
         this.clearPreview();
         const result = this.preview ? this.preview.evaluate(this.edited(), false) : this.creationPreview();
         this.previewValid = result.error === undefined && result.shape !== undefined;
-        showPreviewProblem(result.error);
+        showPreviewProblem(result.error ?? result.warning);
         const meshes = result.shape && previewMeshes(this.body, result.shape);
         if (meshes) {
             for (const mesh of meshes)
@@ -224,13 +224,17 @@ export class FaceSweepCommand extends CancelableCommand {
         }
         this.document.visual.update();
     }
-    private creationPreview(): { shape?: IShape; error?: string } {
+    private creationPreview(): { shape?: IShape; error?: string; warning?: string } {
         const body = this.body;
         if (!body || !body.shape.isOk) return { error: "Face sweep requires a valid existing body" };
         const faces = body.shape.value.findSubShapes(ShapeTypes.face),
             edges = body.shape.value.findSubShapes(ShapeTypes.edge);
         try {
+            let warning: string | undefined;
             const result = evaluateFeature(this.edited(), {
+                warn: (message) => {
+                    warning = message;
+                },
                 document: this.document,
                 host: body,
                 input: body.shape.value,
@@ -242,7 +246,7 @@ export class FaceSweepCommand extends CancelableCommand {
                     outputEdgeIds: [],
                 },
             });
-            return result.isOk ? { shape: result.value } : { error: result.error };
+            return result.isOk ? { shape: result.value, warning } : { error: result.error };
         } finally {
             for (const shape of [...faces, ...edges]) shape.dispose();
         }

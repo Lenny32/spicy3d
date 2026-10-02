@@ -247,11 +247,11 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
             );
             if (!swept.isOk) return Result.err(swept.error);
             owned.push(swept.value.shape);
-            const sweptFaces = swept.value.shape.findSubShapes(ShapeTypes.face);
-            const faceCount = sweptFaces.length;
-            for (const face of sweptFaces) face.dispose();
-            if (faceCount > 256) return Result.err("Face sweep exceeds the 256-face validation limit");
-            const clean = validateSelfIntersection(swept.value.shape, context.warn);
+            const clean = validateSelfIntersection(
+                swept.value.shape,
+                context.warn,
+                context.deferSelfIntersection,
+            );
             if (!clean?.isOk || !clean.value)
                 return Result.err("Face sweep intersects itself or cannot be validated");
             const ids = trackSweep(feature, section.value, path.value, swept.value);
@@ -312,14 +312,7 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
             } finally {
                 for (const solid of solids) solid.dispose();
             }
-            const outputFaces = output.findSubShapes(ShapeTypes.face);
-            try {
-                if (outputFaces.length > 256)
-                    return Result.err("Face sweep boolean exceeds the 256-face validation limit");
-            } finally {
-                for (const face of outputFaces) face.dispose();
-            }
-            const outputClean = validateSelfIntersection(output, context.warn);
+            const outputClean = validateSelfIntersection(output, context.warn, context.deferSelfIntersection);
             if (!outputClean?.isOk || !outputClean.value)
                 return Result.err("Face sweep boolean intersects itself or cannot be validated");
             const tracked = trackBoolean(

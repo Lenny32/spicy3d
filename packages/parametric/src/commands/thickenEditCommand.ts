@@ -131,7 +131,7 @@ export class ThickenEditCommand extends CancelableCommand {
         if (body === undefined || this.feature === undefined || this.preview === undefined) return;
         this.clearPreview();
         const result = this.preview.evaluate(this.edited(this.feature), false);
-        showPreviewProblem(result.error);
+        showPreviewProblem(result.error ?? result.warning);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);
         const context = this.document.visual.context;
         if (meshes !== undefined) {

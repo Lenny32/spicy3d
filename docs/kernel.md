@@ -169,38 +169,41 @@ The analysis panel's section caps and interference queries use the same bounded 
 with progress and Cancel while running; a deadline reports “timed out (result unknown)”.
 The subsequent inspection binding still runs synchronously, with the limitations above.
 
-Feature validation in `sweep` and `faceSweep` retains the 256-face refusal.
-Their synchronous handlers run the analyzer only up to 32 faces and 64 edges; above either
-budget, `checkShape` and finite volume (positive for solids) must pass, and a runtime warning
-reports “Self-intersection check skipped for large shape”. The thresholds are conservative
-heuristics to avoid routinely analyzing large topology: 32 faces already permit 496 face
-pairs and 64 edges permit 2,016 edge pairs. They are not measured time budgets or safety
-limits. Surface complexity can dominate even with very few faces: #120's seven-face
-B-spline shell took 236 seconds, and a free-form sweep can have about three faces.
-**The guard does not bound execution time.**
+Sweep and face-sweep handlers use cheap topology/volume gates and mark validation pending
+in their runtime context. Top-level rebuilds containing either feature take the asynchronous
+scheduler route even below the twelve-feature threshold. The scheduler captures each output
+(including face-sweep's temporary tool before disposal) in a bounded worker and awaits all
+checks **before caching, tracking commit, or displaying the new body**. Checks run at every
+shape size: the 32-face/64-edge heuristic and 256-face refusal have been removed. Worker
+termination enforces the configured slow-op budget capped at 30 seconds. A timeout is a
+feature error, “Self-intersection check timed out after N ms (result unknown)”; it preserves
+the last accepted body, rather than treating an unknown result as valid (#119/#120 policy).
+A newer rebuild, job cancellation, undo/redo, or disposal cancels the pending checks and
+releases the unaccepted output. A synchronous scheduler drain cannot fall back to the
+analyzer. Document open and headless merge evaluation can await these scheduled rebuilds.
+No validation state or shape is stored in the document.
 
-Above the guard, self-overlapping sweeps and face-face intersections in face-sweep boolean
-outputs that the analyzer previously refused can pass. `checkShape` does not detect those
-intersections, and overlapping solids can have finite positive volume. Acceptance with a
-warning is the existing compromise, not proof of validity. Feature edit previews currently
-provide no warning callback, so this warning appears only on the rebuilt feature, not in
-its preview. Headless merge evaluation also uses the synchronous fallback.
+Explicit synchronous program scopes, nested producer/consumer rebuilds, and the current
+synchronous feature-preview API cannot await a worker. These run only the cheap checks,
+with the runtime warning “Self-intersection check skipped in synchronous evaluation
+(result unknown; rebuild validates in worker)”. Preview results expose the warning and
+edit panels display it. This compromise can miss self-overlap in these contexts; it is
+not proof of validity. Ordinary subsequent asynchronous rebuilds validate in the worker.
 
-Guided lofts instead use the full analyzer inside `loftGuidedTracked` at every size; the TS
-handler only checks topology afterward, avoiding a duplicate analyzer and false skip warning.
-Known unrestricted main-thread callers therefore include sweep and faceSweep validation
-at or below both thresholds (including their previews and headless evaluation), and guided
-loft construction of any size in `cpp/src/factory.cpp`. Direct synchronous
-`IShape.checkSelfIntersection()` calls also remain unrestricted.
+Remaining unrestricted main-thread callers:
+- Guided loft construction at every size: the analyzer is inside `loftGuidedTracked` in
+  `cpp/src/factory.cpp`. The existing TS worker protocol has no guided-loft tracked
+  construction operation. Adding only a deferred query cannot contain this internal call.
+- Common-volume and section-cap inspection bindings repeat the analyzer after their
+  bounded pre-check. The worker protocol has no whole-inspection operation; those repeats,
+  booleans, mass calculation and topology checks still have no hard deadline.
+- Direct synchronous `IShape.checkSelfIntersection()` calls outside these managed routes.
 
-This revision takes the minimum documentation/duplicate-check fix. Deferred validation
-would require a second await point after handler evaluation, before caching/tracking and
-commit, with shape ownership and cancellation across the scheduler's synchronous drain.
-The current async hook prepares an operation before the handler runs. Guided loft's
-internal analyzer would additionally require a worker construction contract or kernel
-change; a TS-only deferred query cannot bound it. The 256-face refusal is retained until
-that work is complete. OCCT has no cooperative cancellation hook in this offline build;
-stopping a running check requires terminating its worker.
+Sweep construction, face-sweep booleans, cheap validity gates and BREP capture also remain
+synchronous. This change contains their self-intersection validation, not arbitrary native
+calls. OCCT has no cooperative cancellation hook in this offline build; stopping a running
+check requires terminating its worker. Guided-loft and whole-inspection worker contracts
+remain follow-up work; no C++ or committed WASM artifacts were changed here.
 
 ### Boolean and downstream validity (#119)
 

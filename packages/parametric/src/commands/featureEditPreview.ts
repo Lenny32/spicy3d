@@ -59,11 +59,14 @@ export interface FeatureChainPreviewResult {
     readonly error?: string;
     /** True when the later steps were left out of `shape`. */
     readonly partial: boolean;
+    /** Cheap synchronous preview is not proof of absence of self-intersection. */
+    readonly warning?: string;
 }
 
 export class FeatureChainPreview {
     /** Last measured (or, before the first live run, estimated) cost of the later steps. */
     private _tailMs: number;
+    private readonly warnings = new Set<string>();
     /** The state entering the edited feature, captured before any session rollback. */
     private readonly entering: FeatureTimelineState | undefined;
 
@@ -96,6 +99,12 @@ export class FeatureChainPreview {
 
     /** The body with `feature` in place of the edited one; see the module header. */
     evaluate(feature: FeatureData, interactive: boolean): FeatureChainPreviewResult {
+        this.warnings.clear();
+        const result = this.evaluatePreview(feature, interactive);
+        return { ...result, warning: [...this.warnings].join("; ") || undefined };
+    }
+
+    private evaluatePreview(feature: FeatureData, interactive: boolean): FeatureChainPreviewResult {
         // A position the last run never reached (the chain failed before it) has no input
         // to evaluate against; index 0 legitimately has none.
         if (this.index > 0 && this.entering === undefined) {
@@ -194,6 +203,7 @@ export class FeatureChainPreview {
                 input,
                 scope,
                 tracking,
+                warn: (message) => this.warnings.add(message),
             }),
         );
         if (!result.isOk) return Result.err(String(result.error));

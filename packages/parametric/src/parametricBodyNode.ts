@@ -61,6 +61,7 @@ import type { EdgeRef } from "./features/edgeRef";
 import { findSketch } from "./features/extrude";
 import type { BooleanFeatureData, ExtrudeFeatureData } from "./features/feature";
 import type { ProfileRef } from "./features/profileRef";
+import { prepareValidatedFeature, SELF_INTERSECTION_SKIPPED } from "./features/selfIntersectionValidation";
 import { syncNodeWatches } from "./nodeWatch";
 import { RebuildJob, type RebuildSteps } from "./rebuildJob";
 import { danglingProfileRefs, SketchNode } from "./sketch/sketchNode";
@@ -456,7 +457,10 @@ export class ParametricBodyNode
         if (
             !this.features.some(
                 (feature) =>
-                    feature.type === "fillet" && !feature.suppressed && feature.cornerSetbacks !== undefined,
+                    !feature.suppressed &&
+                    (feature.type === "sweep" ||
+                        feature.type === "faceSweep" ||
+                        (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
             )
         )
             return;
@@ -870,9 +874,10 @@ export class ParametricBodyNode
             (this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD ||
                 this.features.some(
                     (feature) =>
-                        feature.type === "fillet" &&
                         !feature.suppressed &&
-                        feature.cornerSetbacks !== undefined,
+                        (feature.type === "sweep" ||
+                            feature.type === "faceSweep" ||
+                            (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
                 ));
         const revision = DocumentRebuilds.revision(this.document);
         const featuresJson = this.featuresJson;
@@ -1159,7 +1164,13 @@ export class ParametricBodyNode
                     scope,
                     this._timeline.entryAt(nextCache.length)?.variableDependencies,
                 );
-                const cached = invalidSuffix ? undefined : this.validCacheEntry(key, input, nextCache.length);
+                const candidate = invalidSuffix
+                    ? undefined
+                    : this.validCacheEntry(key, input, nextCache.length);
+                const cached =
+                    asynchronous && candidate?.warning?.includes(SELF_INTERSECTION_SKIPPED)
+                        ? undefined
+                        : candidate;
                 let step: Result<FeatureStepOutput>;
                 if (cached) {
                     const featureTrace = PerformanceTrace.enabled
@@ -1207,6 +1218,8 @@ export class ParametricBodyNode
                                     nextCache,
                                     asynchronous &&
                                         (!run.synchronous ||
+                                            feature.type === "sweep" ||
+                                            feature.type === "faceSweep" ||
                                             (feature.type === "fillet" &&
                                                 feature.cornerSetbacks !== undefined)),
                                     features.slice(index + 1, stop).every((feature) => feature.suppressed),
@@ -1568,7 +1581,11 @@ export class ParametricBodyNode
             : undefined;
         const pending =
             preparedOperation ??
-            (asynchronous ? featureHandler(feature.type)?.prepareAsync?.(feature, context) : undefined);
+            (asynchronous
+                ? feature.type === "sweep" || feature.type === "faceSweep"
+                    ? prepareValidatedFeature((context) => evaluateFeature(feature, context), context)
+                    : featureHandler(feature.type)?.prepareAsync?.(feature, context)
+                : undefined);
         return {
             pending,
             finish: (synchronous) => {

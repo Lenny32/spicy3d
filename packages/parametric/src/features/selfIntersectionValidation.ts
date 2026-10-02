@@ -1,29 +1,89 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import { type IAsyncShapeOperation, type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import type { FeatureContext } from "./feature";
 
-/** Topology heuristic only: surface complexity can still make small checks unbounded. See docs/kernel.md. */
-export function validateSelfIntersection(shape: IShape, warn?: (message: string) => void): Result<boolean> {
-    const faces = shape.findSubShapes(ShapeTypes.face);
-    const edges = shape.findSubShapes(ShapeTypes.edge);
+export const SELF_INTERSECTION_SKIPPED =
+    "Self-intersection check skipped in synchronous evaluation (result unknown; rebuild validates in worker)";
+
+/** Cheap validity gates always apply. The analyzer must never run in the page. */
+export function validateSelfIntersection(
+    shape: IShape,
+    warn?: (message: string) => void,
+    defer?: (shape: IShape) => void,
+): Result<boolean> {
+    if (!shape.checkShape()) return Result.err("Shape is invalid");
+    const volume = shape.volume();
+    const solids = shape.findSubShapes(ShapeTypes.solid);
     try {
-        if (faces.length > 256) return Result.err("Shape exceeds the 256-face validation limit");
-        if (!shape.checkShape()) return Result.err("Shape is invalid");
-        if (faces.length > 32 || edges.length > 64) {
-            const volume = shape.volume();
-            const solids = shape.findSubShapes(ShapeTypes.solid);
-            try {
-                if (!Number.isFinite(volume) || (solids.length > 0 && volume <= 1e-8))
-                    return Result.err("Shape has invalid volume");
-            } finally {
-                for (const solid of solids) solid.dispose();
-            }
-            warn?.("Self-intersection check skipped for large shape");
-            return Result.ok(true);
-        }
-        return shape.checkSelfIntersection?.() ?? Result.err("Self-intersection validation unavailable");
+        if (!Number.isFinite(volume) || (solids.length > 0 && volume <= 1e-8))
+            return Result.err("Shape has invalid volume");
     } finally {
-        for (const item of [...faces, ...edges]) item.dispose();
+        for (const solid of solids) solid.dispose();
     }
+    if (defer) defer(shape);
+    else warn?.(SELF_INTERSECTION_SKIPPED);
+    return Result.ok(true);
+}
+
+/** Captures intermediate replicas before a handler disposes them; owns the output until acceptance. */
+export function prepareValidatedFeature(
+    evaluate: (context: FeatureContext) => Result<IShape>,
+    context: FeatureContext,
+): IAsyncShapeOperation<IShape> {
+    const checks: IAsyncShapeOperation<boolean>[] = [];
+    let result: Result<IShape>;
+    try {
+        result = evaluate({
+            ...context,
+            deferSelfIntersection: (shape) => {
+                try {
+                    const bounded = shapeFactory.boundedOperations;
+                    if (!bounded?.shapeQuery)
+                        throw new Error("Self-intersection validation requires a bounded worker");
+                    checks.push(bounded.shapeQuery({ method: "checkSelfIntersection", shape }));
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    checks.push({
+                        ready: Promise.resolve(),
+                        canFallback: false,
+                        cancel: () => {},
+                        take: () => Result.err(message),
+                    });
+                }
+            },
+        });
+    } catch (error) {
+        for (const check of checks) check.cancel();
+        result = Result.err(error instanceof Error ? error.message : String(error));
+    }
+    let consumed = false;
+    const disposeOutput = () => {
+        if (result.isOk && result.value !== context.input) result.value.dispose();
+    };
+    return {
+        canFallback: false,
+        ready: Promise.all(checks.map((check) => check.ready)).then(() => {}),
+        cancel: () => {
+            for (const check of checks) check.cancel();
+            if (!consumed) {
+                consumed = true;
+                disposeOutput();
+            }
+        },
+        take: () => {
+            if (consumed) return Result.err("Self-intersection validation cancelled");
+            consumed = true;
+            if (!result.isOk) return result;
+            for (const check of checks) {
+                const clean = check.take();
+                if (!clean.isOk || !clean.value) {
+                    disposeOutput();
+                    return Result.err(clean.isOk ? "Shape intersects itself" : clean.error);
+                }
+            }
+            return result;
+        },
+    };
 }

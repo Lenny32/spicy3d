@@ -514,7 +514,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
         }
         const result = preview.evaluate(edited, dragging);
         if (this.extent === EXTENT_NEXT) this._nextPreviewError = this._nextError ?? result.error;
-        showPreviewProblem(result.error);
+        showPreviewProblem(result.error ?? result.warning);
         if (result.shape === undefined) return { meshes: [] };
         const meshes = previewMeshes(body, result.shape);
         if (meshes === undefined) return { meshes: [] };

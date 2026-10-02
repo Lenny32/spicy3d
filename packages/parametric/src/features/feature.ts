@@ -316,6 +316,8 @@ export interface FeatureContext {
     readonly meshResult?: boolean;
     /** Runtime diagnostic; never serialized. */
     readonly warn?: (message: string) => void;
+    /** Runtime validation pending: capture now, await before committing the feature. */
+    readonly deferSelfIntersection?: (shape: IShape) => void;
 }
 
 export interface ShapeTracking {

@@ -290,14 +290,7 @@ const handler: FeatureHandler<SweepFeatureData> = {
             );
             if (!swept.isOk) return Result.err(swept.error);
             const shape = swept.value.shape;
-            const faces = shape.findSubShapes(ShapeTypes.face);
-            const faceCount = faces.length;
-            for (const face of faces) face.dispose();
-            if (faceCount > 256) {
-                shape.dispose();
-                return Result.err("Sweep exceeds the 256-face validation limit");
-            }
-            const clean = validateSelfIntersection(shape, context.warn);
+            const clean = validateSelfIntersection(shape, context.warn, context.deferSelfIntersection);
             if (!clean?.isOk || !clean.value) {
                 shape.dispose();
                 return Result.err(

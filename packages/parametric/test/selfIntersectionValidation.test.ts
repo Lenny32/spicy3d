@@ -2,33 +2,30 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IShape, Result, ShapeTypes } from "@spicy3d/core";
-import { validateSelfIntersection } from "../src/features/selfIntersectionValidation";
+import {
+    SELF_INTERSECTION_SKIPPED,
+    validateSelfIntersection,
+} from "../src/features/selfIntersectionValidation";
 
 test.each([
-    [6, 0, 1, true, 1, true, false, true],
-    [33, 0, 1, true, 1, true, true, false],
-    [6, 65, 1, true, 1, true, true, false],
-    [33, 0, 0, true, 0, true, true, false], // shells need not enclose volume
-    [33, 0, 1, false, 1, false, false, false],
-    [33, 0, 1, true, 0, false, false, false],
-    [257, 0, 1, true, 1, false, false, false],
-] as const)("validation heuristic: %s faces, %s edges, %s solids", (faces, edges, solids, valid, volume, ok, warning, analyzed) => {
+    [true, 1, 1, true],
+    [true, 0, 0, true], // shells need not enclose volume
+    [false, 1, 1, false],
+    [true, 1, 0, false],
+    [true, 0, Number.NaN, false],
+] as const)("synchronous cheap gates: valid=%s solids=%s volume=%s", (valid, solids, volume, ok) => {
     const dispose = rs.fn();
     const check = rs.fn(() => Result.ok(true));
     const warn = rs.fn((_message: string) => {});
     const shape = {
-        findSubShapes: (type: number) =>
-            Array.from(
-                { length: type === ShapeTypes.face ? faces : type === ShapeTypes.edge ? edges : solids },
-                () => ({ dispose }),
-            ),
+        findSubShapes: (_type: number) => Array.from({ length: solids }, () => ({ dispose })),
         checkShape: () => valid,
         volume: () => volume,
         checkSelfIntersection: check,
     } as unknown as IShape;
     const result = validateSelfIntersection(shape, warn);
     expect(result.isOk).toBe(ok);
-    expect(warn).toHaveBeenCalledTimes(warning ? 1 : 0);
-    expect(check).toHaveBeenCalledTimes(analyzed ? 1 : 0);
-    expect(dispose).toHaveBeenCalledTimes(faces + edges + (valid && faces <= 256 && !analyzed ? solids : 0));
+    expect(warn.mock.calls).toEqual(ok ? [[SELF_INTERSECTION_SKIPPED]] : []);
+    expect(check).toHaveBeenCalledTimes(0);
+    expect(dispose).toHaveBeenCalledTimes(valid ? solids : 0);
 });
