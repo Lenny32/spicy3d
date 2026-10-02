@@ -333,6 +333,15 @@ export const shapeCapabilities: ShapeCapability[] = [
         ],
     },
     {
+        method: "makeThickSolidTolerant",
+        returnKind: "shape",
+        params: [
+            { name: "shape", kind: "ref" },
+            { name: "openFaces", kind: "refArray" },
+            { name: "thickness", kind: "number", unit: "length" },
+        ],
+    },
+    {
         method: "fillet",
         returnKind: "shape",
         params: [
@@ -2073,6 +2082,7 @@ export const capabilitiesSource = `Available modeling capabilities (from IShapeF
   combine(shapes: refArray) -> compound
   makeThickSolidBySimple(shape: ref, thickness: length) -> shape
   makeThickSolidByJoin(shape: ref, openFaces: refArray, thickness: length, joinType: arc|tangent|intersection, mode: skin|pipe|rectoVerso?, intersection: boolean?) -> shape
+  makeThickSolidTolerant(shape: ref, openFaces: refArray, thickness: length) -> shape
   fillet(shape: ref, edges: numberArray, radius: length) -> shape
   chamfer(shape: ref, edges: numberArray, distance: length) -> shape
   fillet2d(face: ref, edge1: ref, edge2: ref, radius: length) -> face

@@ -191,7 +191,9 @@ export interface IShapeFactory {
         mode?: OffsetMode,
         intersection?: boolean,
     ): Result<IShape>;
-    /** Material envelope with intersection trimming; optional for older kernels. */
+    /** Material envelope with intersection trimming; optional for older kernels.
+     * @unit length thickness
+     */
     makeThickSolidTolerant?(shape: IShape, openFaces: IShape[], thickness: number): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
