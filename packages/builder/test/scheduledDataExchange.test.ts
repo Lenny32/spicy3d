@@ -49,7 +49,6 @@ describe("DefaultDataExchange scheduled kernel export", () => {
         converter.convertToSTEP.mockClear();
         converter.convertToSTL.mockClear();
         rs.stubGlobal("shapeConverter", converter);
-        rs.stubGlobal("shapeFactory", { combine: () => Result.ok(new MockShape()) });
         registerFeature("test-export-scheduled-step", {
             display: "body.parametricBody",
             nodeIds: () => [],

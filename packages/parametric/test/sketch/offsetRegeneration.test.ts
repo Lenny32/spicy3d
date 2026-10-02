@@ -90,7 +90,9 @@ test.each(
         const outcome = solver.solve(true);
         expect(outcome.result).toMatch(/^Ok/);
         expect(solver.offsetErrors.size).toBe(0);
-        solver.entity(source)!.params.forEach((value, i) => expect(value).toBeCloseTo(before[i], 7));
+        solver.entity(source)!.params.forEach((value, i) => {
+            expect(value).toBeCloseTo(before[i], 7);
+        });
         const expected = offsetCurve(solver.entity(source)!, gap);
         expect(expected.isOk).toBe(true);
         expect(solver.entity(target)!.params).toEqual(expected.value.pieces[0].params);
@@ -107,7 +109,9 @@ test.each(
                 ),
             ).toBeCloseTo(expectedStart, 7);
             expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeCloseTo(type === "length" ? 8 : 0, 7);
-            c.forEach((value, i) => expect(value).toBeCloseTo(d[i], 7));
+            c.forEach((value, i) => {
+                expect(value).toBeCloseTo(d[i], 7);
+            });
         }
         expect(solver.diagnose()).toEqual({ conflicting: [], redundant: [], dofs: initialDofs });
         const fixed = solver.toData().constraints.find((c) => c.kind === ConstraintKind.Fix)!;
@@ -119,7 +123,9 @@ test.each(
         expect(edited).not.toEqual(type === "arc" ? [0, 0, 10, 0, 0, 10] : [0, 0, 10, 0]);
         solver.setScope(scope(gap === 3 ? 5 : 3));
         expect(solver.solve(true).result).toMatch(/^Ok/);
-        solver.entity(source)!.params.forEach((value, i) => expect(value).toBeCloseTo(edited[i], 7));
+        solver.entity(source)!.params.forEach((value, i) => {
+            expect(value).toBeCloseTo(edited[i], 7);
+        });
         expect(solver.diagnose()).toEqual({ conflicting: [], redundant: [], dofs: initialDofs });
         const snapshot = solver.toData();
         expect(solver.reset(snapshot).result).toMatch(/^Ok/);

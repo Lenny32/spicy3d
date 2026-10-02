@@ -38,7 +38,8 @@ and dimensions on the target remain refused. A connector cannot itself be an
 offset source or target, be Blocked, or have Fix on the joined endpoint. These
 cases give the relation id and an actionable message to adjust the connector or
 detach the relation. Removing the relation permits ordinary target editing. Source
-deletion removes the relation and retains a plain target with its last good geometry. Deleting the target removes the relation.
+deletion removes the relation and retains a plain target with its last good
+geometry. Deleting the target removes the relation.
 Trim/split/extend replace a source entity and therefore detach its relations too.
 Move and rotate in place retain relations and regenerate their targets, whether
 the source alone or both source and target are selected. Mirror detaches relations

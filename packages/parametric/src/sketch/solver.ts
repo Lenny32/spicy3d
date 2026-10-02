@@ -312,6 +312,7 @@ export class SketchSolver implements ExternalEntityHost {
             try {
                 const outcome = this.reset(next);
                 regenerated = outcome;
+                // Safety net: sources are frozen during regeneration, so connectors should never move them.
                 for (const relation of next.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
                     const source = next.entities.find((e) => e.id === relation.refs[0].entityId)!;
                     const solved = this.entity(source.id)!;
