@@ -316,6 +316,7 @@ export default {
         "construction.ui.ucs_zx_plane": "UCS ZX plane",
         "construction.ui.select": "Select",
         "construction.ui.no_reference_selected": "No reference selected",
+        "construction.ui.optional": "(optional)",
         "construction.ui.fixed_point": "Fixed point",
         "construction.ui.preview_ready": "Preview ready",
         "construction.ui.apply": "Apply",

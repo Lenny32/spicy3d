@@ -140,6 +140,11 @@ export abstract class CancelableCommand extends Observable implements ICancelabl
 
     protected beforeExecute() {
         this.readProperties();
+        this.openCommandContext();
+    }
+
+    /** Commands with session-owned forms can open the context once their content is ready. */
+    protected openCommandContext() {
         PubSub.default.pub("openCommandContext", this);
     }
 

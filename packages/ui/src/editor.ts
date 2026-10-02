@@ -247,11 +247,11 @@ export class Editor extends HTMLElement {
         this.closeFloatingChat();
     }
 
-    private readonly openContext = (command: ICommand) => {
+    private readonly openContext = (command: ICommand, content?: HTMLElement) => {
         if (this.commandContext) {
             this.closeContext();
         }
-        this.commandContext = new CommandContext(command);
+        this.commandContext = new CommandContext(command, content);
         this._commandContextContainer.append(this.commandContext);
         this._viewportContainer.append(this._commandContextContainer);
     };

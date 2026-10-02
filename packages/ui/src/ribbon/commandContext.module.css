@@ -15,7 +15,11 @@
     background-color: var(--panel-background-color);
     color: var(--foreground-color);
     box-shadow: var(--panel-shadow);
-    font-size: 13px;
+    font:
+        13px "Helvetica Neue",
+        Helvetica,
+        Arial,
+        sans-serif;
     z-index: 30;
 }
 
