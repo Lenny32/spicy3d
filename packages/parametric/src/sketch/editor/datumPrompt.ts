@@ -40,6 +40,7 @@ export function promptDatum(
     onApplied: () => void,
     onCancel?: () => void,
     options?: {
+        skipUnchanged?: boolean;
         positiveOnly?: boolean;
         /** Resolves an input to its display value — supplied by the editor, error text included. */
         resolve?: (input: ParameterValue) => Result<number>;
@@ -49,6 +50,7 @@ export function promptDatum(
 ): void {
     const textbox = document.createElement("input");
     textbox.value = typeof initial === "number" ? initial.toFixed(2) : initial;
+    const initialText = textbox.value;
     textbox.autofocus = true;
     const error = createErrorLabel();
     const content = document.createElement("div");
@@ -59,6 +61,7 @@ export function promptDatum(
             // validation lives in shouldClose: the dialog runs onclick even when
             // shouldClose vetoes closing, so applying there would apply invalid values
             shouldClose: () => {
+                if (options?.skipUnchanged && textbox.value === initialText) return true;
                 const parsed = validateDatumInput(textbox.value, options);
                 if (!parsed.isOk) {
                     showDatumError(error, parsed.error);

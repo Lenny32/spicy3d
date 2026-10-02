@@ -973,7 +973,7 @@ export class SketchEditor implements IDisposable {
         apply: (value: ParameterValue) => void,
         unit: UnitSpec,
         onCancel?: () => void,
-        options?: { positiveOnly?: boolean },
+        options?: { positiveOnly?: boolean; skipUnchanged?: boolean },
     ): void {
         const input = this.datumInput(unit);
         datumPrompt.promptDatum(
@@ -1072,7 +1072,7 @@ export class SketchEditor implements IDisposable {
             (value) => this.solver.setDatumSource(constraintId, value),
             unit,
             undefined,
-            { positiveOnly: !signed },
+            { positiveOnly: !signed, skipUnchanged: true },
         );
     }
 

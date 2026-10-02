@@ -230,14 +230,23 @@ describe("signed Angle datums", () => {
             expectOrientation(solver, line, -30);
             expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(-1);
             expect(solver.datumValue(id)).toBeCloseTo(-Math.PI / 6, 6);
-            if (typeof datum === "number") {
-                solver.setDatum(id, datum);
-                expectOrientation(solver, line, -30);
-                expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(-1);
-            }
             expect(solver.setDatumSource(id, typeof datum === "string" ? "tilt + 15" : 45).isOk).toBe(true);
             expectOrientation(solver, line, 45);
             expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(1);
+        } finally {
+            solver.dispose();
+        }
+    });
+
+    test("unchanged numeric solver datum preserves the clockwise side", () => {
+        const { data, line, id } = legacyClockwiseData(Math.PI / 6);
+        const solver = new SketchSolver(Plane.XY, data);
+        try {
+            const datum = solver.toData().constraints.find((c) => c.id === id)?.datum;
+            expect(typeof datum).toBe("number");
+            solver.setDatum(id, Math.PI / 6);
+            expectOrientation(solver, line, -30);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(-1);
         } finally {
             solver.dispose();
         }

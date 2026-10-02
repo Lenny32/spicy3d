@@ -108,12 +108,16 @@ function setup(): TestContext {
     };
 }
 
-test("confirming the same clockwise expression in the dimension dialog preserves its side", () => {
+test.each(["tilt", 0.6])("confirming unchanged clockwise datum %s preserves its side", (datum) => {
     const { doc, restoreFactory } = setup();
     const previous = PubSub.default.pub;
-    let dialog: { content: HTMLElement; buttons: any[] } | undefined;
-    PubSub.default.pub = ((topic: string, ...args: any[]) => {
-        if (topic === "showDialog") dialog = { content: args[1], buttons: args[2] };
+    let dialog: { content: HTMLElement; buttons: { shouldClose: () => boolean }[] } | undefined;
+    PubSub.default.pub = ((topic: string, ...args: unknown[]) => {
+        if (topic === "showDialog")
+            dialog = {
+                content: args[1] as HTMLElement,
+                buttons: args[2] as { shouldClose: () => boolean }[],
+            };
     }) as typeof previous;
     Object.assign(shapeFactory, { line: () => Result.ok(new MockShape()) });
     try {
@@ -124,7 +128,18 @@ test("confirming the same clockwise expression in the dimension dialog preserves
             document: doc,
             plane: Plane.XY,
             data: {
-                entities: [{ id: 1, type: "line", params: [0, 0, 5 * Math.sqrt(3), -5] }],
+                entities: [
+                    {
+                        id: 1,
+                        type: "line",
+                        params: [
+                            0,
+                            0,
+                            10 * Math.cos(typeof datum === "number" ? datum : Math.PI / 6),
+                            -10 * Math.sin(typeof datum === "number" ? datum : Math.PI / 6),
+                        ],
+                    },
+                ],
                 constraints: [
                     { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
                     { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
@@ -132,7 +147,7 @@ test("confirming the same clockwise expression in the dimension dialog preserves
                         id: 4,
                         kind: ConstraintKind.Angle,
                         refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
-                        datum: "tilt",
+                        datum,
                         angleSide: -1,
                     },
                 ],
@@ -143,10 +158,16 @@ test("confirming the same clockwise expression in the dimension dialog preserves
         expect(dialog).not.toBeUndefined();
         const input = dialog!.content.querySelector("input");
         expect(input).not.toBeNull();
-        expect(input!.value).toBe("tilt");
+        expect(input!.value).toBe(typeof datum === "number" ? "-34.38" : "tilt");
+        const before = editor.solver.toData();
+        const savedBefore = node.data;
+        const historyBefore = doc.history.position();
         expect(dialog!.buttons[0].shouldClose()).toBe(true);
-        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(-5, 6);
-        expect(node.data.constraints.find((c) => c.id === 4)).toMatchObject({ datum: "tilt", angleSide: -1 });
+        expect(editor.solver.toData()).toEqual(before);
+        expect(doc.history.position()).toEqual(historyBefore);
+        expect(node.data.constraints.find((c) => c.id === 4)).toEqual(
+            savedBefore.constraints.find((c) => c.id === 4),
+        );
         editor.exit();
         node.dispose();
     } finally {
