@@ -9,6 +9,7 @@ import {
     mergeDocuments,
     migrateDocument,
     Plane,
+    resolveMerge,
     type Serialized,
     sha256Hex,
     splitManifest,
@@ -165,4 +166,37 @@ test.each([
         angleSide: -1,
     });
     expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 5 });
+});
+
+test.each([4, 5])("resolving a sketch %s datum conflict takes its angle side too", (version) => {
+    const base = fixture();
+    base["moduleVersions"]["sketch"] = version;
+    if (version === 4) {
+        const payload = data(base);
+        delete payload.constraints.find((item) => item.id === 4)!.angleSide;
+        sketch(base)["dataJson"] = JSON.stringify(payload);
+    }
+    const ours = edit(fixture(), (payload) => {
+        Object.assign(payload.constraints.find((item) => item.id === 4)!, { datum: "45", angleSide: -1 });
+    });
+    const theirs = edit(fixture(), (payload) => {
+        Object.assign(payload.constraints.find((item) => item.id === 4)!, { datum: "60", angleSide: 1 });
+    });
+    const merged = mergeDocuments(base, ours, theirs);
+    expect(merged.isOk).toBe(true);
+    expect(merged.value.conflicts).toHaveLength(1);
+    expect(merged.value.conflicts[0].path).toContain("/constraint/4/datum");
+    for (const [choice, datum, angleSide, degrees] of [
+        ["ours", "45", -1, -45],
+        ["theirs", "60", 1, 60],
+    ] as const) {
+        const resolved = resolveMerge(merged.value, [{ path: merged.value.conflicts[0].path, choice }]);
+        expect(resolved.isOk).toBe(true);
+        expect(resolved.value.conflicts).toEqual([]);
+        expect(data(resolved.value.merged).constraints.find((item) => item.id === 4)).toMatchObject({
+            datum,
+            angleSide,
+        });
+        expectOrientation(resolved.value.merged, degrees);
+    }
 });

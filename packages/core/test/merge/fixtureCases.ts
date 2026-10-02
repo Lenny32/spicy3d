@@ -277,6 +277,40 @@ const OURS_LINE_ID = 734_251_950_211;
 const THEIRS_LINE_ID = 91_827_364_555;
 
 const CASES: Record<string, CaseBuilder> = {
+    "sketch-angle-datum-side-conflict": () => {
+        const base = clone(
+            loadDocumentFixtures().find((entry) => entry.name === "v2/sketch5-angle-side.json")!.data,
+        );
+        const setAngle = (datum: string, angleSide: number) => (d: Doc) =>
+            editSketch(d, "sketch-angle", (data) => {
+                Object.assign(
+                    data["constraints"].find((c: Json) => c["id"] === 4),
+                    { datum, angleSide },
+                );
+            });
+        const ours = edit(base, setAngle("45", -1));
+        const theirs = edit(base, setAngle("60", 1));
+        return {
+            description: "Concurrent angle expression edits choose datum source and angleSide together.",
+            base,
+            ours,
+            theirs,
+            expected: clone(ours),
+            conflicts: [
+                conflict(
+                    "property",
+                    mergePath("node", "sketch-angle", "constraint", "4", "datum"),
+                    {
+                        base: { datum: "tilt", angleSide: -1 },
+                        ours: { datum: "45", angleSide: -1 },
+                        theirs: { datum: "60", angleSide: 1 },
+                    },
+                    ["Migrated clockwise angle", "datum"],
+                    sideChoices,
+                ),
+            ],
+        };
+    },
     "sketch-text-content-vs-height": () => {
         const base = edit(sharedBase(), (d) => {
             d["moduleVersions"] = { ...d["moduleVersions"], sketch: 4 };
