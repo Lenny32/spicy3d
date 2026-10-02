@@ -1221,6 +1221,10 @@ export default {
         "viewport.mode.solid": "Solid",
         "viewport.mode.wireframe": "Wireframe",
         "viewport.mode.solidAndWireframe": "Solid And Wireframe",
+        "warning.selfIntersection.timeout{0}":
+            "Self-intersection check timed out after {0} ms (result unknown; geometry not verified)",
+        "warning.selfIntersection.unknown":
+            "Self-intersection worker failed or is unavailable (result unknown; geometry not verified)",
         "warning.script.fromDomain": "Do you trust plugins from this origin?",
         "warning.plugin.origin":
             "A plugin runs with the same rights as the app. Only trust origins whose plugins you trust.",

@@ -189,22 +189,23 @@ describe("FeatureListProperty", () => {
         expect(mustQuery(prop, ".fl-error-text").textContent).toBe("Edge not found after rebuild");
     });
 
-    test("warning rows render tinted without forcing expansion", () => {
+    test.each([
+        "Sketch has unresolved external references",
+        "Self-intersection check timed out after 30000 ms (result unknown; geometry not verified)",
+    ])("warning rows render tinted without forcing expansion: %s", (warning) => {
         const doc = createMockDocument();
-        const node = featureNode([], { warning: "Sketch has unresolved external references" });
+        const node = featureNode([], { warning });
         const prop = new FeatureListProperty(doc, node);
 
         const row = mustQuery<HTMLElement>(prop, ".fl-item");
         expect(row.className).toContain("fl-warning");
         expect(row.className).not.toContain("fl-error");
-        expect(row.title).toBe("Sketch has unresolved external references");
+        expect(row.title).toBe(warning);
         // no forced expansion: the text appears only once the user expands the row
         expect(prop.querySelector(".fl-warning-text")).toBeNull();
 
         expandFirstRow(prop);
-        expect(mustQuery(prop, ".fl-warning-text").textContent).toBe(
-            "Sketch has unresolved external references",
-        );
+        expect(mustQuery(prop, ".fl-warning-text").textContent).toBe(warning);
     });
 
     test("renders the feature's reference above its parameters", () => {

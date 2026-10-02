@@ -4,6 +4,7 @@
 import {
     Config,
     DocumentRebuilds,
+    I18n,
     type IDisposable,
     type IFace,
     Matrix4,
@@ -633,7 +634,7 @@ test.each([5, Infinity])("self-intersection stays bounded with slow-op budget %s
         rs.useFakeTimers();
         Config.instance.slowOpWarningSeconds = seconds;
         const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
-        const deadline = seconds === Infinity ? 30_000 : seconds * 1000;
+        const deadline = 30_000;
         await rs.advanceTimersByTimeAsync(deadline);
         await task.ready;
         const result = task.take();
@@ -704,7 +705,7 @@ test("a pre-aborted self-intersection query never copies inputs or creates a wor
     }
 });
 
-test("free-form shell feature validation terminates a hung worker before committing", async () => {
+test("free-form shell feature validation terminates a hung worker and accepts unknown geometry", async () => {
     const shell = freeFormShell();
     const transport = new HungTransport();
     const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
@@ -747,10 +748,11 @@ test("free-form shell feature validation terminates a hung worker before committ
         await rs.advanceTimersByTimeAsync(1);
         await DocumentRebuilds.settled(document);
         expect(transport.terminated).toBe(1);
-        expect(node.featureItems()[0].error).toBe(
-            "Self-intersection check timed out after 30000 ms (result unknown)",
+        expect(node.featureItems()[0].error).toBeUndefined();
+        expect(node.featureItems()[0].warning).toBe(
+            I18n.translate("warning.selfIntersection.timeout{0}", 30_000),
         );
-        expect(node.shape.isOk).toBe(false);
+        expect(node.shape.isOk).toBe(true);
         expect(mainCheck).toHaveBeenCalledTimes(0);
         expect(shell.checkShape()).toBe(true);
     } finally {

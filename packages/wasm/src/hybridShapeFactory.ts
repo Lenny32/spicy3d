@@ -6,7 +6,6 @@ import {
     type AsyncTrackedCorner,
     type BoundedShapeQuery,
     type BoundedShapeRequest,
-    Config,
     type IAsyncShapeFactory,
     type IAsyncShapeOperation,
     type IBoundedShapeFactory,
@@ -39,6 +38,8 @@ import type {
     ShapeReplica,
     WorkerMesh,
 } from "./workerProtocol";
+
+const SELF_INTERSECTION_DEADLINE_MS = 30_000;
 
 type ResidentReplica = {
     source: OccShape;
@@ -177,8 +178,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         signal?.addEventListener("abort", onAbort, { once: true });
         if (signal?.aborted) abort.abort();
         this.active.add(cancel);
-        const budget = Config.instance.slowOpWarningSeconds * 1000;
-        const queryDeadline = Number.isFinite(budget) && budget > 0 ? Math.min(30_000, budget) : 30_000;
+        const queryDeadline = SELF_INTERSECTION_DEADLINE_MS;
         const pending =
             args.method === "checkSelfIntersection"
                 ? worker.request("checkSelfIntersectionReplica", { shape: args.shape }, abort.signal, {

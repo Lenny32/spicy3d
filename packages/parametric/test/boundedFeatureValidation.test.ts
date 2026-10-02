@@ -4,15 +4,19 @@
 import { rs } from "@rstest/core";
 import {
     DocumentRebuilds,
+    I18n,
     type IAsyncShapeOperation,
     type IShape,
+    mergeDocuments,
     Result,
     ShapeTypes,
     Transaction,
+    validateMerge,
 } from "@spicy3d/core";
 import { createMockApplication, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { Document } from "../../app/src/document";
 import { HeadlessDocumentEvaluator } from "../../app/src/mergeEvaluator";
+import en from "../../i18n/src/en";
 import { FeatureChainPreview } from "../src/commands/featureEditPreview";
 import { featureHandler, registerFeature, type SweepFeatureData } from "../src/features/feature";
 import {
@@ -21,7 +25,9 @@ import {
     validateSelfIntersection,
 } from "../src/features/selfIntersectionValidation";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
+import { runParametricProgram } from "../src/program/parametricProgram";
 
+const originalLocale = I18n.getLanguages().find((locale) => locale.language === "en")!;
 const original = featureHandler("sweep")!;
 const feature: SweepFeatureData = {
     id: "sweep",
@@ -40,6 +46,7 @@ let answer: Result<boolean> | undefined;
 let faceCount: number;
 
 beforeEach(() => {
+    I18n.addLanguage(en);
     rs.useFakeTimers();
     document = new TestDocument({ application: createMockApplication() });
     outputs = [];
@@ -101,34 +108,81 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    I18n.addLanguage(originalLocale);
     document.dispose();
     registerFeature("sweep", original);
     rs.unstubAllGlobals();
     rs.useRealTimers();
 });
 
-function body(): ParametricBodyNode {
-    const node = new ParametricBodyNode({ document, featuresJson: JSON.stringify([feature]) });
+function body(features = [feature]): ParametricBodyNode {
+    const node = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features) });
     document.modelManager.addNode(node);
     void node.shape;
     return node;
 }
 
 async function start(): Promise<void> {
-    await rs.advanceTimersByTimeAsync(0);
+    await rs.advanceTimersByTimeAsync(10);
 }
 
-test("single-feature free-form shell is checked above old limits and timeout refuses its commit", async () => {
-    const node = body();
+const timeoutError = "Self-intersection check timed out after 30000 ms (result unknown)";
+const timeoutWarning =
+    "Self-intersection check timed out after 30000 ms (result unknown; geometry not verified)";
+
+test("timeout accepts geometry, evaluates later steps and caches the warning until inputs change", async () => {
+    const node = body([feature, { ...feature, id: "later" }]);
     await start();
     expect(queries).toHaveLength(1);
-    expect(queries[0].shape).toBe(outputs[0]);
     DocumentRebuilds.flush(document);
     expect(DocumentRebuilds.pending(document)).toBe(true);
-    await rs.advanceTimersByTimeAsync(30_000);
+    await rs.advanceTimersByTimeAsync(30_001);
+    expect(queries).toHaveLength(2);
+    queries[1].complete(Result.ok(true));
+    await start();
     await DocumentRebuilds.settled(document);
-    expect(node.featureItems()[0].error).toContain("timed out after 30000 ms (result unknown)");
-    expect(outputs[0].dispose).toHaveBeenCalledTimes(1);
+    expect(node.shape.isOk).toBe(true);
+    expect(node.shape.value).toBe(outputs[1]);
+    expect(node.featureItems().map((item) => item.error)).toEqual([undefined, undefined]);
+    expect(node.featureItems()[0].warning).toBe(timeoutWarning);
+    expect(outputs[0].dispose).toHaveBeenCalledTimes(0);
+    const report = runParametricProgram(document, [{ op: "features", body: node.id }]);
+    expect(report.results.features).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: "sweep", warning: timeoutWarning })]),
+    );
+    node.applyVariables();
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(queries).toHaveLength(2);
+    expect(node.featureItems()[0].warning).toBe(timeoutWarning);
+    answer = Result.ok(true);
+    node.featuresJson = JSON.stringify([
+        { ...feature, roundCorner: true },
+        { ...feature, id: "later" },
+    ]);
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(queries).toHaveLength(4);
+    expect(node.featureItems()[0].warning).toBeUndefined();
+});
+
+test.each([
+    "Geometry worker native runtime failed",
+    "Worker result unavailable",
+])("worker unknown verdict %s accepts geometry with a warning", async (error) => {
+    answer = Result.err(error);
+    const node = body();
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(node.shape.isOk).toBe(true);
+    expect(node.featureItems()[0].error).toBeUndefined();
+    expect(node.featureItems()[0].warning).toBe(
+        "Self-intersection worker failed or is unavailable (result unknown; geometry not verified)",
+    );
+    node.applyVariables();
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(queries).toHaveLength(1);
 });
 
 test("newer rebuild cancels pending check and cannot commit its old answer", async () => {
@@ -146,6 +200,11 @@ test("newer rebuild cancels pending check and cannot commit its old answer", asy
     expect(node.shape.isOk).toBe(true);
     expect(node.shape.value).toBe(outputs[1]);
     expect(node.featureItems()[0].error).toBeUndefined();
+    answer = Result.ok(true);
+    node.featuresJson = JSON.stringify([feature]);
+    await start();
+    await DocumentRebuilds.settled(document);
+    expect(queries).toHaveLength(3);
 });
 
 test.each([true, false])("worker result %s gates acceptance without main-thread checks", async (clean) => {
@@ -187,10 +246,12 @@ test("headless document open and merge evaluation await bounded validation", asy
         void (reopened as ParametricBodyNode).shape;
         await start();
         expect(queries).toHaveLength(1);
-        queries[0].complete(Result.ok(true));
+        queries[0].complete(Result.err(timeoutError));
         await start();
         await DocumentRebuilds.settled(loaded.value);
         expect((reopened as ParametricBodyNode).shape.isOk).toBe(true);
+        expect((reopened as ParametricBodyNode).featureItems()[0].warning).toBe(timeoutWarning);
+        expect(JSON.stringify(loaded.value.serialize())).toBe(JSON.stringify(stored));
         loaded.value.dispose();
         const evaluation = new HeadlessDocumentEvaluator(createMockApplication()).evaluate(stored);
         await start();
@@ -200,7 +261,17 @@ test("headless document open and merge evaluation await bounded validation", asy
         const report = await evaluation;
         expect(report.isOk).toBe(true);
         if (!report.isOk) throw new Error("report failed");
-        expect(JSON.stringify([...report.value])).toContain("result unknown");
+        expect([...report.value]).toEqual([]);
+        answer = Result.err(timeoutError);
+        const merge = mergeDocuments(stored, stored, stored);
+        expect(merge.isOk).toBe(true);
+        const validating = validateMerge(merge.value, {
+            evaluator: new HeadlessDocumentEvaluator(createMockApplication()),
+        });
+        await rs.runAllTimersAsync();
+        const validated = await validating;
+        expect(validated.isOk).toBe(true);
+        expect(validated.value.conflicts).toEqual([]);
     } finally {
         source.dispose();
     }

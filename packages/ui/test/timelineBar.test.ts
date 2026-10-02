@@ -189,6 +189,19 @@ describe("TimelineBar", () => {
         expect(item.title.endsWith("\nNo profile")).toBe(true);
     });
 
+    test("accepted timeout displays a warning on the timeline step", () => {
+        const { document, bar } = setup();
+        const warning =
+            "Self-intersection check timed out after 30000 ms (result unknown; geometry not verified)";
+        document.modelManager.rootNode.add(bodyNode("Body 1", [extrude("f1", { warning })]));
+        show(document);
+        const items = entries(bar);
+        expect(items).toHaveLength(1);
+        expect(items[0].title).toContain(warning);
+        expect(items[0].classList.contains(style.warning)).toBe(true);
+        expect(items[0].classList.contains(style.error)).toBe(false);
+    });
+
     test("follows the history and scrolls a new step into view, not the ones already there", async () => {
         const { document, bar } = setup();
         document.modelManager.rootNode.add(iconNode("Sketch 1", "icon-sketch"));

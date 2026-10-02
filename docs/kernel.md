@@ -25,8 +25,7 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   (`packages/ai/src/mcp/server.ts`), preserving cross-call program refs. Built-in metadata reads
   `get_document_state`, `get_selection`, and the document resource remain responsive during a
   pending worker operation and report a captured committed-state snapshot.
-- **Finite worker deadline.** Self-intersection queries have a deadline of at most 30 seconds (shorter when the
-  slow-op budget is lower), including worker initialization and BREP import. Worker requests
+- **Finite worker deadline.** Self-intersection queries have a deadline of a fixed 30 seconds, including worker initialization and BREP import. Worker requests
   otherwise have a 90-second deadline; corner-setback fits have
   180 seconds for their fixed plate-fit budget (roughly three times the measured reference cost).
   Corner jobs default to a 240-second queue-inclusive deadline and remain immediately cancelable.
@@ -175,9 +174,13 @@ containing either feature take the asynchronous scheduler route even below the t
 (including face-sweep's temporary tool before disposal) in a bounded worker and awaits all
 checks **before caching, tracking commit, or displaying the new body**. Checks run at every
 shape size: the 32-face/64-edge heuristic and 256-face refusal have been removed. Worker
-termination enforces the configured slow-op budget capped at 30 seconds. A timeout is a
-feature error, “Self-intersection check timed out after N ms (result unknown)”; it preserves
-the last accepted body, rather than treating an unknown result as valid (#119/#120 policy).
+termination enforces a fixed 30-second deadline independent of the slow-op warning setting.
+Detected self-intersection is a feature error. Timeout, worker failure and unavailable worker
+results accept the geometry with a runtime warning (result unknown; geometry not verified).
+The warning appears on the timeline, edit panel, body warning list and MCP diagnostics;
+later features still evaluate, including on document open and during merge validation.
+Unknown results are cached with their warnings while inputs remain unchanged and checked
+again after input changes. This cache lasts only for the session (#119/#120 policy).
 A newer rebuild, job cancellation, undo/redo, or disposal cancels the pending checks and
 releases the unaccepted output. A synchronous scheduler drain cannot fall back to the
 analyzer. Document open and headless merge evaluation can await these scheduled rebuilds.

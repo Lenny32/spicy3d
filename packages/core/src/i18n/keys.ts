@@ -1162,6 +1162,8 @@ export const I18N_KEYS = [
     "viewport.mode.solid",
     "viewport.mode.wireframe",
     "viewport.mode.solidAndWireframe",
+    "warning.selfIntersection.timeout{0}",
+    "warning.selfIntersection.unknown",
     "warning.script.fromDomain",
     "warning.plugin.origin",
     "warning.plugin.signedIn",

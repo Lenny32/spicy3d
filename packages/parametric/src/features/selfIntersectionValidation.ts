@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IAsyncShapeOperation, type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import { I18n, type IAsyncShapeOperation, type IShape, Result, ShapeTypes } from "@spicy3d/core";
 import type { FeatureContext } from "./feature";
 
 export const SELF_INTERSECTION_SKIPPED =
@@ -81,9 +81,21 @@ export function prepareValidatedFeature(
             if (!result.isOk) return result;
             for (const check of checks) {
                 const clean = check.take();
-                if (!clean.isOk || !clean.value) {
+                if (!clean.isOk) {
+                    // Cancellation belongs to the superseded run, never to its cache.
+                    if (/cancelled|canceled/i.test(clean.error)) {
+                        disposeOutput();
+                        return Result.err(clean.error);
+                    }
+                    const timeout = /timed out after (\d+) ms/.exec(clean.error);
+                    context.warn?.(
+                        timeout
+                            ? I18n.translate("warning.selfIntersection.timeout{0}", timeout[1])
+                            : I18n.translate("warning.selfIntersection.unknown"),
+                    );
+                } else if (!clean.value) {
                     disposeOutput();
-                    return Result.err(clean.isOk ? "Shape intersects itself" : clean.error);
+                    return Result.err("Shape intersects itself");
                 }
             }
             return result;
