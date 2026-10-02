@@ -132,7 +132,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                         request.method === "makeThickSolidTolerant" ? "intersection" : request.joinType,
                         request.method === "makeThickSolidTolerant",
                     );
-                    if (refused) throw new Error(refused);
+                    if (refused && request.method !== "makeThickSolidTolerant") throw new Error(refused);
                     const faces = request.shape.findSubShapes(ShapeTypes.face);
                     prepared.push(...faces);
                     const closingFaces = request.closingFaces.map((selected) => {

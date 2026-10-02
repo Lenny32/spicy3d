@@ -1312,7 +1312,11 @@ export class ShapeFactory implements IShapeFactory {
         if (typeof binding !== "function")
             return Result.err("Tolerant thicken is not available in this kernel build");
         const refused = refuseIntersectionJoin(shape, "intersection", true);
-        if (refused) return Result.err(refused);
+        if (refused) {
+            const ordinary = this.makeThickSolidByJoin(shape, openingFaces, thickness, "arc");
+            if (ordinary.isOk) return ordinary;
+            return Result.err(refused);
+        }
         const result = convertShapeResult(
             binding,
             [ensureOccShape(shape)[0], ensureOccShape(openingFaces), thickness],

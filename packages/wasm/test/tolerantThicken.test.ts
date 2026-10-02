@@ -200,7 +200,7 @@ test("vertical small fillets produce a real opened prismatic wall", () => {
     expect(wall.volume()).toBeLessThan(input.volume() * 0.99);
 });
 
-test("closed all-fillet collapse also refuses the unchanged input", () => {
+test("closed all-fillet collapse reports the failed wall boolean", () => {
     const box = keep(createBox(factory, 30, 30, 20));
     const edges = box.findSubShapes(ShapeTypes.edge);
     owned.push(...edges);
@@ -226,4 +226,59 @@ test.each([-1, -3.75])("closed box ordinary recovery yields the exact wall at %s
     expect(result.volume()).toBeCloseTo(input.volume() - cavity, 6);
     expect(result.checkShape()).toBe(true);
     expect(result.volume()).toBeLessThan(input.volume() * 0.99);
+});
+
+test.each([-1e-5, 1e-5])("large box accepts a small ordinary offset %s", (thickness) => {
+    const input = keep(createBox(factory, 1000, 1000, 1000));
+    const result = keep(unwrapOk(factory.makeThickSolidByJoin(input, [], thickness, "arc")));
+    expect(result.checkShape()).toBe(true);
+    expect(Math.abs(result.volume() - input.volume())).toBeGreaterThan(50);
+});
+
+test("planar join offset keeps the helpful shell diagnostic", () => {
+    const face = keep(unwrapOk(factory.rect(Plane.XY, 10, 10)));
+    const result = factory.makeThickSolidByJoin(face, [], 1, "arc");
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("not a solid (Shell)");
+    expect(result.error).toContain("makeThickSolidBySimple");
+});
+
+test("42-face perforated box preserves the ordinary arc wall", async () => {
+    const box = keep(createBox(factory, 70, 70, 10));
+    const holes = Array.from({ length: 36 }, (_, index) =>
+        keep(
+            unwrapOk(
+                factory.cylinder(
+                    XYZ.unitZ,
+                    new XYZ(10 + (index % 6) * 10, 10 + Math.floor(index / 6) * 10, 0),
+                    2,
+                    10,
+                ),
+            ),
+        ),
+    );
+    const input = keep(unwrapOk(factory.booleanCut([box], holes)));
+    const faces = input.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    expect(faces).toHaveLength(42);
+    const opening = faces.find((face) => {
+        const bounds = face.boundingBox();
+        return Math.abs(bounds.min.z - 10) < 1e-5 && Math.abs(bounds.max.z - 10) < 1e-5;
+    });
+    expect(opening).not.toBeUndefined();
+    if (!opening) throw new Error("Missing top opening");
+    const ordinary = keep(unwrapOk(factory.makeThickSolidByJoin(input, [opening], -0.5, "arc")));
+    const tolerant = keep(unwrapOk(factory.makeThickSolidTolerant(input, [opening], -0.5)));
+    expect(tolerant.volume()).toBeCloseTo(ordinary.volume(), 6);
+    const hybrid = keep(new HybridShapeFactory(() => new NativeWorkerTransport().client));
+    const operation = hybrid.shapeOperation({
+        method: "makeThickSolidTolerant",
+        shape: input,
+        closingFaces: [opening],
+        thickness: -0.5,
+    });
+    await operation.ready;
+    const bounded = keep(unwrapOk(operation.take()));
+    expect(bounded.checkShape()).toBe(true);
+    expect(bounded.volume()).toBeCloseTo(ordinary.volume(), 6);
 });
