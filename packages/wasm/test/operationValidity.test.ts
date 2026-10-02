@@ -484,6 +484,10 @@ test.each([
     const answer = task.take();
     expect(answer.isOk).toBe(true);
     owned.push(...answer.value.inputs, answer.value.result.shape);
+    // The worker BREP round trip yields a valid result for this fixture, so no
+    // inherited-defect warning is needed (the invalid-result case is tested below).
+    expect(answer.value.result.shape.checkShape()).toBe(true);
+    expect(answer.value.warning).toBeUndefined();
 
     const bounded = hybrid.shapeOperation({
         method: operation === "cut" ? "booleanCut" : "booleanFuse",

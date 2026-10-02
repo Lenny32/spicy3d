@@ -115,6 +115,22 @@ test("large replay offloads every boolean, commits once, and restores a retained
     expect(sync).not.toHaveBeenCalled();
 });
 
+test("worker topology warnings reach feature items after an async rebuild", async () => {
+    // Simulate inherited BRepCheck defects while keeping the real worker operation,
+    // response, async feature replay, and body commit in the path under test.
+    rs.spyOn(wasm.Shape, "check").mockReturnValue(false);
+    const sync = rs.spyOn(factory, "booleanFuseTracked");
+    const { body } = model();
+    await DocumentRebuilds.settled(document);
+    expect(body.shape.isOk).toBe(true);
+    expect(requests()).toHaveLength(12);
+    expect(sync).not.toHaveBeenCalled();
+    expect(body.featureItems()[1].error).toBeUndefined();
+    expect(body.featureItems()[1].warning).toBe(
+        "input 0 is already invalid (checkShape false); tool 0 is already invalid (checkShape false)",
+    );
+});
+
 test("synchronous takeover preserves the completed prefix and never imports the late worker result", async () => {
     const { body } = model();
     // Hold the second worker result: the first worker feature has already become part of this run's prefix.
