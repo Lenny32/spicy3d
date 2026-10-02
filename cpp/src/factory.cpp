@@ -3007,7 +3007,7 @@ public:
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
         }
-        if (thickSolidUnchanged(shape, makeThickSolid.Shape())) {
+        if (thickSolidUnchanged(shape, makeThickSolid.Shape()) || thickSolidGeometricallyUnchanged(shape, makeThickSolid.Shape())) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
@@ -3042,8 +3042,8 @@ public:
         }
         // IsDone and BRepCheck can both pass when the offset collapses and OCCT
         // rebuilds the input solid. A shell must actually remove its closing faces.
-        if (makeThickSolid.Shape().IsSame(shape)
-            || (shapesList.IsEmpty() && thickSolidUnchanged(shape, makeThickSolid.Shape()))) {
+        if (thickSolidGeometricallyUnchanged(shape, makeThickSolid.Shape())
+            || thickSolidUnchanged(shape, makeThickSolid.Shape())) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;

@@ -323,16 +323,16 @@ describe("thicken feature (real kernel)", () => {
                         { op: "thicken", id: "failed", body: body.id, thickness: -5, openFaceIndexes },
                     ]),
                 ),
-            ).toThrow("offset did not remove an opening face");
+            ).toThrow("input shape unchanged");
             expect(body.features).toHaveLength(1);
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
 
             thicken(body, { thickness: -5, openFaces: openings });
-            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(errorOf(body, "t1")).toContain("input shape unchanged");
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
 
             body.setFeatureParameter("t1", "thickness", -7);
-            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(errorOf(body, "t1")).toContain("input shape unchanged");
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
         });
 
