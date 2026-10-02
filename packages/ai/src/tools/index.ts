@@ -5,6 +5,7 @@ import type { Tool } from "../llm/types";
 import { buildSkillTool } from "../skills";
 import { buildAskUserTool } from "./askUser";
 import { buildCapabilityTools } from "./capabilityEngine";
+import { buildErrorLogTools } from "./errorLogTools";
 import { buildExportChunkTool } from "./exportChunks";
 import { buildFileTools, buildReferenceMeshImportTool } from "./fileTools";
 import { guardKernelTool } from "./kernelTools";
@@ -45,6 +46,7 @@ export function buildTools(): Tool[] {
         ...buildCornerJobTools(),
         ...buildParametricJobTools(),
         buildExportChunkTool(),
+        ...buildErrorLogTools(),
     ];
     return tools.map(guardKernelTool);
 }

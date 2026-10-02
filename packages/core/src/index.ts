@@ -22,6 +22,7 @@ export * from "./documentRebuilds";
 export * from "./documentTransfer";
 export * from "./editor";
 export * from "./editSessions";
+export * from "./errorLog";
 export * from "./eventHandlers";
 export * from "./externalContent";
 export * from "./foundation";

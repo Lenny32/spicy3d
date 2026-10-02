@@ -11,7 +11,7 @@ import {
     McpError,
     ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { I18n } from "@spicy3d/core";
+import { ErrorLog, I18n } from "@spicy3d/core";
 import { buildMcpInstructions } from "../llm/prompt";
 import type { Tool, ToolResult } from "../llm/types";
 import { buildSkillTool, MCP_SKILLS } from "../skills";
@@ -176,7 +176,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         { name: MCP_SERVER_NAME, version: __APP_VERSION__ },
         {
             // listChanged: sent when signing in or out adds or removes the cloud tools.
-            capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
+            capabilities: { tools: { listChanged: true }, resources: { listChanged: true }, logging: {} },
             instructions,
         },
     );
@@ -204,14 +204,33 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     // Watched only while connected: a server whose connect failed (the relay not reachable yet,
     // retried with backoff) must not leave a listener behind.
     let stopWatching: (() => void) | undefined;
+    let stopErrorLog: (() => void) | undefined;
     const connect = server.connect.bind(server);
     server.connect = async (transport) => {
         await connect(transport);
         stopWatching ??= onAgentCloudChanged(() => void server.sendToolListChanged().catch(() => undefined));
+        // Every error of the session's list also reaches the agent as a logging message.
+        stopErrorLog ??= ErrorLog.subscribe((entry) => {
+            if (!entry) return;
+            void server
+                .sendLoggingMessage({
+                    level: "error",
+                    logger: "spicy3d.errors",
+                    data: {
+                        id: entry.id,
+                        source: entry.source,
+                        message: entry.message,
+                        details: entry.details,
+                    },
+                })
+                .catch(() => undefined);
+        });
         const closed = transport.onclose;
         transport.onclose = () => {
             stopWatching?.();
             stopWatching = undefined;
+            stopErrorLog?.();
+            stopErrorLog = undefined;
             // The sessions of this connection are gone: their open questions close.
             for (const caller of callers) {
                 forgetCloudCaller(caller);

@@ -3,6 +3,7 @@
 
 import { createMcpPanel, type McpPanel } from "@spicy3d/ai";
 import {
+    ErrorLog,
     type IApplication,
     type ICommand,
     type IDocument,
@@ -14,6 +15,7 @@ import {
 import { collection, div } from "@spicy3d/element";
 import { CommandSearch } from "./commandSearch";
 import style from "./editor.module.css";
+import { ErrorPanel } from "./errorlog/errorPanel";
 import { FloatPanel } from "./floatPanel";
 import { ProjectView } from "./project";
 import { PropertyView } from "./property";
@@ -30,6 +32,8 @@ export class Editor extends HTMLElement {
     private readonly _commandContextContainer = div({});
     private _contentEl: HTMLDivElement | null = null;
     private commandContext?: CommandContext;
+    private errorPanel?: ErrorPanel;
+    private stopErrorLog?: () => void;
     private chatDock?: HTMLElement;
     private chatPanel?: McpPanel;
     private floatingChat?: FloatPanel;
@@ -121,6 +125,24 @@ export class Editor extends HTMLElement {
             this.floatingChat = undefined;
         }
     }
+
+    private showErrors() {
+        if (this.errorPanel) return;
+        const panel = new ErrorPanel();
+        panel.onClose = () => this.hideErrors();
+        this.errorPanel = panel;
+        this._viewportContainer.append(panel);
+    }
+
+    private hideErrors() {
+        this.errorPanel?.remove();
+        this.errorPanel = undefined;
+    }
+
+    private readonly toggleErrors = () => {
+        if (this.errorPanel) this.hideErrors();
+        else this.showErrors();
+    };
 
     private readonly toggleChat = () => {
         if (this.chatDock || this.floatingChat) {
@@ -233,6 +255,11 @@ export class Editor extends HTMLElement {
         PubSub.default.sub("openCommandSearch", this.openCommandSearch);
         PubSub.default.sub("closeCommandContext", this.closeContext);
         PubSub.default.sub("toggleChatPanel", this.toggleChat);
+        PubSub.default.sub("toggleErrorPanel", this.toggleErrors);
+        // A new error shows the list; clearing it does not.
+        this.stopErrorLog ??= ErrorLog.subscribe((entry) => {
+            if (entry) this.showErrors();
+        });
     }
 
     disconnectedCallback(): void {
@@ -242,6 +269,10 @@ export class Editor extends HTMLElement {
         PubSub.default.remove("openCommandSearch", this.openCommandSearch);
         PubSub.default.remove("closeCommandContext", this.closeContext);
         PubSub.default.remove("toggleChatPanel", this.toggleChat);
+        PubSub.default.remove("toggleErrorPanel", this.toggleErrors);
+        this.stopErrorLog?.();
+        this.stopErrorLog = undefined;
+        this.hideErrors();
         this.chatDock?.remove();
         this.chatDock = undefined;
         this.closeFloatingChat();

@@ -175,7 +175,7 @@ export const DefaultRibbon: RibbonTabProfile[] = [
         groups: [
             {
                 groupName: "ribbon.group.tools",
-                items: ["ai.toggleChat", "act.alignCamera"],
+                items: ["ai.toggleChat", "errors.toggle", "act.alignCamera"],
                 collapsedItems: ["test.performance"],
             },
         ],
