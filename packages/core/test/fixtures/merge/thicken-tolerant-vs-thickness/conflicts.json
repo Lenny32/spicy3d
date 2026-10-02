@@ -1,0 +1,4 @@
+{
+    "description": "Tolerant envelope selection and wall thickness merge independently without losing opening-face references.",
+    "conflicts": []
+}

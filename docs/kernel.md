@@ -91,14 +91,26 @@ unchanged. Diagnostics never retry the offset; worker cancellation/timeouts and 
 do not trigger sampling. If more than 64 faces exist, diagnostics explicitly say
 “sampled the first 64 of N faces”. Validation failures describe a possible offset collapse.
 
-The curvature-tolerant envelope mode remains blocked under the frozen save format and offline
-WASM constraints. Open skins already use `MakeThickSolidBySimple`. The existing Join binding
-fixes self-intersection handling to false and exposes no `RemoveIntEdges` argument. Exposing
-such controls or another offset algorithm requires a C++ binding and a rebuilt WASM module;
-the existing optional feature `mode` only accepts OCCT `skin`/`pipe`, and `joinType` controls
-edge joins. A persisted envelope selection would require a new stored option (or extending
-the existing mode's accepted values), approval of the payload change, a parametric version
-bump/migration and fixtures. None of those changes is made here.
+The opt-in `tolerant` thicken option (parametric module 15; 14→15 identity migration) builds
+material rather than a bare offset. With no option, old documents retain their exact behavior.
+Closed full spheres and ring tori with inward thickness at least their sphere/tube radius
+have a proven empty cavity: the envelope is a copy of the entire input solid. Surface type,
+face count, area and volume identify the complete analytic shape; trimmed patches do not
+qualify. Smaller walls and other single solids use OCCT all-parallel intersection trimming
+with intersection joins and internal-edge removal, followed by the wall boolean, ShapeFix,
+UnifySameDomain, exact BRepCheck and finite positive component-volume checks. Inward material
+cannot exceed the source volume. The normal many-face intersection-join guard still applies.
+
+This is a limited envelope mode, **not a general solution for scanned free-form creases**.
+Confirmed classes are full spheres, ring tori at cavity collapse, and opened planar box solids.
+Open skins, multiple solids, pipe mode and unrecognized cavity collapse remain errors; other
+solids may fail OCCT trimming or the validity gates. OCCT 8.0.1's local
+`BRepOffsetAPI_MakeThickSolid.hxx` documents SelfInter removal as unimplemented and all-parallel
+intersection as incomplete; enabling SelfInter would not provide the requested guarantee.
+The new binding is feature-detected; older binaries refuse the opt-in rather than changing
+its meaning. MCP `thicken { tolerant: true }` and the creation/edit panels expose the option.
+Curvature-collapse diagnostics suggest retrying tolerant mode for supported solids. General
+free-form rolling-ball envelopes remain unfinished.
 
 ## Dead-kernel state
 

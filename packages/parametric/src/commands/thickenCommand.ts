@@ -15,6 +15,7 @@ import {
     type INodeVisual,
     LENGTH_UNITS,
     type ParameterValue,
+    type Property,
     PubSub,
     property,
     SelectShapeStep,
@@ -97,6 +98,19 @@ export class ThickenFeatureCommand extends CancelableCommand {
         this.setProperty("mode", value, () => this.displayPreview());
     }
 
+    // Envelope behavior is an explicit opt-in for each new feature.
+    protected override isPropertyCached(property: Property): boolean {
+        return property.name !== "tolerant";
+    }
+
+    @property("option.command.tolerantThicken")
+    get tolerant(): boolean {
+        return this.getPrivateValue("tolerant", false);
+    }
+    set tolerant(value: boolean) {
+        this.setProperty("tolerant", value, () => this.displayPreview());
+    }
+
     @property("common.confirm")
     readonly confirm = () => {
         this.controller?.success();
@@ -163,6 +177,7 @@ export class ThickenFeatureCommand extends CancelableCommand {
             type: "thicken",
             thickness: this.thickness,
             ...thickenOptions(this.joinType, this.mode),
+            ...(this.tolerant ? { tolerant: true } : {}),
             ...(this.openFaces.length > 0 ? { openFaces: this.openFaces.map((x) => x.ref) } : {}),
         };
     }

@@ -594,6 +594,11 @@ const OPS_SCHEMA = {
             enum: ["skin", "pipe"],
             description: "Thicken only, solids: offset mode (default skin)",
         },
+        tolerant: {
+            type: "boolean",
+            description:
+                "Thicken only: opt-in trimmed material envelope. Closed spheres and ring tori tolerate inward cavity collapse; general solids attempt intersection trimming. Open skins and arbitrary free-form collapse remain unsupported. Default false.",
+        },
         openFaceIndexes: {
             type: "array",
             items: { type: "number" },

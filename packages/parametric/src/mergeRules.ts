@@ -281,6 +281,7 @@ registerMergePayload("parametric.features", {
                     fields: {
                         ...featureBase,
                         thickness: expression,
+                        tolerant: scalar,
                         joinType: scalar,
                         mode: scalar,
                         openFaces: profiles,

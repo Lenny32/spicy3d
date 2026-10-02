@@ -3013,6 +3013,96 @@ public:
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }
 
+    // Material envelope, not an offset surface. SelfInter is unimplemented in OCCT 8:
+    // use all-parallel intersection trimming, and handle proven analytic cavity collapse.
+    static ShapeResult makeThickSolidTolerant(const TopoDS_Shape& shape,
+        const ShapeArray& openingFaces, double thickness)
+    {
+        const auto inputError = thickSolidInputError(shape);
+        if (!inputError.empty())
+            return ShapeResult { TopoDS_Shape(), false, inputError };
+        if (!std::isfinite(thickness) || std::abs(thickness) < 1e-6)
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant thickness must be finite and non-zero" };
+        const auto openings = shapeArrayToListOfShape(openingFaces);
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solids, faces;
+        TopExp::MapShapes(shape, TopAbs_SOLID, solids);
+        TopExp::MapShapes(shape, TopAbs_FACE, faces);
+        if (solids.Extent() != 1)
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope currently requires one solid; open skins are unsupported" };
+        GProp_GProps sourceMass;
+        BRepGProp::VolumeProperties(shape, sourceMass);
+        const double sourceVolume = sourceMass.Mass();
+        if (!std::isfinite(sourceVolume) || sourceVolume <= 0)
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope requires positive input volume" };
+        // A complete sphere/ring torus has no inward cavity once the local radius is
+        // consumed. Check topology AND exact mass/area to exclude trimmed surfaces.
+        if (openings.IsEmpty() && thickness < 0 && faces.Extent() == 1) {
+            BRepAdaptor_Surface surface(TopoDS::Face(faces.FindKey(1)));
+            double radius = 0, expectedVolume = 0, expectedArea = 0;
+            if (surface.GetType() == GeomAbs_Sphere) {
+                radius = surface.Sphere().Radius();
+                expectedVolume = 4 * M_PI * radius * radius * radius / 3;
+                expectedArea = 4 * M_PI * radius * radius;
+            } else if (surface.GetType() == GeomAbs_Torus) {
+                const auto torus = surface.Torus();
+                radius = torus.MinorRadius();
+                if (torus.MajorRadius() > radius) {
+                    expectedVolume = 2 * M_PI * M_PI * torus.MajorRadius() * radius * radius;
+                    expectedArea = 4 * M_PI * M_PI * torus.MajorRadius() * radius;
+                }
+            }
+            GProp_GProps area;
+            BRepGProp::SurfaceProperties(shape, area);
+            if (expectedVolume > 0 && -thickness >= radius
+                && std::abs(sourceVolume - expectedVolume) <= 1e-6 * expectedVolume
+                && std::abs(area.Mass() - expectedArea) <= 1e-6 * expectedArea) {
+                BRepBuilderAPI_Copy copy(shape);
+                return ShapeResult { copy.Shape(), true, "" };
+            }
+        }
+        BRepOffsetAPI_MakeThickSolid offset;
+        offset.MakeThickSolidByJoin(shape, openings, thickness, 1e-6,
+            BRepOffset_Skin, true, false, GeomAbs_Intersection, true);
+        if (!offset.IsDone() || offset.MakeOffset().Error() != BRepOffset_NoError)
+            return ShapeResult { TopoDS_Shape(), false,
+                std::string("Tolerant envelope failed: ") + offsetErrorName(offset.MakeOffset().Error())
+                    + "; OCCT cannot trim this geometry (free-form curvature collapse remains unsupported)" };
+        TopoDS_Shape result = offset.Shape();
+        GProp_GProps offsetMass;
+        BRepGProp::VolumeProperties(result, offsetMass);
+        if (offsetMass.Mass() < 0)
+            result.Reverse();
+        if (openings.IsEmpty()) {
+            if (thickSolidUnchanged(shape, result))
+                return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed: unrecognized cavity collapse" };
+            BRepAlgoAPI_Cut wall(thickness < 0 ? shape : result, thickness < 0 ? result : shape);
+            wall.SetNonDestructive(true);
+            wall.Build();
+            if (!wall.IsDone() || wall.HasErrors())
+                return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope wall boolean failed" };
+            result = wall.Shape();
+        }
+        ShapeFix_Shape fix(result);
+        fix.Perform();
+        ShapeUpgrade_UnifySameDomain unify(fix.Shape(), true, true, false);
+        unify.Build();
+        result = unify.Shape();
+        const auto failure = thickSolidResultError(result);
+        if (!failure.empty())
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + failure };
+        GProp_GProps mass;
+        BRepGProp::VolumeProperties(result, mass);
+        if (!std::isfinite(mass.Mass()) || mass.Mass() <= 0
+            || (thickness < 0 && mass.Mass() > sourceVolume * (1 + 1e-6)))
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed volume sanity check" };
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+        TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
+        for (const auto& face : openings)
+            if (resultFaces.Contains(face))
+                return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope did not remove an opening face" };
+        return ShapeResult { result, true, "" };
+    }
+
     // Removes every edge of `shape` that is not in `keepShapes` through the given
     // ReShape. Returns true if at least one edge was removed.
     static bool removeNonKeptEdges(
@@ -3899,6 +3989,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("facesFromEdges", guardedEntry<&ShapeFactory::facesFromEdges>("ShapeFactory.facesFromEdges"))
         .class_function("shell", guardedEntry<&ShapeFactory::shell>("ShapeFactory.shell"))
         .class_function("solid", guardedEntry<&ShapeFactory::solid>("ShapeFactory.solid"))
+        .class_function("makeThickSolidTolerant", guardedEntry<&ShapeFactory::makeThickSolidTolerant>("ShapeFactory.makeThickSolidTolerant"))
         .class_function("makeThickSolidBySimple", guardedEntry<&ShapeFactory::makeThickSolidBySimple>("ShapeFactory.makeThickSolidBySimple"))
         .class_function("makeThickSolidByJoin", guardedEntry<&ShapeFactory::makeThickSolidByJoin>("ShapeFactory.makeThickSolidByJoin"))
         .class_function("simplifyShape", guardedEntry<&ShapeFactory::simplifyShape>("ShapeFactory.simplifyShape"))

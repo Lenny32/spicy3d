@@ -59,6 +59,18 @@ describe("parametricTools", () => {
         expect((runParametric().parameters as any).required).toEqual(["ops"]);
     });
 
+    test("tolerant thicken is a boolean option without top-level schema unions", () => {
+        const schema = runParametric().parameters as any;
+        expect(opsSchema().properties).toHaveProperty(
+            "tolerant",
+            expect.objectContaining({ type: "boolean" }),
+        );
+        for (const key of ["oneOf", "anyOf", "allOf"]) {
+            expect(schema).not.toHaveProperty(key);
+            expect(opsSchema()).not.toHaveProperty(key);
+        }
+    });
+
     test("edge queries advertise origin, adjacency, outline, curve and analytic selectors", () => {
         const properties = (opsSchema() as any).properties;
         expect(Object.keys(properties.selector.properties)).toEqual([

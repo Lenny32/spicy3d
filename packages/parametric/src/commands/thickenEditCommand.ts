@@ -74,6 +74,14 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("mode", value, () => this.refreshPreview());
     }
 
+    @property("option.command.tolerantThicken")
+    get tolerant(): boolean {
+        return this.getPrivateValue("tolerant", false);
+    }
+    set tolerant(value: boolean) {
+        this.setProperty("tolerant", value, () => this.refreshPreview());
+    }
+
     @property("common.confirm")
     readonly confirm = () => {
         this.controller?.success();
@@ -91,6 +99,7 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("thickness", feature.thickness);
         this.setProperty("joinType", keys.joinType);
         this.setProperty("mode", keys.mode);
+        this.setProperty("tolerant", feature.tolerant ?? false);
         this.feature = feature;
         this.preview = new FeatureChainPreview(body, index);
 
@@ -122,8 +131,13 @@ export class ThickenEditCommand extends CancelableCommand {
 
     /** The feature with the panel's values, absent fields for the defaults (as the creation writes them). */
     private edited(feature: ThickenFeatureData): ThickenFeatureData {
-        const { joinType: _joinType, mode: _mode, ...rest } = feature;
-        return { ...rest, thickness: this.thickness, ...thickenOptions(this.joinType, this.mode) };
+        const { joinType: _joinType, mode: _mode, tolerant: _tolerant, ...rest } = feature;
+        return {
+            ...rest,
+            thickness: this.thickness,
+            ...thickenOptions(this.joinType, this.mode),
+            ...(this.tolerant ? { tolerant: true } : {}),
+        };
     }
 
     private refreshPreview(): void {

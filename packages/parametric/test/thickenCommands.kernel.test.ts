@@ -170,6 +170,21 @@ describe("thicken command (real kernel)", () => {
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 6, 3);
     });
 
+    test("tolerant checkbox persists the envelope option in one undo step", async () => {
+        const { app, doc, body } = setup();
+        const command = new ThickenFeatureCommand();
+        pickFaces(doc, command, body, [topFacePick(body)], () => {
+            command.thickness = -2;
+            command.tolerant = true;
+        });
+        await command.execute(app);
+        expect(body.features[1]).toMatchObject({ type: "thicken", thickness: -2, tolerant: true });
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 8, 3);
+        doc.history.undo();
+        expect(body.features).toHaveLength(1);
+    });
+
     test("an expression thickness is stored as typed", async () => {
         const { app, doc, body } = setup();
         Transaction.execute(doc, "edit variables", () => {
@@ -290,6 +305,23 @@ describe("thicken edit session (real kernel)", () => {
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 14 * 14 * 4, 3);
         doc.history.undo();
         expect(body.features[1]).toEqual({ id: "t1", type: "thicken", thickness: -2 });
+    });
+
+    test("editing can enable and remove the stored tolerant option", async () => {
+        const { app, body } = thickened();
+        await editWith(app, body, (session) => {
+            session.tolerant = true;
+            session.confirm();
+        });
+        expect(body.features[1]).toMatchObject({ tolerant: true, thickness: -2 });
+        expect(body.shape.isOk).toBe(true);
+        await editWith(app, body, (session) => {
+            expect(session.tolerant).toBe(true);
+            session.tolerant = false;
+            session.confirm();
+        });
+        expect(body.features[1]).not.toHaveProperty("tolerant");
+        expect(body.shape.isOk).toBe(true);
     });
 
     test("cancelling leaves the feature untouched", async () => {

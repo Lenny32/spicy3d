@@ -844,6 +844,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `thickness`: expression
+      - `tolerant`: scalar
       - `joinType`: scalar
       - `mode`: scalar
       - `openFaces`: atomic of ref → profile

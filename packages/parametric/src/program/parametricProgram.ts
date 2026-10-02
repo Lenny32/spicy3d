@@ -376,6 +376,7 @@ export interface EdgesReport {
  * with a closed void), an open shell or face becomes a solid.
  */
 export interface ThickenOp {
+    tolerant?: boolean;
     op: "thicken";
     id: string;
     name?: string;
@@ -1613,6 +1614,8 @@ function runThickenOp(state: State, op: ThickenOp): void {
     const body = resolveBody(state, op.body);
     const shape = body.shape;
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    if (op.tolerant !== undefined && typeof op.tolerant !== "boolean")
+        throw new Error("Thicken tolerant must be a boolean");
     if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
     ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
     if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
@@ -1640,6 +1643,7 @@ function runThickenOp(state: State, op: ThickenOp): void {
         id: Id.generate(),
         type: "thicken",
         thickness: op.thickness,
+        ...(op.tolerant ? { tolerant: true } : {}),
         ...(op.joinType === undefined || op.joinType === "arc" ? {} : { joinType: op.joinType }),
         ...(op.mode === undefined || op.mode === "skin" ? {} : { mode: op.mode }),
         ...(openFaces.length > 0 ? { openFaces } : {}),

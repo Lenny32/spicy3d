@@ -653,6 +653,30 @@ const CASES: Record<string, CaseBuilder> = {
             ],
         };
     },
+    "thicken-tolerant-vs-thickness": () => {
+        const fixture = loadDocumentFixtures().find(
+            (entry) => entry.name === "v2/parametric15-tolerant-thicken.json",
+        );
+        if (!fixture) throw new Error("Missing tolerant thicken fixture");
+        const base = clone(fixture.data);
+        const list = features(base, "body-shell");
+        delete list[1]["tolerant"];
+        setFeatures(base, "body-shell", list);
+        const patch = (value: Json) => (doc: Doc) => {
+            const list = features(doc, "body-shell");
+            Object.assign(list[1], value);
+            setFeatures(doc, "body-shell", list);
+        };
+        return {
+            description:
+                "Tolerant envelope selection and wall thickness merge independently without losing opening-face references.",
+            base,
+            ours: edit(base, patch({ tolerant: true })),
+            theirs: edit(base, patch({ thickness: "-2 mm" })),
+            expected: edit(base, patch({ tolerant: true, thickness: "-2 mm" })),
+            conflicts: [],
+        };
+    },
     "identity-unchanged": () => {
         const base = sharedBase();
         return {

@@ -24,8 +24,9 @@ import { migrateSketchAngles } from "./angleMigration";
  * 12: independently editable fillet corner setbacks; older readers would silently omit the corner patch.
  * 13: optional loft spine and boundary guides; older readers would silently build an unguided loft.
  * 14: sketch-profile emboss/deboss; older readers cannot rebuild this new feature.
+ * 15: optional tolerant thicken envelope; older readers would silently use the ordinary offset.
  */
-export const PARAMETRIC_FORMAT_VERSION = 14;
+export const PARAMETRIC_FORMAT_VERSION = 15;
 /**
  * Format of a `SketchNode`'s stored `SketchData` (entities, constraints, external references).
  * 2: `bspline` entities (one interpolating B-spline edge through fit points, with `parametrization`
@@ -100,3 +101,6 @@ registerMigration("sketch", 4, migrateSketchAngles);
 
 // sketch 5 → 6: existing entities remain plain geometry, without associative links.
 registerMigration("sketch", 5, (document) => document);
+
+// parametric 14 → 15: absent tolerant option preserves ordinary thicken behavior verbatim.
+registerMigration("parametric", 14, (document) => document);

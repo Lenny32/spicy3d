@@ -121,6 +121,14 @@ function thickenShape(
     thickness: number,
 ): Result<IShape> {
     const openFaces = feature.openFaces ?? [];
+    if (feature.tolerant) {
+        if (feature.mode === "pipe") return Result.err("Tolerant thicken requires skin mode");
+        if (!shapeFactory.makeThickSolidTolerant)
+            return Result.err("Tolerant thicken is not available in this kernel build");
+        const faces = openFaces.length > 0 ? matchOpenFaces(feature, context, input) : Result.ok([]);
+        if (!faces.isOk) return Result.err(faces.error);
+        return shapeFactory.makeThickSolidTolerant(input, faces.value, thickness);
+    }
     if (input.findSubShapes(ShapeTypes.solid).length === 0) {
         if (input.findSubShapes(ShapeTypes.face).length === 0) {
             return Result.err("Thicken needs faces or a solid");

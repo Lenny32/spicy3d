@@ -1301,6 +1301,40 @@ export class ShapeFactory implements IShapeFactory {
             "Combine",
         ) as Result<ICompound>;
     }
+    makeThickSolidTolerant(shape: IShape, openingFaces: IShape[], thickness: number): Result<IShape> {
+        const binding = wasm.ShapeFactory.makeThickSolidTolerant;
+        if (typeof binding !== "function")
+            return Result.err("Tolerant thicken is not available in this kernel build");
+        const refused = refuseIntersectionJoin(shape, "intersection");
+        if (refused) return Result.err(refused);
+        const result = convertShapeResult(
+            binding,
+            [ensureOccShape(shape)[0], ensureOccShape(openingFaces), thickness],
+            "MakeThickSolidTolerant",
+        );
+        if (!result.isOk)
+            return Result.err(thickenFailureDiagnostic(result.error, shape, thickness, openingFaces));
+        // Filled analytic cavities legitimately return the original volume: do not apply
+        // the ordinary offset's unchanged-result rejection to a material envelope.
+        const output = result.value;
+        const solids = output.findSubShapes(ShapeTypes.solid);
+        try {
+            if (
+                !output.checkShape() ||
+                solids.length === 0 ||
+                solids.some((solid) => {
+                    const volume = solid.volume();
+                    return !Number.isFinite(volume) || volume <= 0;
+                })
+            ) {
+                output.dispose();
+                return Result.err("Tolerant thicken produced an invalid solid or volume");
+            }
+        } finally {
+            for (const solid of solids) solid.dispose();
+        }
+        return result;
+    }
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape> {
         const result = validThickSolid(
             convertShapeResult(

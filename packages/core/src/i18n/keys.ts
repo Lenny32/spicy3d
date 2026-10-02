@@ -950,6 +950,7 @@ export const I18N_KEYS = [
     "option.command.modifyBoundary",
     "option.command.pitch",
     "option.command.normalOffset",
+    "option.command.tolerantThicken",
     "option.command.offsetMode",
     "option.command.offsetMode.pipe",
     "option.command.offsetMode.rectoVerso",

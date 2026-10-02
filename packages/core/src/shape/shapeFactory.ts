@@ -191,6 +191,8 @@ export interface IShapeFactory {
         mode?: OffsetMode,
         intersection?: boolean,
     ): Result<IShape>;
+    /** Material envelope with intersection trimming; optional for older kernels. */
+    makeThickSolidTolerant?(shape: IShape, openFaces: IShape[], thickness: number): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
     /** OCCT smooth radius interpolation per selected edge; normalized arc length, natural curve direction.

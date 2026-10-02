@@ -1002,6 +1002,7 @@ export default {
         "option.command.merge": "Merge",
         "option.command.modifyBoundary": "Modify boundary",
         "option.command.normalOffset": "Normal Offset",
+        "option.command.tolerantThicken": "Tolerant envelope (solid only)",
         "option.command.offsetMode": "Offset Mode",
         "option.command.offsetMode.pipe": "Pipe",
         "option.command.offsetMode.rectoVerso": "Recto Verso",

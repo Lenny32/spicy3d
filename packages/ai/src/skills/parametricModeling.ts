@@ -140,7 +140,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   endpoint radii on a closed contour. BREP validation can reject a law that cannot fit the shape.
   editFeature action "setRadiusLaw" replaces the whole law; omit radiusLaw to restore the saved
   constant radius. setParameter keys radiusLaw.0, radiusLaw.1, ... edit individual radius expressions.
-- { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
+- { op: "thicken", id, body, thickness, joinType?, mode?, tolerant?, openFaceIndexes? }
+  tolerant:true opts into a material envelope: closed spheres/ring tori can consume an inward
+  cavity entirely; other solids attempt intersection trimming with validity/volume gates.
+  Open skins and arbitrary free-form curvature collapse remain unsupported and return errors.
+  Intersection trimming retains the many-face guard; an older kernel reports unavailable.
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
   (outward for a solid), negative inward; never zero. A SOLID with openFaceIndexes (face indexes, found

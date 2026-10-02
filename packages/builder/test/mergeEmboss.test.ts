@@ -142,5 +142,5 @@ test("cloud blob manifests and .spicy exports round-trip the complete approved v
     expect(decoded.isOk).toBe(true);
     expect(decoded.value).toEqual(b);
     expect(feature(decoded.value)).toEqual(feature(b));
-    expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: 14, sketch: 6 });
+    expect(decoded.value["moduleVersions"]).toMatchObject({ parametric: 15, sketch: 6 });
 });

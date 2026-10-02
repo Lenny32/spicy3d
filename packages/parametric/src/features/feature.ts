@@ -209,6 +209,8 @@ export interface SweepFeatureData extends FeatureBase {
  */
 export interface ThickenFeatureData extends FeatureBase {
     readonly type: "thicken";
+    /** Opt-in material envelope (parametric 15); absent retains ordinary offset behavior. */
+    readonly tolerant?: boolean;
     /**
      * Signed wall thickness, the kernel's convention: positive grows along the face normals
      * (outward for a solid), negative inward. Never zero.
