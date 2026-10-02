@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
 import type { IView } from "@spicy3d/core";
+import { Config } from "@spicy3d/core";
 
 rs.mock("../src/viewport/viewport.module.css", () => ({
     root: "vp-root",
@@ -16,6 +17,8 @@ rs.mock("../src/viewport/viewport.module.css", () => ({
     viewModeMenu: "vp-view-mode-menu",
     visible: "vp-visible",
     actived: "vp-actived",
+    navigationButton: "vp-navigation-button",
+    navigationLabel: "vp-navigation-label",
 }));
 
 // Track PubSub publications via the shared recorder
@@ -37,6 +40,7 @@ rs.mock("@spicy3d/core", () => {
         PubSub: pubSubRecorder.stub,
         ViewModes: [],
         ViewModeI18nKeys: {},
+        Config: { instance: { showGrid: true } },
     };
 });
 
@@ -66,7 +70,13 @@ function createMockView(detected: unknown[], node: unknown) {
     const view = {
         document: doc,
         mode: "perspective",
-        cameraController: {},
+        width: 1000,
+        height: 700,
+        cameraController: {
+            cameraType: "orthographic",
+            fitContent: rs.fn(() => {}),
+            zoom: rs.fn((_x: number, _y: number, _delta: number) => {}),
+        },
         setDom: rs.fn(),
         update: rs.fn(),
         detectVisual: rs.fn(() => detected),
@@ -87,6 +97,50 @@ describe("Viewport double-click", () => {
         viewport?.remove();
         viewport = undefined;
         pubSubRecorder.reset();
+    });
+
+    test("navigation buttons have tooltips and accessible labels and keep their actions", () => {
+        const { view } = createMockView([], undefined);
+        viewport = new Viewport(view as unknown as IView, true);
+        const buttons = [...viewport.querySelectorAll<HTMLButtonElement>(".vp-navigation-button")];
+        const titles = [
+            "viewport.orthographic",
+            "viewport.perspective",
+            "viewport.grid",
+            "viewport.fitContent",
+            "viewport.zoomIn",
+            "viewport.zoomOut",
+        ];
+        expect(buttons.map((button) => button.title)).toEqual(titles);
+        for (const [index, button] of buttons.entries()) {
+            expect(button.type).toBe("button");
+            const label = button.querySelector(".vp-navigation-label");
+            expect(label).not.toBeNull();
+            expect(String((label as unknown as { _textContent: unknown })._textContent)).toBe(titles[index]);
+            const icon = button.querySelector("svg");
+            expect(icon).not.toBeNull();
+            expect(icon?.getAttribute("aria-hidden")).toBe("true");
+        }
+        const grid = Config.instance.showGrid;
+        try {
+            for (const button of buttons) {
+                (
+                    button as unknown as { _onclick: (event: { stopPropagation: () => void }) => void }
+                )._onclick({
+                    stopPropagation: () => {},
+                });
+            }
+            expect(view.cameraController.cameraType).toBe("perspective");
+            expect(Config.instance.showGrid).toBe(!grid);
+            expect(view.cameraController.fitContent).toHaveBeenCalledTimes(1);
+            expect(view.cameraController.zoom.mock.calls).toEqual([
+                [500, 350, -5],
+                [500, 350, 5],
+            ]);
+            expect(view.update).toHaveBeenCalledTimes(5);
+        } finally {
+            Config.instance.showGrid = grid;
+        }
     });
 
     test("should publish nodeDoubleClicked for the node under the cursor", () => {

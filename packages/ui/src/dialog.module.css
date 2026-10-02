@@ -1,9 +1,12 @@
 dialog {
-    border: none;
-    box-shadow: 0px 5px 10px var(--foreground-muted-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: var(--panel-shadow);
     padding: 0px;
     background-color: var(--panel-background-color);
-    backdrop-filter: blur(5px);
+    color: var(--foreground-color);
+    max-width: calc(100vw - 32px);
+    max-height: calc(100dvh - 32px);
 }
 
 dialog::backdrop {
@@ -18,18 +21,21 @@ dialog::backdrop {
 }
 
 .title {
-    padding-top: 16px;
-    padding-bottom: 8px;
-    font-size: 1.5em;
-    font-weight: bold;
-    margin: 0px auto;
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--control-background-color);
     flex-shrink: 0;
 }
 
 .content {
     padding: 16px;
     max-width: 1080px;
-    max-height: 680px;
+    max-height: min(680px, calc(100dvh - 160px));
     flex: 1 1 auto;
     overflow: auto;
 }
@@ -39,21 +45,27 @@ dialog::backdrop {
     flex-direction: row;
     flex-shrink: 0;
     justify-content: flex-end;
-    padding: 8px;
-    background-color: rgba(128, 128, 128, 0.25);
+    padding: 10px 16px;
+    gap: 8px;
+    border-top: 1px solid var(--border-color);
+    background-color: var(--control-background-color);
 
     & button {
         width: fit-content;
-        margin: 6px;
-        padding: 8px 16px;
-        font-size: 1em;
+        min-width: 72px;
+        padding: 5px 12px;
+        font: inherit;
         border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border-radius: 3px;
         background-color: var(--panel-background-color);
         color: var(--foreground-color);
 
         &:hover {
             background-color: var(--hover-background-color);
+        }
+        &:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
         }
         &:active {
             background-color: var(--primary-color);

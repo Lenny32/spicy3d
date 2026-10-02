@@ -117,23 +117,36 @@
 
 .viewControls {
     position: absolute;
-    height: 100%;
-    top: 0;
+    top: 140px;
+    bottom: 12px;
     right: 16px;
     z-index: 999;
-    pointer-events: none;
-    padding-top: 160px;
+    pointer-events: auto;
+    overflow-y: auto;
+    scrollbar-width: thin;
     color: var(--foreground-color);
 
-    svg {
+    .navigationButton {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         border: none;
         background: transparent;
-        width: 22px;
-        height: 22px;
+        width: 38px;
+        height: 38px;
+        flex-shrink: 0;
         padding: 8px;
         border-radius: 7.5px;
         color: inherit;
-        fill: currentColor;
+        cursor: pointer;
+
+        svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+            pointer-events: none;
+        }
 
         &:hover {
             background: var(--hover-background-color);
@@ -141,6 +154,11 @@
 
         &:active {
             background: var(--active-background-color);
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: -2px;
         }
     }
 
@@ -172,10 +190,13 @@
     }
 }
 
-@media (max-width: 680px) {
-    .viewControls {
-        display: none;
-    }
+.navigationLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .viewModeControl {

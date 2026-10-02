@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { type IDisposable, type IFace, type IShape, Matrix4, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { type IDisposable, type IFace, type IShape, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
 import { OccShapeConverter } from "../src/converter";
 import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";

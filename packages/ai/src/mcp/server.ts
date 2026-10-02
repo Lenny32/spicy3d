@@ -24,6 +24,7 @@ import { withImageByteBudget } from "../tools/imageEncoding";
 import { takeSlowOpWarnings } from "../tools/opBudget";
 import { forgetProgramJobs, isProgramJobTool } from "../tools/programJobs";
 import { documentSnapshot, hasDocumentReadSnapshot, isMetadataReadTool } from "../tools/readTools";
+import { isScreenshotTool } from "../tools/viewTools";
 
 export const MCP_SERVER_NAME = "spicy3d";
 
@@ -259,8 +260,9 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
             if (!extra.signal.aborted) withSlowOpWarnings(result);
             return result;
         };
-        // These built-ins read only the committed metadata snapshot while mutations stay FIFO.
-        return (isMetadataReadTool(tool) && hasDocumentReadSnapshot()) || isProgramJobTool(tool)
+        // Built-in metadata and screenshots can read while a program yields; mutations stay FIFO.
+        return ((isMetadataReadTool(tool) || isScreenshotTool(tool)) && hasDocumentReadSnapshot()) ||
+            isProgramJobTool(tool)
             ? invoke()
             : queue.run(invoke);
     });

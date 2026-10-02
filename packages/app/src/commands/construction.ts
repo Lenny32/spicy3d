@@ -30,6 +30,7 @@ import {
     type ParameterValue,
     Plane,
     PointStep,
+    PubSub,
     parseParameterValue,
     Result,
     resolveUnitSpec,
@@ -271,6 +272,9 @@ function option(text: string, value = text): HTMLOptionElement {
 class ConstructionSession {
     private readonly values: Record<string, unknown>;
     private readonly root = document.createElement("div");
+    get element(): HTMLElement {
+        return this.root;
+    }
     private readonly status = document.createElement("div");
     private readonly previewIds: number[] = [];
     private readonly sourceLabels = new Map<string, HTMLElement>();
@@ -288,7 +292,6 @@ class ConstructionSession {
     constructor(
         private readonly model: IDocument,
         private readonly tool: Tool,
-        private readonly title: string,
         initial?: ConstructionDefinition,
     ) {
         this.values = initial ? { ...initial } : { kind: tool.kind };
@@ -308,9 +311,6 @@ class ConstructionSession {
             }
         }
         this.root.className = `spicy-construction-editor ${style.root}`;
-        const header = document.createElement("strong");
-        header.textContent = title;
-        this.root.append(header);
         this.renderSources();
         this.renderNumbers();
         this.renderChoices();
@@ -320,27 +320,37 @@ class ConstructionSession {
         const actions = document.createElement("div");
         actions.className = style.actions;
         const create = document.createElement("button");
+        create.type = "button";
+        create.className = style.primary;
         create.textContent = tr(initial ? "Apply" : "Create");
         create.onclick = () => {
             const definition = this.definition();
             if (definition) this.finish(definition);
         };
         const cancel = document.createElement("button");
+        cancel.type = "button";
         cancel.textContent = tr("Cancel");
         cancel.onclick = () => this.finish();
         actions.append(create, cancel);
         this.root.append(actions);
-        (this.model.application.mainWindow ?? document.body).append(this.root);
         this.refreshPreview();
     }
 
     private renderSources() {
         for (const field of this.tool.sources) {
             const row = document.createElement("div");
-            row.className = style.field;
+            row.className = `${style.field} ${style.source}`;
             const label = document.createElement("label");
             label.textContent = tr(field.label);
+            if (field.optional) {
+                const hint = document.createElement("span");
+                hint.textContent = tr("(optional)");
+                hint.className = style.optional;
+                label.append(" ", hint);
+            }
             const mode = document.createElement("select");
+            mode.id = `construction-${field.name}`;
+            label.htmlFor = mode.id;
             mode.append(
                 option(tr("Pick geometry"), "shape"),
                 option(tr("Pick construction object"), "datum"),
@@ -379,6 +389,7 @@ class ConstructionSession {
                     option(tr("UCS ZX plane"), "UCS-ZX"),
                 );
             const pick = document.createElement("button");
+            pick.type = "button";
             pick.textContent = tr("Select");
             pick.onclick = () => void this.pick(field, mode.value);
             const chosen = document.createElement("small");
@@ -856,16 +867,19 @@ function previewGeometry(geometry: ConstructionGeometry) {
     ];
 }
 
-abstract class CreateConstruction extends CancelableCommand {
+abstract class ConstructionCommand extends CancelableCommand {
+    protected override openCommandContext(): void {
+        // The session supplies its form when executeAsync opens the context.
+    }
+}
+
+abstract class CreateConstruction extends ConstructionCommand {
     protected abstract readonly toolName: keyof typeof TOOLS;
     private session?: ConstructionSession;
     protected override async executeAsync(): Promise<void> {
         const tool = TOOLS[this.toolName];
-        this.session = new ConstructionSession(
-            this.document,
-            tool,
-            I18n.translate(`command.construct.${this.toolName}` as I18nKeys),
-        );
+        this.session = new ConstructionSession(this.document, tool);
+        PubSub.default.pub("openCommandContext", this, this.session.element);
         const definition = await this.session.done;
         if (!definition) return;
         Transaction.execute(this.document, `create ${this.toolName}`, () => {
@@ -961,7 +975,7 @@ export class UcsCommand extends CreateConstruction {
 }
 
 @command({ key: "construct.edit", icon: "icon-editConstruction" })
-export class EditConstructionCommand extends CancelableCommand {
+export class EditConstructionCommand extends ConstructionCommand {
     private session?: ConstructionSession;
     protected override async executeAsync(): Promise<void> {
         const node = this.document.selection
@@ -970,7 +984,8 @@ export class EditConstructionCommand extends CancelableCommand {
         if (!(node instanceof ConstructionNode) || node.reference.kind !== "datum") return;
         const toolName = Object.keys(TOOLS).find((key) => TOOLS[key].kind === node.definition.kind);
         if (!toolName) return;
-        this.session = new ConstructionSession(this.document, TOOLS[toolName], node.name, node.definition);
+        this.session = new ConstructionSession(this.document, TOOLS[toolName], node.definition);
+        PubSub.default.pub("openCommandContext", this, this.session.element);
         const definition = await this.session.done;
         if (!definition) return;
         Transaction.execute(this.document, "edit construction", () => {

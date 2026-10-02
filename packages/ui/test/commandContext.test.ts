@@ -24,6 +24,11 @@ rs.mock("../src/ribbon/commandContext.module.css", () => ({
     command: "cc-command",
     icon: "cc-icon",
     title: "cc-title",
+    closeButton: "cc-close-button",
+    row: "cc-row",
+    footer: "cc-footer",
+    primaryButton: "cc-primary-button",
+    selectionSummary: "cc-selection-summary",
     cancelButton: "cc-cancel",
     selectionButton: "cc-selection-button",
     selectionControl: "cc-selection-control",
@@ -282,6 +287,30 @@ describe("CommandContext", () => {
     }
 
     describe("header", () => {
+        test("names the panel and associates every editable field with its label", () => {
+            const ctx = track(new CommandContext(new TestCommand()));
+            const title = mustQuery(ctx, ".cc-title");
+            expect(ctx.getAttribute("role")).toBe("region");
+            expect(ctx.getAttribute("aria-labelledby")).toBe(title.id);
+            const controls = ctx.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
+            expect(controls.length).toBe(6);
+            expect(new Set([...controls].map((control) => control.id)).size).toBe(6);
+            for (const control of controls) {
+                expect(control.id).not.toBe("");
+                expect(mustQuery<HTMLLabelElement>(control.parentElement!, "label").htmlFor).toBe(control.id);
+            }
+        });
+
+        test("the header close button cancels the active command", () => {
+            const command = new CancelableTestCommand();
+            const ctx = track(new CommandContext(command));
+            const close = mustQuery<HTMLButtonElement>(ctx, ".cc-close-button");
+            expect(close.type).toBe("button");
+            expect(close.getAttribute("aria-label")).toBe(I18n.translate("common.cancel"));
+            (close as unknown as { _onclick: () => void })._onclick();
+            expect(command.cancel).toHaveBeenCalledTimes(1);
+        });
+
         test("should render command icon and title", () => {
             const ctx = track(new CommandContext(new TestCommand()));
             expect(ctx.className).toBe("cc-panel");
@@ -298,6 +327,135 @@ describe("CommandContext", () => {
         test("should not render cancel button for non-cancelable command", () => {
             const ctx = track(new CommandContext(new TestCommand()));
             expect(ctx.querySelector(".cc-cancel")).toBeNull();
+        });
+    });
+
+    test("mounts a session form once and keeps it through selection confirmation", () => {
+        const command = new CancelableTestCommand();
+        const form = document.createElement("div");
+        const input = document.createElement("input");
+        input.value = "12";
+        const apply = document.createElement("button");
+        apply.textContent = "Create";
+        form.append(input, apply);
+        const ctx = track(new CommandContext(command, form));
+        document.body.append(ctx);
+
+        expect(mustQuery(ctx, ".cc-container").firstElementChild).toBe(form);
+        expect(ctx.querySelectorAll("input").length).toBe(1);
+        expect(ctx.querySelector(".cc-cancel")).toBeNull();
+        const close = mustQuery(ctx, ".cc-close-button");
+        const controller = { success: rs.fn(() => {}), cancel: rs.fn(() => {}) };
+        PubSub.default.pub("showSelectionControl", controller as unknown as AsyncController);
+        expect(form.inert).toBe(true);
+        const buttons = ctx.querySelectorAll(".cc-selection-control .cc-selection-button");
+        expect(buttons.length).toBe(2);
+        (buttons[1] as unknown as { _onclick: () => void })._onclick();
+        expect(controller.success).toHaveBeenCalledTimes(1);
+
+        PubSub.default.pub("clearSelectionControl");
+        expect(form.inert).toBe(false);
+        expect(mustQuery(ctx, ".cc-container").firstElementChild).toBe(form);
+        expect(input.value).toBe("12");
+        (close as unknown as { _onclick: () => void })._onclick();
+        expect(command.cancel).toHaveBeenCalledTimes(1);
+    });
+
+    describe("dragging", () => {
+        const hosts: HTMLElement[] = [];
+        afterEach(() => {
+            hosts.splice(0).forEach((host) => host.remove());
+        });
+
+        function draggableContext() {
+            const host = document.createElement("div");
+            hosts.push(host);
+            Object.defineProperties(host, {
+                clientWidth: { value: 1000 },
+                clientHeight: { value: 700 },
+            });
+            rs.spyOn(host, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 1000, 700));
+            const ctx = track(new CommandContext(new CancelableTestCommand()));
+            Object.defineProperty(ctx, "offsetParent", { value: host });
+            rs.spyOn(ctx, "getBoundingClientRect").mockReturnValue(new DOMRect(400, 62, 320, 400));
+            host.append(ctx);
+            document.body.append(host);
+            return { ctx, header: mustQuery(ctx, ".cc-command") };
+        }
+
+        function pointer(target: EventTarget, type: string, x: number, y: number, pointerId = 3) {
+            target.dispatchEvent(
+                new PointerEvent(type, {
+                    bubbles: true,
+                    button: 0,
+                    pointerId,
+                    clientX: x,
+                    clientY: y,
+                }),
+            );
+        }
+
+        test("moves by the header without moving the viewport", () => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            expect(header.hasPointerCapture(3)).toBe(true);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
+            expect(ctx.style.right).toBe("auto");
+            pointer(document, "pointerup", 320, 180);
+            expect(header.hasPointerCapture(3)).toBe(false);
+        });
+
+        test.each([
+            { x: -1000, y: -1000, left: "8px", top: "8px" },
+            { x: 2000, y: 2000, left: "548px", top: "292px" },
+        ])("keeps a dragged panel visible and outside the navigation strip ($x, $y)", ({
+            x,
+            y,
+            left,
+            top,
+        }) => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", x, y);
+            expect(ctx.style.left).toBe(left);
+            expect(ctx.style.top).toBe(top);
+            pointer(document, "pointerup", x, y);
+        });
+
+        test("the close button and other pointers do not drag the panel", () => {
+            const { ctx, header } = draggableContext();
+            pointer(mustQuery(ctx, ".cc-close-button"), "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("");
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180, 4);
+            expect(ctx.style.left).toBe("");
+            pointer(document, "pointerup", 320, 180, 4);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("200px");
+            pointer(document, "pointerup", 320, 180);
+        });
+
+        test.each(["pointerup", "pointercancel", "lostpointercapture"])("stops dragging on %s", (event) => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            pointer(event === "lostpointercapture" ? header : document, event, 320, 180);
+            pointer(document, "pointermove", 520, 280);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
+        });
+
+        test("removing the panel releases an active drag", () => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            ctx.remove();
+            pointer(document, "pointermove", 520, 280);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
         });
     });
 
@@ -536,7 +694,7 @@ describe("CommandContext", () => {
             expect(detailControl.style.display).toBe("none");
 
             command.mode = "b";
-            expect(detailControl.style.display).toBe("inherit");
+            expect(detailControl.style.display).toBe("");
 
             command.mode = "a";
             expect(detailControl.style.display).toBe("none");
@@ -555,6 +713,28 @@ describe("CommandContext", () => {
     });
 
     describe("selection control", () => {
+        test("keeps editable fields and their values across selection steps", () => {
+            const command = new TestCommand();
+            const ctx = track(new CommandContext(command));
+            document.body.appendChild(ctx);
+            const input = findInput(ctx, "text");
+            input.value = "7";
+            const controller = { success: rs.fn(() => {}), cancel: rs.fn(() => {}) };
+
+            PubSub.default.pub("showSelectionControl", controller as unknown as AsyncController);
+            expect(findInput(ctx, "text")).toBe(input);
+            expect(input.value).toBe("7");
+            (input as unknown as { _onblur: (e: { target: HTMLInputElement }) => void })._onblur({
+                target: input,
+            });
+            expect(command.size).toBe(7);
+
+            PubSub.default.pub("clearSelectionControl");
+            expect(findInput(ctx, "text")).toBe(input);
+            expect(mustQuery(ctx, ".cc-container").parentElement).toBe(ctx);
+            expect(input.value).toBe("7");
+        });
+
         test("should show selection control on pubsub event and call controller on confirm", () => {
             const command = new CancelableTestCommand();
             const ctx = track(new CommandContext(command));
@@ -571,7 +751,9 @@ describe("CommandContext", () => {
 
             const buttons = control!.querySelectorAll(".cc-selection-button");
             expect(buttons.length).toBe(2);
-            (buttons[0] as unknown as { _onclick: () => void })._onclick();
+            expect(buttons[1].tagName).toBe("BUTTON");
+            expect((buttons[1] as HTMLButtonElement).type).toBe("button");
+            (buttons[1] as unknown as { _onclick: () => void })._onclick();
             expect(controller.success).toHaveBeenCalledTimes(1);
 
             PubSub.default.pub("clearSelectionControl");
@@ -589,7 +771,8 @@ describe("CommandContext", () => {
 
             const buttons = ctx.querySelectorAll(".cc-selection-control .cc-selection-button");
             expect(buttons.length).toBe(2);
-            (buttons[1] as unknown as { _onclick: () => void })._onclick();
+            expect(buttons[0].tagName).toBe("BUTTON");
+            (buttons[0] as unknown as { _onclick: () => void })._onclick();
             expect(controller.cancel).toHaveBeenCalledTimes(1);
 
             PubSub.default.pub("clearSelectionControl");
@@ -678,6 +861,7 @@ describe("CommandContext", () => {
             clickWithEvent(control.querySelectorAll(".cc-node-remove")[0]);
             expect(command.deselect.mock.calls).toEqual([[[left], true]]);
             expect(listed()).toEqual(["Right"]);
+            expect(mustQuery(control, ".cc-selection-count").textContent).toBe("1");
             // Confirm and cancel stay the only selection buttons.
             expect(control.querySelectorAll(".cc-selection-button").length).toBe(2);
 

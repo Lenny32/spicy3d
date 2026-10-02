@@ -264,7 +264,12 @@ export class ParametricBodyNode
         }
     }
 
-    private drainDeferredUpstream(): void {
+    /**
+     * `onRead`: the drain serves a geometry read inside the batch (a later sketch edit projecting
+     * this body, a consumer reading it), which must see the fresh result, not the pre-batch shape
+     * an asynchronous rebuild would leave in place until it finishes.
+     */
+    private drainDeferredUpstream(onRead = false): void {
         // Installing the result reads `shape` again; a body queued anew meanwhile waits for the
         // drain loop (which caps the passes) instead of recursing through its own getter.
         if (this._drainingUpstream) return;
@@ -275,6 +280,7 @@ export class ParametricBodyNode
         this._drainingUpstream = true;
         try {
             this.rebuildFromUpstream("batched-upstream", source, true);
+            if (onRead) this._job?.flush();
         } finally {
             this._drainingUpstream = false;
         }
@@ -831,7 +837,7 @@ export class ParametricBodyNode
         // this node as its source) gets the previous result as-is: recomputing here
         // would re-enter generateShape.
         if (this._evaluating) return this._shape;
-        this.drainDeferredUpstream();
+        this.drainDeferredUpstream(true);
         if (ParametricBodyNode.evaluationDepth > 0) this._job?.flush();
         if (this._job) return this._shape;
         if (!this._shape.isOk && (!this._evaluated || this.hasNewReferences())) {

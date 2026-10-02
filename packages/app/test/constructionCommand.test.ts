@@ -2,11 +2,20 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { ConstructionNode, type IView, SelectNodeStep, XYZ } from "@spicy3d/core";
+import { ConstructionNode, type ICommand, type IView, PubSub, SelectNodeStep, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockSelection, TestDocument } from "@spicy3d/core/test-utils";
 import { EditConstructionCommand, OffsetPlaneCommand, UcsCommand } from "../src/commands/construction";
 
+const mountContent = (_command: ICommand, content?: HTMLElement) => {
+    if (content) document.body.append(content);
+};
+
+beforeEach(() => {
+    PubSub.default.sub("openCommandContext", mountContent);
+});
+
 afterEach(() => {
+    PubSub.default.remove("openCommandContext", mountContent);
     document.querySelectorAll(".spicy-construction-editor").forEach((element) => element.remove());
     rs.restoreAllMocks();
 });
@@ -34,7 +43,7 @@ function button(text: string): HTMLButtonElement {
 
 async function chooseSource(label: string, mode: string) {
     const sourceLabel = [...panel().querySelectorAll("label")].find(
-        (element) => element.textContent === label,
+        (element) => element.firstChild?.textContent === label,
     );
     expect(sourceLabel).not.toBeUndefined();
     const row = sourceLabel!.parentElement!;
@@ -49,6 +58,28 @@ async function chooseSource(label: string, mode: string) {
 }
 
 describe("construction command forms", () => {
+    test("opens one command context containing its form and marks the point source optional", async () => {
+        const { app } = setup();
+        const opened = rs.fn((_command: ICommand, _content?: HTMLElement) => {});
+        PubSub.default.sub("openCommandContext", opened);
+        try {
+            const command = new OffsetPlaneCommand();
+            const completion = command.execute(app);
+            expect(opened.mock.calls).toEqual([[command, panel()]]);
+            expect(document.querySelectorAll(".spicy-construction-editor").length).toBe(1);
+            const label = [...panel().querySelectorAll("label")].find(
+                (element) => element.firstChild?.textContent === "To Object point",
+            );
+            expect(label).not.toBeUndefined();
+            expect(label!.textContent).toBe("To Object point (optional)");
+            button("Cancel").click();
+            await completion;
+            expect(document.querySelector(".spicy-construction-editor")).toBeNull();
+        } finally {
+            PubSub.default.remove("openCommandContext", opened);
+        }
+    });
+
     test("cancelling during an active pick signals its controller and leaves no model mutation", async () => {
         const { app, doc } = setup();
         const cancelObserved = rs.fn();
@@ -271,7 +302,7 @@ describe("construction command forms", () => {
         expect(panel().querySelector("[role=status]")?.textContent).toBe("Preview ready");
         expect(display).toHaveBeenCalledTimes(1);
         const toPointRow = [...panel().querySelectorAll("label")].find(
-            (element) => element.textContent === "To Object point",
+            (element) => element.firstChild?.textContent === "To Object point",
         );
         expect(toPointRow).not.toBeUndefined();
         expect(toPointRow!.parentElement!.querySelector("small")?.textContent).toBe("Fixed point");
