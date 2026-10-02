@@ -1063,6 +1063,9 @@ describe("fillet and boolean", () => {
             { op: "fillet", id: "appended", body: body.id, edgeRefs: [picks.edges[0].reference], radius: 4 },
         ]);
         expect(message).toContain("Failed to fillet");
+        expect(message).toContain("invalid result face index");
+        expect(message).toContain("BRepCheck: Intersecting Wires");
+        expect(message).toContain("edge 0 adjoining faces [0, 1]");
         expect(message).toContain("before downstream cuts with index");
         expect(body.features).toEqual(original);
         expectClean(body);

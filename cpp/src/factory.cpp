@@ -5,6 +5,7 @@
 #include <emscripten/val.h>
 
 #include "cornerSetback.hpp"
+#include "faceValidation.hpp"
 #include "guard.hpp"
 #include "guidedLoftValidation.hpp"
 #include "shared.hpp"
@@ -1297,6 +1298,10 @@ static std::string filletBuildFailure(BRepFilletAPI_MakeFillet& builder, double 
         message += "; faulty corner vertices=" + std::to_string(vertices);
     if (faulty == 0 && vertices == 0)
         message += "; no detailed failure status was reported. Try a smaller radius or another edge selection";
+    if (builder.HasResult())
+        message += FaceValidation::invalidFaces(builder.BadShape());
+    else
+        message += "; no result faces available for BRepCheck";
     return message;
 }
 
@@ -3310,7 +3315,7 @@ public:
         const TopoDS_Shape& result = makeFillet.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return ShapeResult { TopoDS_Shape(), false,
-                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" };
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result) };
         }
         return ShapeResult { result, true, "" };
     }
@@ -3339,7 +3344,7 @@ public:
         const TopoDS_Shape& result = makeFillet.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return TrackedShapeResult { TopoDS_Shape(), false,
-                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+                "Failed to fillet: the result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result), { }, { } };
         }
         return TrackedShapeResult { result, true, "", faceHistory(makeFillet, shape, result),
             edgeHistory(makeFillet, shape, result) };
@@ -3359,7 +3364,7 @@ public:
             return ShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius) };
         const auto result = builder.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
-            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" };
+            return ShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result) };
         return ShapeResult { result, true, "" };
     }
 
@@ -3377,7 +3382,7 @@ public:
             return TrackedShapeResult { TopoDS_Shape(), false, filletBuildFailure(builder, maximumRadius), { }, { } };
         const auto result = builder.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid()))
-            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)", { }, { } };
+            return TrackedShapeResult { TopoDS_Shape(), false, "Variable-radius fillet result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result), { }, { } };
         std::vector<int> faceAncestors;
         std::vector<int> edgeAncestors;
         TrackedShapeResult tracked { result, true, "",
@@ -3411,7 +3416,7 @@ public:
         const TopoDS_Shape& result = makeChamfer.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return ShapeResult { TopoDS_Shape(), false,
-                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" };
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result) };
         }
         return ShapeResult { result, true, "" };
     }
@@ -3440,7 +3445,7 @@ public:
         const TopoDS_Shape& result = makeChamfer.Shape();
         if (result.IsNull() || (!BRepCheck_Analyzer(result).IsValid() && BRepCheck_Analyzer(shape).IsValid())) {
             return TrackedShapeResult { TopoDS_Shape(), false,
-                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)", { }, { } };
+                "Failed to chamfer: the result is invalid (BRepCheck_Analyzer)" + FaceValidation::invalidFaces(result), { }, { } };
         }
         return TrackedShapeResult { result, true, "", faceHistory(makeChamfer, shape, result),
             edgeHistory(makeChamfer, shape, result) };

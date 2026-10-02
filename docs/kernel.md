@@ -237,3 +237,17 @@ block; neither path adds the more expensive self-intersection analyzer. Empty bo
 results retain the existing feature-specific errors. Thicken retains its orientation repair
 for a valid inside-out offset before it becomes a feature result; the bounded bridge performs
 the same repair before checking every output component.
+
+### Fillet/chamfer invalid-face diagnostics (#132)
+
+The supplied final-body snapshot did not reproduce #132 in investigation. Diagnostics now
+identify up to eight invalid result faces by zero-based index and BRepCheck status, including
+wire and edge defects under a face. They reuse the face-status implementation of `checkFaces`.
+Failed fillets inspect OCCT's partial result when one exists; an early build failure explicitly
+reports that no result faces are available. Chamfer invalid results use the same diagnostics.
+The result detail is bounded to 1,800 characters, in addition to the existing bounded contour
+and MCP selected-edge/adjoining-face context. Result face indexes refer to the attempted output,
+while the selection indexes refer to the input. The synthetic near-wall mouse-skirt recess
+regression produces `Intersecting Wires`. For the investigated attachment, set
+`SPICY3D_ISSUE_132_MODEL` to a local `.spicy` path to run the opt-in final-body fillet regression;
+no download or large committed attachment is needed.

@@ -35,6 +35,9 @@ describe("native corner failure diagnostics", () => {
         expect(result.error).toContain("OCCT build failed");
         expect(result.error).toContain(operation.startsWith("fillet") ? "radius=100" : "distance=100");
         expect(result.error).toContain("contours=");
+        if (operation.startsWith("fillet")) {
+            expect(result.error).toContain("no result faces available for BRepCheck");
+        }
         expect(result.error.length).toBeGreaterThan(80);
         expect(box.checkShape()).toBe(true);
         expect(box.volume()).toBeCloseTo(1000, 6);
