@@ -51,10 +51,15 @@ import {
 import style from "./commandContext.module.css";
 
 export class CommandContext extends HTMLElement implements IDisposable {
+    private static nextControlId = 0;
     private readonly propMap: Map<string | number | symbol, [Property, HTMLElement][]> = new Map();
     /** Controls that redraw themselves when their property changes (node lists). */
     private readonly redraws: Map<string | number | symbol, () => void> = new Map();
     private readonly container = div({ className: style.container });
+    private readonly header = div({ className: style.command });
+    private drag?: { pointerId: number; startX: number; startY: number; left: number; top: number };
+    private position?: { left: number; top: number };
+    private resizeObserver?: ResizeObserver;
     private selectionControlContainer?: HTMLDivElement;
     private closeIcon?: HTMLElement;
     private selectionCountCleanups: Array<() => void> = [];
@@ -62,7 +67,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
     constructor(readonly command: ICommand) {
         super();
         this.className = style.panel;
-        this.append(this.container);
+        this.setAttribute("role", "region");
         this.render();
     }
 
@@ -70,26 +75,36 @@ export class CommandContext extends HTMLElement implements IDisposable {
         const data = CommandStore.getComandData(this.command);
         const icon = createIcon(data!.icon);
         icon.classList.add(style.icon);
-        this.container.append(
-            div(
-                { className: style.command },
-                icon,
-                label({ className: style.title, textContent: new Localize(`command.${data!.key}`) }),
-            ),
-        );
+        const title = label({ className: style.title, textContent: new Localize(`command.${data!.key}`) });
+        title.id = `command-title-${CommandContext.nextControlId++}`;
+        this.setAttribute("aria-labelledby", title.id);
+        this.header.append(icon, title);
+        if (isCancelableCommand(this.command)) {
+            const close = button(
+                {
+                    type: "button",
+                    className: style.closeButton,
+                    title: I18n.translate("common.cancel"),
+                    onclick: () => (this.command as ICancelableCommand).cancel(),
+                },
+                svg({ icon: "icon-cancel" }),
+            );
+            close.setAttribute("aria-label", I18n.translate("common.cancel"));
+            this.header.append(close);
+        }
+        this.append(this.header, this.container);
         this.initContext();
         if (isCancelableCommand(this.command)) {
             this.closeIcon = div(
                 { className: style.cancelButton },
-                div(
-                    {
-                        className: style.selectionButton,
-                        onclick: () => (this.command as CancelableCommand).cancel(),
-                    },
-                    svg({ icon: "icon-cancel" }),
-                ),
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton}`,
+                    textContent: new Localize("common.cancel"),
+                    onclick: () => (this.command as ICancelableCommand).cancel(),
+                }),
             );
-            this.container.append(this.closeIcon);
+            this.append(this.closeIcon);
         }
     }
 
@@ -100,24 +115,35 @@ export class CommandContext extends HTMLElement implements IDisposable {
         this.selectionControlContainer = div(
             { className: style.selectionControl },
             div(
-                { className: style.selectionInfo },
-                this.countDom(),
-                span({
-                    className: style.selectionCountLabel,
-                    textContent: new Localize("prompt.selectedCount"),
+                { className: style.selectionSummary },
+                div(
+                    { className: style.selectionInfo },
+                    span({
+                        className: style.selectionCountLabel,
+                        textContent: new Localize("prompt.selectedCount"),
+                    }),
+                    this.countDom(),
+                ),
+                ...(options?.nodes ? [this.selectedNodesDom()] : []),
+            ),
+            this.container,
+            div(
+                { className: style.footer },
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton}`,
+                    textContent: new Localize("common.cancel"),
+                    onclick: () => controller.cancel(),
+                }),
+                button({
+                    type: "button",
+                    className: `${style.button} ${style.selectionButton} ${style.primaryButton}`,
+                    textContent: new Localize("common.ok"),
+                    onclick: () => controller.success(),
                 }),
             ),
-            ...(options?.nodes ? [this.selectedNodesDom()] : []),
-            div(
-                { className: style.selectionButton, onclick: () => controller.success() },
-                svg({ icon: "icon-confirm" }),
-            ),
-            div(
-                { className: style.selectionButton, onclick: () => controller.cancel() },
-                svg({ icon: "icon-cancel" }),
-            ),
         );
-        this.container.append(this.selectionControlContainer);
+        this.insertBefore(this.selectionControlContainer, this.closeIcon ?? null);
     };
 
     private countDom() {
@@ -160,6 +186,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
     }
 
     private readonly clearSelectionControl = () => {
+        if (this.selectionControlContainer) {
+            this.insertBefore(this.container, this.selectionControlContainer);
+        }
         this.selectionControlContainer?.remove();
         this.selectionControlContainer = undefined;
         if (this.closeIcon) this.closeIcon.style.display = "";
@@ -168,6 +197,11 @@ export class CommandContext extends HTMLElement implements IDisposable {
     };
 
     connectedCallback(): void {
+        this.header.addEventListener("pointerdown", this.startDrag);
+        this.header.addEventListener("lostpointercapture", this.endDrag);
+        this.resizeObserver = new ResizeObserver(this.keepPositionInViewport);
+        this.resizeObserver.observe(this);
+        if (this.offsetParent instanceof HTMLElement) this.resizeObserver.observe(this.offsetParent);
         PubSub.default.sub("showSelectionControl", this.showSelectionControl);
         PubSub.default.sub("clearSelectionControl", this.clearSelectionControl);
         if (this.command instanceof Observable) {
@@ -176,6 +210,11 @@ export class CommandContext extends HTMLElement implements IDisposable {
     }
 
     disconnectedCallback(): void {
+        this.header.removeEventListener("pointerdown", this.startDrag);
+        this.header.removeEventListener("lostpointercapture", this.endDrag);
+        this.endDrag();
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = undefined;
         this.clearSelectionControl();
         PubSub.default.remove("showSelectionControl", this.showSelectionControl);
         PubSub.default.remove("clearSelectionControl", this.clearSelectionControl);
@@ -189,6 +228,67 @@ export class CommandContext extends HTMLElement implements IDisposable {
         this.redraws.clear();
         this.disconnectedCallback();
     }
+
+    private readonly startDrag = (event: PointerEvent) => {
+        if (event.button !== 0 || (event.target as Element).closest("button") || this.drag) return;
+        const viewport = this.offsetParent;
+        if (!(viewport instanceof HTMLElement)) return;
+        const bounds = this.getBoundingClientRect();
+        const host = viewport.getBoundingClientRect();
+        this.drag = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            left: bounds.left - host.left - viewport.clientLeft,
+            top: bounds.top - host.top - viewport.clientTop,
+        };
+        this.header.setPointerCapture(event.pointerId);
+        document.addEventListener("pointermove", this.moveDrag);
+        document.addEventListener("pointerup", this.endDrag);
+        document.addEventListener("pointercancel", this.endDrag);
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
+    private readonly moveDrag = (event: PointerEvent) => {
+        if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+        this.position = {
+            left: this.drag.left + event.clientX - this.drag.startX,
+            top: this.drag.top + event.clientY - this.drag.startY,
+        };
+        this.keepPositionInViewport();
+    };
+
+    private readonly endDrag = (event?: PointerEvent) => {
+        if (event && this.drag && event.pointerId !== this.drag.pointerId) return;
+        const pointerId = this.drag?.pointerId;
+        this.drag = undefined;
+        if (pointerId !== undefined && this.header.hasPointerCapture(pointerId)) {
+            this.header.releasePointerCapture(pointerId);
+        }
+        document.removeEventListener("pointermove", this.moveDrag);
+        document.removeEventListener("pointerup", this.endDrag);
+        document.removeEventListener("pointercancel", this.endDrag);
+    };
+
+    private readonly keepPositionInViewport = () => {
+        const viewport = this.offsetParent;
+        if (!this.position || !(viewport instanceof HTMLElement)) return;
+        const bounds = this.getBoundingClientRect();
+        const navigationSpace =
+            Number.parseFloat(getComputedStyle(this).getPropertyValue("--command-panel-right")) || 132;
+        this.position.left = Math.max(
+            8,
+            Math.min(this.position.left, viewport.clientWidth - navigationSpace - bounds.width),
+        );
+        this.position.top = Math.max(
+            8,
+            Math.min(this.position.top, viewport.clientHeight - bounds.height - 8),
+        );
+        this.style.left = `${this.position.left}px`;
+        this.style.top = `${this.position.top}px`;
+        this.style.right = "auto";
+    };
 
     private readonly onPropertyChanged = (property: string | number | symbol) => {
         this.redraws.get(property)?.();
@@ -210,6 +310,13 @@ export class CommandContext extends HTMLElement implements IDisposable {
 
             const group = this.findGroup(groupMap, property);
             const item = this.createItem(this.command, property);
+            item.classList.add(style.row);
+            const caption = item.querySelector("label");
+            const control = item.querySelector<HTMLInputElement | HTMLSelectElement>("input, select");
+            if (caption && control) {
+                control.id = `command-field-${CommandContext.nextControlId++}`;
+                caption.htmlFor = control.id;
+            }
             this.setVisible(item, property);
             this.cacheDependencies(item, property);
             group.append(item);
@@ -235,7 +342,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
                 }
             }
         }
-        control.style.display = visible ? "inherit" : "none";
+        control.style.display = visible ? "" : "none";
     }
 
     private findGroup(groupMap: Map<I18nKeys, HTMLDivElement>, prop: Property) {
@@ -441,8 +548,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
                 ...(fixed.has(node)
                     ? []
                     : [
-                          div(
+                          button(
                               {
+                                  type: "button",
                                   className: style.nodeRemove,
                                   title: I18n.translate("option.command.nodeList.remove"),
                                   onclick: (e: MouseEvent) => {

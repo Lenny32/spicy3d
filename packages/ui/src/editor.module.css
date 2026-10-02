@@ -47,6 +47,7 @@
 
     & .viewportContainer {
         position: relative;
+        container-type: size;
         background-color: var(--viewport-background-color);
         flex: 1 1 auto;
         height: 0;

@@ -4,9 +4,14 @@
 }
 
 .header {
-    margin: 2px 18px;
-    font-size: 1.15rem;
-    font-weight: bold;
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--control-background-color);
     flex: 0;
 }
 

@@ -7,6 +7,7 @@ import {
     type CameraType,
     Config,
     I18n,
+    type I18nKeys,
     type IConverter,
     type IEventHandler,
     type IView,
@@ -17,7 +18,7 @@ import {
     ViewModeI18nKeys,
     ViewModes,
 } from "@spicy3d/core";
-import { collection, div, input, label, span, svg } from "@spicy3d/element";
+import { button, collection, div, input, label, span, svg } from "@spicy3d/element";
 import { Flyout } from "./flyout";
 import style from "./viewport.module.css";
 
@@ -106,13 +107,8 @@ export class Viewport extends HTMLElement {
             { className: style.border },
             div(
                 { className: new Binding(Config.instance, "showGrid", new GridConverter()) },
-                svg({
-                    icon: "icon-grid",
-                    title: new Localize("viewport.grid"),
-                    onclick: (e) => {
-                        e.stopPropagation();
-                        Config.instance.showGrid = !Config.instance.showGrid;
-                    },
+                this.createNavigationButton("icon-grid", "viewport.grid", () => {
+                    Config.instance.showGrid = !Config.instance.showGrid;
                 }),
             ),
         );
@@ -121,31 +117,37 @@ export class Viewport extends HTMLElement {
     private createActionControls() {
         return div(
             { className: style.border },
-            svg({
-                icon: "icon-fitcontent",
-                title: new Localize("viewport.fitContent"),
-                onclick: async (e) => {
-                    e.stopPropagation();
-                    this.view.cameraController.fitContent();
-                    this.view.update();
-                },
+            this.createNavigationButton("icon-fitcontent", "viewport.fitContent", () => {
+                this.view.cameraController.fitContent();
+                this.view.update();
             }),
-            svg({
-                icon: "icon-zoomin",
-                title: new Localize("viewport.zoomIn"),
-                onclick: () => {
-                    this.view.cameraController.zoom(this.view.width / 2, this.view.height / 2, -5);
-                    this.view.update();
-                },
+            this.createNavigationButton("icon-zoomin", "viewport.zoomIn", () => {
+                this.view.cameraController.zoom(this.view.width / 2, this.view.height / 2, -5);
+                this.view.update();
             }),
-            svg({
-                icon: "icon-zoomout",
-                title: new Localize("viewport.zoomOut"),
-                onclick: () => {
-                    this.view.cameraController.zoom(this.view.width / 2, this.view.height / 2, 5);
-                    this.view.update();
-                },
+            this.createNavigationButton("icon-zoomout", "viewport.zoomOut", () => {
+                this.view.cameraController.zoom(this.view.width / 2, this.view.height / 2, 5);
+                this.view.update();
             }),
+        );
+    }
+
+    private createNavigationButton(icon: string, title: I18nKeys, action: () => void) {
+        const image = svg({ icon });
+        image.setAttribute("aria-hidden", "true");
+        return button(
+            {
+                type: "button",
+                className: style.navigationButton,
+                title: new Localize(title),
+                onkeydown: (event) => event.stopPropagation(),
+                onclick: (event) => {
+                    event.stopPropagation();
+                    action();
+                },
+            },
+            image,
+            span({ className: style.navigationLabel, textContent: new Localize(title) }),
         );
     }
 
@@ -229,14 +231,9 @@ export class Viewport extends HTMLElement {
                     new CameraConverter(cameraType),
                 ),
             },
-            svg({
-                icon: icon,
-                title: new Localize(`viewport.${cameraType}`),
-                onclick: (e) => {
-                    e.stopPropagation();
-                    this.view.cameraController.cameraType = cameraType;
-                    this.view.update();
-                },
+            this.createNavigationButton(icon, `viewport.${cameraType}`, () => {
+                this.view.cameraController.cameraType = cameraType;
+                this.view.update();
             }),
         );
     }
