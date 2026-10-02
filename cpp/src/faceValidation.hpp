@@ -13,11 +13,15 @@
 #include <string>
 
 namespace FaceValidation {
+// Translate OCCT validation statuses into the stable labels used in face diagnostics.
+// Groups follow the checked geometry: points, curves, wires, shells, then whole shapes.
 inline const char* checkStatusName(BRepCheck_Status status)
 {
+    // A successful check has no defect to describe.
     if (status == BRepCheck_NoError) {
         return "No Error";
     }
+    // Point placement must agree with the supporting curve and surface.
     if (status == BRepCheck_InvalidPointOnCurve) {
         return "Invalid Point On Curve";
     }
@@ -27,6 +31,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidPointOnSurface) {
         return "Invalid Point On Surface";
     }
+    // Edges need a single valid spatial curve and compatible surface curves.
     if (status == BRepCheck_No3DCurve) {
         return "No 3D Curve";
     }
@@ -45,6 +50,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidCurveOnClosedSurface) {
         return "Invalid Curve On Closed Surface";
     }
+    // Edge flags and ranges describe consistency between curve representations.
     if (status == BRepCheck_InvalidSameRangeFlag) {
         return "Invalid Same Range Flag";
     }
@@ -54,6 +60,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidDegeneratedFlag) {
         return "Invalid Degenerated Flag";
     }
+    // Edge connectivity and parameter ranges must support a valid boundary.
     if (status == BRepCheck_FreeEdge) {
         return "Free Edge";
     }
@@ -63,6 +70,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidRange) {
         return "Invalid Range";
     }
+    // Wire boundaries must contain distinct edges without self-intersections.
     if (status == BRepCheck_EmptyWire) {
         return "Empty Wire";
     }
@@ -72,6 +80,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_SelfIntersectingWire) {
         return "Self Intersecting Wire";
     }
+    // Faces need a surface and properly nested, non-intersecting wires.
     if (status == BRepCheck_NoSurface) {
         return "No Surface";
     }
@@ -87,6 +96,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidImbricationOfWires) {
         return "Invalid Imbrication Of Wires";
     }
+    // Shells need distinct faces and valid nesting within their solid.
     if (status == BRepCheck_EmptyShell) {
         return "Empty Shell";
     }
@@ -96,6 +106,7 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_InvalidImbricationOfShells) {
         return "Invalid Imbrication Of Shells";
     }
+    // Shape topology must be orientable, closed, connected and internally consistent.
     if (status == BRepCheck_UnorientableShape) {
         return "Unorientable Shape";
     }
@@ -114,18 +125,21 @@ inline const char* checkStatusName(BRepCheck_Status status)
     if (status == BRepCheck_BadOrientationOfSubshape) {
         return "Bad Orientation Of Subshape";
     }
+    // Discrete geometry and tolerances must agree with the checked shape.
     if (status == BRepCheck_InvalidPolygonOnTriangulation) {
         return "Invalid Polygon On Triangulation";
     }
     if (status == BRepCheck_InvalidToleranceValue) {
         return "Invalid Tolerance Value";
     }
+    // Region and checker failures describe defects beyond individual boundaries.
     if (status == BRepCheck_EnclosedRegion) {
         return "Enclosed Region";
     }
     if (status == BRepCheck_CheckFail) {
         return "Check Fail";
     }
+    // Preserve a fallback for statuses introduced by newer OCCT versions.
     return "Unknown";
 }
 
@@ -159,7 +173,7 @@ inline std::string invalidFaces(const TopoDS_Shape& shape)
     BRepCheck_Analyzer analyzer(shape);
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
     TopExp::MapShapes(shape, TopAbs_FACE, faces);
-    std::string diagnostics;
+    std::string faceStatusReport;
     int invalid = 0;
     for (int i = 1; i <= faces.Extent(); ++i) {
         const auto& face = faces.FindKey(i);
@@ -168,44 +182,44 @@ inline std::string invalidFaces(const TopoDS_Shape& shape)
         if (++invalid > 8)
             continue;
         std::set<std::string> statuses;
-        const auto collectStatuses = [&](const TopoDS_Shape& item) {
-            const auto& checkResult = analyzer.Result(item);
-            if (checkResult.IsNull())
+        const auto gatherFaceStatusNames = [&](const TopoDS_Shape& item) {
+            const auto& brepCheckOutcome = analyzer.Result(item);
+            if (brepCheckOutcome.IsNull())
                 return;
-            for (auto status : checkResult->Status())
+            for (auto status : brepCheckOutcome->Status())
                 if (status != BRepCheck_NoError)
                     statuses.insert(checkStatusName(status));
-            checkResult->InitContextIterator();
-            while (checkResult->MoreShapeInContext()) {
-                for (auto status : checkResult->StatusOnShape())
+            brepCheckOutcome->InitContextIterator();
+            while (brepCheckOutcome->MoreShapeInContext()) {
+                for (auto status : brepCheckOutcome->StatusOnShape())
                     if (status != BRepCheck_NoError)
                         statuses.insert(checkStatusName(status));
-                checkResult->NextShapeInContext();
+                brepCheckOutcome->NextShapeInContext();
             }
         };
-        collectStatuses(face);
+        gatherFaceStatusNames(face);
         for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next())
-            collectStatuses(wires.Current());
+            gatherFaceStatusNames(wires.Current());
         for (TopExp_Explorer edges(face, TopAbs_EDGE); edges.More(); edges.Next())
-            collectStatuses(edges.Current());
-        diagnostics += "; invalid result face index " + std::to_string(i - 1) + " (BRepCheck: ";
+            gatherFaceStatusNames(edges.Current());
+        faceStatusReport += "; invalid result face index " + std::to_string(i - 1) + " (BRepCheck: ";
         if (statuses.empty())
-            diagnostics += "invalid subshape; no detailed status";
-        bool isFirstStatus = true;
+            faceStatusReport += "invalid subshape; no detailed status";
+        bool atFirstStatusEntry = true;
         for (const auto& status : statuses) {
-            if (!isFirstStatus)
-                diagnostics += ", ";
-            diagnostics += status;
-            isFirstStatus = false;
+            if (!atFirstStatusEntry)
+                faceStatusReport += ", ";
+            faceStatusReport += status;
+            atFirstStatusEntry = false;
         }
-        diagnostics += ")";
+        faceStatusReport += ")";
     }
     if (invalid > 8)
-        diagnostics += "; additional invalid faces=" + std::to_string(invalid - 8);
-    if (diagnostics.empty())
-        diagnostics = "; result faces have no reported BRepCheck defect (failure may be at shell/solid level)";
-    if (diagnostics.size() > 1800)
-        diagnostics = diagnostics.substr(0, 1800) + "...";
-    return diagnostics;
+        faceStatusReport += "; additional invalid faces=" + std::to_string(invalid - 8);
+    if (faceStatusReport.empty())
+        faceStatusReport = "; result faces have no reported BRepCheck defect (failure may be at shell/solid level)";
+    if (faceStatusReport.size() > 1800)
+        faceStatusReport = faceStatusReport.substr(0, 1800) + "...";
+    return faceStatusReport;
 }
 }
