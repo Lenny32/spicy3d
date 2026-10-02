@@ -191,7 +191,9 @@ export interface IShapeFactory {
         mode?: OffsetMode,
         intersection?: boolean,
     ): Result<IShape>;
-    /** Material envelope with intersection trimming; optional for older kernels. */
+    /** Material envelope with intersection trimming; optional for older kernels.
+     * @unit length thickness
+     */
     makeThickSolidTolerant?(shape: IShape, openFaces: IShape[], thickness: number): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
@@ -300,15 +302,19 @@ export interface IShapeFactory {
      * chains are an error naming the section. Open chains are valid sections.
      */
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
+    /** Runtime capability; the matching binding omits the page analyzer. */
+    readonly supportsDeferredGuidedLoft?: boolean;
     /**
      * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
      * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
+     * Deferred validation requires the bounded worker; older kernels keep their internal analyzer.
      */
     loftGuidedTracked?(
         sections: IWire[],
         spine: IWire,
         boundary: IWire,
         solid: boolean,
+        deferSelfIntersection?: boolean,
     ): Result<TrackedShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(

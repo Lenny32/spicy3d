@@ -9,6 +9,7 @@ import {
     formatMeasure,
     type IEdge,
     type IFace,
+    type IInspectionPrecheck,
     type IShape,
     isLengthUnit,
     lengthUnitSymbol,
@@ -331,7 +332,10 @@ async function section(manager: AnalysisManager, context: AnalysisContext): Prom
                 if (!world.inspectionSectionCaps) return Result.err("Section cap query is unavailable");
                 const checked = await inspectionPrecheck([world], context.signal);
                 if (!checked.isOk) return Result.err(checked.error);
-                const caps = world.inspectionSectionCaps(plane);
+                const caps = (world as IShape & IInspectionPrecheck).inspectionSectionCaps!(
+                    plane,
+                    checked.value,
+                );
                 if (!caps.isOk) {
                     skipped++;
                     continue;
@@ -384,7 +388,10 @@ async function interference(context: AnalysisContext): Promise<Result<AnalysisRe
                     return Result.err("Exact interference query is unavailable");
                 const checked = await inspectionPrecheck([shapes[i], shapes[j]], context.signal);
                 if (!checked.isOk) return Result.err(checked.error);
-                const volume = shapes[i].inspectionCommonVolume!(shapes[j]);
+                const volume = (shapes[i] as IShape & IInspectionPrecheck).inspectionCommonVolume!(
+                    shapes[j],
+                    checked.value,
+                );
                 if (!volume.isOk) return Result.err(volume.error);
                 let overlays: AnalysisResult["overlays"];
                 if (volume.value > tolerance) {

@@ -140,6 +140,12 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   endpoint radii on a closed contour. BREP validation can reject a law that cannot fit the shape.
   editFeature action "setRadiusLaw" replaces the whole law; omit radiusLaw to restore the saved
   constant radius. setParameter keys radiusLaw.0, radiusLaw.1, ... edit individual radius expressions.
+Guided lofts use a deferred native analyzer plus bounded worker validation when supported by
+the kernel. Detected self-intersection is an error; timeout/unavailable-worker verdicts accept
+with runtime warnings. Synchronous preview/program evaluation has a skipped-check warning.
+Older kernels retain the original synchronous guided-loft analyzer. Construction and section/
+guide coverage booleans remain synchronous.
+
 - { op: "thicken", id, body, thickness, joinType?, mode?, tolerant?, openFaceIndexes? }
   tolerant:true opts into a material envelope: closed spheres/ring tori can consume an inward
   cavity entirely; other solids attempt intersection trimming with validity/volume gates.

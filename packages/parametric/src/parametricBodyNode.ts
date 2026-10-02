@@ -875,7 +875,11 @@ export class ParametricBodyNode
                 this.features.some(
                     (feature) =>
                         !feature.suppressed &&
-                        (((feature.type === "sweep" || feature.type === "faceSweep") &&
+                        (((feature.type === "sweep" ||
+                            feature.type === "faceSweep" ||
+                            (feature.type === "loft" &&
+                                feature.guided !== undefined &&
+                                shapeFactory.supportsDeferredGuidedLoft)) &&
                             shapeFactory.boundedOperations?.shapeQuery !== undefined) ||
                             (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
                 ));
@@ -1584,7 +1588,11 @@ export class ParametricBodyNode
         const pending =
             preparedOperation ??
             (asynchronous
-                ? (feature.type === "sweep" || feature.type === "faceSweep") &&
+                ? (feature.type === "sweep" ||
+                      feature.type === "faceSweep" ||
+                      (feature.type === "loft" &&
+                          feature.guided !== undefined &&
+                          shapeFactory.supportsDeferredGuidedLoft)) &&
                   shapeFactory.boundedOperations?.shapeQuery !== undefined
                     ? prepareValidatedFeature((context) => evaluateFeature(feature, context), context)
                     : featureHandler(feature.type)?.prepareAsync?.(feature, context)

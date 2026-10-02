@@ -731,6 +731,7 @@ interface EmbindModule {
     filletVariableRadiusTracked(_0: TopoDS_Shape, _1: Array<number>, _2: Array<number>): TrackedShapeResult;
     chamferTracked(_0: TopoDS_Shape, _1: Array<number>, _2: number): TrackedShapeResult;
     sweep(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: boolean, _3: boolean): ShapeResult;
+    loftGuidedTrackedDeferred(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: TopoDS_Wire, _3: boolean): TrackedShapeResult;
     loftGuidedTracked(_0: Array<TopoDS_Shape>, _1: TopoDS_Wire, _2: TopoDS_Wire, _3: boolean): TrackedShapeResult;
     makeThickSolidTolerant(_0: TopoDS_Shape, _1: Array<TopoDS_Shape>, _2: number): ShapeResult;
     makeThickSolidByJoin(_0: TopoDS_Shape, _1: Array<TopoDS_Shape>, _2: number, _3: GeomAbs_JoinType, _4: BRepOffset_Mode, _5: boolean): ShapeResult;
@@ -933,11 +934,13 @@ interface EmbindModule {
     findSubShapes(_0: TopoDS_Shape, _1: TopAbs_ShapeEnum): Array<TopoDS_Shape>;
     getDirectSubShapes(_0: TopoDS_Shape): Array<TopoDS_Shape>;
     splitShapes(_0: Array<TopoDS_Shape>, _1: Array<TopoDS_Shape>, _2: number): TopoDS_Shape;
+    inspectionCommonVolumePrechecked(_0: TopoDS_Shape, _1: TopoDS_Shape): number | undefined;
     inspectionCommonVolume(_0: TopoDS_Shape, _1: TopoDS_Shape): number | undefined;
     inspectionDistance(_0: TopoDS_Shape, _1: TopoDS_Shape): InspectionDistance | undefined;
     inspectionMass(_0: TopoDS_Shape): InspectionMass | undefined;
     boundingBox(_0: TopoDS_Shape, _1: boolean): BoundingBox;
     orientedBoundingBox(_0: TopoDS_Shape, _1: boolean): OrientedBoundingBox;
+    inspectionSectionCapsPrechecked(_0: TopoDS_Shape, _1: Pln): TopoDS_Shape;
     inspectionSectionCaps(_0: TopoDS_Shape, _1: Pln): TopoDS_Shape;
     sectionSP(_0: TopoDS_Shape, _1: Pln): TopoDS_Shape;
     checkFaces(_0: TopoDS_Shape): FaceCheckResultVector;

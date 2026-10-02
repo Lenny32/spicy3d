@@ -333,7 +333,7 @@ export class OccShape implements IShape, IInspectionPrecheck {
         });
     }
 
-    inspectionCommonVolume(other: IShape): Result<number> {
+    inspectionCommonVolume(other: IShape, validated?: ReadonlySet<IShape>): Result<number> {
         if (!(other instanceof OccShape) || this.isNull() || other.isNull()) {
             return Result.err("Intersection requires two non-null OCCT shapes");
         }
@@ -344,7 +344,12 @@ export class OccShape implements IShape, IInspectionPrecheck {
         if (!other.checkShape()) {
             return Result.err("Intersection volume: the other shape is invalid (checkShape is false)");
         }
-        const value = wasm.Shape.inspectionCommonVolume(this.shape, other.shape);
+        const checked = wasm.Shape.inspectionCommonVolumePrechecked;
+        const binding =
+            validated?.has(this) && validated.has(other) && typeof checked === "function"
+                ? checked
+                : wasm.Shape.inspectionCommonVolume;
+        const value = binding(this.shape, other.shape);
         return value == null || !Number.isFinite(value) || value < 0
             ? Result.err("Intersection volume is unavailable")
             : Result.ok(value);
@@ -433,7 +438,7 @@ export class OccShape implements IShape, IInspectionPrecheck {
         return wasm.Shape.volume(this.shape);
     }
 
-    inspectionSectionCaps(plane: Plane): Result<IShape> {
+    inspectionSectionCaps(plane: Plane, validated?: ReadonlySet<IShape>): Result<IShape> {
         if (
             this.isNull() ||
             (this.shapeType !== ShapeTypes.solid &&
@@ -445,7 +450,12 @@ export class OccShape implements IShape, IInspectionPrecheck {
         ) {
             return Result.err("Section caps require a valid solid and finite plane");
         }
-        const caps = wasm.Shape.inspectionSectionCaps(this.shape, {
+        const checked = wasm.Shape.inspectionSectionCapsPrechecked;
+        const binding =
+            validated?.has(this) && typeof checked === "function"
+                ? checked
+                : wasm.Shape.inspectionSectionCaps;
+        const caps = binding(this.shape, {
             location: plane.origin,
             direction: plane.normal,
             xDirection: plane.xvec,

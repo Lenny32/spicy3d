@@ -11,7 +11,7 @@ const box = (id: string) => ({ id, method: "box", args: { dx: 10, dy: 10, dz: 10
 function setup(mode: "hang" | "pass" | "intersect" | "fail" = "pass", needsCheck = true) {
     const doc = new TestDocument({ selection: createMockDocument().selection });
     const shapes: IShape[] = [];
-    const inspection = rs.fn(() => Result.ok(5));
+    const inspection = rs.fn((..._args: unknown[]) => Result.ok(5));
     const shapeQuery = rs.fn((_request: BoundedShapeQuery, signal?: AbortSignal) => {
         let answer: Result<boolean>;
         let finish!: () => void;
@@ -51,8 +51,8 @@ function setup(mode: "hang" | "pass" | "intersect" | "fail" = "pass", needsCheck
                 needsInspectionSelfIntersectionCheck: needsCheck,
                 inspectionMass: inspection,
                 inspectionCommonVolume: inspection,
-                inspectionSectionCaps: rs.fn(() => {
-                    inspection();
+                inspectionSectionCaps: rs.fn((...args: unknown[]) => {
+                    inspection(...args);
                     return Result.ok(new MockShape());
                 }),
                 inspectionDistance: inspection,
@@ -115,6 +115,8 @@ test.each(methods)("%s runs only after every input passes the worker pre-check",
         );
         expect(inspection).toHaveBeenCalledTimes(1);
         expect(shapeQuery).toHaveBeenCalledTimes(method === "shape.inspectionCommonVolume" ? 2 : 1);
+        const receipt = inspection.mock.calls[0].at(-1);
+        expect(receipt).toEqual(new Set(method === "shape.inspectionCommonVolume" ? shapes : [shapes[0]]));
         expect(shapeQuery.mock.calls.map(([request]) => request.shape)).toEqual(
             method === "shape.inspectionCommonVolume" ? shapes : [shapes[0]],
         );

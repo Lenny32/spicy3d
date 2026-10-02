@@ -52,7 +52,7 @@ const edgeIds = (body: ParametricBodyNode) =>
         return body.edgeIdAt(index);
     });
 
-test("guided loft trusts the kernel self-intersection check without a second TS analyzer", () => {
+test("guided loft deferred validation never runs a synchronous TS analyzer", () => {
     expect(shapeFactory.loftGuidedTracked).not.toBeUndefined();
     const original = shapeFactory.loftGuidedTracked!.bind(shapeFactory);
     const checks: Array<ReturnType<typeof rs.spyOn<IShape, "checkSelfIntersection">>> = [];

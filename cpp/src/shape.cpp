@@ -296,13 +296,23 @@ public:
 
     static std::optional<double> inspectionCommonVolume(const TopoDS_Shape& first, const TopoDS_Shape& second)
     {
+        return inspectionCommonVolumeImpl(first, second, false);
+    }
+
+    static std::optional<double> inspectionCommonVolumePrechecked(const TopoDS_Shape& first, const TopoDS_Shape& second)
+    {
+        return inspectionCommonVolumeImpl(first, second, true);
+    }
+
+    static std::optional<double> inspectionCommonVolumeImpl(const TopoDS_Shape& first, const TopoDS_Shape& second, bool skipSelfIntersection)
+    {
         if (!containsOnlySolids(first) || !containsOnlySolids(second)
             || !BRepCheck_Analyzer(first).IsValid()
             || !BRepCheck_Analyzer(second).IsValid())
             return std::nullopt;
         // BRepCheck_Analyzer does not test self-intersection, and the boolean may raise on a
         // self-intersecting solid (an offset whose faces cross). Bounded, see the face limit.
-        if (!boundedSelfIntersectionFree(first) || !boundedSelfIntersectionFree(second))
+        if (!skipSelfIntersection && (!boundedSelfIntersectionFree(first) || !boundedSelfIntersectionFree(second)))
             return std::nullopt;
         BRepAlgoAPI_Common common(first, second);
         common.Build();
@@ -329,6 +339,16 @@ public:
     }
 
     static TopoDS_Shape inspectionSectionCaps(const TopoDS_Shape& shape, const Pln& plane)
+    {
+        return inspectionSectionCapsImpl(shape, plane, false);
+    }
+
+    static TopoDS_Shape inspectionSectionCapsPrechecked(const TopoDS_Shape& shape, const Pln& plane)
+    {
+        return inspectionSectionCapsImpl(shape, plane, true);
+    }
+
+    static TopoDS_Shape inspectionSectionCapsImpl(const TopoDS_Shape& shape, const Pln& plane, bool skipSelfIntersection)
     {
         const Vector3& o = plane.location;
         const Vector3& n = plane.direction;
@@ -364,7 +384,7 @@ public:
         if (!halfSpace.IsDone() || halfSpace.Solid().IsNull())
             return TopoDS_Shape();
         // As in inspectionCommonVolume: a self-intersecting solid may make the boolean raise.
-        if (!boundedSelfIntersectionFree(shape))
+        if (!skipSelfIntersection && !boundedSelfIntersectionFree(shape))
             return TopoDS_Shape();
         BRepAlgoAPI_Common common(shape, halfSpace.Solid());
         common.Build();
@@ -877,8 +897,10 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("orientedBoundingBox", guardedEntry<&Shape::orientedBoundingBox>("Shape.orientedBoundingBox"))
         .class_function("extremaDistance", guardedEntry<&Shape::extremaDistance>("Shape.extremaDistance"))
         .class_function("inspectionDistance", guardedEntry<&Shape::inspectionDistance>("Shape.inspectionDistance"))
+        .class_function("inspectionCommonVolumePrechecked", guardedEntry<&Shape::inspectionCommonVolumePrechecked>("Shape.inspectionCommonVolumePrechecked"))
         .class_function("inspectionCommonVolume", guardedEntry<&Shape::inspectionCommonVolume>("Shape.inspectionCommonVolume"))
         .class_function("inspectionMass", guardedEntry<&Shape::inspectionMass>("Shape.inspectionMass"))
+        .class_function("inspectionSectionCapsPrechecked", guardedEntry<&Shape::inspectionSectionCapsPrechecked>("Shape.inspectionSectionCapsPrechecked"))
         .class_function("inspectionSectionCaps", guardedEntry<&Shape::inspectionSectionCaps>("Shape.inspectionSectionCaps"))
         .class_function("clean", guardedEntry<&Shape::clean>("Shape.clean"))
         .class_function("clone", guardedEntry<&Shape::clone>("Shape.clone"))

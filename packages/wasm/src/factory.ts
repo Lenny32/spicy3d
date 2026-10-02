@@ -1399,17 +1399,25 @@ export class ShapeFactory implements IShapeFactory {
             for (const shape of created) shape.dispose();
         }
     }
+    get supportsDeferredGuidedLoft(): boolean {
+        return typeof wasm.ShapeFactory.loftGuidedTrackedDeferred === "function";
+    }
     loftGuidedTracked(
         sections: IWire[],
         spine: IWire,
         boundary: IWire,
         solid: boolean,
+        deferSelfIntersection = false,
     ): Result<TrackedShape> {
-        const binding = (
+        const legacyBinding = (
             wasm.ShapeFactory as unknown as {
                 loftGuidedTracked?: (...args: unknown[]) => TrackedShapeResult;
             }
         ).loftGuidedTracked;
+        const binding =
+            deferSelfIntersection && this.supportsDeferredGuidedLoft
+                ? (wasm.ShapeFactory.loftGuidedTrackedDeferred as typeof legacyBinding)
+                : legacyBinding;
         if (!binding) return Result.err("Guided loft requires a newer geometry kernel");
         if (sections.length < 2 || sections.length > 16)
             return Result.err("Guided loft requires 2 to 16 sections");

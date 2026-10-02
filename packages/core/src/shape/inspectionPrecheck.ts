@@ -12,10 +12,11 @@ export async function precheckInspectionShapes(
     factory: IShapeFactory,
     signal?: AbortSignal,
     owned: <T>(action: () => T) => T = (action) => action(),
-): Promise<Result<void>> {
+): Promise<Result<ReadonlySet<IShape>>> {
     if (signal?.aborted) return Result.err(I18n.translate("analysis.inspectionCancelled"));
     if (owned(() => shapes.some((shape) => !shape.checkShape())))
         return Result.err(I18n.translate("analysis.inspectionInvalid"));
+    const validated = new Set<IShape>();
     for (const shape of new Set(shapes)) {
         if (signal?.aborted) return Result.err(I18n.translate("analysis.inspectionCancelled"));
         if (
@@ -42,9 +43,10 @@ export async function precheckInspectionShapes(
                 );
             }
             if (!result.value) return Result.err(I18n.translate("analysis.inspectionIntersects"));
+            validated.add(shape);
         } finally {
             pending.cancel();
         }
     }
-    return Result.ok(undefined);
+    return Result.ok(validated);
 }

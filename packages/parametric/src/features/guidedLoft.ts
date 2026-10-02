@@ -14,6 +14,7 @@ import type { FeatureContext, FeatureData, LoftFeatureData } from "./feature";
 import { pathReferenceDependencies, type ResolvedPath, resolvePathReferences } from "./pathReferences";
 import { captureProfileRef } from "./profileRef";
 import { isReusableTopologyIdentity } from "./reusableTopologyIdentity";
+import { validateSelfIntersection } from "./selfIntersectionValidation";
 import { resolveSweepSection, type SweepSection, sectionVertexSeeds } from "./sweep";
 import { ancestorInputs } from "./trackedId";
 
@@ -282,11 +283,19 @@ export function evaluateGuidedLoft(feature: LoftFeatureData, context: FeatureCon
             spine.wire,
             boundary.wire,
             feature.solid !== false,
+            shapeFactory.supportsDeferredGuidedLoft === true,
         );
         if (!result.isOk) return Result.err(result.error);
         shape = result.value.shape;
-        // loftGuidedTracked already validates self-intersection in the kernel, at every size.
-        if (!shape.checkShape()) return Result.err("Guided loft output is invalid");
+        if (shapeFactory.supportsDeferredGuidedLoft) {
+            const clean = validateSelfIntersection(
+                shape,
+                context.warn,
+                context.deferSelfIntersection,
+                "Guided loft output intersects itself",
+            );
+            if (!clean.isOk) return Result.err(clean.error);
+        } else if (!shape.checkShape()) return Result.err("Guided loft output is invalid");
         const ids = trackGuidedLoft(feature, sections, spine, boundary, result.value);
         if (!ids.isOk) return Result.err(ids.error);
         if (context.tracking) {

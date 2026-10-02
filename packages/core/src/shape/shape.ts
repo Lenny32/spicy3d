@@ -14,6 +14,9 @@ export type Orientation = "forward" | "reversed" | "internal" | "external";
 export interface IInspectionPrecheck {
     /** Whether this input needs a worker pre-check (kernel binding and inspection face cutoff). */
     readonly needsInspectionSelfIntersectionCheck: boolean;
+    /** Runtime-only receipt of checks for these exact input objects, never exposed in tool schemas. */
+    inspectionCommonVolume?(other: IShape, validated: ReadonlySet<IShape>): Result<number>;
+    inspectionSectionCaps?(plane: Plane, validated: ReadonlySet<IShape>): Result<IShape>;
 }
 
 export interface IShape extends IDisposable {

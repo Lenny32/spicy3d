@@ -3,6 +3,9 @@
 
 import { type IShape, precheckInspectionShapes, type Result } from "@spicy3d/core";
 
-export function inspectionPrecheck(shapes: IShape[], signal: AbortSignal): Promise<Result<void>> {
+export function inspectionPrecheck(
+    shapes: IShape[],
+    signal: AbortSignal,
+): Promise<Result<ReadonlySet<IShape>>> {
     return precheckInspectionShapes(shapes, shapeFactory, signal);
 }

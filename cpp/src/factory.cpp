@@ -1532,8 +1532,20 @@ public:
         return ShapeResult { cylinder.Solid(), true, "" };
     }
 
-    static TrackedShapeResult loftGuidedTracked(const ShapeArray& sections, const TopoDS_Wire& originalSpine,
-        const TopoDS_Wire& originalAuxiliary, bool solid)
+    static TrackedShapeResult loftGuidedTracked(const ShapeArray& sections, const TopoDS_Wire& spine,
+        const TopoDS_Wire& boundary, bool solid)
+    {
+        return loftGuidedTrackedImpl(sections, spine, boundary, solid, false);
+    }
+
+    static TrackedShapeResult loftGuidedTrackedDeferred(const ShapeArray& sections, const TopoDS_Wire& spine,
+        const TopoDS_Wire& boundary, bool solid)
+    {
+        return loftGuidedTrackedImpl(sections, spine, boundary, solid, true);
+    }
+
+    static TrackedShapeResult loftGuidedTrackedImpl(const ShapeArray& sections, const TopoDS_Wire& originalSpine,
+        const TopoDS_Wire& originalAuxiliary, bool solid, bool skipSelfIntersection)
     {
         auto originalInputs = vecFromJSArray<TopoDS_Shape>(sections);
         if (originalInputs.size() < 2 || originalInputs.size() > 16)
@@ -1576,13 +1588,15 @@ public:
             return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft could not close a solid" };
         if (!BRepCheck_Analyzer(builder.Shape()).IsValid())
             return TrackedShapeResult { TopoDS_Shape(), false, "Invalid guided loft output" };
-        BOPAlgo_ArgumentAnalyzer selfIntersection;
-        selfIntersection.SetShape1(builder.Shape());
-        selfIntersection.SelfInterMode() = true;
-        selfIntersection.StopOnFirstFaulty() = true;
-        selfIntersection.Perform();
-        if (selfIntersection.HasFaulty())
-            return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft output self-intersects or could not be checked" };
+        if (!skipSelfIntersection) {
+            BOPAlgo_ArgumentAnalyzer selfIntersection;
+            selfIntersection.SetShape1(builder.Shape());
+            selfIntersection.SelfInterMode() = true;
+            selfIntersection.StopOnFirstFaulty() = true;
+            selfIntersection.Perform();
+            if (selfIntersection.HasFaulty())
+                return TrackedShapeResult { TopoDS_Shape(), false, "Guided loft output self-intersects or could not be checked" };
+        }
         BRep_Builder topology;
         TopoDS_Compound sides;
         topology.MakeCompound(sides);
@@ -3970,6 +3984,7 @@ EMSCRIPTEN_BINDINGS(ShapeFactory)
         .class_function("cylinder", guardedEntry<&ShapeFactory::cylinder>("ShapeFactory.cylinder"))
         .class_function("pyramid", guardedEntry<&ShapeFactory::pyramid>("ShapeFactory.pyramid"))
         .class_function("sweep", guardedEntry<&ShapeFactory::sweep>("ShapeFactory.sweep"))
+        .class_function("loftGuidedTrackedDeferred", guardedEntry<&ShapeFactory::loftGuidedTrackedDeferred>("ShapeFactory.loftGuidedTrackedDeferred"))
         .class_function("loftGuidedTracked", guardedEntry<&ShapeFactory::loftGuidedTracked>("ShapeFactory.loftGuidedTracked"))
         .class_function("revolve", guardedEntry<&ShapeFactory::revolve>("ShapeFactory.revolve"))
         .class_function("prism", guardedEntry<&ShapeFactory::prism>("ShapeFactory.prism"))

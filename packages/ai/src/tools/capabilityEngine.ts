@@ -1303,6 +1303,7 @@ async function precheckInspection(
         owner.run(action),
     );
     if (!checked.isOk) throw new Error(`${op.method}: ${checked.error}; inspection skipped`);
+    resolved.args.push(checked.value);
     return resolved;
 }
 

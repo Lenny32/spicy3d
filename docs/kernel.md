@@ -169,20 +169,21 @@ Each applicable pre-check exports a BREP replica and starts a fresh Worker and O
 That startup adds latency per inspection; common volume normally pays for two sequential
 pre-checks, one per distinct input.
 
-The pre-check duplicates work: common-volume and section-cap inspections repeat the same
-analyzer synchronously after the verified BREP replica passes in the worker. A successful
-pre-check does not impose a deadline on this repeated analyzer or the subsequent native
-inspection. Boolean intersection, mass calculations, topology validation, and replica
-capture can still block.
+After a worker pass, common-volume and section-cap inspections pass a runtime receipt of
+validated input objects to feature-detected `*Prechecked` sibling bindings. Only the exact
+objects in that receipt skip the internal analyzer; changed/transformed inputs require a new
+check. Older binaries retain their original binding and repeat the analyzer. Receipts live
+only for the call and are never cached or serialized. Boolean intersection, mass calculations,
+topology validation, and replica capture still have no hard deadline.
 Skipping an explicit self-intersection query does not bypass these inspection pre-checks.
 
 The analysis panel's section caps and interference queries use the same bounded pre-check,
 with progress and Cancel while running; a deadline reports “timed out (result unknown)”.
 The subsequent inspection binding still runs synchronously, with the limitations above.
 
-Sweep and face-sweep handlers use cheap topology/volume gates and mark validation pending
+Sweep, face-sweep and guided-loft handlers use cheap topology/volume gates and mark validation pending
 in their runtime context. With bounded-worker support installed, top-level rebuilds
-containing either feature take the asynchronous scheduler route even below the twelve-feature threshold. The scheduler captures each output
+containing these features take the asynchronous scheduler route even below the twelve-feature threshold. The scheduler captures each output
 (including face-sweep's temporary tool before disposal) in a bounded worker and awaits all
 checks **before caching, tracking commit, or displaying the new body**. Checks run at every
 shape size: the 32-face/64-edge heuristic and 256-face refusal have been removed. Worker
@@ -209,20 +210,23 @@ with the runtime warning “Self-intersection check skipped in synchronous evalu
 edit panels display it. This compromise can miss self-overlap in these contexts; it is
 not proof of validity. Ordinary subsequent asynchronous rebuilds validate in the worker.
 
-Remaining unrestricted main-thread callers:
-- Guided loft construction at every size: the analyzer is inside `loftGuidedTracked` in
-  `cpp/src/factory.cpp`. The existing TS worker protocol has no guided-loft tracked
-  construction operation. Adding only a deferred query cannot contain this internal call.
-- Common-volume and section-cap inspection bindings repeat the analyzer after their
-  bounded pre-check. The worker protocol has no whole-inspection operation; those repeats,
-  booleans, mass calculation and topology checks still have no hard deadline.
-- Direct synchronous `IShape.checkSelfIntersection()` calls outside these managed routes.
+Guided loft feature construction uses the feature-detected `loftGuidedTrackedDeferred`
+sibling binding, omitting its internal analyzer while preserving cheap native gates, section
+and boundary coverage checks, and tracked ancestry. It then uses the same bounded validation,
+unknown-verdict warning, cancellation and cache policy as sweeps. An older binary retains
+its original synchronous analyzer. Explicit direct calls to `loftGuidedTracked` keep that
+original behavior unless their caller requests deferred validation.
+
+Direct synchronous `IShape.checkSelfIntersection()` calls outside these managed routes remain
+unrestricted. Whole guided-loft construction and whole-inspection worker operations do not
+yet exist; section/guide coverage booleans and inspection booleans remain synchronous.
 
 Sweep construction, face-sweep booleans, cheap validity gates and BREP capture also remain
 synchronous. This change contains their self-intersection validation, not arbitrary native
 calls. OCCT has no cooperative cancellation hook in this offline build; stopping a running
-check requires terminating its worker. Guided-loft and whole-inspection worker contracts
-remain follow-up work; no C++ or committed WASM artifacts were changed here.
+check requires terminating its worker. Whole guided-loft construction and whole-inspection
+worker contracts remain follow-up work. The deferred/prechecked C++ bindings and rebuilt
+WASM artifacts are committed together.
 
 ### Boolean and downstream validity (#119)
 
