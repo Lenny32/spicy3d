@@ -1,7 +1,24 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Config, type IDisposable, type IFace, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
+import {
+    Config,
+    DocumentRebuilds,
+    type IDisposable,
+    type IFace,
+    Matrix4,
+    Result,
+    ShapeTypes,
+    XYZ,
+} from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
+import {
+    featureHandler,
+    registerFeature,
+    type SweepFeatureData,
+} from "../../parametric/src/features/feature";
+import { validateSelfIntersection } from "../../parametric/src/features/selfIntersectionValidation";
+import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
 import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";
 import type { OccShape } from "../src/shape";
@@ -684,5 +701,64 @@ test("a pre-aborted self-intersection query never copies inputs or creates a wor
     } finally {
         serialize.mockRestore();
         hybrid.dispose();
+    }
+});
+
+test("free-form shell feature validation terminates a hung worker before committing", async () => {
+    const shell = freeFormShell();
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const document = new TestDocument({ application: createMockApplication() });
+    const original = featureHandler("sweep")!;
+    const budget = Config.instance.slowOpWarningSeconds;
+    const mainCheck = rs.spyOn(shell, "checkSelfIntersection");
+    try {
+        Config.instance.slowOpWarningSeconds = 30;
+        rs.useFakeTimers();
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        // Reproduce validation of the expensive seven-face spline shell without spending
+        // minutes in a real analyzer. Construction/tracking is independent of this regression.
+        registerFeature("sweep", {
+            display: "body.sweep",
+            nodeIds: () => [],
+            parameters: () => [],
+            setParameter: (feature: SweepFeatureData) => feature,
+            evaluate: (_feature, context) => {
+                const output = shell.transformedMul(Matrix4.identity());
+                const clean = validateSelfIntersection(output, context.warn, context.deferSelfIntersection);
+                if (!clean.isOk) {
+                    output.dispose();
+                    return Result.err(clean.error);
+                }
+                return Result.ok(output);
+            },
+        });
+        const node = new ParametricBodyNode({
+            document,
+            featuresJson: JSON.stringify([{ id: "shell", type: "sweep" }]),
+        });
+        document.modelManager.addNode(node);
+        void node.shape;
+        await rs.advanceTimersByTimeAsync(0);
+        expect(transport.messages[0]).toMatchObject({ operation: "checkSelfIntersectionReplica" });
+        await rs.advanceTimersByTimeAsync(29_999);
+        expect(DocumentRebuilds.pending(document)).toBe(true);
+        expect(transport.terminated).toBe(0);
+        await rs.advanceTimersByTimeAsync(1);
+        await DocumentRebuilds.settled(document);
+        expect(transport.terminated).toBe(1);
+        expect(node.featureItems()[0].error).toBe(
+            "Self-intersection check timed out after 30000 ms (result unknown)",
+        );
+        expect(node.shape.isOk).toBe(false);
+        expect(mainCheck).toHaveBeenCalledTimes(0);
+        expect(shell.checkShape()).toBe(true);
+    } finally {
+        document.dispose();
+        hybrid.dispose();
+        registerFeature("sweep", original);
+        rs.unstubAllGlobals();
+        mainCheck.mockRestore();
+        Config.instance.slowOpWarningSeconds = budget;
     }
 });

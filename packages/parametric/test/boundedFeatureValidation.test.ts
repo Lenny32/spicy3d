@@ -228,13 +228,15 @@ test("undo and redo cancel pending validation and validate replayed features", a
     expect(node.featureItems()[0].error).toBeUndefined();
 });
 
-test("missing worker refuses validation and disposes output without a synchronous retry", async () => {
+test("synchronous-only factory accepts cheap gates with a visible warning and never runs analyzer", async () => {
     rs.stubGlobal("shapeFactory", { combine: () => Result.ok(new MockShape()) });
     const node = body();
     await start();
     await DocumentRebuilds.settled(document);
-    expect(node.featureItems()[0].error).toBe("Self-intersection validation requires a bounded worker");
-    expect(outputs[0].dispose).toHaveBeenCalledTimes(1);
+    expect(node.shape.isOk).toBe(true);
+    expect(node.featureItems()[0].error).toBeUndefined();
+    expect(node.featureItems()[0].warning).toBe(SELF_INTERSECTION_SKIPPED);
+    expect(outputs[0].dispose).toHaveBeenCalledTimes(0);
     expect(queries).toHaveLength(0);
 });
 

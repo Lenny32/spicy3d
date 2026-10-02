@@ -170,7 +170,7 @@ with progress and Cancel while running; a deadline reports “timed out (result 
 The subsequent inspection binding still runs synchronously, with the limitations above.
 
 Sweep and face-sweep handlers use cheap topology/volume gates and mark validation pending
-in their runtime context. Top-level rebuilds containing either feature take the asynchronous
+in their runtime context. With bounded-worker support installed, top-level rebuilds containing either feature take the asynchronous
 scheduler route even below the twelve-feature threshold. The scheduler captures each output
 (including face-sweep's temporary tool before disposal) in a bounded worker and awaits all
 checks **before caching, tracking commit, or displaying the new body**. Checks run at every
@@ -183,7 +183,8 @@ releases the unaccepted output. A synchronous scheduler drain cannot fall back t
 analyzer. Document open and headless merge evaluation can await these scheduled rebuilds.
 No validation state or shape is stored in the document.
 
-Explicit synchronous program scopes, nested producer/consumer rebuilds, and the current
+Factories without bounded-worker support, explicit synchronous program scopes, nested
+producer/consumer rebuilds, and the current
 synchronous feature-preview API cannot await a worker. These run only the cheap checks,
 with the runtime warning “Self-intersection check skipped in synchronous evaluation
 (result unknown; rebuild validates in worker)”. Preview results expose the warning and
