@@ -68,7 +68,8 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
 - { op: "sketchInfo", sketch, id? }   reads a sketch back: entities with their points, constraints with
-  their datums (display units), externals (projected edges, ids -100 and below), dofs, solve status,
+  their datums (display units), angleSide (+1 counterclockwise, -1 clockwise) and effectiveDatum
+  (the signed angle in degrees used by the solver), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
   a sketch you did not build in this call.
 - { op: "extrude", id, sketch, depth, symmetric?, startOffset?, startFace?, body?, operation?, extent?, secondExtent? }
@@ -158,6 +159,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   rendering but stay reachable from the body's feature list.
 - { op: "editFeature", body, featureId, action, ... }
   action: "setParameter" (key, value) | "setRadiusLaw" (radiusLaw?, fillet only) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
+  moveTo across a sketch or construction timeline anchor is refused.
 - { op: "features", body }   // reads the feature list: ids, names, parameters, errors
 - { op: "construct", id, definition, name?, displaySize? }   // construction plane / axis / point / UCS
 - { op: "editConstruction", node, definition?, name?, displaySize? }
@@ -185,7 +187,8 @@ the way the UI picks them — by entities and points — and the refs are derive
   { kind: "HorizontalDistance" | "VerticalDistance", points: [p1, p2], datum }   signed: p2 − p1
   { kind: "PointLineDistance", points: [p], entities: [line], datum }   signed: + = left of the line direction
   { kind: "Radius", entities: [circle|arc], datum }
-  { kind: "Angle", entities: [line1, line2], datum }               signed from line1 to line2, CCW positive
+  { kind: "Angle", entities: [line1, line2], datum }               signed from line1 to line2, CCW positive; angleSide preserves the chosen side
+  Re-sending the same datum expression keeps a clockwise side; sketchInfo reports effectiveDatum.
   { kind: "Scale", entities: [line1, line2], datum }    length(line1) = datum × length(line2)
   Entity keys: an id, a name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
   "direction": [u, v] rotates the axis of Horizontal/Vertical/HorizontalDistance/VerticalDistance.
