@@ -6,6 +6,7 @@ import type { Tool, ToolCallContext } from "../llm/types";
 import { handleRunProgram, type ProgramProgress, runProgramParameters } from "./capabilityEngine";
 import { cornerJobDefinitions, executeCornerJob } from "./cornerJobs";
 import { getDocument } from "./documentContext";
+import { RUN_PARAMETRIC_PARAMETERS, runParametric } from "./parametricTools";
 
 type JobState = "queued" | "running" | "cancelling" | "completed" | "cancelled" | "failed";
 type Job = {
@@ -64,17 +65,20 @@ export class ProgramJobs {
             timeoutMs > 600_000
         )
             throw new Error("timeoutMs must be finite and within 1–600000 milliseconds");
-        const input = structuredClone({ ops });
+        const responseMode = args["responseMode"];
+        if (responseMode !== undefined && responseMode !== "full" && responseMode !== "compact")
+            throw new Error('"responseMode" must be "full" or "compact"');
+        const input = structuredClone(responseMode === undefined ? { ops } : { ops, responseMode });
         if (new TextEncoder().encode(JSON.stringify(input)).length > MAX_RESULT_BYTES)
             throw new Error("Background program arguments exceed 1 MiB");
         this.prune();
         const active = [...this.jobs.values()].filter((job) => job.finishedAt === undefined);
         if (active.filter((job) => job.caller === context.caller).length >= MAX_CALLER_ACTIVE)
-            throw new Error("This session already has four active modeling jobs");
+            throw new Error("This session already has four active jobs of this kind");
         if (this.jobs.size >= MAX_JOBS) {
             const old = [...this.jobs.values()].find((job) => job.finishedAt !== undefined);
             if (old) this.jobs.delete(old.id);
-            else throw new Error("The page already has sixteen active modeling jobs");
+            else throw new Error("The page already has sixteen active jobs of this kind");
         }
         const job: Job = {
             id: crypto.randomUUID(),
@@ -195,14 +199,17 @@ export class ProgramJobs {
 }
 
 const PAGE_JOBS = new ProgramJobs();
+const PARAMETRIC_JOBS = new ProgramJobs(runParametric);
 const CORNER_JOBS = new ProgramJobs(executeCornerJob);
 export const cancelAllProgramJobs = (reason: string): void => {
     PAGE_JOBS.cancelAll(reason);
+    PARAMETRIC_JOBS.cancelAll(reason);
     CORNER_JOBS.cancelAll(reason);
 };
 KernelRecovery.current.addQuiesce(() => cancelAllProgramJobs("Main kernel recovery cancelled modeling jobs"));
 export const forgetProgramJobs = (caller: string): void => {
     PAGE_JOBS.forget(caller);
+    PARAMETRIC_JOBS.forget(caller);
     CORNER_JOBS.forget(caller);
 };
 
@@ -212,7 +219,7 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
         {
             name: "start_program_job",
             description:
-                "Queue a run_program in the page's shared mutation FIFO and immediately return a jobId. Poll get_program_job for live completed-operation counts and the completion result. Worker-eligible geometry remains responsive; synchronous query/creation operations retain their existing limits. Jobs belong to this MCP session and the active document, expire ten minutes after finishing, and cancel when the session ends. Per caller, this family allows sixteen retained/four active jobs, separately from corner jobs (combined maximum 32 retained/8 active). A running corner job can occupy the shared FIFO for up to 90s. Default deadline 120s, maximum 600s; result limit 1 MiB. An oversized result reports completed with a reporting error, preserving committed edits. Load modeling-api for ops.",
+                "Queue a run_program in the page's shared mutation FIFO and immediately return a jobId. Poll get_program_job for live completed-operation counts and the completion result. Worker-eligible geometry remains responsive; synchronous query/creation operations retain their existing limits. Jobs belong to this MCP session and the active document, expire ten minutes after finishing, and cancel when the session ends. This family allows sixteen retained jobs per page and four active per caller, separately from corner and parametric jobs (combined maximum 48 retained/12 active). A running corner job can occupy the shared FIFO for up to 90s. Default deadline 120s, maximum 600s; result limit 1 MiB. An oversized result reports completed with a reporting error, preserving committed edits. Load modeling-api for ops.",
             parameters: {
                 ...runProgramParameters(),
                 properties: {
@@ -239,7 +246,7 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
         {
             name: "get_rebuild_status",
             description:
-                "Read runtime background parametric rebuild status for the active document without geometry reads or queue waits. Returns pending job count and last yielded feature indexes where known; does not invent a percentage or start a rebuild. run_parametric retains its synchronous behavior.",
+                "Read runtime background parametric rebuild status for the active document without geometry reads or queue waits. Returns pending job count and last yielded feature indexes where known; does not invent a percentage or start a rebuild. For a cancellable sketch-edit batch use start_parametric_job; run_parametric waits synchronously.",
             parameters: { type: "object", properties: {} },
             handler: async () => {
                 const document = getDocument();
@@ -257,6 +264,41 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
 
 export function buildCornerJobTools(jobs = CORNER_JOBS): Tool[] {
     const tools = cornerJobDefinitions(jobs);
+    for (const tool of tools) jobTools.add(tool);
+    return tools;
+}
+
+export function buildParametricJobTools(jobs = PARAMETRIC_JOBS): Tool[] {
+    const idParameters = { type: "object", properties: { jobId: { type: "string" } }, required: ["jobId"] };
+    const tools: Tool[] = [
+        {
+            name: "start_parametric_job",
+            description:
+                "Queue a parametric program and immediately return a jobId. Consecutive editSketch operations coalesce downstream rebuilds, which yield between uncached features. Poll get_parametric_job and get_rebuild_status; cancel_parametric_job rolls back the whole program. Other topology-dependent operations and individual synchronous kernel calls can block until they return. One success is one undo step. Jobs use the shared mutation FIFO, belong to this session/document, and cancel on session end. Default deadline 120s, maximum 600s, 1–256 ops, 1 MiB arguments/results, sixteen retained parametric jobs per page and four active per caller, separate from program and corner jobs (combined maximum 48 retained/12 active); retained ten minutes after completion. Load parametric-modeling for ops.",
+            parameters: {
+                ...RUN_PARAMETRIC_PARAMETERS,
+                properties: {
+                    ...(RUN_PARAMETRIC_PARAMETERS.properties as object),
+                    timeoutMs: { type: "number", minimum: 1, maximum: 600_000 },
+                },
+            },
+            handler: async (args, _signal, context) => JSON.stringify(jobs.start(args, context)),
+        },
+        {
+            name: "get_parametric_job",
+            description:
+                "Read this session's parametric job state, completed-operation counts and completion result without waiting for the mutation queue.",
+            parameters: idParameters,
+            handler: async (args, _signal, context) => JSON.stringify(jobs.read(args, context)),
+        },
+        {
+            name: "cancel_parametric_job",
+            description:
+                "Cancel this session's parametric job without waiting for the mutation queue. A running job reports cancelling until its rebuilds stop and edits roll back, then cancelled. Completed jobs remain completed.",
+            parameters: idParameters,
+            handler: async (args, _signal, context) => JSON.stringify(jobs.cancel(args, context)),
+        },
+    ];
     for (const tool of tools) jobTools.add(tool);
     return tools;
 }

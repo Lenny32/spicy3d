@@ -181,6 +181,8 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
 /**
  * A thick solid the kernel answered is checked before it is handed out:
  *
+ * - it must change the input and remove the requested opening faces: a collapsed offset can
+ *   report success with a rebuilt copy of the input solid;
  * - it must hold a solid: `makeThickSolidByJoin` on an open shell without closing faces answers
  *   `IsDone` with a compound of the offset faces, which `checkShape()` accepts; `notSolidHint`
  *   says what to call instead;
@@ -191,10 +193,44 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
 function validThickSolid(
     result: Result<IShape, string>,
     op: string,
+    input: IShape,
+    closingFaces: IShape[] = [],
     notSolidHint = "",
 ): Result<IShape, string> {
     if (!result.isOk) return result;
     const shape = result.value;
+    if (shape.isSame(input)) {
+        shape.dispose();
+        return Result.err(`${op} failed: the offset returned the input shape unchanged`);
+    }
+    if (closingFaces.length > 0) {
+        const faces = shape.findSubShapes(ShapeTypes.face);
+        const retained = faces.some((face) => closingFaces.some((closing) => face.isSame(closing)));
+        for (const face of faces) face.dispose();
+        if (retained) {
+            shape.dispose();
+            return Result.err(`${op} failed: the offset did not remove an opening face`);
+        }
+    } else {
+        // A rebuilt shell/solid can have a new container but exactly the input's faces.
+        // Simple thickening keeps the original skin too, so require the whole face set to match.
+        const faces = shape.findSubShapes(ShapeTypes.face);
+        const inputFaces = input.findSubShapes(ShapeTypes.face);
+        let unchanged: boolean;
+        try {
+            unchanged =
+                faces.length > 0 &&
+                faces.length === inputFaces.length &&
+                faces.every((face) => inputFaces.some((original) => face.isSame(original)));
+        } finally {
+            for (const face of faces) face.dispose();
+            for (const face of inputFaces) face.dispose();
+        }
+        if (unchanged) {
+            shape.dispose();
+            return Result.err(`${op} failed: the offset returned the input shape unchanged`);
+        }
+    }
     if (!containsSolid(shape)) {
         const type = ShapeTypeUtils.stringValue(shape.shapeType);
         shape.dispose();
@@ -1198,6 +1234,7 @@ export class ShapeFactory implements IShapeFactory {
                 "MakeThickSolidBySimple",
             ),
             "MakeThickSolidBySimple",
+            shape,
         );
     }
     makeThickSolidByJoin(
@@ -1224,6 +1261,8 @@ export class ShapeFactory implements IShapeFactory {
                 "MakeThickSolidByJoin",
             ),
             "MakeThickSolidByJoin",
+            shape,
+            closingFaces,
             "; for an open shell use makeThickSolidBySimple",
         );
     }

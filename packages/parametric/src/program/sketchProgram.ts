@@ -4,9 +4,11 @@
 import {
     type IEdge,
     type INode,
+    LENGTH_UNITS,
     Matrix4,
     type ParameterValue,
     type Plane,
+    resolveUnitSpec,
     type Scope,
     ShapeNode,
     ShapeTypes,
@@ -162,7 +164,7 @@ export type SketchAction =
     | { action: "trim"; entity: SketchEntityKey; at: [number, number] }
     | { action: "split"; entity: SketchEntityKey; at: [number, number] }
     | { action: "extend"; entity: SketchEntityKey; to: SketchEntityKey; end?: "start" | "end" }
-    | { action: "offset"; entity: SketchEntityKey; distance: number; name?: string }
+    | { action: "offset"; entity: SketchEntityKey; distance: ParameterValue; name?: string }
     | { action: "move"; entities: SketchEntityKey[]; delta: [number, number]; copy?: boolean }
     | {
           action: "rotate";
@@ -238,7 +240,7 @@ export class SketchSession {
         private readonly host: SketchProgramHost,
         private readonly node: SketchNode,
         private readonly names: SketchNames,
-        scope: Scope,
+        private readonly scope: Scope,
         ids?: SketchIdAllocator,
     ) {
         this.solver = new SketchSolver(node.plane, node.data, scope, ids);
@@ -385,10 +387,15 @@ export class SketchSession {
                 return;
             }
             case "offset": {
-                const edit = offsetCurve(
-                    this.editableCurveOf(action.entity),
-                    finite(action.distance, "distance"),
-                );
+                if (
+                    !(typeof action.distance === "number" && Number.isFinite(action.distance)) &&
+                    !(typeof action.distance === "string" && action.distance.trim() !== "")
+                ) {
+                    throw new Error(`"distance" must be a finite number or a length expression`);
+                }
+                const distance = resolveUnitSpec(action.distance, this.scope, LENGTH_UNITS);
+                if (!distance.isOk) throw new Error(distance.error);
+                const edit = offsetCurve(this.editableEntity(action.entity), distance.value);
                 const ids = this.applyEdit(edit);
                 if (action.name !== undefined) this.nameEntity(action.name, ids[0]);
                 return;

@@ -24,7 +24,8 @@ const MAX_ATTEMPTS = 4;
 /** Room kept in a relay message for the JSON-RPC envelope and the text part around the base64. */
 const MAX_ENVELOPE_BYTES = 64 * 1024;
 
-let callBudget: number | undefined;
+/** Calls in flight, oldest first; a finished call removes only its own entry. */
+const activeBudgets: { budget: number | undefined }[] = [];
 
 /**
  * The base64 budget for images in one message of `maxMessageBytes` (the relay's limit, SRV-09):
@@ -37,22 +38,23 @@ export function imageBudgetFor(maxMessageBytes: number): number {
 
 /**
  * Runs one tool call with an image budget: the remote relay's calls get one derived from its
- * `maxMessageBytes`, the in-app assistant none. Tool calls of the MCP server
- * run one at a time (one queue per page), so the budget never leaks into another server's call.
+ * `maxMessageBytes`, the in-app assistant none. Calls can overlap (a screenshot or metadata read
+ * runs while a program yields), so each call keeps its own entry instead of saving and restoring
+ * one value: a call ending out of order never brings back a budget whose call has finished.
  */
 export async function withImageByteBudget<T>(budget: number | undefined, run: () => Promise<T>): Promise<T> {
-    const previous = callBudget;
-    callBudget = budget;
+    const entry = { budget };
+    activeBudgets.push(entry);
     try {
         return await run();
     } finally {
-        callBudget = previous;
+        activeBudgets.splice(activeBudgets.indexOf(entry), 1);
     }
 }
 
-/** The budget of the tool call running now; undefined = no limit. */
+/** The budget of the most recently started tool call still running; undefined = no limit. */
 export function imageByteBudget(): number | undefined {
-    return callBudget;
+    return activeBudgets.at(-1)?.budget;
 }
 
 export function parseDataUrl(dataUrl: string): ImagePart {
@@ -174,7 +176,7 @@ export async function encodeSnapshot(
             canvas.width,
             canvas.height,
             { ...options, format: options.format ?? "png" },
-            callBudget,
+            imageByteBudget(),
         );
     } catch (error) {
         Logger.warn(`[ai] screenshot not encoded: ${error}`);
@@ -191,7 +193,7 @@ export async function encodeImage(
     dataUrl: string,
     options: ImageEncodeOptions = {},
 ): Promise<Result<ImagePart, string>> {
-    const budget = callBudget;
+    const budget = imageByteBudget();
     const original = parseDataUrl(dataUrl);
     const fits = (image: ImagePart) => budget === undefined || image.data.length <= budget;
     const wantsFormat = options.format !== undefined && mediaTypeOf(options.format) !== original.mediaType;

@@ -11,7 +11,8 @@ import { SKILLS } from "../src/skills";
 import { buildAskUserTool } from "../src/tools/askUser";
 import { imageByteBudget } from "../src/tools/imageEncoding";
 import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
-import { buildReadTools } from "../src/tools/readTools";
+import { buildReadTools, holdDocumentReadSnapshot } from "../src/tools/readTools";
+import { buildViewTools } from "../src/tools/viewTools";
 
 function tool(name: string, handler: Tool["handler"]): Tool {
     return { name, description: `${name} tool.`, parameters: { type: "object", properties: {} }, handler };
@@ -309,4 +310,37 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
         queued.mockRestore();
         rs.unstubAllGlobals();
     }
+});
+
+test("built-in screenshots bypass a suspended program and lookalikes are not recognized", async () => {
+    const doc = createMockDocument();
+    const app = createMockApplication();
+    const toImage = rs.fn(() => "data:image/png;base64,AAAA");
+    app.activeView = { document: doc, toImage } as unknown as typeof app.activeView;
+    rs.stubGlobal("app", app);
+    const releaseSnapshot = holdDocumentReadSnapshot(doc);
+    const screenshot = buildViewTools().find((entry) => entry.name === "capture_screenshot")!;
+    const queue = new SerialQueue();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const held = queue.run(() => gate);
+    const { client } = await connect([screenshot], {}, queue);
+    try {
+        const result = await client.callTool({ name: "capture_screenshot", arguments: {} });
+        expect(result.isError).not.toBe(true);
+        expect(toImage).toHaveBeenCalledTimes(1);
+        expect((result.content as { type: string }[]).map((item) => item.type)).toEqual(["text", "image"]);
+    } finally {
+        release();
+        await held;
+        releaseSnapshot();
+        await client.close();
+        rs.unstubAllGlobals();
+    }
+    // Recognition is by the actual object, never by a plugin's chosen name.
+    const { isScreenshotTool } = await import("../src/tools/viewTools");
+    expect(isScreenshotTool(screenshot)).toBe(true);
+    expect(isScreenshotTool(tool("capture_screenshot", async () => "{}"))).toBe(false);
 });

@@ -2864,19 +2864,27 @@ public:
         return "";
     }
 
-    // Empty text = the thick solid is valid. BRepOffset may answer IsDone() with a result whose
-    // offset faces cross (steep, narrow faces of an open shell); a later boolean or inspection
-    // on it may raise, so the cheap topology check runs here. Self-intersection is not tested
-    // (expensive): callers opt in with Shape.checkSelfIntersection.
+    // Empty text = the thick solid is valid. The sampled curve-on-surface test of the default
+    // BRepCheck_Analyzer can miss an offset edge whose p-curve disagrees with its 3D curve between
+    // sample points (periodic ruled lofts, issue #126): such a solid passes checkShape and the
+    // self-interference checks yet breaks every boolean. Only the exact test runs (it covers the
+    // sampled one); the sampled one runs again only to word a failure. Re-parameterizing the
+    // edges (BRepLib::SameParameter, ShapeFix) does not repair such a result: the offset geometry
+    // itself is off, so it is refused.
     static std::string thickSolidResultError(const TopoDS_Shape& result)
     {
         if (result.IsNull()) {
             return "Failed to create thick solid: empty result";
         }
+        if (BRepCheck_Analyzer(result, true, false, true).IsValid()) {
+            return "";
+        }
         if (!BRepCheck_Analyzer(result).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
-        return "";
+        return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
+               "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the "
+               "thickness or the sections";
     }
 
     static const char* offsetErrorName(BRepOffset_Error error)
@@ -2918,6 +2926,28 @@ public:
         return "BRepOffset_UnknownError";
     }
 
+    // A rebuilt container can differ in identity while retaining exactly the input's faces.
+    // A real thickening adds offset/rim faces even when it also retains the original skin.
+    static bool thickSolidUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& thickenedShape)
+    {
+        if (thickenedShape.IsSame(input)) {
+            return true;
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputFaces;
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+        TopExp::MapShapes(input, TopAbs_FACE, inputFaces);
+        TopExp::MapShapes(thickenedShape, TopAbs_FACE, resultFaces);
+        if (inputFaces.IsEmpty() || inputFaces.Extent() != resultFaces.Extent()) {
+            return false;
+        }
+        for (const auto& face : inputFaces) {
+            if (!resultFaces.Contains(face)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static ShapeResult makeThickSolidBySimple(const TopoDS_Shape& shape, double thickness)
     {
         std::string inputError = thickSolidInputError(shape);
@@ -2928,6 +2958,9 @@ public:
         makeThickSolid.MakeThickSolidBySimple(shape, thickness);
         if (!makeThickSolid.IsDone() || makeThickSolid.Shape().IsNull()) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid" };
+        }
+        if (thickSolidUnchanged(shape, makeThickSolid.Shape())) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
         if (!resultError.empty()) {
@@ -2951,13 +2984,26 @@ public:
 
         BRepOffsetAPI_MakeThickSolid makeThickSolid;
         makeThickSolid.MakeThickSolidByJoin(shape, shapesList, thickness, 1e-6, mode, intersection, false, joinType);
-        if (!makeThickSolid.IsDone()) {
+        if (!makeThickSolid.IsDone() || makeThickSolid.MakeOffset().Error() != BRepOffset_NoError) {
             return ShapeResult { TopoDS_Shape(), false,
                 std::string("Failed to create thick solid: ") + offsetErrorName(makeThickSolid.MakeOffset().Error()) };
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape());
         if (!resultError.empty()) {
             return ShapeResult { TopoDS_Shape(), false, resultError };
+        }
+        // IsDone and BRepCheck can both pass when the offset collapses and OCCT
+        // rebuilds the input solid. A shell must actually remove its closing faces.
+        if (makeThickSolid.Shape().IsSame(shape)
+            || (shapesList.IsEmpty() && thickSolidUnchanged(shape, makeThickSolid.Shape()))) {
+            return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
+        }
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+        TopExp::MapShapes(makeThickSolid.Shape(), TopAbs_FACE, resultFaces);
+        for (const auto& face : shapesList) {
+            if (resultFaces.Contains(face)) {
+                return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset did not remove an opening face" };
+            }
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
     }

@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { AsyncController, MeshDataUtils, PubSub, Result, VisualConfig } from "@spicy3d/core";
+import { bsplineOffsetSide } from "../bsplineOffset";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { entityDistance, sketchEntityMesh } from "../editor/sketchEventHandler";
 import {
@@ -29,7 +30,9 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
             this.controller = new AsyncController();
             const id = await editor.pickEntity(
                 this.operation === "extend" ? "prompt.sketchExtendTarget" : "prompt.pickSketchEntity",
-                ["line", "arc", "circle"],
+                this.operation === "offset"
+                    ? ["line", "arc", "circle", "bspline"]
+                    : ["line", "arc", "circle"],
                 undefined,
                 this.controller,
             );
@@ -37,6 +40,24 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
             if (this.operation === "extend") targetId = id;
             else sourceId = id;
         }
+        // A B-spline offset is costly to fit and only depends on the side the cursor is on:
+        // keep both sides of the current source so pointer moves reuse them.
+        let offsetSource = "";
+        const offsets = new Map<number, Result<GeometryEdit>>();
+        const offset = (source: SketchEntityData, distance: number): Result<GeometryEdit> => {
+            if (source.type !== "bspline") return offsetCurve(source, distance);
+            const key = JSON.stringify(source);
+            if (key !== offsetSource) {
+                offsetSource = key;
+                offsets.clear();
+            }
+            let edit = offsets.get(distance);
+            if (!edit) {
+                edit = offsetCurve(source, distance);
+                offsets.set(distance, edit);
+            }
+            return edit;
+        };
         const proposal = (uv: [number, number]): Result<GeometryEdit> => {
             const curves = constraintTargetEntities(editor.solver).filter(editableCurve);
             const source =
@@ -57,7 +78,11 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                     ? extendCurve(source, target, uv)
                     : Result.err("The extension target no longer exists");
             }
-            return offsetCurve(source, this.offsetDistance * offsetSide(source, uv));
+            try {
+                return offset(source, this.offsetDistance * offsetSide(source, uv));
+            } catch (e) {
+                return Result.err(e instanceof Error ? e.message : String(e));
+            }
         };
         try {
             while (!this.isCanceled) {
@@ -106,6 +131,7 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
 }
 
 function offsetSide(e: SketchEntityData, uv: [number, number]): number {
+    if (e.type === "bspline") return bsplineOffsetSide(e, uv);
     const [x, y, x2, y2] = e.params;
     const signed =
         e.type === "line"

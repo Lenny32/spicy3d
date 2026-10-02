@@ -37,7 +37,7 @@ jobs:
     # commit), when this workflow itself changes, and on schedule / manual runs.
     changes:
         name: Detect changed areas
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         outputs:
             ts: ${{ steps.areas.outputs.ts }}
             cpp: ${{ steps.areas.outputs.cpp }}
@@ -109,7 +109,7 @@ jobs:
         name: Lint & format (Biome, clang-format)
         needs: changes
         if: needs.changes.outputs.ts == 'true' || needs.changes.outputs.cpp == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -134,7 +134,7 @@ jobs:
         name: Typecheck (tsc)
         needs: changes
         if: needs.changes.outputs.ts == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -156,7 +156,7 @@ jobs:
         name: Semgrep (SAST)
         needs: changes
         if: needs.changes.outputs.code == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             security-events: write
@@ -200,7 +200,7 @@ jobs:
         name: CodeQL (${{ matrix.language }})
         needs: changes
         if: needs.changes.outputs.codeql != '[]'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             security-events: write
@@ -235,7 +235,7 @@ jobs:
         # New advisories without a dependency change surface in the weekly scheduled run.
         needs: changes
         if: needs.changes.outputs.deps == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             pull-requests: write

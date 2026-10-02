@@ -18,6 +18,7 @@ import {
     bsplinePointAt,
     bsplinePoints,
     closestBSplineParameter,
+    entityBSpline,
     interpolateBSpline,
 } from "./bsplineGeometry";
 import {
@@ -539,24 +540,40 @@ export class SketchSolver implements ExternalEntityHost {
             current === undefined ||
             current.type !== edit.source.type ||
             current.construction !== edit.source.construction ||
+            current.periodic !== edit.source.periodic ||
+            current.parametrization !== edit.source.parametrization ||
+            JSON.stringify(current.control) !== JSON.stringify(edit.source.control) ||
             current.params.length !== edit.source.params.length ||
             current.params.some((value, i) => value !== edit.source.params[i])
         ) {
             return Result.err("The edited geometry has changed; select it again");
         }
-        if (!editableCurve(current) || !edit.pieces.every(editableCurve)) {
+        const valid = (e: SketchEntityData) => {
+            if (editableCurve(e)) return true;
+            if (!edit.copy || e.type !== "bspline" || e.params.length % 2 !== 0) return false;
+            try {
+                entityBSpline(e.params, e);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+        if (!valid(current) || !edit.pieces.every(valid)) {
             return Result.err("The edit contains invalid geometry");
         }
         const saved = this.toData().constraints.filter((c) => c.refs.some((r) => r.entityId === current.id));
         const removedConstraints = edit.copy ? [] : this.removeEntity(current.id);
         const entityIds = edit.pieces.map((e) => {
             const p = e.params;
-            const id =
-                e.type === "line"
-                    ? this.addLine(p[0], p[1], p[2], p[3])
-                    : e.type === "circle"
-                      ? this.addCircle(p[0], p[1], p[2])
-                      : this.addArc(p[0], p[1], p[2], p[3], p[4], p[5]);
+            const spline = e.type === "bspline" ? this.addBSpline(bsplinePoints(p), e) : undefined;
+            if (spline && !spline.isOk) throw new Error(spline.error);
+            const id = spline
+                ? spline.value
+                : e.type === "line"
+                  ? this.addLine(p[0], p[1], p[2], p[3])
+                  : e.type === "circle"
+                    ? this.addCircle(p[0], p[1], p[2])
+                    : this.addArc(p[0], p[1], p[2], p[3], p[4], p[5]);
             this.setConstruction(id, e.construction === true);
             return id;
         });
