@@ -17,7 +17,7 @@
                 "angleSide": 1
             },
             "messageKey": "merge.conflict.property{0}{1}",
-            "args": ["Migrated clockwise angle", "datum"],
+            "args": ["constraint 4", "datum"],
             "choices": ["ours", "theirs"]
         }
     ]

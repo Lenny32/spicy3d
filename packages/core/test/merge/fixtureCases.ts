@@ -305,7 +305,7 @@ const CASES: Record<string, CaseBuilder> = {
                         ours: { datum: "45", angleSide: -1 },
                         theirs: { datum: "60", angleSide: 1 },
                     },
-                    ["Migrated clockwise angle", "datum"],
+                    ["constraint 4", "datum"],
                     sideChoices,
                 ),
             ],
