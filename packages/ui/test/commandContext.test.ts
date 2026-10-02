@@ -330,6 +330,37 @@ describe("CommandContext", () => {
         });
     });
 
+    test("mounts a session form once and keeps it through selection confirmation", () => {
+        const command = new CancelableTestCommand();
+        const form = document.createElement("div");
+        const input = document.createElement("input");
+        input.value = "12";
+        const apply = document.createElement("button");
+        apply.textContent = "Create";
+        form.append(input, apply);
+        const ctx = track(new CommandContext(command, form));
+        document.body.append(ctx);
+
+        expect(mustQuery(ctx, ".cc-container").firstElementChild).toBe(form);
+        expect(ctx.querySelectorAll("input").length).toBe(1);
+        expect(ctx.querySelector(".cc-cancel")).toBeNull();
+        const close = mustQuery(ctx, ".cc-close-button");
+        const controller = { success: rs.fn(() => {}), cancel: rs.fn(() => {}) };
+        PubSub.default.pub("showSelectionControl", controller as unknown as AsyncController);
+        expect(form.inert).toBe(true);
+        const buttons = ctx.querySelectorAll(".cc-selection-control .cc-selection-button");
+        expect(buttons.length).toBe(2);
+        (buttons[1] as unknown as { _onclick: () => void })._onclick();
+        expect(controller.success).toHaveBeenCalledTimes(1);
+
+        PubSub.default.pub("clearSelectionControl");
+        expect(form.inert).toBe(false);
+        expect(mustQuery(ctx, ".cc-container").firstElementChild).toBe(form);
+        expect(input.value).toBe("12");
+        (close as unknown as { _onclick: () => void })._onclick();
+        expect(command.cancel).toHaveBeenCalledTimes(1);
+    });
+
     describe("dragging", () => {
         const hosts: HTMLElement[] = [];
         afterEach(() => {

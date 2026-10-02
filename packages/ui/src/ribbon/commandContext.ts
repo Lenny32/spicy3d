@@ -64,7 +64,10 @@ export class CommandContext extends HTMLElement implements IDisposable {
     private closeIcon?: HTMLElement;
     private selectionCountCleanups: Array<() => void> = [];
 
-    constructor(readonly command: ICommand) {
+    constructor(
+        readonly command: ICommand,
+        private readonly content?: HTMLElement,
+    ) {
         super();
         this.className = style.panel;
         this.setAttribute("role", "region");
@@ -93,8 +96,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
             this.header.append(close);
         }
         this.append(this.header, this.container);
-        this.initContext();
-        if (isCancelableCommand(this.command)) {
+        if (this.content) this.container.append(this.content);
+        else this.initContext();
+        if (!this.content && isCancelableCommand(this.command)) {
             this.closeIcon = div(
                 { className: style.cancelButton },
                 button({
@@ -110,6 +114,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
 
     private readonly showSelectionControl = (controller: AsyncController, options?: { nodes?: boolean }) => {
         if (this.selectionControlContainer) return;
+        if (this.content) this.content.inert = true;
         if (this.closeIcon) this.closeIcon.style.display = "none";
 
         this.selectionControlContainer = div(
@@ -186,6 +191,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
     }
 
     private readonly clearSelectionControl = () => {
+        if (this.content) this.content.inert = false;
         if (this.selectionControlContainer) {
             this.insertBefore(this.container, this.selectionControlContainer);
         }

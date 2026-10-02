@@ -203,6 +203,7 @@ export const I18N_KEYS = [
     "construction.ui.ucs_zx_plane",
     "construction.ui.select",
     "construction.ui.no_reference_selected",
+    "construction.ui.optional",
     "construction.ui.fixed_point",
     "construction.ui.preview_ready",
     "construction.ui.apply",

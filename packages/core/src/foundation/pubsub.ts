@@ -37,7 +37,7 @@ export interface PubSubEventMap {
     hideBanner: (id: string) => void;
     modelUpdate: (model: INode) => void;
     nodeDoubleClicked: (node: INode) => void;
-    openCommandContext: (command: ICommand) => void;
+    openCommandContext: (command: ICommand, content?: HTMLElement) => void;
     openCommandSearch: () => void;
     parentVisibleChanged: (model: INode) => void;
     popShortcutContext: (context: ShortcutContext) => void;
