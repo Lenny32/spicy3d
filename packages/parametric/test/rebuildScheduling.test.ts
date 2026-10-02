@@ -503,3 +503,34 @@ test.each([
     expect(calls.slice(-16).map((call) => call.id)).toEqual(steps(16).map((step) => step.id));
     expect(document.isDirty).toBe(editDuringLoad);
 });
+
+test("batched edits of two producers rebuild their shared consumer once", () => {
+    const inputs = ["left", "right"].map((name) => {
+        const node = new EditableShapeNode({ document, name, shape: shape(name) });
+        document.modelManager.addNode(node);
+        return node;
+    });
+    const producers = inputs.map((input) => {
+        const features = steps(1);
+        features[0].id = input.name;
+        features[0].refs = [input.id];
+        const node = body(1, features);
+        warm(node);
+        return node;
+    });
+    const features = steps(6);
+    features[3].refs = [producers[0].id];
+    features[4].refs = [producers[1].id];
+    const consumer = body(6, features);
+    warm(consumer);
+    const prefix = consumer.timelineStateAt(3)?.shape;
+    calls = [];
+    ParametricBodyNode.withDeferredUpstream(document, () => {
+        inputs[0].shape = Result.ok(shape("left edited"));
+        inputs[1].shape = Result.ok(shape("right edited"));
+        inputs[0].shape = Result.ok(shape("left edited again"));
+        expect(calls).toEqual([]);
+    });
+    expect(calls.map((call) => call.id)).toEqual(["left", "right", "f3", "f4", "f5"]);
+    expect(consumer.timelineStateAt(3)?.shape).toBe(prefix);
+});

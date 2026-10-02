@@ -9,6 +9,8 @@ export const parametricModeling: Skill = {
         "How to build a PARAMETRIC body with run_parametric: the op catalog (sketch/editSketch/sketchInfo/extrude/revolve/loft/sweep/projection/faceSweep/editFaceSweep/fillet/chamfer/thicken/boolean/editFeature/features/construct/editConstruction/constructionInfo), sketch entity encodings, constraints, every sketch editing action, construction planes/axes/points, and how to pick edge indexes — load it before any run_parametric call",
     content: `Parametric modeling. run_parametric builds a feature TREE the user can re-edit; run_program builds throwaway geometry.
 
+Long sketch-edit batches: use start_parametric_job with the same { ops, responseMode? } payload (optional timeoutMs up to 600000). It returns a jobId immediately; get_parametric_job polls its state/result, get_rebuild_status shows pending rebuilds, and cancel_parametric_job rolls back the job. Consecutive editSketch ops coalesce downstream rebuilds; an intervening query/feature operation is a geometry boundary. Rebuilds yield between uncached features, but individual synchronous kernel calls and topology-dependent operations can still block until they return. run_parametric keeps its synchronous response and also batches consecutive sketch edits.
+
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
 
 Ops run in order; later ops reference earlier ids. An op that EDITS a body (extrude with "body", fillet,
@@ -202,6 +204,12 @@ sketch re-solves after each action and a failing one rolls everything back):
 - { action: "split", entity, at: [u, v] }                  splits at "at" (snaps to a nearby intersection)
 - { action: "extend", entity, to: boundary, end? = "end" } lengthens a line/arc to the boundary entity
 - { action: "offset", entity, distance, name? }            parallel copy; + = left of a line / outward
+  Supports lines, arcs, circles and open/periodic B-splines (fit or control mode). For open B-splines
+  + is left along the curve; for periodic B-splines + is outward regardless of winding. B-splines
+  are approximated to 0.001 mm at checked samples, with at most 512 fit points; collapsed, inverted
+  or crossing offsets are refused. distance takes mm or a length expression, evaluated ONCE.
+  The copy is not associative: later source/variable edits do not update it. Remove the pasted
+  source from a section sketch if only the offset outline should contribute to a loft.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }
 - { action: "mirror", entities, axis: line|"xAxis"|"yAxis", copy? = true }   copies get Symmetric constraints

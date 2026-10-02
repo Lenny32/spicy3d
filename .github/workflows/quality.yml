@@ -20,7 +20,7 @@ concurrency:
 jobs:
     lint:
         name: Lint & format (Biome, clang-format)
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -41,7 +41,7 @@ jobs:
 
     typecheck:
         name: Typecheck (tsc)
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -61,7 +61,7 @@ jobs:
 
     semgrep:
         name: Semgrep (SAST)
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             security-events: write
@@ -103,7 +103,7 @@ jobs:
 
     codeql:
         name: CodeQL (${{ matrix.language }})
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             security-events: write
@@ -137,7 +137,7 @@ jobs:
 
     dependencies:
         name: Dependency audit
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
             pull-requests: write
