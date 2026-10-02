@@ -247,7 +247,7 @@ test("upstream edit panel shows a neutral note for the tolerant tail", async () 
     let document: TestDocument | undefined;
     try {
         const state = await create();
-        const { app, doc, body } = state;
+        const { doc, body } = state;
         globalThis.shapeFactory = new ShapeFactory(undefined, hybrid);
         document = doc;
         body.setFeaturesEmitShapeChanged([
