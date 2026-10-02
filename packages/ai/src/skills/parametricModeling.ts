@@ -217,7 +217,8 @@ sketch re-solves after each action and a failing one rolls everything back):
     "at" between its neighbouring intersections (a circle needs two)
 - { action: "split", entity, at: [u, v] }                  splits at "at" (snaps to a nearby intersection)
 - { action: "extend", entity, to: boundary, end? = "end" } lengthens a line/arc to the boundary entity
-- { action: "offset", entity, distance, associative?, name? }            parallel copy; + = left of a line / outward
+- { action: "offset", entity, distance, associative?, name? }
+  Parallel copy; + = left of a line / outward.
   Supports lines, arcs, circles and open/periodic B-splines (fit or control mode). For open B-splines
   + is left along the curve; for periodic B-splines + is outward regardless of winding. B-splines
   are approximated to 0.001 mm at checked samples, with at most 512 fit points; collapsed, inverted
@@ -226,7 +227,7 @@ sketch re-solves after each action and a failing one rolls everything back):
   changes regenerate on fine solve / commit, not each pointer frame. Keep the source as construction
   geometry when only the offset outline should contribute to a loft. Removing the source or relation
   detaches the target. Offset chains and extra constraints on generated targets are refused; detach
-  first to edit one. Move/rotate/mirror/copy/paste detach relations touching the transformed selection.
+  first to edit one. Move/rotate in place keep the relation. Mirror/copy/paste detach transformed relations.
   Pasted sources are snapshots of the other sketch, not cross-sketch links.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }

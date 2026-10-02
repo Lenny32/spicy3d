@@ -11,16 +11,22 @@ B-splines. B-spline targets remain approximate interpolating curves, checked by
 the existing offset fitter to 0.001 mm with at most 512 fit points. Collapsed,
 inverted, self-intersecting or over-budget fits fail with the constraint id.
 Regeneration stages all targets before publishing any geometry; failures preserve
-the last good targets and appear in solver diagnostics. Off-session rebuilds
-return a Result error, including during merge validation, rather than consuming
-stale target geometry as a successful feature input.
+the last good targets and appear in solver diagnostics and runtime node warnings
+naming the constraint. Live updates, reopening, and headless rebuilds (including
+merge validation) build this last good geometry, so downstream features keep
+working. Warnings are recomputed when regeneration is attempted and clear on
+recovery; they are never stored. Unresolved expressions on other constraint kinds
+retain their existing best-effort build behavior.
 
 Targets are pinned in the native solver and owned by the relation. Offset chains
 and extra constraints on a target are refused. Remove the relation before editing
 or constraining its target. Source deletion removes the relation and retains a
 plain target with its last good geometry. Deleting the target removes the relation.
 Trim/split/extend replace a source entity and therefore detach its relations too.
-Move, rotate and mirror detach relations touching the selection. Copy and paste
+Move and rotate in place retain relations and regenerate their targets, whether
+the source alone or both source and target are selected. Mirror detaches relations
+touching the selection. Targets can be selected for deletion and construction
+toggling, but remain non-draggable and otherwise non-editable. Copy and paste
 create plain geometry; the originals keep their relations. Even copying a whole
 source/target pair detaches the copies. Mirror-copy may still create the existing
 symmetry constraints, but copies of generated targets are fixed snapshots and do
@@ -50,3 +56,12 @@ Undo/redo and autosave use the normal sketch snapshot and document persistence.
 The sketch 5→6 migration is identity: old geometry gains no links and userData is
 untouched. The document envelope and parametric module versions are unchanged;
 older applications refuse sketch 6 through the existing newer-module guard.
+
+## Known limitations / follow-ups
+
+- Associative creation is MCP only; there is no UI creation toggle.
+- An open offset cannot be joined into a closed profile with connecting lines:
+  extra constraints on a target are refused.
+- No cross-sketch links.
+- No offset chains.
+- No extrusion draft angle.

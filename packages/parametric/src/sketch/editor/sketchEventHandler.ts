@@ -271,9 +271,12 @@ export class SketchEventHandler implements IEventHandler {
         return best;
     }
 
-    /** Real entities plus the seeded external references (constraint targets). */
+    /** Ordinary selection includes offset targets; constraint picks exclude them. */
     private pickableEntities(): SketchEntityData[] {
-        return constraintTargetEntities(this.editor.solver);
+        const solver = this.editor.solver;
+        return this.editor.activePick && !this.editor.activePick.includeOffsetTargets
+            ? constraintTargetEntities(solver)
+            : [...solver.entities(), ...solver.externalEntitiesData()];
     }
 
     hitTestEntity(
@@ -421,8 +424,8 @@ export class SketchEventHandler implements IEventHandler {
             return;
         }
         const ref = this.hitTestPoint(view, event);
-        // the datum origin and external references are pickable for constraints but never draggable
-        if (ref !== undefined && !isDatumEntityId(ref.entityId) && !isExternalEntityId(ref.entityId)) {
+        // Datum, external references and generated offsets are pinned and never draggable.
+        if (ref !== undefined && !this.editor.solver.isFixed(ref.entityId)) {
             this.beginPointDrag(view, ref);
             return;
         }

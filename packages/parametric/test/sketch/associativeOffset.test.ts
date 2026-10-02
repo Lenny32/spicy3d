@@ -1,9 +1,11 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { LENGTH_UNITS, Plane } from "@spicy3d/core";
+import { LENGTH_UNITS, Plane, Result } from "@spicy3d/core";
+import { createMockApplication, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { offsetCurve } from "../../src/sketch/geometryEditing";
 import { ConstraintKind, type SketchData, type SketchEntityData } from "../../src/sketch/sketchModel";
+import { SketchNode } from "../../src/sketch/sketchNode";
 import { SketchSolver } from "../../src/sketch/solver";
 import { copySketchSelection } from "../../src/sketch/utilityOperations";
 import "./setup";
@@ -121,8 +123,6 @@ test("deleting source detaches target without dangling references", () => {
 });
 
 test.each([
-    "move",
-    "rotate",
     "mirror",
     "paste",
     "copy",
@@ -227,6 +227,128 @@ test("a failed multi-offset pass publishes no partial targets", () => {
         expect([solver.entity(20), solver.entity(21)]).toEqual(targets);
         expect(solver.datumErrors.get(31)).toContain("Offset constraint 31");
         expect(solver.datumErrors.has(30)).toBe(false);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test.each([
+    ["move", [10]],
+    ["move", [10, 20]],
+    ["rotate", [10]],
+    ["rotate", [10, 20]],
+] as const)("%s in place keeps the offset for selection %j", (kind, ids) => {
+    const solver = new SketchSolver(Plane.XY, linked(sources[0]), scope(2));
+    try {
+        const transform =
+            kind === "move"
+                ? { kind, delta: [3, 4] as [number, number] }
+                : { kind, center: [0, 0] as [number, number], angle: Math.PI / 2 };
+        const result = solver.applyTransform(ids, transform);
+        expect(result.isOk).toBe(true);
+        expect(solver.toData().constraints).toEqual(linked(sources[0]).constraints);
+        const expected = offsetCurve(solver.entity(10)!, 2);
+        expect(expected.isOk).toBe(true);
+        expect(solver.entity(20)!.params).toEqual(expected.value.pieces[0].params);
+        expect(solver.entity(20)!.derivation).toBe("offset");
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("fork and reset retry failed offsets without replacing last good targets", () => {
+    const solver = new SketchSolver(Plane.XY, linked(sources[1]), scope(-50));
+    const fork = solver.fork();
+    try {
+        expect(fork.entity(20)!.params).toEqual([0, 0, 12]);
+        expect([...fork.offsetErrors.values()]).toEqual([...solver.offsetErrors.values()]);
+        fork.reset(fork.toData());
+        expect(fork.entity(20)!.params).toEqual([0, 0, 12]);
+        expect(fork.offsetErrors.get(30)).toMatch(/Offset constraint 30:.*collapse/);
+        fork.setScope(scope(3));
+        expect(fork.solve(true).result).toMatch(/^Ok/);
+        expect(fork.offsetErrors.size).toBe(0);
+        expect(fork.entity(20)!.params).toEqual([0, 0, 13]);
+    } finally {
+        fork.dispose();
+        solver.dispose();
+    }
+});
+
+test.each([-1, -2, -3])("datum source %s reports an editable-curve error", (id) => {
+    const solver = new SketchSolver(Plane.XY);
+    try {
+        expect(() => solver.validateOffsetSource(id)).toThrow("The source must be an editable sketch curve");
+    } finally {
+        solver.dispose();
+    }
+});
+
+test.each([false, true])("unresolved non-offset datum still builds (offset=%s)", (withOffset) => {
+    const doc = new TestDocument({ application: createMockApplication() });
+    const data = withOffset ? linked(sources[1]) : { entities: [sources[1]], constraints: [] };
+    if (withOffset) data.constraints[0].datum = 2;
+    data.constraints.push({
+        id: 40,
+        kind: ConstraintKind.Radius,
+        refs: [{ entityId: 10, pointIndex: 0 }],
+        datum: "missing",
+    });
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "shapeFactory");
+    rs.stubGlobal("shapeFactory", {
+        circle: () => Result.ok(new MockShape()),
+        combine: () => Result.ok(new MockShape()),
+    });
+    try {
+        const node = new SketchNode({ document: doc, plane: Plane.XY, data });
+        doc.modelManager.addNode(node);
+        expect(node.shape.isOk).toBe(true);
+        expect(node.warningCount).toBe(0);
+        doc.variables.setItems([{ id: "other", name: "other", expression: "3", type: "length" }]);
+        expect(node.shape.isOk).toBe(true);
+        expect(node.warningCount).toBe(0);
+        const solver = node.createSolver();
+        try {
+            expect(solver.datumErrors.get(40)).toContain("Unknown identifier");
+            expect(solver.offsetErrors.size).toBe(0);
+        } finally {
+            solver.dispose();
+        }
+    } finally {
+        rs.unstubAllGlobals();
+        if (previous) Object.defineProperty(globalThis, "shapeFactory", previous);
+        doc.dispose();
+    }
+});
+
+test("external offset source reports an editable-curve error", () => {
+    const solver = new SketchSolver(Plane.XY);
+    try {
+        solver.addExternalEntity({
+            entityId: -100,
+            nodeId: "source",
+            role: "reference",
+            edge: { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x: 10, y: 0, z: 0 } },
+            snapshot: [0, 0, 10, 0],
+            type: "line",
+        });
+        expect(() => solver.validateOffsetSource(-100)).toThrow(
+            "The source must be an editable sketch curve",
+        );
+    } finally {
+        solver.dispose();
+    }
+});
+
+test("moving only an offset target is refused without modifying the relation or geometry", () => {
+    const solver = new SketchSolver(Plane.XY, linked(sources[0]), scope(2));
+    try {
+        const before = solver.toData();
+        const result = solver.applyTransform([20], { kind: "move", delta: [3, 4] });
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("Detach the offset relation");
+        expect(solver.toData()).toEqual(before);
     } finally {
         solver.dispose();
     }

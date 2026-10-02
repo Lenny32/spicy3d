@@ -120,6 +120,17 @@ export function transformSketchSelection(
     if (transform.kind === "mirror" && selected.has(transform.axis.id))
         return Result.err("The mirror axis must be outside the selection");
     const duplicate = copy || clipboard !== undefined;
+    const preserveOffsets = !duplicate && transform.kind !== "mirror";
+    if (
+        preserveOffsets &&
+        data.constraints.some(
+            (c) =>
+                c.kind === ConstraintKind.Offset &&
+                selected.has(c.refs[1].entityId) &&
+                !selected.has(c.refs[0].entityId),
+        )
+    )
+        return Result.err("Detach the offset relation before editing its target");
     const result = cloneSketchData(data);
     const entityIds = new Set([...data.entities.map((e) => e.id), ...textIds(data)]);
     const newEntityId = () => {
@@ -182,7 +193,7 @@ export function transformSketchSelection(
     // Symmetry already transfers the originals' relationships. Duplicating Fix or
     // axis constraints would freeze the copies when the source or mirror axis moves.
     for (const original of copy && transform.kind === "mirror" ? [] : source.constraints) {
-        // Utility transforms detach derived offsets, including copies/paste of a complete pair.
+        // Copies detach offsets; in-place move/rotate retain the original relations below.
         if (original.kind === ConstraintKind.Offset) continue;
         const constraint = { ...original, refs: original.refs.map(remap) };
         const transformed = transformConstraint(constraint, transform, entities);
@@ -194,7 +205,11 @@ export function transformSketchSelection(
             (e) => entities.find((transformed) => transformed.id === e.id) ?? e,
         );
         // Any relationship crossing the selection boundary is detached.
-        result.constraints = result.constraints.filter((c) => !c.refs.some((r) => selected.has(r.entityId)));
+        result.constraints = result.constraints.filter(
+            (c) =>
+                (preserveOffsets && c.kind === ConstraintKind.Offset) ||
+                !c.refs.some((r) => selected.has(r.entityId)),
+        );
     }
     if (duplicate) result.entities.push(...entities);
     const constraintIds = new Set(data.constraints.map((c) => c.id));

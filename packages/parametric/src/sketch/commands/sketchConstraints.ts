@@ -368,7 +368,7 @@ export class ConstructionConstraintCommand extends SketchConstraintCommand {
             const id = await editor.pickEntity(
                 "prompt.pickSketchEntity",
                 undefined,
-                undefined,
+                { includeOffsetTargets: true },
                 this.controller,
             );
             if (id === undefined) return;
