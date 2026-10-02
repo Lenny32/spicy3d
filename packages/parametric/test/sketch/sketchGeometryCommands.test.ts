@@ -82,6 +82,7 @@ function setup(data: SketchData = { entities: [source, boundary, target], constr
 }
 
 afterEach(() => {
+    new SketchOffsetCommand().associative = false;
     sketchClipboard.value = undefined;
     SketchEditor.exit();
     rs.restoreAllMocks();
@@ -365,6 +366,93 @@ describe("geometry command interaction", () => {
         expect(node.data.entities[0]).toEqual(source);
         expect(node.data.entities[3].params).toEqual([0, side * 5, 100, side * 5]);
         expect(node.data.constraints).toEqual([]);
+    });
+
+    test.each([
+        false,
+        true,
+    ])("UI offset expression is one undo step (associative=%s)", async (associative) => {
+        const { node, doc, editor, click } = setup({ entities: [source], constraints: [] });
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "5", type: "length" }]);
+        const before = node.data;
+        const command = new SketchOffsetCommand();
+        command.associative = associative;
+        command.distance = "gap*2";
+        expect(new SketchOffsetCommand().associative).toBe(associative);
+        const run = command.executeAsync();
+        await click(20);
+        await click(20, -20);
+        await run;
+        const after = node.data;
+        expect(after.entities[1].params).toEqual([0, -10, 100, -10]);
+        expect(after.entities[1].id).not.toBe(source.id);
+        expect(after.constraints).toHaveLength(associative ? 1 : 0);
+        if (associative) {
+            expect(after.constraints[0]).toMatchObject({
+                kind: ConstraintKind.Offset,
+                datum: "-(gap*2)",
+                refs: [source.id, after.entities[1].id].map((entityId) => ({ entityId, pointIndex: 0 })),
+            });
+            expect(after.entities[1].derivation).toBe("offset");
+        }
+        doc.history.undo();
+        expect(node.data).toEqual(before);
+        expect(editor.solver.toData()).toEqual(before);
+        doc.history.redo();
+        expect(node.data).toEqual(after);
+        expect(editor.solver.toData()).toEqual(after);
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "7", type: "length" }]);
+        expect(editor.solver.entity(after.entities[1].id)!.params).toEqual([
+            0,
+            associative ? -14 : -10,
+            100,
+            associative ? -14 : -10,
+        ]);
+    });
+
+    test.each([-1, -2, -3, -100, 20])("UI refuses unsupported associative source %s", async (id) => {
+        const data: SketchData = {
+            entities: [source, { id: 20, type: "line", params: [0, 2, 100, 2] }],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    refs: [
+                        { entityId: 1, pointIndex: 0 },
+                        { entityId: 20, pointIndex: 0 },
+                    ],
+                    datum: 2,
+                },
+            ],
+        };
+        const { editor, node } = setup(data);
+        if (id === -100)
+            editor.solver.addExternalEntity({
+                entityId: -100,
+                nodeId: "external",
+                role: "reference",
+                type: "line",
+                edge: { kind: "line", start: { x: 0, y: 0, z: 0 }, end: { x: 10, y: 0, z: 0 } },
+                snapshot: [0, 0, 10, 0],
+            });
+        const before = node.data;
+        rs.spyOn(editor, "pickEntity").mockResolvedValue(id);
+        rs.spyOn(editor, "pickPosition").mockResolvedValueOnce([20, 20]).mockResolvedValueOnce(undefined);
+        const errors = rs.fn((_message: string) => {});
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            command.associative = true;
+            await command.executeAsync();
+            expect(errors).toHaveBeenCalledWith(
+                id === 20
+                    ? "Associative offset chains are not supported; detach the existing offset first"
+                    : "The source must be an editable sketch curve",
+            );
+            expect(node.data).toEqual(before);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
     });
 
     test("offset picks a B-spline and copies it on the chosen side", async () => {

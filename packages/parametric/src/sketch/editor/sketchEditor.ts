@@ -790,13 +790,30 @@ export class SketchEditor implements IDisposable {
 
     // ------------------------------------------------------------------ Solving, commit and deletion
 
-    applyGeometryEdit(edit: GeometryEdit): boolean {
+    applyGeometryEdit(edit: GeometryEdit, offsetDatum?: number | string): boolean {
         if (this.disposed) return false;
         const before = this.solver.toData();
         const result = this.solver.applyGeometryEdit(edit);
         if (!result.isOk) {
             PubSub.default.pub("displayError", result.error);
             return false;
+        }
+        if (offsetDatum !== undefined) {
+            try {
+                this.solver.validateOffsetSource(edit.source.id);
+                this.solver.addConstraint({
+                    kind: ConstraintKind.Offset,
+                    refs: [edit.source.id, result.value.entityIds[0]].map((entityId) => ({
+                        entityId,
+                        pointIndex: 0,
+                    })),
+                    datum: offsetDatum,
+                });
+            } catch (error) {
+                this.solver.reset(before);
+                PubSub.default.pub("displayError", error instanceof Error ? error.message : String(error));
+                return false;
+            }
         }
         const outcome = this.solve(true);
         if (!outcome.result.startsWith("Ok")) {

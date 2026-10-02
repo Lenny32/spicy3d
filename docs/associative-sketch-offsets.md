@@ -1,5 +1,11 @@
 # Associative sketch offsets
 
+The sketch ribbon's Offset command has an **Associative** checkbox in its command
+options, remembered for the page session and initially off. The distance field
+accepts positive lengths and length expressions; clicking selects the side, and
+an expression on the negative side is stored as `-(expression)`. Creation is one
+undo step, using the same target and Offset relation as the sketch program.
+
 The sketch program's `offset` action accepts `associative: true` (default `false`).
 It creates an ordinary curve and an `Offset` constraint (`kind: 34`) with two refs,
 source then target, both at point index zero, and a signed `datum` (millimetres or
@@ -59,7 +65,6 @@ older applications refuse sketch 6 through the existing newer-module guard.
 
 ## Known limitations / follow-ups
 
-- Associative creation is MCP only; there is no UI creation toggle.
 - An open offset cannot be joined into a closed profile with connecting lines:
   extra constraints on a target are refused.
 - No cross-sketch links.
