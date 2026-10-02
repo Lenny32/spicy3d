@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { Precision } from "@spicy3d/core";
+import { allowsOffsetEndpointJoin, offsetEndpointIndexes } from "./associativeOffset";
 import {
     arcAngles,
     axisLineRefs,
@@ -219,7 +220,10 @@ export function snapPosition(
     const entities = constraintTargetEntities(solver);
     let snap: DragSnap | undefined;
     if (options.pointTolerance > 0) {
-        const nearest = nearestCandidate(snapCandidates(solver, entities), probe, options.pointTolerance);
+        const candidates = snapCandidates(solver, entities);
+        const type = tentative?.(probe)?.type;
+        if (type === "line" || type === "arc") candidates.push(...offsetEndpointCandidates(solver));
+        const nearest = nearestCandidate(candidates, probe, options.pointTolerance);
         if (nearest !== undefined) snap = { kind: "point", point: nearest.ref, position: nearest.position };
     }
 
@@ -341,7 +345,11 @@ function snapToExistingPoints(
     const candidates = snapCandidates(solver, constraintTargetEntities(solver), refs[0].entityId);
 
     for (const ref of refs) {
-        const nearest = nearestCandidate(candidates, solver.pointOf(ref), tolerance);
+        const nearest = nearestCandidate(
+            [...candidates, ...offsetEndpointCandidates(solver, ref)],
+            solver.pointOf(ref),
+            tolerance,
+        );
         if (nearest === undefined || collapsesOntoSibling(solver, refs, ref, nearest.position)) continue;
 
         solver.setPointPosition(ref, nearest.position[0], nearest.position[1]);
@@ -466,6 +474,28 @@ function projectOntoEntity(
     return { position, distance: Math.abs(centerDistance - radius) };
 }
 
+/** Generated endpoints are point-only snap targets, and only connectors may follow them. */
+function offsetEndpointCandidates(solver: SketchSolver, connector?: SketchPointRef): SnapCandidate[] {
+    const data = solver.toData();
+    return data.entities
+        .filter((e) => e.derivation === "offset")
+        .flatMap((entity) =>
+            offsetEndpointIndexes(entity).flatMap((pointIndex) => {
+                const ref = { entityId: entity.id, pointIndex };
+                if (
+                    connector &&
+                    !allowsOffsetEndpointJoin(
+                        { kind: ConstraintKind.P2PCoincident, refs: [connector, ref] },
+                        entity.id,
+                        data,
+                    )
+                )
+                    return [];
+                return [{ ref, position: solver.pointOf(ref) }];
+            }),
+        );
+}
+
 /**
  * Snap targets: every snappable point of the other entities (real and external),
  * plus the origin (last, so a real point wins ties).
@@ -511,6 +541,11 @@ function nearestPointSnap(
             candidates.push({ ref: candidateRef, position: solver.pointOf(candidateRef) });
         }
     }
+    candidates.push(
+        ...offsetEndpointCandidates(solver, ref).filter(
+            (c) => !excluded.has(pointRefKey(c.ref)) && !excludeEntityIds?.has(c.ref.entityId),
+        ),
+    );
     candidates.push({ ref: originRef(), position: [0, 0] });
     return nearestCandidate(candidates, target, tolerance);
 }

@@ -25,8 +25,19 @@ recovery; they are never stored. Unresolved expressions on other constraint kind
 retain their existing best-effort build behavior.
 
 Targets are pinned in the native solver and owned by the relation. Offset chains
-and extra constraints on a target are refused. Remove the relation before editing
-or constraining its target. Source deletion removes the relation and retains a
+are refused. A target's **open-curve endpoint** can participate in Coincident with
+a **movable line or arc endpoint**. This is option (a): the target parameters stay
+frozen, so only the connecting geometry solves to the regenerated point. Use the
+Coincident command (which exposes target endpoints), or draw/snap a line or arc to
+an endpoint. The connector's other dimensions and constraints remain ordinary.
+No new relation kind or stored payload is needed.
+
+This intentionally supports only endpoint-to-endpoint Coincident: target centers,
+B-spline interior points, periodic curves, curve incidence, collinearity, tangency
+and dimensions on the target remain refused. A connector cannot itself be an
+offset source or target, be Blocked, or have Fix on the joined endpoint. These
+cases give the relation id and an actionable message to adjust the connector or
+detach the relation. Removing the relation permits ordinary target editing. Source deletion removes the relation and retains a
 plain target with its last good geometry. Deleting the target removes the relation.
 Trim/split/extend replace a source entity and therefore detach its relations too.
 Move and rotate in place retain relations and regenerate their targets, whether
@@ -49,6 +60,13 @@ commit, variable update, or rebuild). Coarse pointer-move solves retain the prev
 target as a cheap preview. A per-session signature skips unchanged source/distance
 inputs; fitting never runs in the pointer-move path. Each regeneration uses the
 existing bounded fitter; the native target pinning adds no new WASM bindings.
+When targets change, one additional fine solve updates connectors against the new
+frozen endpoints. Fitted B-spline end refs are remapped if the fit point count
+changes. A pass that fails, or whose connectors would move an offset source,
+restores the previous target/connector geometry and reports the runtime warning;
+it never iterates regeneration to chase a feedback loop. Independent source and
+connector edits merge normally and rebuild deterministically through validateMerge.
+Closed-profile extraction and downstream extrusions use the joined geometry.
 
 Sketch module version 6 adds Offset and optional entity `derivation: "offset"`.
 This marker identifies cached generated geometry to the merge rules; it is removed
@@ -65,8 +83,8 @@ older applications refuse sketch 6 through the existing newer-module guard.
 
 ## Known limitations / follow-ups
 
-- An open offset cannot be joined into a closed profile with connecting lines:
-  extra constraints on a target are refused.
+- Only Coincident between open target endpoints and movable line/arc endpoints;
+  other target constraints and connector feedback into offset sources are refused.
 - No cross-sketch links.
 - No offset chains.
 - No extrusion draft angle.

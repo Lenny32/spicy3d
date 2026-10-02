@@ -10,7 +10,7 @@ import {
     type Scope,
 } from "@spicy3d/core";
 import { INCIDENCE_TOLERANCE } from "../features/refGeometry";
-import { validateOffsetRelations } from "./associativeOffset";
+import { offsetEndpointIndexes, validateOffsetRelations } from "./associativeOffset";
 import {
     type BSplineOptions,
     type BSplineParametrization,
@@ -48,7 +48,6 @@ import {
     type ExternalRefData,
     isDatumEntityId,
     isExternalEntityId,
-    isStructuralConstraint,
     pointRefKey,
     resolveDatumSource,
     SKETCH_ORIGIN_ID,
@@ -262,7 +261,7 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     /** Full fitting runs only on fine solves, after the source has solved; no pointer-frame fitting. */
-    private regenerateOffsets(): void {
+    private regenerateOffsets(): SolveOutcome | undefined {
         if (![...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)) return;
         const before = this.toData();
         const next = structuredClone(before);
@@ -288,16 +287,43 @@ export class SketchSolver implements ExternalEntityHost {
             // Source construction is independent of whether its generated curve contributes a profile.
             if (target.construction) replacement.construction = true;
             else delete replacement.construction;
+            // Fitted B-splines can change point count. Keep endpoint joins on the new end.
+            const oldEnd = offsetEndpointIndexes(target).at(-1);
+            const newEnd = offsetEndpointIndexes(replacement).at(-1);
+            if (oldEnd !== undefined && newEnd !== undefined && oldEnd !== newEnd) {
+                for (const join of next.constraints) {
+                    if (join.kind !== ConstraintKind.P2PCoincident) continue;
+                    for (const ref of join.refs) {
+                        if (ref.entityId === target.id && ref.pointIndex === oldEnd) ref.pointIndex = newEnd;
+                    }
+                }
+            }
             const index = next.entities.indexOf(target);
             next.entities[index] = replacement;
             changed ||= JSON.stringify(target) !== JSON.stringify(replacement);
         }
         // A failed pass never publishes partial geometry or changes the last good target.
         if (failed) return;
+        let regenerated: SolveOutcome | undefined;
         if (changed) {
             this.derivingOffsets = true;
             try {
                 this.reset(next);
+                const outcome = this.solve(true);
+                regenerated = outcome;
+                for (const relation of next.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+                    const source = next.entities.find((e) => e.id === relation.refs[0].entityId)!;
+                    const solved = this.entity(source.id)!;
+                    if (solved.params.some((value, i) => Math.abs(value - source.params[i]) > 1e-7)) {
+                        throw new Error(
+                            "connecting geometry would move the offset source; adjust connector constraints or detach the relation",
+                        );
+                    }
+                }
+                if (!outcome.result.startsWith("Ok"))
+                    throw new Error(
+                        "connecting geometry conflicts with the regenerated offset; adjust connector constraints or detach the relation",
+                    );
             } catch (error) {
                 this.reset(before);
                 for (const id of signatures.keys())
@@ -308,6 +334,7 @@ export class SketchSolver implements ExternalEntityHost {
             }
         }
         for (const [id, signature] of signatures) this.offsetInputs.set(id, signature);
+        return regenerated;
     }
 
     /**
@@ -900,15 +927,13 @@ export class SketchSolver implements ExternalEntityHost {
             report = this.system.solve(true);
             this.refreshCache();
         }
-        if (fine && !this.derivingOffsets) this.regenerateOffsets();
+        const regenerated = fine && !this.derivingOffsets ? this.regenerateOffsets() : undefined;
         return {
             result: [...this._datumErrors.keys()].some(
                 (id) => this.constraints.get(id)?.kind === ConstraintKind.Offset,
             )
                 ? "Unsolved constraints"
-                : typeof report === "string"
-                  ? report
-                  : String(report?.result),
+                : (regenerated?.result ?? (typeof report === "string" ? report : String(report?.result))),
             dofs: this.system.dofs(),
         };
     }
@@ -1438,15 +1463,10 @@ export class SketchSolver implements ExternalEntityHost {
             this.fixedEntities.add(targetId);
             return;
         }
-        const derivedTarget = [...this.constraints.values()].find(
-            (c) =>
-                c.kind === ConstraintKind.Offset &&
-                constraint.refs.some((r) => r.entityId === c.refs[1].entityId),
-        );
-        if (derivedTarget && !isStructuralConstraint({ ...constraint, id }, this.entities()))
-            throw new Error(
-                `Offset constraint ${derivedTarget.id}: detach the relation before constraining its target`,
-            );
+        if ([...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)) {
+            const data = this.toData();
+            validateOffsetRelations({ ...data, constraints: [...data.constraints, { ...constraint, id }] });
+        }
         if (constraint.kind === ConstraintKind.PointOnBSpline) {
             this.addPointOnBSpline(id, constraint);
             return;
@@ -1961,7 +1981,10 @@ export class SketchSolver implements ExternalEntityHost {
             }
             if (entity.construction) this.constructionEntities.add(entity.id);
         }
-        for (const constraint of data.constraints) {
+        for (const constraint of data.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+            this.addConstraintWithId(constraint.id, constraint);
+        }
+        for (const constraint of data.constraints.filter((c) => c.kind !== ConstraintKind.Offset)) {
             this.addConstraintWithId(constraint.id, constraint);
         }
         this.legacyCounters = {};

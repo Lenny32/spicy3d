@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
-import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XYZ } from "@spicy3d/core";
+import { type ICameraController, Plane, PubSub, Result, type ShapeMeshData, XY, XYZ } from "@spicy3d/core";
 import {
     createMockApplication,
     createMockView,
@@ -10,6 +10,7 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import * as bsplineOffset from "../../src/sketch/bsplineOffset";
+import { CoincidentConstraintCommand } from "../../src/sketch/commands/sketchConstraints";
 import { SketchCopyCommand } from "../../src/sketch/commands/sketchCopy";
 import { SketchExtendCommand } from "../../src/sketch/commands/sketchExtend";
 import { SketchMirrorCommand } from "../../src/sketch/commands/sketchMirror";
@@ -531,4 +532,49 @@ describe("geometry command interaction", () => {
         expect(node.data).toEqual(before);
         expect(preview.mock.calls.at(-1)?.[0]).toEqual([]);
     });
+});
+
+test("Coincident UI picks offset endpoints and commits an undoable connector join", async () => {
+    const { node, doc, editor, click } = setup({
+        entities: [
+            source,
+            { id: 20, type: "line", derivation: "offset", params: [0, 5, 100, 5] },
+            { id: 40, type: "line", params: [20, 30, 40, 40] },
+        ],
+        constraints: [
+            {
+                id: 30,
+                kind: ConstraintKind.Offset,
+                refs: [
+                    { entityId: 1, pointIndex: 0 },
+                    { entityId: 20, pointIndex: 0 },
+                ],
+                datum: 5,
+            },
+        ],
+    });
+    rs.spyOn(doc.application.activeView!, "worldToScreen").mockImplementation(
+        (point) => new XY({ x: point.x + 400, y: 300 - point.y }),
+    );
+    const before = node.data;
+    const run = new CoincidentConstraintCommand().executeAsync();
+    await click(0, 5);
+    await click(20, 30);
+    await run;
+    expect(node.data.constraints.filter((c) => c.kind === ConstraintKind.P2PCoincident)).toEqual([
+        expect.objectContaining({
+            refs: [
+                { entityId: 20, pointIndex: 0 },
+                { entityId: 40, pointIndex: 0 },
+            ],
+        }),
+    ]);
+    expect(editor.solver.pointOf({ entityId: 40, pointIndex: 0 })).toEqual([0, 5]);
+    const after = node.data;
+    doc.history.undo();
+    expect(node.data).toEqual(before);
+    expect(editor.solver.toData()).toEqual(before);
+    doc.history.redo();
+    expect(node.data).toEqual(after);
+    expect(editor.solver.toData()).toEqual(after);
 });

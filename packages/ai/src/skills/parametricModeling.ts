@@ -230,8 +230,11 @@ sketch re-solves after each action and a failing one rolls everything back):
   associative:true keeps an Offset constraint linking source and target; source edits and variable
   changes regenerate on fine solve / commit, not each pointer frame. Keep the source as construction
   geometry when only the offset outline should contribute to a loft. Removing the source or relation
-  detaches the target. Offset chains and extra constraints on generated targets are refused; detach
-  first to edit one. Move/rotate in place keep the relation. Mirror/copy/paste detach transformed relations.
+  detaches the target. To close an open offset profile, Coincident may join a target endpoint
+  to a movable line/arc endpoint: the connector follows the frozen target on fine solve.
+  Target centers/interior B-spline points, other target constraints, and connectors that are
+  offset sources/targets, Blocked or Fixed at the joined endpoint are refused; detach first.
+  Offset chains are refused; detach first to edit a target. Move/rotate in place keep the relation. Mirror/copy/paste detach transformed relations.
   Pasted sources are snapshots of the other sketch, not cross-sketch links.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }

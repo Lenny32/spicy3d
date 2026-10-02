@@ -12,6 +12,7 @@ import {
     type ShapeMeshData,
     VisualConfig,
 } from "@spicy3d/core";
+import { offsetEndpointIndexes } from "../associativeOffset";
 import {
     applyDragAutoConstraints,
     type DragSnap,
@@ -252,6 +253,12 @@ export class SketchEventHandler implements IEventHandler {
         for (const entity of this.pickableEntities()) {
             const pointCount = entityPointCount(entity.type, entity.params);
             for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+                if (
+                    entity.derivation === "offset" &&
+                    this.editor.activePick?.includeOffsetEndpoints &&
+                    !offsetEndpointIndexes(entity).includes(pointIndex)
+                )
+                    continue;
                 const [u, v] = solver.pointOf({ entityId: entity.id, pointIndex });
                 const screen = view.worldToScreen(toWorld(plane, u, v));
                 const distance = Math.hypot(screen.x - event.offsetX, screen.y - event.offsetY);
@@ -274,7 +281,12 @@ export class SketchEventHandler implements IEventHandler {
     private pickableEntities(): SketchEntityData[] {
         const solver = this.editor.solver;
         return this.editor.activePick && !this.editor.activePick.includeOffsetTargets
-            ? constraintTargetEntities(solver)
+            ? [
+                  ...constraintTargetEntities(solver),
+                  ...(this.editor.activePick.includeOffsetEndpoints
+                      ? solver.entities().filter((e) => e.derivation === "offset")
+                      : []),
+              ]
             : [...solver.entities(), ...solver.externalEntitiesData()];
     }
 
@@ -922,8 +934,13 @@ export function sketchEntityMeshes(editor: SketchEditor): ShapeMeshData[] {
 function entityPointMeshes(editor: SketchEditor): ShapeMeshData[] {
     const plane = editor.node.plane;
     const meshes: ShapeMeshData[] = [];
-    for (const entity of constraintTargetEntities(editor.solver)) {
+    for (const entity of [
+        ...constraintTargetEntities(editor.solver),
+        ...editor.solver.entities().filter((e) => e.derivation === "offset"),
+    ]) {
         for (let pointIndex = 0; pointIndex < entityPointCount(entity.type, entity.params); pointIndex++) {
+            if (entity.derivation === "offset" && !offsetEndpointIndexes(entity).includes(pointIndex))
+                continue;
             const [u, v] = editor.solver.pointOf({ entityId: entity.id, pointIndex });
             meshes.push(
                 MeshDataUtils.createVertexMesh(

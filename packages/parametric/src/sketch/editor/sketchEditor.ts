@@ -97,6 +97,7 @@ interface PickRequest {
     entityType?: SketchEntityTypeFilter;
     includeText?: boolean;
     includeOffsetTargets?: boolean;
+    includeOffsetEndpoints?: boolean;
     /** Entity picks only: also allow picking the datum X/Y axes. */
     datum?: boolean;
     preview?: SketchPickPreview;
@@ -680,6 +681,7 @@ export class SketchEditor implements IDisposable {
               entityType?: SketchEntityTypeFilter;
               includeText?: boolean;
               includeOffsetTargets?: boolean;
+              includeOffsetEndpoints?: boolean;
               datum?: boolean;
               preview?: SketchPickPreview;
           }
@@ -691,8 +693,18 @@ export class SketchEditor implements IDisposable {
         prompt: I18nKeys,
         preview?: SketchPickPreview,
         controller?: AsyncController,
+        includeOffsetEndpoints = false,
     ): Promise<SketchPointRef | undefined> {
-        return this.startPick("point", prompt, undefined, undefined, preview, controller);
+        const pending = this.startPick<SketchPointRef>(
+            "point",
+            prompt,
+            undefined,
+            undefined,
+            preview,
+            controller,
+        );
+        if (this.pickRequest) this.pickRequest.includeOffsetEndpoints = includeOffsetEndpoints;
+        return pending;
     }
 
     pickEntity(

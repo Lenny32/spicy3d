@@ -1088,3 +1088,55 @@ describe("applyPointAutoConstraints", () => {
         solver.dispose();
     });
 });
+
+test("line drawing and dragging snap only to generated endpoints and follow their offset", () => {
+    const solver = new SketchSolver(Plane.XY, {
+        entities: [
+            { id: 10, type: "line", params: [0, 20, 10, 20] },
+            { id: 20, type: "line", derivation: "offset", params: [0, 25, 10, 25] },
+        ],
+        constraints: [
+            {
+                id: 30,
+                kind: ConstraintKind.Offset,
+                refs: [
+                    { entityId: 10, pointIndex: 0 },
+                    { entityId: 20, pointIndex: 0 },
+                ],
+                datum: 5,
+            },
+        ],
+    });
+    try {
+        const options = { pointTolerance: 0.5, lineTolerance: 0.5 };
+        const tentative = (p: [number, number]) => ({ type: "line" as const, params: [...p, 30, 40] });
+        expect(snapPosition(solver, [10.1, 25.1], options, tentative).snap).toMatchObject({
+            kind: "point",
+            point: { entityId: 20, pointIndex: 1 },
+        });
+        expect(snapPosition(solver, [5, 25.1], options, tentative).snap).toBeUndefined();
+        expect(
+            snapPosition(solver, [10.1, 25.1], options, (p) => ({ type: "circle", params: [...p, 2] })).snap,
+        ).toBeUndefined();
+        const connector = solver.addLine(10.1, 25.1, 30, 40);
+        const added = applyAutoConstraints(solver, connector, options);
+        expect(added).toEqual([
+            {
+                kind: ConstraintKind.P2PCoincident,
+                refs: [
+                    { entityId: connector, pointIndex: 0 },
+                    { entityId: 20, pointIndex: 1 },
+                ],
+            },
+        ]);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.setDatumSource(30, 7).isOk).toBe(true);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.pointOf({ entityId: connector, pointIndex: 0 })).toEqual([10, 27]);
+        expect(
+            dragSnapPosition(solver, { entityId: connector, pointIndex: 1 }, [0.1, 27.1], options).snap,
+        ).toMatchObject({ kind: "point", point: { entityId: 20, pointIndex: 0 } });
+    } finally {
+        solver.dispose();
+    }
+});
