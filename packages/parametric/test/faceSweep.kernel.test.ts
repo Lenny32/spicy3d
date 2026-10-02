@@ -325,7 +325,9 @@ test.each([
     ["volume", "Shape has invalid volume"],
 ] as const)("face sweep preserves the %s gate diagnostic", (gate, expected) => {
     const { document, body, feature } = fixture();
-    const original = shapeFactory.faceSweepTracked.bind(shapeFactory);
+    const binding = shapeFactory.faceSweepTracked;
+    if (!binding) throw new Error("Missing face-sweep binding");
+    const original = binding.bind(shapeFactory);
     const build = rs.spyOn(shapeFactory, "faceSweepTracked").mockImplementation((...args) => {
         const result = original(...args);
         if (result.isOk) {

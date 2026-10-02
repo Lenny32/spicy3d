@@ -27,7 +27,7 @@ beforeAll(async () => {
     await initWasm({ wasmBinary: WASM_BINARY });
     asyncFactory = new HybridShapeFactory(() => new NativeWorkerTransport().client);
     Object.defineProperty(globalThis, "shapeFactory", {
-        value: new ShapeFactory(asyncFactory),
+        value: new ShapeFactory(asyncFactory, asyncFactory),
         writable: true,
         configurable: true,
     });
@@ -104,6 +104,7 @@ test("the approved guided loft fixture loads both real guides and preserves its 
     await doc.modelManager.deserialize(structuredClone(data["models"]));
     const body = doc.modelManager.findNode((node) => node.id === "body-guided-loft") as ParametricBodyNode;
     expect(body).toBeInstanceOf(ParametricBodyNode);
+    void body.shape;
     expect(await body.whenRebuilt()).toBe(true);
     expect(body.featureItems().filter((item) => item.error)).toEqual([]);
     expect(body.shape.isOk).toBe(true);

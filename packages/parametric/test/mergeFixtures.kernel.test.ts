@@ -12,7 +12,8 @@ import {
     MERGE_FIXTURE_DOCUMENTS,
     TestDocument,
 } from "@spicy3d/core/test-utils";
-import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory, initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { SketchNode } from "../src/sketch/sketchNode";
 import "./sketch/setup";
@@ -26,14 +27,18 @@ const WASM_BINARY = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
 );
 
+let boundedFactory: HybridShapeFactory;
 beforeAll(async () => {
     await initWasm({ wasmBinary: WASM_BINARY });
+    boundedFactory = new HybridShapeFactory(() => new NativeWorkerTransport().client);
     Object.defineProperty(globalThis, "shapeFactory", {
-        value: new ShapeFactory(),
+        value: new ShapeFactory(undefined, boundedFactory),
         writable: true,
         configurable: true,
     });
 });
+
+afterAll(() => boundedFactory.dispose());
 
 async function load(stored: Serialized) {
     const data = migrateDocument(stored).value;
@@ -41,6 +46,13 @@ async function load(stored: Serialized) {
     doc.visual = createMockVisualWithDocument(doc) as any;
     doc.variables.setItems(data["variables"]);
     await doc.modelManager.deserialize(structuredClone(data["models"]));
+    const bodies = doc.modelManager.findNodes(
+        (node) => node instanceof ParametricBodyNode,
+    ) as ParametricBodyNode[];
+    for (const body of bodies) {
+        void body.shape;
+        await body.whenRebuilt();
+    }
     return { doc, data };
 }
 
