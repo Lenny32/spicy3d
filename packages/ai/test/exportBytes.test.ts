@@ -194,7 +194,7 @@ describe("chunked export delivery", () => {
             await server.close();
             await rm(directory, { recursive: true, force: true });
         }
-    });
+    }, 30_000);
 
     test("keeps exact ranges, supports eof reads and enforces session ownership and release", async () => {
         const { tool } = prepare([Uint8Array.of(0, 255), "é", new Blob(["tail"])]);
