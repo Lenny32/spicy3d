@@ -158,21 +158,21 @@ describe.each([false, true])("regenerated snapshots=%s", (savedSnapshots) => {
                 { id: 11, kind: ConstraintKind.Fix, refs: [ref(42, 1)], datums: [10, -2] },
             );
             node["dataJson"] = JSON.stringify(data);
-            if (savedSnapshots) {
-                doc.variables.setItems(sourceEdit["variables"]);
-                sourceEdit["models"] = doc.modelManager.serialize();
-                const other = newDocument();
-                try {
-                    await other.modelManager.deserialize(connectorEdit["models"]);
-                    expect(
-                        volume(other.modelManager.findNode((n) => n.id === "body") as ParametricBodyNode),
-                    ).toBeCloseTo(280, 6);
+            const other = newDocument();
+            try {
+                await other.modelManager.deserialize(connectorEdit["models"]);
+                expect(
+                    volume(other.modelManager.findNode((n) => n.id === "body") as ParametricBodyNode),
+                ).toBeCloseTo(280, 6);
+                if (savedSnapshots) {
+                    doc.variables.setItems(sourceEdit["variables"]);
+                    sourceEdit["models"] = doc.modelManager.serialize();
                     connectorEdit["models"] = other.modelManager.serialize();
-                } finally {
-                    other.dispose();
                 }
-                expect(volume(body)).toBeCloseTo(360, 6);
+            } finally {
+                other.dispose();
             }
+            expect(volume(body)).toBeCloseTo(savedSnapshots ? 360 : 200, 6);
             const merged = mergeDocuments(
                 base,
                 reverse ? connectorEdit : sourceEdit,

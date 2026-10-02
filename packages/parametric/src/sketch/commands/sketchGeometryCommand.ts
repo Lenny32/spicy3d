@@ -45,7 +45,9 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                 this.operation === "offset"
                     ? ["line", "arc", "circle", "bspline"]
                     : ["line", "arc", "circle"],
-                this.operation === "offset" ? { datum: true, includeOffsetTargets: true } : undefined,
+                this.operation === "offset" && this.associativeOffset
+                    ? { datum: true, includeOffsetTargets: true }
+                    : undefined,
                 this.controller,
             );
             if (id === undefined) return;
@@ -81,7 +83,7 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                           .sort((a, b) => a.distance - b.distance)[0]?.e
                     : editor.solver.entity(sourceId);
             if (!source) {
-                if (this.operation === "offset" && sourceId !== undefined) {
+                if (this.operation === "offset" && this.associativeOffset && sourceId !== undefined) {
                     try {
                         editor.solver.validateOffsetSource(sourceId);
                     } catch (error) {
@@ -90,7 +92,7 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                 }
                 return Result.err("Select editable sketch geometry");
             }
-            if (this.operation === "offset") {
+            if (this.operation === "offset" && this.associativeOffset) {
                 try {
                     editor.solver.validateOffsetSource(source.id);
                 } catch (error) {

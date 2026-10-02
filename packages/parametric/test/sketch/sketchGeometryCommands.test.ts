@@ -387,15 +387,22 @@ describe("geometry command interaction", () => {
         const after = node.data;
         expect(after.entities[1].params).toEqual([0, -10, 100, -10]);
         expect(after.entities[1].id).not.toBe(source.id);
-        expect(after.constraints).toHaveLength(associative ? 1 : 0);
-        if (associative) {
-            expect(after.constraints[0]).toMatchObject({
-                kind: ConstraintKind.Offset,
-                datum: "-(gap*2)",
-                refs: [source.id, after.entities[1].id].map((entityId) => ({ entityId, pointIndex: 0 })),
-            });
-            expect(after.entities[1].derivation).toBe("offset");
-        }
+        expect(after.constraints).toEqual(
+            associative
+                ? [
+                      {
+                          id: expect.any(Number),
+                          kind: ConstraintKind.Offset,
+                          datum: "-(gap*2)",
+                          refs: [source.id, after.entities[1].id].map((entityId) => ({
+                              entityId,
+                              pointIndex: 0,
+                          })),
+                      },
+                  ]
+                : [],
+        );
+        expect(after.entities[1].derivation).toBe(associative ? "offset" : undefined);
         doc.history.undo();
         expect(node.data).toEqual(before);
         expect(editor.solver.toData()).toEqual(before);
@@ -450,6 +457,61 @@ describe("geometry command interaction", () => {
                     ? "Associative offset chains are not supported; detach the existing offset first"
                     : "The source must be an editable sketch curve",
             );
+            expect(node.data).toEqual(before);
+        } finally {
+            PubSub.default.remove("displayError", errors);
+        }
+    });
+
+    test.each([
+        false,
+        true,
+    ])("offset source picking follows the associative toggle (%s)", async (associative) => {
+        const { editor } = setup();
+        const pick = rs.spyOn(editor, "pickEntity").mockResolvedValue(undefined);
+        const validate = rs.spyOn(editor.solver, "validateOffsetSource");
+        const command = new SketchOffsetCommand();
+        command.associative = associative;
+        await command.executeAsync();
+        expect(pick).toHaveBeenCalledWith(
+            "prompt.pickSketchEntity",
+            ["line", "arc", "circle", "bspline"],
+            associative ? { datum: true, includeOffsetTargets: true } : undefined,
+            expect.anything(),
+        );
+        expect(validate).not.toHaveBeenCalled();
+    });
+
+    test("plain offset ignores generated targets without an associative-chain warning", async () => {
+        const data: SketchData = {
+            entities: [source, { id: 20, type: "line", params: [0, 2, 100, 2] }],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    refs: [
+                        { entityId: 1, pointIndex: 0 },
+                        { entityId: 20, pointIndex: 0 },
+                    ],
+                    datum: 2,
+                },
+            ],
+        };
+        const { editor, node, click, pressEscape } = setup(data);
+        const before = node.data;
+        const validate = rs.spyOn(editor.solver, "validateOffsetSource");
+        const errors = rs.fn((_message: string) => {});
+        PubSub.default.sub("displayError", errors);
+        try {
+            const command = new SketchOffsetCommand();
+            command.associative = false;
+            const run = command.executeAsync();
+            await click(20, 2);
+            expect(editor.isPicking).toBe(true);
+            pressEscape();
+            await run;
+            expect(validate).not.toHaveBeenCalled();
+            expect(errors).not.toHaveBeenCalled();
             expect(node.data).toEqual(before);
         } finally {
             PubSub.default.remove("displayError", errors);
