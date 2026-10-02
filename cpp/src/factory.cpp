@@ -2967,6 +2967,35 @@ public:
         return true;
     }
 
+    // Identity is insufficient after offset/repair rebuilds every face.
+    static bool thickSolidGeometricallyUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& result)
+    {
+        if (result.IsNull())
+            return false;
+        GProp_GProps inputVolume, resultVolume, inputArea, resultArea;
+        BRepGProp::VolumeProperties(input, inputVolume);
+        BRepGProp::VolumeProperties(result, resultVolume);
+        BRepGProp::SurfaceProperties(input, inputArea);
+        BRepGProp::SurfaceProperties(result, resultArea);
+        return std::abs(inputVolume.Mass() - resultVolume.Mass()) <= 1e-7 * std::max(1.0, std::abs(inputVolume.Mass()))
+            && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-7 * std::max(1.0, inputArea.Mass());
+    }
+
+    // An interior point of every removed face must lie outside the material. A
+    // topological Contains test cannot detect rebuilt copies of the opening.
+    static std::string thickSolidOpeningError(const TopoDS_Shape& result, const NCollection_List<TopoDS_Shape>& openings)
+    {
+        for (const auto& face : openings) {
+            gp_Pnt witness;
+            if (!profileWitness(TopoDS::Face(face), witness))
+                return "Failed to create thick solid: cannot verify an opening face interior";
+            BRepClass3d_SolidClassifier classifier(result, witness, Precision::Confusion());
+            if (classifier.State() != TopAbs_OUT)
+                return "Failed to create thick solid: the offset did not remove an opening face";
+        }
+        return "";
+    }
+
     static ShapeResult makeThickSolidBySimple(const TopoDS_Shape& shape, double thickness)
     {
         std::string inputError = thickSolidInputError(shape);
@@ -3074,6 +3103,38 @@ public:
                 return ShapeResult { copy.Shape(), true, "" };
             }
         }
+        // Preserve ordinary arc results (notably tapered circular lofts). The
+        // intersection envelope is only a recovery path, never a downgrade.
+        auto ordinary = makeThickSolidByJoin(shape, openingFaces, thickness, GeomAbs_Arc, BRepOffset_Skin, false);
+        if (ordinary.isOk && !thickSolidGeometricallyUnchanged(shape, ordinary.shape)) {
+            if (!openings.IsEmpty()) {
+                GProp_GProps wallMass;
+                BRepGProp::VolumeProperties(ordinary.shape, wallMass);
+                // Ordinary arc can legitimately fill a small opening at a tapered
+                // tip. Preserve that result, but never accept the unchanged solid.
+                if (std::isfinite(wallMass.Mass()) && wallMass.Mass() > 0
+                    && (thickness > 0 || wallMass.Mass() < sourceVolume * (1 - 1e-7)))
+                    return ordinary;
+            } else {
+                TopoDS_Shape cavity = ordinary.shape;
+                GProp_GProps cavityMass;
+                BRepGProp::VolumeProperties(cavity, cavityMass);
+                if (cavityMass.Mass() < 0)
+                    cavity.Reverse();
+                BRepAlgoAPI_Cut wall(thickness < 0 ? shape : cavity, thickness < 0 ? cavity : shape);
+                wall.SetNonDestructive(true);
+                wall.Build();
+                if (wall.IsDone() && !wall.HasErrors() && thickSolidResultError(wall.Shape()).empty())
+                    return ShapeResult { wall.Shape(), true, "" };
+            }
+        }
+        // OCCT's incomplete all-parallel trimming is not a free-form crease envelope.
+        for (const auto& face : faces) {
+            const auto type = BRepAdaptor_Surface(TopoDS::Face(face)).GetType();
+            if (type != GeomAbs_Plane && type != GeomAbs_Cylinder && type != GeomAbs_Cone
+                && type != GeomAbs_Sphere && type != GeomAbs_Torus)
+                return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: free-form crease envelopes are not supported" };
+        }
         BRepOffsetAPI_MakeThickSolid offset;
         offset.MakeThickSolidByJoin(shape, openings, thickness, 1e-6,
             BRepOffset_Skin, true, false, GeomAbs_Intersection, true);
@@ -3082,6 +3143,8 @@ public:
                 std::string("Tolerant envelope failed: ") + offsetErrorName(offset.MakeOffset().Error())
                     + "; OCCT cannot trim this geometry (free-form curvature collapse remains unsupported)" };
         TopoDS_Shape result = offset.Shape();
+        if (thickSolidUnchanged(shape, result) || thickSolidGeometricallyUnchanged(shape, result))
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed: offset returned the input unchanged (unrecognized cavity collapse)" };
         GProp_GProps offsetMass;
         BRepGProp::VolumeProperties(result, offsetMass);
         if (offsetMass.Mass() < 0)
@@ -3107,13 +3170,11 @@ public:
         GProp_GProps mass;
         BRepGProp::VolumeProperties(result, mass);
         if (!std::isfinite(mass.Mass()) || mass.Mass() <= 0
-            || (thickness < 0 && mass.Mass() > sourceVolume * (1 + 1e-6)))
+            || (thickness < 0 && mass.Mass() >= sourceVolume * (1 - 1e-7)))
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed volume sanity check" };
-        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
-        TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
-        for (const auto& face : openings)
-            if (resultFaces.Contains(face))
-                return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope did not remove an opening face" };
+        const auto openingError = thickSolidOpeningError(result, openings);
+        if (!openingError.empty())
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + openingError };
         return ShapeResult { result, true, "" };
     }
 

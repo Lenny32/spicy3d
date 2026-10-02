@@ -104,3 +104,70 @@ test("feature uses envelope as material directly and older bindings refuse the o
         wasm.ShapeFactory.makeThickSolidTolerant = binding;
     }
 });
+
+function taperedLoft(ellipse: boolean): IShape {
+    const wires = [20, 3].map((radius, index) => {
+        const center = new XYZ(0, 0, index * 20);
+        const edge = keep(
+            unwrapOk(
+                ellipse
+                    ? factory.ellipse(XYZ.unitZ, center, XYZ.unitX, radius, radius * 0.6)
+                    : factory.circle(XYZ.unitZ, center, radius),
+            ),
+        );
+        return keep(unwrapOk(factory.wire([edge])));
+    });
+    return keep(unwrapOk(factory.loft(wires, true, false, "c0")));
+}
+
+function topOpening(input: IShape): IShape {
+    const faces = input.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    const top = faces.find((face) => {
+        const bounds = face.boundingBox();
+        return Math.abs(bounds.min.z - 20) < 1e-5 && Math.abs(bounds.max.z - 20) < 1e-5;
+    });
+    expect(top).not.toBeUndefined();
+    return top!;
+}
+
+test.each([-2.5, -3.75])("tolerant circular loft preserves the ordinary wall at %s", (thickness) => {
+    const input = taperedLoft(false);
+    const opening = topOpening(input);
+    const ordinaryInput = keep(input.clone());
+    const ordinary = keep(
+        unwrapOk(factory.makeThickSolidByJoin(ordinaryInput, [topOpening(ordinaryInput)], thickness, "arc")),
+    );
+    const tolerant = keep(unwrapOk(factory.makeThickSolidTolerant(input, [opening], thickness)));
+    expect(tolerant.volume()).toBeCloseTo(ordinary.volume(), 6);
+    expect(tolerant.volume()).toBeLessThan(input.volume() * 0.99);
+    expect(tolerant.checkShape()).toBe(true);
+});
+
+test.each([-2.5, -3.75])("free-form ellipse collapse refuses an unchanged envelope at %s", (thickness) => {
+    const input = taperedLoft(true);
+    const result = factory.makeThickSolidTolerant(input, [topOpening(input)], thickness);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("free-form crease envelopes are not supported");
+    expect(result.error).toContain("input face index");
+    expect(result.error).not.toContain("retry with tolerant mode");
+});
+
+test.each([1, 2, 3.5, 5])("all-edge fillet radius %s never yields the unchanged opened box", (radius) => {
+    const box = keep(createBox(factory, 30, 30, 20));
+    const edges = box.findSubShapes(ShapeTypes.edge);
+    owned.push(...edges);
+    const input = keep(
+        unwrapOk(
+            factory.fillet(
+                box,
+                edges.map((_, index) => index),
+                radius,
+            ),
+        ),
+    );
+    const result = factory.makeThickSolidTolerant(input, [topOpening(input)], -3.75);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("offset returned the input unchanged");
+    expect(input.checkShape()).toBe(true);
+});

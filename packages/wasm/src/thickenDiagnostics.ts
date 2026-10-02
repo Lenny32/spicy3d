@@ -7,7 +7,7 @@ const SAMPLE_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const MAX_FACES = 64;
 const NATIVE_TRAP = /aborted|RuntimeError|unreachable|out of bounds|signature mismatch|crashed/i;
 
-type CurvatureRegion = { faceIndex: number; radius: number; point: XYZ };
+type CurvatureRegion = { faceIndex: number; radius: number; point: XYZ; analytic: boolean };
 
 /**
  * Behavior-only diagnosis using the existing D2/trimmed-domain bindings. This is a local
@@ -24,7 +24,7 @@ export function thickenFailureDiagnostic(
     if (
         !Number.isFinite(thickness) ||
         thickness === 0 ||
-        !/offset|thick\s*solid/i.test(error) ||
+        !/offset|thick\s*solid|tolerant/i.test(error) ||
         NATIVE_TRAP.test(error)
     ) {
         return error;
@@ -53,7 +53,10 @@ export function thickenFailureDiagnostic(
         return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled}; reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
     }
     const { point, radius, faceIndex } = region;
-    return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; retry with tolerant mode for supported solids. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
+    const remedy = region.analytic
+        ? "retry with tolerant mode for supported analytic solids"
+        : "the free-form crease envelope is not supported by tolerant mode";
+    return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
 }
 
 function number(value: number): string {
@@ -97,7 +100,12 @@ function sampleFace(face: IFace, faceIndex: number, thickness: number): Curvatur
                     const [, normal] = face.normal(u, v);
                     const radius = limitingRadius(d, normal, thickness);
                     if (radius !== undefined && (!region || radius < region.radius)) {
-                        region = { faceIndex, radius, point: d.point };
+                        region = {
+                            faceIndex,
+                            radius,
+                            point: d.point,
+                            analytic: surface.isAnalytic?.() === true,
+                        };
                     }
                 } catch (failure) {
                     if (isNativeTrap(failure)) throw failure;

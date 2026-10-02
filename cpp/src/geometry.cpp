@@ -6,6 +6,7 @@
 #include <GeomAPI_ExtremaCurveCurve.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomAdaptor_Surface.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <GeomLib_Tool.hxx>
 #include <GeomProjLib.hxx>
@@ -175,6 +176,13 @@ public:
         return Vector3Array(val::array(points.begin(), points.end()));
     }
 
+    static bool isAnalytic(const Geom_Surface* surface)
+    {
+        const auto type = GeomAdaptor_Surface(surface).GetType();
+        return type == GeomAbs_Plane || type == GeomAbs_Cylinder || type == GeomAbs_Cone
+            || type == GeomAbs_Sphere || type == GeomAbs_Torus;
+    }
+
     static bool isPlanar(const Geom_Surface* surface)
     {
         GeomLib_IsPlanarSurface isPlanarSurface(surface);
@@ -232,6 +240,7 @@ EMSCRIPTEN_BINDINGS(Geometry)
     class_<Surface>("Surface")
         .class_function("projectCurve", guardedEntry<&Surface::projectCurve>("Surface.projectCurve"), allow_raw_pointers())
         .class_function("projectPoint", guardedEntry<&Surface::projectPoint>("Surface.projectPoint"), allow_raw_pointers())
+        .class_function("isAnalytic", guardedEntry<&Surface::isAnalytic>("Surface.isAnalytic"), allow_raw_pointers())
         .class_function("isPlanar", guardedEntry<&Surface::isPlanar>("Surface.isPlanar"), allow_raw_pointers())
         .class_function("parameters", guardedEntry<&Surface::parameters>("Surface.parameters"), allow_raw_pointers())
         .class_function("nearestPoint", guardedEntry<&Surface::nearestPoint>("Surface.nearestPoint"), allow_raw_pointers())

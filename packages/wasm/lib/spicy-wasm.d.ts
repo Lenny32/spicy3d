@@ -790,6 +790,7 @@ interface EmbindModule {
     nearestExtremaCC(_0: Geom_Curve | null, _1: Geom_Curve | null): ExtremaCCResult | undefined;
   };
   Surface: {
+    isAnalytic(_0: Geom_Surface | null): boolean;
     isPlanar(_0: Geom_Surface | null): boolean;
     bounds(_0: Geom_Surface | null): SurfaceBounds;
     projectCurve(_0: Geom_Surface | null, _1: Geom_Curve | null): Handle_Geom_Curve;

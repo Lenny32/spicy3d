@@ -32,6 +32,8 @@ export interface ISurface extends IGeometry {
     /** @unit none v */
     vIso(v: number): ICurve;
     isPlanar(): boolean;
+    /** Exact GeomAdaptor analytic surface class, when available in the kernel. */
+    isAnalytic?(): boolean;
     isUClosed(): boolean;
     isVClosed(): boolean;
     isUPeriodic(): boolean;

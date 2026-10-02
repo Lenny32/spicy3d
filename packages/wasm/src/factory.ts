@@ -320,13 +320,19 @@ function containsSolid(shape: IShape): boolean {
  * pairwise; on a shell of many narrow faces it may never finish, and a kernel call on the main
  * thread cannot be interrupted, so the tab hangs. Arc joins and simple offsets do not.
  */
-export function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
+export function refuseIntersectionJoin(
+    shape: IShape,
+    joinType: JoinType,
+    tolerant = false,
+): string | undefined {
     if (joinType !== "intersection") return undefined;
     const limit = Config.instance.thickSolidIntersectionMaxFaces;
     const faces = shape.findSubShapes(ShapeTypes.face);
     const count = faces.length;
     for (const face of faces) face.dispose();
     if (count <= limit) return undefined;
+    if (tolerant)
+        return `Tolerant thicken refused: ${count} input faces exceed the envelope trimming limit ${limit}; simplify the solid or use ordinary thicken`;
     return `MakeThickSolidByJoin refused: joinType "intersection" on a shape with ${count} faces (limit ${limit}) may never finish and would freeze the tab; use joinType "arc" or makeThickSolidBySimple (Config.thickSolidIntersectionMaxFaces raises the limit)`;
 }
 
@@ -1305,7 +1311,7 @@ export class ShapeFactory implements IShapeFactory {
         const binding = wasm.ShapeFactory.makeThickSolidTolerant;
         if (typeof binding !== "function")
             return Result.err("Tolerant thicken is not available in this kernel build");
-        const refused = refuseIntersectionJoin(shape, "intersection");
+        const refused = refuseIntersectionJoin(shape, "intersection", true);
         if (refused) return Result.err(refused);
         const result = convertShapeResult(
             binding,

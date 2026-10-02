@@ -143,3 +143,16 @@ test("a located face reports the translated sampling position", () => {
     expect(z).toBeGreaterThan(297);
     expect(message).toContain("curvature radius 2 mm");
 });
+
+test.each([
+    "Tolerant envelope wall boolean failed",
+    "Tolerant envelope failed: unrecognized cavity collapse",
+    "Tolerant envelope failed volume sanity check",
+])("%s retains the limiting region", (error) => {
+    const sphere = keep(createSphere(factory, undefined, 2));
+    const message = thickenFailureDiagnostic(error, sphere, -3.75);
+    expect(message).toContain(error);
+    expect(message).toContain("input face index 0 near (");
+    expect(message).toContain("curvature radius 2 mm");
+    expect(message).toContain("retry with tolerant mode for supported analytic solids");
+});
