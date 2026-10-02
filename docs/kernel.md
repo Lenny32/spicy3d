@@ -159,10 +159,10 @@ That startup adds latency per inspection; common volume normally pays for two se
 pre-checks, one per distinct input.
 
 The pre-check duplicates work: common-volume and section-cap inspections repeat the same
-analyzer synchronously after the verified BREP replica passes quickly in the worker. The
-same geometry should make that repeated analyzer fast too; this is an effective bound on
-that known blocking path, not a hard deadline on the subsequent main-thread call. Boolean
-intersection, mass calculations, topology validation, and replica capture can still block.
+analyzer synchronously after the verified BREP replica passes in the worker. A successful
+pre-check does not impose a deadline on this repeated analyzer or the subsequent native
+inspection. Boolean intersection, mass calculations, topology validation, and replica
+capture can still block.
 Skipping an explicit self-intersection query does not bypass these inspection pre-checks.
 
 The analysis panel's section caps and interference queries use the same bounded pre-check,
@@ -170,8 +170,8 @@ with progress and Cancel while running; a deadline reports “timed out (result 
 The subsequent inspection binding still runs synchronously, with the limitations above.
 
 Sweep and face-sweep handlers use cheap topology/volume gates and mark validation pending
-in their runtime context. With bounded-worker support installed, top-level rebuilds containing either feature take the asynchronous
-scheduler route even below the twelve-feature threshold. The scheduler captures each output
+in their runtime context. With bounded-worker support installed, top-level rebuilds
+containing either feature take the asynchronous scheduler route even below the twelve-feature threshold. The scheduler captures each output
 (including face-sweep's temporary tool before disposal) in a bounded worker and awaits all
 checks **before caching, tracking commit, or displaying the new body**. Checks run at every
 shape size: the 32-face/64-edge heuristic and 256-face refusal have been removed. Worker
@@ -184,8 +184,7 @@ analyzer. Document open and headless merge evaluation can await these scheduled 
 No validation state or shape is stored in the document.
 
 Factories without bounded-worker support, explicit synchronous program scopes, nested
-producer/consumer rebuilds, and the current
-synchronous feature-preview API cannot await a worker. These run only the cheap checks,
+producer/consumer rebuilds, and the current synchronous feature-preview API cannot await a worker. These run only the cheap checks,
 with the runtime warning “Self-intersection check skipped in synchronous evaluation
 (result unknown; rebuild validates in worker)”. Preview results expose the warning and
 edit panels display it. This compromise can miss self-overlap in these contexts; it is

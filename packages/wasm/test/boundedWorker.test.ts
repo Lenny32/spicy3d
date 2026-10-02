@@ -711,7 +711,7 @@ test("free-form shell feature validation terminates a hung worker before committ
     const document = new TestDocument({ application: createMockApplication() });
     const original = featureHandler("sweep")!;
     const budget = Config.instance.slowOpWarningSeconds;
-    const mainCheck = rs.spyOn(shell, "checkSelfIntersection");
+    const mainCheck = rs.spyOn(wasm.Shape, "checkSelfIntersection");
     try {
         Config.instance.slowOpWarningSeconds = 30;
         rs.useFakeTimers();
