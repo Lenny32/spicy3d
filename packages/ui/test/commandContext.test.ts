@@ -330,6 +330,104 @@ describe("CommandContext", () => {
         });
     });
 
+    describe("dragging", () => {
+        const hosts: HTMLElement[] = [];
+        afterEach(() => {
+            hosts.splice(0).forEach((host) => host.remove());
+        });
+
+        function draggableContext() {
+            const host = document.createElement("div");
+            hosts.push(host);
+            Object.defineProperties(host, {
+                clientWidth: { value: 1000 },
+                clientHeight: { value: 700 },
+            });
+            rs.spyOn(host, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 1000, 700));
+            const ctx = track(new CommandContext(new CancelableTestCommand()));
+            Object.defineProperty(ctx, "offsetParent", { value: host });
+            rs.spyOn(ctx, "getBoundingClientRect").mockReturnValue(new DOMRect(400, 62, 320, 400));
+            host.append(ctx);
+            document.body.append(host);
+            return { ctx, header: mustQuery(ctx, ".cc-command") };
+        }
+
+        function pointer(target: EventTarget, type: string, x: number, y: number, pointerId = 3) {
+            target.dispatchEvent(
+                new PointerEvent(type, {
+                    bubbles: true,
+                    button: 0,
+                    pointerId,
+                    clientX: x,
+                    clientY: y,
+                }),
+            );
+        }
+
+        test("moves by the header without moving the viewport", () => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            expect(header.hasPointerCapture(3)).toBe(true);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
+            expect(ctx.style.right).toBe("auto");
+            pointer(document, "pointerup", 320, 180);
+            expect(header.hasPointerCapture(3)).toBe(false);
+        });
+
+        test.each([
+            { x: -1000, y: -1000, left: "8px", top: "8px" },
+            { x: 2000, y: 2000, left: "548px", top: "292px" },
+        ])("keeps a dragged panel visible and outside the navigation strip ($x, $y)", ({
+            x,
+            y,
+            left,
+            top,
+        }) => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", x, y);
+            expect(ctx.style.left).toBe(left);
+            expect(ctx.style.top).toBe(top);
+            pointer(document, "pointerup", x, y);
+        });
+
+        test("the close button and other pointers do not drag the panel", () => {
+            const { ctx, header } = draggableContext();
+            pointer(mustQuery(ctx, ".cc-close-button"), "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("");
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180, 4);
+            expect(ctx.style.left).toBe("");
+            pointer(document, "pointerup", 320, 180, 4);
+            pointer(document, "pointermove", 320, 180);
+            expect(ctx.style.left).toBe("200px");
+            pointer(document, "pointerup", 320, 180);
+        });
+
+        test.each(["pointerup", "pointercancel", "lostpointercapture"])("stops dragging on %s", (event) => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            pointer(event === "lostpointercapture" ? header : document, event, 320, 180);
+            pointer(document, "pointermove", 520, 280);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
+        });
+
+        test("removing the panel releases an active drag", () => {
+            const { ctx, header } = draggableContext();
+            pointer(header, "pointerdown", 420, 80);
+            pointer(document, "pointermove", 320, 180);
+            ctx.remove();
+            pointer(document, "pointermove", 520, 280);
+            expect(ctx.style.left).toBe("200px");
+            expect(ctx.style.top).toBe("112px");
+        });
+    });
+
     describe("dimensional fields", () => {
         function dimensionalContext(
             variables: { name: string; expression: string; type?: "length" | "angle" }[],

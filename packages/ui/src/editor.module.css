@@ -56,10 +56,6 @@
             height: 100%;
             position: relative;
         }
-
-        &:has(command-context) {
-            --viewport-navigation-offset: 332px;
-        }
     }
 
     & .sidePanels {
@@ -87,12 +83,6 @@
         background-color: var(--background-color);
         overflow: hidden;
         position: relative;
-    }
-}
-
-@container (max-width: 480px) {
-    .viewportContainer:has(command-context) view-gizmo {
-        display: none;
     }
 }
 

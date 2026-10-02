@@ -117,12 +117,13 @@
 
 .viewControls {
     position: absolute;
-    height: 100%;
-    top: 0;
-    right: calc(16px + var(--viewport-navigation-offset, 0px));
+    top: 140px;
+    bottom: 12px;
+    right: 16px;
     z-index: 999;
-    pointer-events: none;
-    padding-top: 160px;
+    pointer-events: auto;
+    overflow-y: auto;
+    scrollbar-width: thin;
     color: var(--foreground-color);
 
     svg {
@@ -169,18 +170,6 @@
             border-radius: 7.5px;
             color: inherit;
         }
-    }
-}
-
-@container (max-width: 480px) {
-    .viewControls {
-        display: none;
-    }
-}
-
-@media (max-width: 680px) {
-    .viewControls {
-        display: none;
     }
 }
 

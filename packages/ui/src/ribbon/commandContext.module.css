@@ -1,11 +1,12 @@
 .panel {
+    --command-panel-right: 132px;
     position: absolute;
     top: 12px;
-    right: 12px;
+    right: var(--command-panel-right);
     display: flex;
     flex-direction: column;
     width: 320px;
-    max-width: calc(100% - 24px);
+    max-width: calc(100% - 144px);
     max-height: calc(100% - 24px);
     box-sizing: border-box;
     overflow: hidden;
@@ -27,6 +28,9 @@
     padding: 10px 12px;
     border-bottom: 1px solid var(--border-color);
     background-color: var(--control-background-color);
+    cursor: move;
+    user-select: none;
+    touch-action: none;
 }
 
 .icon {
@@ -325,8 +329,7 @@
 @container (max-width: 480px) {
     .panel {
         top: 8px;
-        right: 8px;
-        max-width: calc(100% - 16px);
+        max-width: calc(100% - 140px);
         max-height: calc(100% - 16px);
         width: 280px;
     }

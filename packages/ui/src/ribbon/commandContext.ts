@@ -56,6 +56,10 @@ export class CommandContext extends HTMLElement implements IDisposable {
     /** Controls that redraw themselves when their property changes (node lists). */
     private readonly redraws: Map<string | number | symbol, () => void> = new Map();
     private readonly container = div({ className: style.container });
+    private readonly header = div({ className: style.command });
+    private drag?: { pointerId: number; startX: number; startY: number; left: number; top: number };
+    private position?: { left: number; top: number };
+    private resizeObserver?: ResizeObserver;
     private selectionControlContainer?: HTMLDivElement;
     private closeIcon?: HTMLElement;
     private selectionCountCleanups: Array<() => void> = [];
@@ -74,7 +78,7 @@ export class CommandContext extends HTMLElement implements IDisposable {
         const title = label({ className: style.title, textContent: new Localize(`command.${data!.key}`) });
         title.id = `command-title-${CommandContext.nextControlId++}`;
         this.setAttribute("aria-labelledby", title.id);
-        const header = div({ className: style.command }, icon, title);
+        this.header.append(icon, title);
         if (isCancelableCommand(this.command)) {
             const close = button(
                 {
@@ -86,9 +90,9 @@ export class CommandContext extends HTMLElement implements IDisposable {
                 svg({ icon: "icon-cancel" }),
             );
             close.setAttribute("aria-label", I18n.translate("common.cancel"));
-            header.append(close);
+            this.header.append(close);
         }
-        this.append(header, this.container);
+        this.append(this.header, this.container);
         this.initContext();
         if (isCancelableCommand(this.command)) {
             this.closeIcon = div(
@@ -193,6 +197,11 @@ export class CommandContext extends HTMLElement implements IDisposable {
     };
 
     connectedCallback(): void {
+        this.header.addEventListener("pointerdown", this.startDrag);
+        this.header.addEventListener("lostpointercapture", this.endDrag);
+        this.resizeObserver = new ResizeObserver(this.keepPositionInViewport);
+        this.resizeObserver.observe(this);
+        if (this.offsetParent instanceof HTMLElement) this.resizeObserver.observe(this.offsetParent);
         PubSub.default.sub("showSelectionControl", this.showSelectionControl);
         PubSub.default.sub("clearSelectionControl", this.clearSelectionControl);
         if (this.command instanceof Observable) {
@@ -201,6 +210,11 @@ export class CommandContext extends HTMLElement implements IDisposable {
     }
 
     disconnectedCallback(): void {
+        this.header.removeEventListener("pointerdown", this.startDrag);
+        this.header.removeEventListener("lostpointercapture", this.endDrag);
+        this.endDrag();
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = undefined;
         this.clearSelectionControl();
         PubSub.default.remove("showSelectionControl", this.showSelectionControl);
         PubSub.default.remove("clearSelectionControl", this.clearSelectionControl);
@@ -214,6 +228,67 @@ export class CommandContext extends HTMLElement implements IDisposable {
         this.redraws.clear();
         this.disconnectedCallback();
     }
+
+    private readonly startDrag = (event: PointerEvent) => {
+        if (event.button !== 0 || (event.target as Element).closest("button") || this.drag) return;
+        const viewport = this.offsetParent;
+        if (!(viewport instanceof HTMLElement)) return;
+        const bounds = this.getBoundingClientRect();
+        const host = viewport.getBoundingClientRect();
+        this.drag = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            left: bounds.left - host.left - viewport.clientLeft,
+            top: bounds.top - host.top - viewport.clientTop,
+        };
+        this.header.setPointerCapture(event.pointerId);
+        document.addEventListener("pointermove", this.moveDrag);
+        document.addEventListener("pointerup", this.endDrag);
+        document.addEventListener("pointercancel", this.endDrag);
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
+    private readonly moveDrag = (event: PointerEvent) => {
+        if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+        this.position = {
+            left: this.drag.left + event.clientX - this.drag.startX,
+            top: this.drag.top + event.clientY - this.drag.startY,
+        };
+        this.keepPositionInViewport();
+    };
+
+    private readonly endDrag = (event?: PointerEvent) => {
+        if (event && this.drag && event.pointerId !== this.drag.pointerId) return;
+        const pointerId = this.drag?.pointerId;
+        this.drag = undefined;
+        if (pointerId !== undefined && this.header.hasPointerCapture(pointerId)) {
+            this.header.releasePointerCapture(pointerId);
+        }
+        document.removeEventListener("pointermove", this.moveDrag);
+        document.removeEventListener("pointerup", this.endDrag);
+        document.removeEventListener("pointercancel", this.endDrag);
+    };
+
+    private readonly keepPositionInViewport = () => {
+        const viewport = this.offsetParent;
+        if (!this.position || !(viewport instanceof HTMLElement)) return;
+        const bounds = this.getBoundingClientRect();
+        const navigationSpace =
+            Number.parseFloat(getComputedStyle(this).getPropertyValue("--command-panel-right")) || 132;
+        this.position.left = Math.max(
+            8,
+            Math.min(this.position.left, viewport.clientWidth - navigationSpace - bounds.width),
+        );
+        this.position.top = Math.max(
+            8,
+            Math.min(this.position.top, viewport.clientHeight - bounds.height - 8),
+        );
+        this.style.left = `${this.position.left}px`;
+        this.style.top = `${this.position.top}px`;
+        this.style.right = "auto";
+    };
 
     private readonly onPropertyChanged = (property: string | number | symbol) => {
         this.redraws.get(property)?.();
