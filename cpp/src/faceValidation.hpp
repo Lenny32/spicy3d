@@ -15,96 +15,130 @@
 namespace FaceValidation {
 inline const char* checkStatusName(BRepCheck_Status status)
 {
-    switch (status) {
-    case BRepCheck_NoError:
+    if (status == BRepCheck_NoError) {
         return "No Error";
-    case BRepCheck_InvalidPointOnCurve:
-        return "Invalid Point On Curve";
-    case BRepCheck_InvalidPointOnCurveOnSurface:
-        return "Invalid Point On Curve On Surface";
-    case BRepCheck_InvalidPointOnSurface:
-        return "Invalid Point On Surface";
-    case BRepCheck_No3DCurve:
-        return "No 3D Curve";
-    case BRepCheck_Multiple3DCurve:
-        return "Multiple 3D Curve";
-    case BRepCheck_Invalid3DCurve:
-        return "Invalid 3D Curve";
-    case BRepCheck_NoCurveOnSurface:
-        return "No Curve On Surface";
-    case BRepCheck_InvalidCurveOnSurface:
-        return "Invalid Curve On Surface";
-    case BRepCheck_InvalidCurveOnClosedSurface:
-        return "Invalid Curve On Closed Surface";
-    case BRepCheck_InvalidSameRangeFlag:
-        return "Invalid Same Range Flag";
-    case BRepCheck_InvalidSameParameterFlag:
-        return "Invalid Same Parameter Flag";
-    case BRepCheck_InvalidDegeneratedFlag:
-        return "Invalid Degenerated Flag";
-    case BRepCheck_FreeEdge:
-        return "Free Edge";
-    case BRepCheck_InvalidMultiConnexity:
-        return "Invalid Multi Connexity";
-    case BRepCheck_InvalidRange:
-        return "Invalid Range";
-    case BRepCheck_EmptyWire:
-        return "Empty Wire";
-    case BRepCheck_RedundantEdge:
-        return "Redundant Edge";
-    case BRepCheck_SelfIntersectingWire:
-        return "Self Intersecting Wire";
-    case BRepCheck_NoSurface:
-        return "No Surface";
-    case BRepCheck_InvalidWire:
-        return "Invalid Wire";
-    case BRepCheck_RedundantWire:
-        return "Redundant Wire";
-    case BRepCheck_IntersectingWires:
-        return "Intersecting Wires";
-    case BRepCheck_InvalidImbricationOfWires:
-        return "Invalid Imbrication Of Wires";
-    case BRepCheck_EmptyShell:
-        return "Empty Shell";
-    case BRepCheck_RedundantFace:
-        return "Redundant Face";
-    case BRepCheck_InvalidImbricationOfShells:
-        return "Invalid Imbrication Of Shells";
-    case BRepCheck_UnorientableShape:
-        return "Unorientable Shape";
-    case BRepCheck_NotClosed:
-        return "Not Closed";
-    case BRepCheck_NotConnected:
-        return "Not Connected";
-    case BRepCheck_SubshapeNotInShape:
-        return "Subshape Not In Shape";
-    case BRepCheck_BadOrientation:
-        return "Bad Orientation";
-    case BRepCheck_BadOrientationOfSubshape:
-        return "Bad Orientation Of Subshape";
-    case BRepCheck_InvalidPolygonOnTriangulation:
-        return "Invalid Polygon On Triangulation";
-    case BRepCheck_InvalidToleranceValue:
-        return "Invalid Tolerance Value";
-    case BRepCheck_EnclosedRegion:
-        return "Enclosed Region";
-    case BRepCheck_CheckFail:
-        return "Check Fail";
-    default:
-        return "Unknown";
     }
+    if (status == BRepCheck_InvalidPointOnCurve) {
+        return "Invalid Point On Curve";
+    }
+    if (status == BRepCheck_InvalidPointOnCurveOnSurface) {
+        return "Invalid Point On Curve On Surface";
+    }
+    if (status == BRepCheck_InvalidPointOnSurface) {
+        return "Invalid Point On Surface";
+    }
+    if (status == BRepCheck_No3DCurve) {
+        return "No 3D Curve";
+    }
+    if (status == BRepCheck_Multiple3DCurve) {
+        return "Multiple 3D Curve";
+    }
+    if (status == BRepCheck_Invalid3DCurve) {
+        return "Invalid 3D Curve";
+    }
+    if (status == BRepCheck_NoCurveOnSurface) {
+        return "No Curve On Surface";
+    }
+    if (status == BRepCheck_InvalidCurveOnSurface) {
+        return "Invalid Curve On Surface";
+    }
+    if (status == BRepCheck_InvalidCurveOnClosedSurface) {
+        return "Invalid Curve On Closed Surface";
+    }
+    if (status == BRepCheck_InvalidSameRangeFlag) {
+        return "Invalid Same Range Flag";
+    }
+    if (status == BRepCheck_InvalidSameParameterFlag) {
+        return "Invalid Same Parameter Flag";
+    }
+    if (status == BRepCheck_InvalidDegeneratedFlag) {
+        return "Invalid Degenerated Flag";
+    }
+    if (status == BRepCheck_FreeEdge) {
+        return "Free Edge";
+    }
+    if (status == BRepCheck_InvalidMultiConnexity) {
+        return "Invalid Multi Connexity";
+    }
+    if (status == BRepCheck_InvalidRange) {
+        return "Invalid Range";
+    }
+    if (status == BRepCheck_EmptyWire) {
+        return "Empty Wire";
+    }
+    if (status == BRepCheck_RedundantEdge) {
+        return "Redundant Edge";
+    }
+    if (status == BRepCheck_SelfIntersectingWire) {
+        return "Self Intersecting Wire";
+    }
+    if (status == BRepCheck_NoSurface) {
+        return "No Surface";
+    }
+    if (status == BRepCheck_InvalidWire) {
+        return "Invalid Wire";
+    }
+    if (status == BRepCheck_RedundantWire) {
+        return "Redundant Wire";
+    }
+    if (status == BRepCheck_IntersectingWires) {
+        return "Intersecting Wires";
+    }
+    if (status == BRepCheck_InvalidImbricationOfWires) {
+        return "Invalid Imbrication Of Wires";
+    }
+    if (status == BRepCheck_EmptyShell) {
+        return "Empty Shell";
+    }
+    if (status == BRepCheck_RedundantFace) {
+        return "Redundant Face";
+    }
+    if (status == BRepCheck_InvalidImbricationOfShells) {
+        return "Invalid Imbrication Of Shells";
+    }
+    if (status == BRepCheck_UnorientableShape) {
+        return "Unorientable Shape";
+    }
+    if (status == BRepCheck_NotClosed) {
+        return "Not Closed";
+    }
+    if (status == BRepCheck_NotConnected) {
+        return "Not Connected";
+    }
+    if (status == BRepCheck_SubshapeNotInShape) {
+        return "Subshape Not In Shape";
+    }
+    if (status == BRepCheck_BadOrientation) {
+        return "Bad Orientation";
+    }
+    if (status == BRepCheck_BadOrientationOfSubshape) {
+        return "Bad Orientation Of Subshape";
+    }
+    if (status == BRepCheck_InvalidPolygonOnTriangulation) {
+        return "Invalid Polygon On Triangulation";
+    }
+    if (status == BRepCheck_InvalidToleranceValue) {
+        return "Invalid Tolerance Value";
+    }
+    if (status == BRepCheck_EnclosedRegion) {
+        return "Enclosed Region";
+    }
+    if (status == BRepCheck_CheckFail) {
+        return "Check Fail";
+    }
+    return "Unknown";
 }
 
 inline std::string joinStatusNames(const NCollection_List<BRepCheck_Status>& statusList)
 {
-    std::string result;
+    std::string joinedStatuses;
     for (auto it = statusList.begin(); it != statusList.end(); ++it) {
-        if (!result.empty()) {
-            result += ", ";
+        if (!joinedStatuses.empty()) {
+            joinedStatuses += ", ";
         }
-        result += checkStatusName(*it);
+        joinedStatuses += checkStatusName(*it);
     }
-    return result;
+    return joinedStatuses;
 }
 
 inline std::string collectFaceStatus(const BRepCheck_Analyzer& analyzer, const TopoDS_Shape& face)
@@ -125,7 +159,7 @@ inline std::string invalidFaces(const TopoDS_Shape& shape)
     BRepCheck_Analyzer analyzer(shape);
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
     TopExp::MapShapes(shape, TopAbs_FACE, faces);
-    std::string text;
+    std::string diagnostics;
     int invalid = 0;
     for (int i = 1; i <= faces.Extent(); ++i) {
         const auto& face = faces.FindKey(i);
@@ -134,44 +168,44 @@ inline std::string invalidFaces(const TopoDS_Shape& shape)
         if (++invalid > 8)
             continue;
         std::set<std::string> statuses;
-        const auto collect = [&](const TopoDS_Shape& item) {
-            const auto& result = analyzer.Result(item);
-            if (result.IsNull())
+        const auto collectStatuses = [&](const TopoDS_Shape& item) {
+            const auto& checkResult = analyzer.Result(item);
+            if (checkResult.IsNull())
                 return;
-            for (auto status : result->Status())
+            for (auto status : checkResult->Status())
                 if (status != BRepCheck_NoError)
                     statuses.insert(checkStatusName(status));
-            result->InitContextIterator();
-            while (result->MoreShapeInContext()) {
-                for (auto status : result->StatusOnShape())
+            checkResult->InitContextIterator();
+            while (checkResult->MoreShapeInContext()) {
+                for (auto status : checkResult->StatusOnShape())
                     if (status != BRepCheck_NoError)
                         statuses.insert(checkStatusName(status));
-                result->NextShapeInContext();
+                checkResult->NextShapeInContext();
             }
         };
-        collect(face);
+        collectStatuses(face);
         for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next())
-            collect(wires.Current());
+            collectStatuses(wires.Current());
         for (TopExp_Explorer edges(face, TopAbs_EDGE); edges.More(); edges.Next())
-            collect(edges.Current());
-        text += "; invalid result face index " + std::to_string(i - 1) + " (BRepCheck: ";
+            collectStatuses(edges.Current());
+        diagnostics += "; invalid result face index " + std::to_string(i - 1) + " (BRepCheck: ";
         if (statuses.empty())
-            text += "invalid subshape; no detailed status";
-        bool first = true;
+            diagnostics += "invalid subshape; no detailed status";
+        bool isFirstStatus = true;
         for (const auto& status : statuses) {
-            if (!first)
-                text += ", ";
-            text += status;
-            first = false;
+            if (!isFirstStatus)
+                diagnostics += ", ";
+            diagnostics += status;
+            isFirstStatus = false;
         }
-        text += ")";
+        diagnostics += ")";
     }
     if (invalid > 8)
-        text += "; additional invalid faces=" + std::to_string(invalid - 8);
-    if (text.empty())
-        text = "; result faces have no reported BRepCheck defect (failure may be at shell/solid level)";
-    if (text.size() > 1800)
-        text = text.substr(0, 1800) + "...";
-    return text;
+        diagnostics += "; additional invalid faces=" + std::to_string(invalid - 8);
+    if (diagnostics.empty())
+        diagnostics = "; result faces have no reported BRepCheck defect (failure may be at shell/solid level)";
+    if (diagnostics.size() > 1800)
+        diagnostics = diagnostics.substr(0, 1800) + "...";
+    return diagnostics;
 }
 }

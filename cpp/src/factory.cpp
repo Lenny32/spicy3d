@@ -1109,12 +1109,12 @@ struct SplitEdgesResult {
 // Adds both orientations of `segment` to the map (lookups ignore orientation, but be
 // explicit), extending the parallel source array only on real insertions — the map
 // dedupes shapes that are IsSame.
-static void addSegment(SplitEdgesResult& result, const TopoDS_Shape& segment, int inputIndex)
+static void addSegment(SplitEdgesResult& splitEdges, const TopoDS_Shape& segment, int inputIndex)
 {
-    const int added = result.segments.Add(segment.Oriented(TopAbs_FORWARD));
-    result.segments.Add(segment.Oriented(TopAbs_REVERSED));
-    if (added == result.segments.Extent()) {
-        result.segmentSources.push_back(inputIndex);
+    const int added = splitEdges.segments.Add(segment.Oriented(TopAbs_FORWARD));
+    splitEdges.segments.Add(segment.Oriented(TopAbs_REVERSED));
+    if (added == splitEdges.segments.Extent()) {
+        splitEdges.segmentSources.push_back(inputIndex);
     }
 }
 
@@ -1131,20 +1131,20 @@ static SplitEdgesResult splitAtIntersections(const NCollection_List<TopoDS_Shape
         return SplitEdgesResult { TopoDS_Shape(), { }, { }, false, "Failed to split edges at intersections" };
     }
 
-    SplitEdgesResult result { splitter.Shape(), { }, { }, true, "" };
+    SplitEdgesResult splitEdges { splitter.Shape(), { }, { }, true, "" };
     int inputIndex = 0;
     for (const TopoDS_Shape& edge : edges) {
         const NCollection_List<TopoDS_Shape>& modified = splitter.Modified(edge);
         if (modified.IsEmpty()) {
-            addSegment(result, edge, inputIndex);
+            addSegment(splitEdges, edge, inputIndex);
         } else {
             for (const TopoDS_Shape& segment : modified) {
-                addSegment(result, segment, inputIndex);
+                addSegment(splitEdges, segment, inputIndex);
             }
         }
         inputIndex++;
     }
-    return result;
+    return splitEdges;
 }
 
 // Builds a base face dwarfing the split edges so BuilderFace can tell bounded regions from
@@ -2803,12 +2803,12 @@ public:
             return ShapeResult { TopoDS_Shape(), false, "Failed to create face from surface" };
         }
 
-        TopoDS_Face result = makeFace.Face();
+        TopoDS_Face surfaceFace = makeFace.Face();
 
         // Rebuild pcurves on the new face — missing pcurves cause mesh defects.
-        BRepLib::BuildCurves3d(result, Precision::Confusion());
+        BRepLib::BuildCurves3d(surfaceFace, Precision::Confusion());
 
-        ShapeFix_Face faceFix(result);
+        ShapeFix_Face faceFix(surfaceFace);
         faceFix.FixOrientation();
         faceFix.Perform();
 
@@ -2890,15 +2890,15 @@ public:
     // sampled one); the sampled one runs again only to word a failure. Re-parameterizing the
     // edges (BRepLib::SameParameter, ShapeFix) does not repair such a result: the offset geometry
     // itself is off, so it is refused.
-    static std::string thickSolidResultError(const TopoDS_Shape& result)
+    static std::string thickSolidResultError(const TopoDS_Shape& thickenedShape)
     {
-        if (result.IsNull()) {
+        if (thickenedShape.IsNull()) {
             return "Failed to create thick solid: empty result";
         }
-        if (BRepCheck_Analyzer(result, true, false, true).IsValid()) {
+        if (BRepCheck_Analyzer(thickenedShape, true, false, true).IsValid()) {
             return "";
         }
-        if (!BRepCheck_Analyzer(result).IsValid()) {
+        if (!BRepCheck_Analyzer(thickenedShape).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
         return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
@@ -2968,30 +2968,30 @@ public:
     }
 
     // Identity is insufficient after offset/repair rebuilds every face.
-    static bool thickSolidGeometricallyUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& result, double thickness)
+    static bool thickSolidGeometricallyUnchanged(const TopoDS_Shape& input, const TopoDS_Shape& thickenedShape, double thickness)
     {
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solids;
         TopExp::MapShapes(input, TopAbs_SOLID, solids);
-        if (solids.IsEmpty() || result.IsNull())
+        if (solids.IsEmpty() || thickenedShape.IsNull())
             return false;
         GProp_GProps inputVolume, resultVolume, inputArea, resultArea;
         BRepGProp::VolumeProperties(input, inputVolume);
-        BRepGProp::VolumeProperties(result, resultVolume);
+        BRepGProp::VolumeProperties(thickenedShape, resultVolume);
         BRepGProp::SurfaceProperties(input, inputArea);
-        BRepGProp::SurfaceProperties(result, resultArea);
+        BRepGProp::SurfaceProperties(thickenedShape, resultArea);
         return std::abs(std::abs(inputVolume.Mass()) - std::abs(resultVolume.Mass())) <= 1e-4 * std::abs(inputArea.Mass() * thickness)
             && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-9 * std::max(1.0, inputArea.Mass());
     }
 
     // An interior point of every removed face must lie outside the material. A
     // topological Contains test cannot detect rebuilt copies of the opening.
-    static std::string thickSolidOpeningError(const TopoDS_Shape& result, const NCollection_List<TopoDS_Shape>& openings)
+    static std::string thickSolidOpeningError(const TopoDS_Shape& thickenedShape, const NCollection_List<TopoDS_Shape>& openings)
     {
         for (const auto& face : openings) {
             gp_Pnt witness;
             if (!profileWitness(TopoDS::Face(face), witness))
                 return "Failed to create thick solid: cannot verify an opening face interior";
-            BRepClass3d_SolidClassifier classifier(result, witness, Precision::Confusion());
+            BRepClass3d_SolidClassifier classifier(thickenedShape, witness, Precision::Confusion());
             if (classifier.State() != TopAbs_OUT)
                 return "Failed to create thick solid: the offset did not remove an opening face";
         }
@@ -3096,11 +3096,11 @@ public:
                     expectedArea = 4 * M_PI * M_PI * torus.MajorRadius() * radius;
                 }
             }
-            GProp_GProps area;
-            BRepGProp::SurfaceProperties(shape, area);
+            GProp_GProps surfaceArea;
+            BRepGProp::SurfaceProperties(shape, surfaceArea);
             if (expectedVolume > 0 && -thickness >= radius
                 && std::abs(sourceVolume - expectedVolume) <= 1e-6 * expectedVolume
-                && std::abs(area.Mass() - expectedArea) <= 1e-6 * expectedArea) {
+                && std::abs(surfaceArea.Mass() - expectedArea) <= 1e-6 * expectedArea) {
                 BRepBuilderAPI_Copy copy(shape);
                 return ShapeResult { copy.Shape(), true, "" };
             }
@@ -3150,40 +3150,40 @@ public:
             return ShapeResult { TopoDS_Shape(), false,
                 std::string("Tolerant envelope failed: ") + offsetErrorName(offset.MakeOffset().Error())
                     + "; OCCT cannot trim this geometry (free-form curvature collapse remains unsupported)" };
-        TopoDS_Shape result = offset.Shape();
-        if (thickSolidUnchanged(shape, result) || thickSolidGeometricallyUnchanged(shape, result, thickness))
+        TopoDS_Shape thickenedShape = offset.Shape();
+        if (thickSolidUnchanged(shape, thickenedShape) || thickSolidGeometricallyUnchanged(shape, thickenedShape, thickness))
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed: offset returned the input unchanged (unrecognized cavity collapse)" };
         GProp_GProps offsetMass;
-        BRepGProp::VolumeProperties(result, offsetMass);
+        BRepGProp::VolumeProperties(thickenedShape, offsetMass);
         if (offsetMass.Mass() < 0)
-            result.Reverse();
+            thickenedShape.Reverse();
         if (openings.IsEmpty()) {
-            if (thickSolidUnchanged(shape, result))
+            if (thickSolidUnchanged(shape, thickenedShape))
                 return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed: unrecognized cavity collapse" };
-            BRepAlgoAPI_Cut wall(thickness < 0 ? shape : result, thickness < 0 ? result : shape);
+            BRepAlgoAPI_Cut wall(thickness < 0 ? shape : thickenedShape, thickness < 0 ? thickenedShape : shape);
             wall.SetNonDestructive(true);
             wall.Build();
             if (!wall.IsDone() || wall.HasErrors())
                 return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope wall boolean failed" };
-            result = wall.Shape();
+            thickenedShape = wall.Shape();
         }
-        ShapeFix_Shape fix(result);
+        ShapeFix_Shape fix(thickenedShape);
         fix.Perform();
         ShapeUpgrade_UnifySameDomain unify(fix.Shape(), true, true, false);
         unify.Build();
-        result = unify.Shape();
-        const auto failure = thickSolidResultError(result);
-        if (!failure.empty())
-            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + failure };
+        thickenedShape = unify.Shape();
+        const auto validationError = thickSolidResultError(thickenedShape);
+        if (!validationError.empty())
+            return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + validationError };
         GProp_GProps mass;
-        BRepGProp::VolumeProperties(result, mass);
+        BRepGProp::VolumeProperties(thickenedShape, mass);
         if (!std::isfinite(mass.Mass()) || mass.Mass() <= 0
             || (thickness < 0 && mass.Mass() >= sourceVolume * (1 - 1e-7)))
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed volume sanity check" };
-        const auto openingError = thickSolidOpeningError(result, openings);
+        const auto openingError = thickSolidOpeningError(thickenedShape, openings);
         if (!openingError.empty())
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + openingError };
-        return ShapeResult { result, true, "" };
+        return ShapeResult { thickenedShape, true, "" };
     }
 
     // Removes every edge of `shape` that is not in `keepShapes` through the given

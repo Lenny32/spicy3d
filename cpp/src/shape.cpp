@@ -299,22 +299,22 @@ public:
         return inspectionCommonVolumeImpl(first, second, false);
     }
 
-    static std::optional<double> inspectionCommonVolumePrechecked(const TopoDS_Shape& first, const TopoDS_Shape& second)
+    static std::optional<double> inspectionCommonVolumePrechecked(const TopoDS_Shape& firstShape, const TopoDS_Shape& second)
     {
-        return inspectionCommonVolumeImpl(first, second, true);
+        return inspectionCommonVolumeImpl(firstShape, second, true);
     }
 
-    static std::optional<double> inspectionCommonVolumeImpl(const TopoDS_Shape& first, const TopoDS_Shape& second, bool skipSelfIntersection)
+    static std::optional<double> inspectionCommonVolumeImpl(const TopoDS_Shape& firstShape, const TopoDS_Shape& second, bool skipSelfIntersection)
     {
-        if (!containsOnlySolids(first) || !containsOnlySolids(second)
-            || !BRepCheck_Analyzer(first).IsValid()
+        if (!containsOnlySolids(firstShape) || !containsOnlySolids(second)
+            || !BRepCheck_Analyzer(firstShape).IsValid()
             || !BRepCheck_Analyzer(second).IsValid())
             return std::nullopt;
         // BRepCheck_Analyzer does not test self-intersection, and the boolean may raise on a
         // self-intersecting solid (an offset whose faces cross). Bounded, see the face limit.
-        if (!skipSelfIntersection && (!boundedSelfIntersectionFree(first) || !boundedSelfIntersectionFree(second)))
+        if (!skipSelfIntersection && (!boundedSelfIntersectionFree(firstShape) || !boundedSelfIntersectionFree(second)))
             return std::nullopt;
-        BRepAlgoAPI_Common common(first, second);
+        BRepAlgoAPI_Common common(firstShape, second);
         common.Build();
         if (!common.IsDone() || common.HasErrors() || common.Shape().IsNull())
             return std::nullopt;
