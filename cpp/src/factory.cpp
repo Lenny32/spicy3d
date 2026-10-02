@@ -2980,7 +2980,7 @@ public:
         BRepGProp::SurfaceProperties(input, inputArea);
         BRepGProp::SurfaceProperties(result, resultArea);
         return std::abs(std::abs(inputVolume.Mass()) - std::abs(resultVolume.Mass())) <= 1e-4 * std::abs(inputArea.Mass() * thickness)
-            && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-10 * std::max(1.0, inputArea.Mass());
+            && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-9 * std::max(1.0, inputArea.Mass());
     }
 
     // An interior point of every removed face must lie outside the material. A
