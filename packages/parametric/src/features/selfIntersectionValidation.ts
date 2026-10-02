@@ -3,7 +3,7 @@
 
 import { type IShape, Result, ShapeTypes } from "@spicy3d/core";
 
-/** Sync handlers cannot await a cancellable worker: bound the analyzer's topology instead. */
+/** Topology heuristic only: surface complexity can still make small checks unbounded. See docs/kernel.md. */
 export function validateSelfIntersection(shape: IShape, warn?: (message: string) => void): Result<boolean> {
     const faces = shape.findSubShapes(ShapeTypes.face);
     const edges = shape.findSubShapes(ShapeTypes.edge);

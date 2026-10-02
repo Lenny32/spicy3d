@@ -169,17 +169,38 @@ The analysis panel's section caps and interference queries use the same bounded 
 with progress and Cancel while running; a deadline reports “timed out (result unknown)”.
 The subsequent inspection binding still runs synchronously, with the limitations above.
 
-Feature validation in `sweep`, `faceSweep`, and `guidedLoft` retains the 256-face refusal.
+Feature validation in `sweep` and `faceSweep` retains the 256-face refusal.
 Their synchronous handlers run the analyzer only up to 32 faces and 64 edges; above either
 budget, `checkShape` and finite volume (positive for solids) must pass, and a runtime warning
-reports “Self-intersection check skipped for large shape”. These cheap checks do not prove
-absence of self-intersection. The async rebuild scheduler yields between handlers; moving
-tracked sweep construction and validation into its worker contract is a broader change.
+reports “Self-intersection check skipped for large shape”. The thresholds are conservative
+heuristics to avoid routinely analyzing large topology: 32 faces already permit 496 face
+pairs and 64 edges permit 2,016 edge pairs. They are not measured time budgets or safety
+limits. Surface complexity can dominate even with very few faces: #120's seven-face
+B-spline shell took 236 seconds, and a free-form sweep can have about three faces.
+**The guard does not bound execution time.**
 
-Known unrestricted main-thread callers remain: the analyzer in `loftGuidedTracked` in
-`cpp/src/factory.cpp`. Direct synchronous
-`IShape.checkSelfIntersection()` calls still use the existing binding. OCCT has no cooperative
-cancellation hook in this offline build; stopping a running check requires terminating its worker.
+Above the guard, self-overlapping sweeps and face-face intersections in face-sweep boolean
+outputs that the analyzer previously refused can pass. `checkShape` does not detect those
+intersections, and overlapping solids can have finite positive volume. Acceptance with a
+warning is the existing compromise, not proof of validity. Feature edit previews currently
+provide no warning callback, so this warning appears only on the rebuilt feature, not in
+its preview. Headless merge evaluation also uses the synchronous fallback.
+
+Guided lofts instead use the full analyzer inside `loftGuidedTracked` at every size; the TS
+handler only checks topology afterward, avoiding a duplicate analyzer and false skip warning.
+Known unrestricted main-thread callers therefore include sweep and faceSweep validation
+at or below both thresholds (including their previews and headless evaluation), and guided
+loft construction of any size in `cpp/src/factory.cpp`. Direct synchronous
+`IShape.checkSelfIntersection()` calls also remain unrestricted.
+
+This revision takes the minimum documentation/duplicate-check fix. Deferred validation
+would require a second await point after handler evaluation, before caching/tracking and
+commit, with shape ownership and cancellation across the scheduler's synchronous drain.
+The current async hook prepares an operation before the handler runs. Guided loft's
+internal analyzer would additionally require a worker construction contract or kernel
+change; a TS-only deferred query cannot bound it. The 256-face refusal is retained until
+that work is complete. OCCT has no cooperative cancellation hook in this offline build;
+stopping a running check requires terminating its worker.
 
 ### Boolean and downstream validity (#119)
 
