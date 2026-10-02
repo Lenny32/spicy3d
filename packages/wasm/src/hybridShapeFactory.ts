@@ -124,8 +124,12 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                 case "makeThickSolidBySimple":
                     args = { ...request, shape: capture(request.shape) };
                     break;
+                case "makeThickSolidTolerant":
                 case "makeThickSolidByJoin": {
-                    const refused = refuseIntersectionJoin(request.shape, request.joinType);
+                    const refused = refuseIntersectionJoin(
+                        request.shape,
+                        request.method === "makeThickSolidTolerant" ? "intersection" : request.joinType,
+                    );
                     if (refused) throw new Error(refused);
                     const faces = request.shape.findSubShapes(ShapeTypes.face);
                     prepared.push(...faces);
@@ -212,14 +216,15 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
                     if (
                         (answer.error.code === "invalid" || answer.error.code === "geometry") &&
                         (request.method === "makeThickSolidBySimple" ||
-                            request.method === "makeThickSolidByJoin")
+                            request.method === "makeThickSolidByJoin" ||
+                            request.method === "makeThickSolidTolerant")
                     ) {
                         return Result.err(
                             thickenFailureDiagnostic(
                                 message,
                                 request.shape,
                                 request.thickness,
-                                request.method === "makeThickSolidByJoin" ? request.closingFaces : [],
+                                request.method === "makeThickSolidBySimple" ? [] : request.closingFaces,
                             ),
                         );
                     }

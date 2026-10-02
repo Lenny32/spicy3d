@@ -109,7 +109,9 @@ solids may fail OCCT trimming or the validity gates. OCCT 8.0.1's local
 intersection as incomplete; enabling SelfInter would not provide the requested guarantee.
 The new binding is feature-detected; older binaries refuse the opt-in rather than changing
 its meaning. MCP `thicken { tolerant: true }` and the creation/edit panels expose the option.
-Curvature-collapse diagnostics suggest retrying tolerant mode for supported solids. General
+The generated `run_program` catalog also exposes `makeThickSolidTolerant` as an edit operation,
+using the bounded replica worker with no synchronous fallback. Curvature-collapse diagnostics
+suggest retrying tolerant mode for supported solids. General
 free-form rolling-ball envelopes remain unfinished.
 
 ## Dead-kernel state

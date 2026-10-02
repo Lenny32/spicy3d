@@ -334,3 +334,38 @@ test("a late abort cannot undo an already committed program", async () => {
         doc.dispose();
     }
 });
+
+test("tolerant thicken uses a bounded edit and replaces its source as one undo step", async () => {
+    const { doc, tool, shapeOperation, succeed } = setup();
+    try {
+        await tool.handler({ ops: [boxOp("source")] });
+        const before = doc.history.undoCount();
+        const running = tool.handler({
+            ops: [
+                {
+                    id: "envelope",
+                    method: "makeThickSolidTolerant",
+                    args: { shape: "source", openFaces: [], thickness: -3.75 },
+                },
+            ],
+        });
+        await rs.waitFor(() => expect(shapeOperation).toHaveBeenCalledTimes(1));
+        expect(shapeOperation.mock.calls[0][0]).toMatchObject({
+            method: "makeThickSolidTolerant",
+            closingFaces: [],
+            thickness: -3.75,
+        });
+        succeed();
+        const response = JSON.parse((await running) as string);
+        expect(response.created).toHaveLength(1);
+        expect(response.removed).toHaveLength(1);
+        expect(doc.history.undoCount()).toBe(before + 1);
+        doc.history.undo();
+        const restored = doc.modelManager.findNodes(() => true).map((node) => node.id);
+        expect(restored).toContain(response.removed[0].nodeId);
+        expect(restored).not.toContain(response.created[0].nodeId);
+    } finally {
+        succeed();
+        doc.dispose();
+    }
+});

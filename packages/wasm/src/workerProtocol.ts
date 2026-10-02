@@ -71,6 +71,7 @@ export type BoundedReplicaRequest =
           continuity: "c0" | "g1" | "c1" | "g2" | "c2" | "c3" | "cn";
       }
     | { method: "makeThickSolidBySimple"; shape: ShapeReplica; thickness: number }
+    | { method: "makeThickSolidTolerant"; shape: ShapeReplica; closingFaces: number[]; thickness: number }
     | {
           method: "makeThickSolidByJoin";
           shape: ShapeReplica;

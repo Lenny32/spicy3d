@@ -407,6 +407,7 @@ export type BoundedShapeRequest =
     | { method: "fillet" | "chamfer"; shape: IShape; edges: number[]; value: number }
     | { method: "loft"; sections: IShape[]; isSolid: boolean; isRuled: boolean; continuity: Continuity }
     | { method: "makeThickSolidBySimple"; shape: IShape; thickness: number }
+    | { method: "makeThickSolidTolerant"; shape: IShape; closingFaces: IShape[]; thickness: number }
     | {
           method: "makeThickSolidByJoin";
           shape: IShape;

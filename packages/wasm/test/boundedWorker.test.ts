@@ -799,3 +799,34 @@ test("factory disposal explicitly cancels a pending self-intersection verdict", 
     expect(task.take().isOk).toBe(false);
     expect(transport.terminated).toBe(1);
 });
+
+test("bounded tolerant thicken returns the filled sphere envelope without a main-thread offset", async () => {
+    const sphere = keep(createSphere(new ShapeFactory(), undefined, 2));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const binding = rs.spyOn(wasm.ShapeFactory, "makeThickSolidTolerant");
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidTolerant",
+            shape: sphere,
+            closingFaces: [],
+            thickness: -3.75,
+        });
+        await task.ready;
+        const result = keep(unwrapOk(task.take()));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(sphere.volume(), 6);
+        expect(binding).toHaveBeenCalledTimes(1);
+        expect(transport.requests).toContainEqual(
+            expect.objectContaining({
+                operation: "boundedReplica",
+                args: expect.objectContaining({ method: "makeThickSolidTolerant", closingFaces: [] }),
+            }),
+        );
+        expect(task.canFallback).toBe(false);
+        expect(sphere.checkShape()).toBe(true);
+    } finally {
+        binding.mockRestore();
+        hybrid.dispose();
+    }
+});

@@ -265,6 +265,7 @@ export const EDIT_METHODS: ReadonlySet<string> = new Set([
     "fillet2d",
     "makeThickSolidByJoin",
     "makeThickSolidBySimple",
+    "makeThickSolidTolerant",
     "pushPull",
     "removeFeature",
     "removeFillet",
@@ -1438,6 +1439,13 @@ function boundedRequest(method: string, args: unknown[]): BoundedShapeRequest | 
             };
         case "makeThickSolidBySimple":
             return { method, shape: args[0] as IShape, thickness: args[1] as number };
+        case "makeThickSolidTolerant":
+            return {
+                method,
+                shape: args[0] as IShape,
+                closingFaces: args[1] as IShape[],
+                thickness: args[2] as number,
+            };
         case "makeThickSolidByJoin":
             return {
                 method,

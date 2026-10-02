@@ -479,6 +479,7 @@ export class WorkerKernel {
                 case "makeThickSolidBySimple":
                     if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
                     return m.ShapeFactory.makeThickSolidBySimple(snapshot(request.shape), request.thickness);
+                case "makeThickSolidTolerant":
                 case "makeThickSolidByJoin": {
                     if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
                     const shape = snapshot(request.shape);
@@ -490,6 +491,15 @@ export class WorkerKernel {
                         )
                     )
                         throw new Error("Opening face is not part of the input replica");
+                    if (request.method === "makeThickSolidTolerant") {
+                        if (typeof m.ShapeFactory.makeThickSolidTolerant !== "function")
+                            throw new Error("Tolerant thicken is not available in this kernel build");
+                        return m.ShapeFactory.makeThickSolidTolerant(
+                            shape,
+                            request.closingFaces.map((i) => faces[i]),
+                            request.thickness,
+                        );
+                    }
                     const joins = {
                         arc: m.GeomAbs_JoinType.GeomAbs_Arc,
                         tangent: m.GeomAbs_JoinType.GeomAbs_Tangent,
@@ -555,7 +565,8 @@ export class WorkerKernel {
                         // thick solid, then reject any negative component left in the result.
                         const thicken =
                             request.method === "makeThickSolidBySimple" ||
-                            request.method === "makeThickSolidByJoin";
+                            request.method === "makeThickSolidByJoin" ||
+                            request.method === "makeThickSolidTolerant";
                         const volume = thicken ? m.Shape.volume(shape) : 0;
                         if (thicken && volume < -volumeTolerance(volume, m.Shape.boundingBox(shape, false))) {
                             const fixed = m.ShapeFactory.fixSolid(shape, 1e-6);
@@ -579,7 +590,8 @@ export class WorkerKernel {
                         if (error) return this.geometryFailure(`${request.method} result: ${error}`);
                         if (
                             request.method === "makeThickSolidBySimple" ||
-                            request.method === "makeThickSolidByJoin"
+                            request.method === "makeThickSolidByJoin" ||
+                            request.method === "makeThickSolidTolerant"
                         ) {
                             const solids = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_SOLID);
                             owned.push(...solids);
