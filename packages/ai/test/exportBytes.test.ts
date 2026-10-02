@@ -228,6 +228,20 @@ describe("chunked export delivery", () => {
         expect((await read({})).error).toContain("not found");
     });
 
+    test("a binary STL header beginning with solid still uses its binary triangle count", async () => {
+        const bytes = new Uint8Array(84 + 2 * 50);
+        bytes.set(new TextEncoder().encode("solid facet normal"));
+        new DataView(bytes.buffer).setUint32(80, 2, true);
+        const { tool } = prepare([bytes]);
+        const result = JSON.parse(
+            (await tool.handler({ format: ".stl binary", delivery: "chunks" }, undefined, {
+                caller: "chunks-test",
+            })) as string,
+        );
+        expect(result.triangles).toBe(2);
+        expect(result.bytes).toBe(bytes.length);
+    });
+
     test("reports ASCII STL triangles and retrieves separate ZIP exports", async () => {
         const { tool } = prepare(["solid p\nfacet normal 0 0 1\nendfacet\nendsolid p"]);
         const owner = { caller: "chunks-test" };

@@ -65,9 +65,7 @@ export async function retainExport(
     if (metadata.mimeType === "model/stl") {
         const count = bytes.length >= 84 ? new DataView(bytes.buffer).getUint32(80, true) : undefined;
         triangles =
-            count !== undefined &&
-            new TextDecoder().decode(bytes.subarray(0, 5)).toLowerCase() !== "solid" &&
-            84 + count * 50 === bytes.length
+            count !== undefined && 84 + count * 50 === bytes.length
                 ? count
                 : (new TextDecoder().decode(bytes).match(/\bfacet\s+normal\b/g) ?? []).length;
     }

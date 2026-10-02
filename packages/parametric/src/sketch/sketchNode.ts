@@ -202,11 +202,10 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
 
     /**
      * INodeWarning: badge tooltip — `{0}` takes `warningCount`. A lost construction
-     * plane wins: it hides the whole sketch, the more severe of the two warnings.
+     * plane is included alongside offset diagnostics when both occur.
      */
     get warningTooltip(): I18nKeys {
-        if (this._constructionPlaneError === undefined && this._offsetWarnings.length)
-            return "sketch.offsetWarnings{0}{1}";
+        if (this._offsetWarnings.length) return "sketch.offsetWarnings{0}{1}";
         return this._constructionPlaneError === undefined
             ? "sketch.externalRefsLost{0}"
             : "sketch.constructionPlaneInvalid{0}";
@@ -219,6 +218,8 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
 
     get warningTooltipArgs(): readonly unknown[] {
         const messages = [...this._offsetWarnings];
+        if (this._constructionPlaneError !== undefined)
+            messages.unshift(I18n.translate("sketch.constructionPlaneInvalid{0}", 1));
         if (this._danglingProfileCount)
             messages.unshift(I18n.translate("sketch.externalRefsLost{0}", this._danglingProfileCount));
         return [this.warningCount, messages.join("; ")];

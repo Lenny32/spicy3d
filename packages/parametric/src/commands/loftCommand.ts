@@ -8,6 +8,7 @@ import {
     Continuities,
     type Continuity,
     command,
+    I18n,
     Id,
     type IFace,
     type IShape,
@@ -138,7 +139,7 @@ export class LoftFeatureCommand extends CancelableCommand {
                 if (shape.shapeType === ShapeTypes.edge) {
                     const profiles = resolveProfiles(sketch);
                     if (profiles.isOk && profiles.value.length > 1) {
-                        showPreviewProblem("Select a profile face: this sketch has several closed profiles");
+                        showPreviewProblem(I18n.translate("parametric.loft.selectProfileFace"));
                         continue;
                     }
                 }

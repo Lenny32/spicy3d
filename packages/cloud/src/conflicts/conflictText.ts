@@ -138,18 +138,17 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
                     (side) => side !== null && typeof side === "object" && "angleSide" in side,
                 );
             if (angular) {
+                const angle =
+                    typeof record["datum"] === "number"
+                        ? String(Number(((record["datum"] * 180) / Math.PI).toFixed(6)))
+                        : datum;
+                if (record["angleSide"] !== -1 && record["angleSide"] !== 1) return `${angle}°`;
                 const side = I18n.translate(
                     record["angleSide"] === -1
                         ? "cloud.merge.value.clockwise"
                         : "cloud.merge.value.counterclockwise",
                 );
-                const angle =
-                    typeof record["datum"] === "number"
-                        ? String(Number(((record["datum"] * 180) / Math.PI).toFixed(6)))
-                        : datum;
-                return record["angleSide"] === -1 || record["angleSide"] === 1
-                    ? `${angle}° (${side})`
-                    : `${angle}°`;
+                return `${angle}° (${side})`;
             }
             return datum;
         }

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+    I18n,
     type IFace,
     type IPicker,
     Matrix4,
@@ -115,6 +116,43 @@ const bodies = (doc: TestDocument) =>
     doc.modelManager.findNodes((n) => n instanceof ParametricBodyNode) as ParametricBodyNode[];
 
 describe("loft command (real kernel)", () => {
+    test("an edge from a multi-profile sketch asks for a profile face using translated text", async () => {
+        const { app, doc, base, top } = setup();
+        const data = square(10);
+        base.setDataEmitShapeChanged({
+            ...data,
+            entities: [
+                ...data.entities,
+                ...data.entities.map((entity) => ({
+                    ...entity,
+                    id: entity.id + 4,
+                    params: entity.params.map((value, index) => (index % 2 === 0 ? value + 40 : value)),
+                })),
+            ],
+        });
+        class UncachedLoftCommand extends LoftFeatureCommand {
+            protected override isPropertyCached(): boolean {
+                return false;
+            }
+        }
+        const command = new UncachedLoftCommand();
+        command.solid = false;
+        const pub = rs.spyOn(PubSub.default, "pub");
+        try {
+            pickSections(doc, command, [base, top], undefined, true);
+            await command.execute(app);
+            expect(pub).toHaveBeenCalledWith("showFloatTip", {
+                level: "warn",
+                msg: I18n.translate("parametric.loft.selectProfileFace"),
+            });
+            expect(bodies(doc)).toHaveLength(0);
+            expect(base.visible).toBe(true);
+        } finally {
+            pub.mockRestore();
+            doc.dispose();
+        }
+    });
+
     test("lofts the picked sections into a new body and hides their sketches", async () => {
         const { app, doc, base, top } = setup();
         const command = new LoftFeatureCommand();

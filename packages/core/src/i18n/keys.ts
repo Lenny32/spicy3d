@@ -367,6 +367,7 @@ export const I18N_KEYS = [
     "analysis.inspectionIntersects",
     "analysis.inspectionTimedOutAfter{0}",
     "analysis.panel.run",
+    "parametric.loft.selectProfileFace",
     "analysis.inspectionTimedOut",
     "analysis.inspectionRunning",
     "analysis.panel.name",

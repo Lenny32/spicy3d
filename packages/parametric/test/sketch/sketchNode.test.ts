@@ -466,6 +466,21 @@ describe("SketchNode", () => {
         ]);
     });
 
+    test("the warning tooltip includes construction-plane failure and offset diagnostics", () => {
+        const node = new SketchNode({ document: doc, plane, data: { entities: [], constraints: [] } });
+        node.constructionPlaneRefJson = JSON.stringify({ nodeId: "missing-plane" });
+        expect(node.shape.isOk).toBe(false);
+        expect(node.constructionPlaneError).not.toBeUndefined();
+        const message = "Offset constraint 30: collapse";
+        node.syncOffsetWarnings({ offsetErrors: new Map([[30, message]]) } as unknown as SketchSolver);
+        expect(node.warningCount).toBe(2);
+        expect(node.warningTooltip).toBe("sketch.offsetWarnings{0}{1}");
+        expect(node.warningTooltipArgs).toEqual([
+            2,
+            `${I18n.translate("sketch.constructionPlaneInvalid{0}", 1)}; ${message}`,
+        ]);
+    });
+
     test("danglingProfileRefs returns only refs that are both dangling and profile-role", () => {
         const ref = (
             entityId: number,

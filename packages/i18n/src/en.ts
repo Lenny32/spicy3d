@@ -379,6 +379,7 @@ export default {
         "analysis.inspectionIntersects": "Inspection input intersects itself",
         "analysis.inspectionTimedOutAfter{0}": "Inspection timed out after {0} ms (result unknown)",
         "analysis.panel.run": "Run",
+        "parametric.loft.selectProfileFace": "Select a profile face: this sketch has several closed profiles",
         "analysis.inspectionTimedOut": "Inspection timed out (result unknown)",
         "analysis.inspectionRunning": "Checking geometry…",
         "analysis.panel.name": "Name",
