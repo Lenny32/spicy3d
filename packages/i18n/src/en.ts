@@ -1504,6 +1504,8 @@ export default {
         "cloud.merge.undoUnavailable": "This merge can no longer be undone",
         "cloud.merge.validating": "Rebuilding the merged model…",
         "cloud.merge.value.absent": "Not there",
+        "cloud.merge.value.clockwise": "clockwise",
+        "cloud.merge.value.counterclockwise": "counterclockwise",
         "cloud.merge.value.changed": "Changed",
         "cloud.merge.value.data": "Geometry data",
         "cloud.merge.value.deleted": "Deleted",

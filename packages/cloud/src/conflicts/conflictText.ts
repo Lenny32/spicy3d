@@ -115,6 +115,22 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
     if (Array.isArray(value)) return I18n.translate("cloud.merge.value.items{0}", value.length);
     if (typeof value === "object") {
         const record = value as Record<string, unknown>;
+        if ("datum" in record) {
+            const datum = formatConflictValue(conflict, record["datum"], names);
+            if (record["angleSide"] === -1 || record["angleSide"] === 1) {
+                const side = I18n.translate(
+                    record["angleSide"] === -1
+                        ? "cloud.merge.value.clockwise"
+                        : "cloud.merge.value.counterclockwise",
+                );
+                const angle =
+                    typeof record["datum"] === "number"
+                        ? String(Number(((record["datum"] * 180) / Math.PI).toFixed(6)))
+                        : datum;
+                return `${angle}° (${side})`;
+            }
+            return datum;
+        }
         if (typeof record["$blob"] === "string") return I18n.translate("cloud.merge.value.data");
         if (typeof record["name"] === "string" && record["name"] !== "")
             return shorten(displayNodeName(record["name"]));

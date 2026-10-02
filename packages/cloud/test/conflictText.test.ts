@@ -98,6 +98,26 @@ describe("labels and values", () => {
         ],
         ["a parent, by its name", conflict("node/x/parent", { kind: "move" }), "folder-b", "Folder B"],
         ["a number", conflict("node/a/feature/f/param/depth"), 12.5000000001, "12.5"],
+        ["Distance datum", conflict("node/a/constraint/c/datum"), { datum: 12 }, "12"],
+        ["Radius datum", conflict("node/a/constraint/c/datum"), { datum: 15 }, "15"],
+        [
+            "Angle datum clockwise",
+            conflict("node/a/constraint/c/datum"),
+            { datum: Math.PI / 6, angleSide: -1 },
+            "30° (cloud.merge.value.clockwise)",
+        ],
+        [
+            "Angle datum counterclockwise",
+            conflict("node/a/constraint/c/datum"),
+            { datum: Math.PI / 4, angleSide: 1 },
+            "45° (cloud.merge.value.counterclockwise)",
+        ],
+        [
+            "Angle expression",
+            conflict("node/a/constraint/c/datum"),
+            { datum: "tilt", angleSide: -1 },
+            "tilt° (cloud.merge.value.clockwise)",
+        ],
         ["an expression", conflict("variable/v/expression"), "w * 2", "w * 2"],
         [
             "a blob",

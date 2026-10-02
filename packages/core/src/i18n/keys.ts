@@ -1409,6 +1409,8 @@ export const I18N_KEYS = [
     "cloud.merge.undoUnavailable",
     "cloud.merge.validating",
     "cloud.merge.value.absent",
+    "cloud.merge.value.clockwise",
+    "cloud.merge.value.counterclockwise",
     "cloud.merge.value.changed",
     "cloud.merge.value.data",
     "cloud.merge.value.deleted",

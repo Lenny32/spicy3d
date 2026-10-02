@@ -13,6 +13,7 @@ import {
     type Serialized,
     SidePanels,
 } from "@spicy3d/core";
+import { ConstraintKind } from "@spicy3d/parametric";
 import type { ConflictPanel } from "../src/conflicts/conflictPanel";
 import { MergePreviewRepository, mergePreviewOf } from "../src/conflicts/mergePreview";
 import { MERGE_REPORT_FORMAT } from "../src/conflicts/mergeReport";
@@ -126,6 +127,33 @@ const W = "variable/w/expression";
 const H = "variable/h/expression";
 
 describe("the conflict panel", () => {
+    test("distance datum conflict displays both numbers and the base", async () => {
+        const sketch = (datum: number): Serialized => ({
+            __cla$$__: "SketchNode",
+            id: "sketch",
+            name: "Sketch",
+            dataJson: JSON.stringify({
+                entities: [],
+                constraints: [{ id: 7, kind: ConstraintKind.P2PDistance, refs: [], datum }],
+            }),
+        });
+        const a = await device();
+        const { doc } = await conflictOn(a, {}, {}, {}, [sketch(10)], [sketch(12)], [sketch(15)]);
+        const panel = openPanel(a, doc);
+        const path = panel.resolution.rows[0].conflict.path;
+        expect(panel.resolution.rows).toHaveLength(1);
+        const values = rowOf(panel, path).querySelector("[data-values]");
+        expect(values).not.toBeNull();
+        expect(values!.textContent).toContain("12");
+        expect(values!.textContent).toContain("15");
+        expect(values!.getAttribute("title")).toContain("10");
+        choose(panel, path, "ours");
+        expect(panel.resolution.result.conflicts).toHaveLength(0);
+        const merged = panel.resolution.result.merged["models"] as { nodes: Serialized[] };
+        expect(JSON.parse(merged.nodes[0]["dataJson"] as string).constraints[0].datum).toBe(12);
+        a.documents.closeConflicts();
+    });
+
     test("opens from the conflict pill, labels the sides, holds the sync and autosave while open", async () => {
         const a = await device();
         const { doc } = await conflictOn(a, { w: "10" }, { w: "20" }, { w: "30" });
