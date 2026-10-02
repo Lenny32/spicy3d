@@ -26,10 +26,10 @@ test("real export context reveals opted-in STL fields and edits linear deflectio
         expect(custom.style.display).toBe("none");
         expect(linear.style.display).toBe("none");
         command.format = ".stl binary";
-        expect(custom.style.display).toBe("inherit");
+        expect(custom.style.display).toBe("");
         expect(linear.style.display).toBe("none");
         command.customTessellation = true;
-        expect(linear.style.display).toBe("inherit");
+        expect(linear.style.display).toBe("");
         const input = linear.querySelector("input");
         expect(input).not.toBeNull();
         if (!input) throw new Error("Linear deflection editor missing");
