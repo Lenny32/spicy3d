@@ -9,6 +9,7 @@ import {
     formatMeasure,
     type IEdge,
     type IFace,
+    type IInspectionPrecheck,
     type IShape,
     isLengthUnit,
     lengthUnitSymbol,
@@ -21,6 +22,8 @@ import {
     VisualConfig,
     XYZ,
 } from "@spicy3d/core";
+
+import { inspectionPrecheck } from "./inspectionPrecheck";
 
 function worldShape(source: AnalysisContext["sources"][number]): IShape {
     const shape = source.subShape ?? source.shape;
@@ -327,7 +330,12 @@ async function section(manager: AnalysisManager, context: AnalysisContext): Prom
             const world = worldShape(source.value);
             try {
                 if (!world.inspectionSectionCaps) return Result.err("Section cap query is unavailable");
-                const caps = world.inspectionSectionCaps(plane);
+                const checked = await inspectionPrecheck([world], context.signal);
+                if (!checked.isOk) return Result.err(checked.error);
+                const caps = (world as IShape & IInspectionPrecheck).inspectionSectionCaps!(
+                    plane,
+                    checked.value,
+                );
                 if (!caps.isOk) {
                     skipped++;
                     continue;
@@ -378,7 +386,12 @@ async function interference(context: AnalysisContext): Promise<Result<AnalysisRe
                 if (context.signal.aborted) return Result.err("Interference analysis cancelled");
                 if (!shapes[i].inspectionCommonVolume)
                     return Result.err("Exact interference query is unavailable");
-                const volume = shapes[i].inspectionCommonVolume!(shapes[j]);
+                const checked = await inspectionPrecheck([shapes[i], shapes[j]], context.signal);
+                if (!checked.isOk) return Result.err(checked.error);
+                const volume = (shapes[i] as IShape & IInspectionPrecheck).inspectionCommonVolume!(
+                    shapes[j],
+                    checked.value,
+                );
                 if (!volume.isOk) return Result.err(volume.error);
                 let overlays: AnalysisResult["overlays"];
                 if (volume.value > tolerance) {

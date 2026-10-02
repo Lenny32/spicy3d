@@ -8,6 +8,8 @@ import { rs } from "@rstest/core";
 import {
     type AsyncController,
     Config,
+    DocumentRebuilds,
+    I18n,
     type IEdge,
     type IEventHandler,
     type IFace,
@@ -15,6 +17,7 @@ import {
     type IShape,
     Matrix4,
     Plane,
+    PubSub,
     ShapeTypes,
     Signal,
     VisualConfig,
@@ -28,6 +31,8 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory } from "../../wasm/src/hybridShapeFactory";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import type { FilletEditCommand } from "../src/commands/edgeCornerEditCommand";
 import type { ExtrudeEditCommand } from "../src/commands/extrudeEditCommand";
 import { FeatureChainPreview, LIVE_PREVIEW_BUDGET_MS } from "../src/commands/featureEditPreview";
@@ -195,6 +200,29 @@ describe("FeatureChainPreview", () => {
         [rollback, live, lowerRollback].forEach((x) => x.shape?.dispose());
     });
 
+    test("a suppressed tolerant step does not truncate the live preview", () => {
+        const { doc } = setup();
+        try {
+            const body = blockWithBoss(doc);
+            body.setFeaturesEmitShapeChanged([
+                body.features[0],
+                { id: "wall", type: "thicken", thickness: -1, tolerant: true, suppressed: true },
+                body.features[1],
+            ]);
+            const result = new FeatureChainPreview(body, 0, "live").evaluate(withDepth(body, "e1", 5), false);
+            try {
+                expect(result.partial).toBe(false);
+                expect(result.error).toBeUndefined();
+                expect(result.note).toBeUndefined();
+                expect(topOf(result.shape)).toBeCloseTo(30);
+            } finally {
+                result.shape?.dispose();
+            }
+        } finally {
+            doc.dispose();
+        }
+    });
+
     test("previewing leaves the body untouched", () => {
         const { doc } = setup();
         const body = blockWithBoss(doc);
@@ -255,6 +283,78 @@ describe("FeatureChainPreview", () => {
 });
 
 describe("feature edit sessions", () => {
+    test.each(["extrude", "fillet"])("%s panel defers a tolerant tail with an info note", async (kind) => {
+        const { doc, app, drive } = setup();
+        const originalFactory = shapeFactory;
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        const pub = rs.spyOn(PubSub.default, "pub");
+        globalThis.shapeFactory = new ShapeFactory(undefined, hybrid);
+        try {
+            const body = blockWithBoss(doc);
+            body.setFeaturesEmitShapeChanged(body.features.slice(0, 1));
+            let editedId = "e1";
+            if (kind === "fillet") {
+                const edge = body.shape.value.findSubShapes(ShapeTypes.edge)[0] as IEdge;
+                try {
+                    body.setFeaturesEmitShapeChanged([
+                        ...body.features,
+                        {
+                            id: "f1",
+                            type: "fillet",
+                            radius: 1,
+                            edges: [captureEdgeRef(edge, body.edgeIdAt(0), false)],
+                        },
+                    ]);
+                    expect(body.shape.isOk).toBe(true);
+                } finally {
+                    edge.dispose();
+                }
+                editedId = "f1";
+            }
+            const faces = body.shape.value.findSubShapes(ShapeTypes.face);
+            const bottom = faces.find((face) => Math.abs(face.boundingBox().max.z) < 1e-5);
+            expect(bottom).not.toBeUndefined();
+            body.setFeaturesEmitShapeChanged([
+                ...body.features,
+                {
+                    id: "wall",
+                    type: "thicken",
+                    thickness: -0.5,
+                    tolerant: true,
+                    openFaces: [captureProfileRef(bottom as IFace)],
+                },
+            ]);
+            for (const face of faces) face.dispose();
+            await DocumentRebuilds.settled(doc);
+            expect(body.featureItems().filter((item) => item.error !== undefined)).toEqual([]);
+            pub.mockClear();
+            let driven = false;
+            drive((_handler, controller) => {
+                driven = true;
+                if (kind === "extrude") (app.executingCommand as ExtrudeEditCommand).depth = 22;
+                else (app.executingCommand as FilletEditCommand).value = 1.2;
+                controller.cancel();
+            });
+            await body.editFeature(editedId);
+            expect(driven).toBe(true);
+            expect(pub.mock.calls.filter(([event]) => event === "showFloatTip")).toContainEqual([
+                "showFloatTip",
+                {
+                    level: "info",
+                    msg: I18n.translate("prompt.thicken.backgroundResult"),
+                },
+            ]);
+            expect(
+                JSON.stringify(pub.mock.calls.filter(([event]) => event === "showFloatTip")),
+            ).not.toContain("unavailable in synchronous evaluation");
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            globalThis.shapeFactory = originalFactory;
+            pub.mockRestore();
+        }
+    });
+
     test("every interactive feature kind is marked editable in the feature list", () => {
         const { doc } = setup();
         const body = blockWithBoss(doc);

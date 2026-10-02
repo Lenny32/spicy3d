@@ -3,6 +3,7 @@
 
 import {
     type ConstructionRef,
+    I18n,
     type I18nKeys,
     type IDocument,
     type IEdge,
@@ -37,6 +38,7 @@ import { type ExternalResolveResult, resolveExternalRefs } from "./externalRef";
 import { type PlaneFaceRef, resolveFacePlane } from "./planeRef";
 import {
     arcAngles,
+    ConstraintKind,
     type ExternalRefData,
     isProfileEntity,
     profileExternalRefs,
@@ -173,6 +175,7 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
 
     private _planeRefNode: INode | undefined;
     private _constructionPlaneError?: string;
+    private _offsetWarnings: string[] = [];
 
     /**
      * Derived, runtime-only warning state behind `INodeWarning` (the model-tree
@@ -190,17 +193,46 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
      * plane (which hides the sketch: `shape` reports the error) badge the model-tree row.
      */
     get warningCount(): number {
-        return this._danglingProfileCount + (this._constructionPlaneError === undefined ? 0 : 1);
+        return (
+            this._danglingProfileCount +
+            (this._constructionPlaneError === undefined ? 0 : 1) +
+            this._offsetWarnings.length
+        );
     }
 
     /**
      * INodeWarning: badge tooltip — `{0}` takes `warningCount`. A lost construction
-     * plane wins: it hides the whole sketch, the more severe of the two warnings.
+     * plane is included alongside offset diagnostics when both occur.
      */
     get warningTooltip(): I18nKeys {
+        if (this._offsetWarnings.length) return "sketch.offsetWarnings{0}{1}";
         return this._constructionPlaneError === undefined
             ? "sketch.externalRefsLost{0}"
             : "sketch.constructionPlaneInvalid{0}";
+    }
+
+    /** Runtime diagnostics; never part of the saved sketch payload. */
+    get offsetWarnings(): readonly string[] {
+        return this._offsetWarnings;
+    }
+
+    get warningTooltipArgs(): readonly unknown[] {
+        const messages = [...this._offsetWarnings];
+        if (this._constructionPlaneError !== undefined)
+            messages.unshift(I18n.translate("sketch.constructionPlaneInvalid{0}", 1));
+        if (this._danglingProfileCount)
+            messages.unshift(I18n.translate("sketch.externalRefsLost{0}", this._danglingProfileCount));
+        return [this.warningCount, messages.join("; ")];
+    }
+
+    /** Shared by off-session solves and the editor, including passes that move no geometry. */
+    syncOffsetWarnings(solver: SketchSolver): void {
+        const warnings = [...solver.offsetErrors.values()];
+        if (JSON.stringify(warnings) === JSON.stringify(this._offsetWarnings)) return;
+        const oldCount = this.warningCount;
+        this._offsetWarnings = warnings;
+        // A changed message must refresh the tooltip even when the count stays the same.
+        this.emitPropertyChanged("warningCount", oldCount);
     }
 
     /** The resolution error of the construction plane, undefined while it resolves (or is unset). */
@@ -351,7 +383,29 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         // sync stays unconditional like syncPlaneRefWatch (a ref-set change from
         // projectEdges, delete, undo/redo must re-watch sources on THIS evaluation);
         // refresh never changes ref nodeIds, so watching post-refresh refs is equal.
-        const data = this.data;
+        let data = this.data;
+        if (!this._editingSession && data.constraints.some((c) => c.kind === ConstraintKind.Offset)) {
+            try {
+                const solver = this.createSolver(data);
+                try {
+                    this.syncOffsetWarnings(solver);
+                    const solved = solver.toData();
+                    if (data.anchors) solved.anchors = data.anchors;
+                    if (JSON.stringify(solved) !== JSON.stringify(data))
+                        this.withoutHistory(() => this.setProperty("dataJson", JSON.stringify(solved)));
+                    data = solved;
+                } finally {
+                    solver.dispose();
+                }
+            } catch (error) {
+                return Result.err(String(error));
+            }
+        }
+        if (!data.constraints.some((c) => c.kind === ConstraintKind.Offset) && this._offsetWarnings.length) {
+            const oldCount = this.warningCount;
+            this._offsetWarnings = [];
+            this.emitPropertyChanged("warningCount", oldCount);
+        }
         this.syncExternalRefWatch(data.externalRefs ?? []);
 
         const edges = this.buildEdges(data);
@@ -643,6 +697,23 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     /** The parameter-table revision this sketch last re-solved against (see `applyVariables`). */
     private _variableRevision: number | undefined;
 
+    /** Creates a solver using the current parameter table and persisted angle semantics. */
+    createSolver(data: SketchData = this.data): SketchSolver {
+        return new SketchSolver(this.plane, data, this.document.variables.evaluate().scope);
+    }
+
+    /** Persists a session's variable-only replay as derived geometry, preserving redo. */
+    persistSolver(solver: SketchSolver): void {
+        this.syncOffsetWarnings(solver);
+        const solved = solver.toData();
+        const anchors = this.data.anchors;
+        if (anchors !== undefined) solved.anchors = anchors;
+        this.withoutHistory(() => {
+            this.setProperty("dataJson", JSON.stringify(solved));
+            this.setShape(this.generateShape());
+        });
+    }
+
     /** `IVariableConsumer`: sketches re-solve before the bodies that read them. */
     readonly variableSyncOrder = 0;
 
@@ -741,11 +812,9 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
     private solveWithScope(data: SketchData): SketchData | undefined {
         let solved: SketchData;
         try {
-            // No explicit solve here: the constructor's loadData already ends with the
-            // full solve that pulls constrained entities onto the moved external
-            // geometry — a second solve(true) on unchanged state is a no-op.
-            const solver = new SketchSolver(this.plane, data, this.document.variables.evaluate().scope);
+            const solver = this.createSolver(data);
             try {
+                this.syncOffsetWarnings(solver);
                 solved = solver.toData();
             } finally {
                 solver.dispose();

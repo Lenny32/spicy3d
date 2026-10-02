@@ -1,6 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import { volumeTolerance } from "@spicy3d/core/src/shape/volumeValidity";
+
 import type {
     ClassHandle,
     IntVector,
@@ -28,6 +30,7 @@ import type {
 export class WorkerKernel {
     private readonly shapes = new Map<KernelHandle, TopoDS_Shape>();
     private readonly replicaLeases = new Set<KernelHandle>();
+    private readonly validatedShapes = new WeakSet<TopoDS_Shape>();
     private nextHandle = 0;
     private trapped = false;
     private requestId = 0;
@@ -71,6 +74,41 @@ export class WorkerKernel {
         switch (request.operation) {
             case "cornerSetbackReplica":
                 return this.cornerSetbackReplica(request.args);
+            case "checkSelfIntersectionReplica": {
+                const check = (
+                    m.Shape as unknown as { checkSelfIntersection?: (shape: TopoDS_Shape) => boolean }
+                ).checkSelfIntersection;
+                if (typeof check !== "function")
+                    return {
+                        ok: false,
+                        error: {
+                            code: "unavailable",
+                            message: "Self-intersection check is not available in this kernel build",
+                        },
+                    };
+                const shape = m.Converter.convertFromBrep(request.args.shape.brep);
+                return this.native(
+                    () => {
+                        if (
+                            shape.isNull() ||
+                            !sameReplicaTopology(request.args.shape.topology, replicaTopology(m, shape))
+                        )
+                            return {
+                                ok: false,
+                                error: { code: "invalid", message: "Input BREP topology order changed" },
+                            };
+                        return {
+                            ok: true,
+                            value: this.measure(
+                                "worker.kernel.operation",
+                                () => Boolean(check.call(m.Shape, shape)),
+                                "checkSelfIntersection",
+                            ),
+                        };
+                    },
+                    () => shape.delete(),
+                );
+            }
             case "boundedReplica":
                 return this.boundedReplica(request.args);
             case "ready":
@@ -149,7 +187,11 @@ export class WorkerKernel {
                             owned,
                         );
                         if (!result.ok) return result;
-                        const output = result.value as { handle: KernelHandle; tracking: WorkerTracking };
+                        const output = result.value as {
+                            handle: KernelHandle;
+                            tracking: WorkerTracking;
+                            warning?: string;
+                        };
                         const shape = this.get(output.handle);
                         // This request owns every operand. Cached operands are consumed exactly once:
                         // OCCT may modify inputs, so they must never become reusable cache entries again.
@@ -172,6 +214,7 @@ export class WorkerKernel {
                                 topology,
                                 handle,
                                 tracking: output.tracking,
+                                warning: output.warning,
                                 nativeMs: this.nativeMs,
                                 mesh,
                             },
@@ -222,6 +265,10 @@ export class WorkerKernel {
                 }
                 const a = left.map((id) => this.get(id));
                 const b = right.map((id) => this.get(id));
+                for (const [index, shape] of [...a, ...b].entries()) {
+                    const error = this.shapeError(shape, false);
+                    if (error) return this.geometryFailure(`Boolean ${operation} input ${index}: ${error}`);
+                }
                 const methods = {
                     fuse: m.ShapeFactory.booleanFuseTracked,
                     cut: m.ShapeFactory.booleanCutTracked,
@@ -243,8 +290,12 @@ export class WorkerKernel {
                                   this.convertTracking(result),
                               )
                             : this.convertTracking(result);
-                        const saved = this.keep(this.copyResultShape(result), created);
-                        return saved.ok ? { ok: true, value: { handle: saved.value, tracking } } : saved;
+                        const shape = this.copyResultShape(result);
+                        const saved = this.keep(shape, created);
+                        if (!saved.ok) return saved;
+                        const { error, warning } = this.booleanResultError(shape, a, b);
+                        if (error) return this.geometryFailure(`Boolean ${operation} result: ${error}`);
+                        return { ok: true, value: { handle: saved.value, tracking, warning } };
                     },
                     () => result.delete(),
                 );
@@ -315,6 +366,8 @@ export class WorkerKernel {
                 owned.push(input);
                 if (input.isNull() || !sameReplicaTopology(request.shape.topology, replicaTopology(m, input)))
                     return invalid("Input BREP topology order changed");
+                const inputError = this.shapeError(input);
+                if (inputError) return this.geometryFailure(`Fillet corner input: ${inputError}`);
                 const result = this.measure(
                     "worker.kernel.operation",
                     () => binding(input, request.edges, request.radius, request.distances),
@@ -332,6 +385,8 @@ export class WorkerKernel {
                 return this.native(
                     () => {
                         if (!result.isOk) return invalid(result.error);
+                        const error = this.shapeError(result.shape);
+                        if (error) return this.geometryFailure(`Fillet corner result: ${error}`);
                         const arrays = Object.fromEntries(
                             Object.entries(vectors).map(([key, vector]) => [key, Int32Array.from(vector)]),
                         ) as Record<keyof typeof vectors, Int32Array>;
@@ -364,12 +419,17 @@ export class WorkerKernel {
     private boundedReplica(request: BoundedReplicaRequest): KernelResult<ShapeReplica> {
         const m = this.module;
         const owned: TopoDS_Shape[] = [];
+        const operands: TopoDS_Shape[] = [];
         const snapshot = (replica: ShapeReplica): TopoDS_Shape => {
             const shape = m.Converter.convertFromBrep(replica.brep);
             owned.push(shape);
+            operands.push(shape);
             if (shape.isNull() || !sameReplicaTopology(replica.topology, replicaTopology(m, shape))) {
                 throw new Error("Input BREP topology order changed");
             }
+            const error = this.shapeError(shape, !request.method.startsWith("boolean"));
+            if (error)
+                throw new InvalidGeometryError(`${request.method} input ${owned.length - 1}: ${error}`);
             return shape;
         };
         const invoke = (): ShapeResult => {
@@ -419,6 +479,7 @@ export class WorkerKernel {
                 case "makeThickSolidBySimple":
                     if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
                     return m.ShapeFactory.makeThickSolidBySimple(snapshot(request.shape), request.thickness);
+                case "makeThickSolidTolerant":
                 case "makeThickSolidByJoin": {
                     if (!Number.isFinite(request.thickness)) throw new Error("Thickness must be finite");
                     const shape = snapshot(request.shape);
@@ -430,6 +491,15 @@ export class WorkerKernel {
                         )
                     )
                         throw new Error("Opening face is not part of the input replica");
+                    if (request.method === "makeThickSolidTolerant") {
+                        if (typeof m.ShapeFactory.makeThickSolidTolerant !== "function")
+                            throw new Error("Tolerant thicken is not available in this kernel build");
+                        return m.ShapeFactory.makeThickSolidTolerant(
+                            shape,
+                            request.closingFaces.map((i) => faces[i]),
+                            request.thickness,
+                        );
+                    }
                     const joins = {
                         arc: m.GeomAbs_JoinType.GeomAbs_Arc,
                         tangent: m.GeomAbs_JoinType.GeomAbs_Tangent,
@@ -461,7 +531,7 @@ export class WorkerKernel {
                     return {
                         ok: false,
                         error: {
-                            code: "invalid",
+                            code: error instanceof InvalidGeometryError ? "geometry" : "invalid",
                             message: error instanceof Error ? error.message : "Invalid bounded operation",
                         },
                     };
@@ -491,14 +561,37 @@ export class WorkerKernel {
                                 () => simplified.delete(),
                             );
                         }
-                        if (!m.Shape.check(shape))
-                            return {
-                                ok: false,
-                                error: { code: "invalid", message: "Kernel returned an invalid shape" },
-                            };
+                        // Match the feature's existing orientation repair for a wholly inverted
+                        // thick solid, then reject any negative component left in the result.
+                        const thicken =
+                            request.method === "makeThickSolidBySimple" ||
+                            request.method === "makeThickSolidByJoin" ||
+                            request.method === "makeThickSolidTolerant";
+                        const volume = thicken ? m.Shape.volume(shape) : 0;
+                        if (thicken && volume < -volumeTolerance(volume, m.Shape.boundingBox(shape, false))) {
+                            const fixed = m.ShapeFactory.fixSolid(shape, 1e-6);
+                            const repaired = this.native(
+                                () => {
+                                    if (!fixed.isOk) return false;
+                                    shape = this.copyResultShape(fixed);
+                                    owned.push(shape);
+                                    return m.Shape.volume(shape) > 0;
+                                },
+                                () => fixed.delete(),
+                            );
+                            if (!repaired)
+                                return this.geometryFailure(
+                                    `${request.method} result: thick solid is inside out`,
+                                );
+                        }
+                        const error = request.method.startsWith("boolean")
+                            ? this.booleanResultError(shape, operands, []).error
+                            : this.shapeError(shape);
+                        if (error) return this.geometryFailure(`${request.method} result: ${error}`);
                         if (
                             request.method === "makeThickSolidBySimple" ||
-                            request.method === "makeThickSolidByJoin"
+                            request.method === "makeThickSolidByJoin" ||
+                            request.method === "makeThickSolidTolerant"
                         ) {
                             const solids = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_SOLID);
                             owned.push(...solids);
@@ -517,6 +610,51 @@ export class WorkerKernel {
                 for (const shape of owned.reverse()) shape.delete();
             },
         );
+    }
+
+    /** Boolean operands need only orientation checks; reuse validated resident results. */
+    private shapeError(shape: TopoDS_Shape, analyze = true): string | undefined {
+        if (!analyze && this.validatedShapes.has(shape)) return undefined;
+        const m = this.module;
+        const valid = !analyze || m.Shape.check(shape);
+        const solids = m.Shape.findSubShapes(shape, m.TopAbs_ShapeEnum.TopAbs_SOLID);
+        try {
+            const tolerance = solids.length
+                ? volumeTolerance(m.Shape.volume(shape), m.Shape.boundingBox(shape, false))
+                : 0;
+            // A positive compound total can hide an inside-out solid among valid ones.
+            for (const [index, solid] of solids.entries()) {
+                const volume = m.Shape.volume(solid);
+                if (!Number.isFinite(volume) || volume < -tolerance)
+                    return `solid ${index} has invalid volume (${volume} mm³)`;
+            }
+        } finally {
+            for (const solid of solids) solid.delete();
+        }
+        if (!valid) return "invalid shape (checkShape is false)";
+        if (analyze) this.validatedShapes.add(shape);
+        return undefined;
+    }
+
+    /** Inherited topology defects are accepted; component volume failures never are. */
+    private booleanResultError(
+        shape: TopoDS_Shape,
+        inputs: readonly TopoDS_Shape[],
+        tools: readonly TopoDS_Shape[],
+    ): { error?: string; warning?: string } {
+        const error = this.shapeError(shape);
+        if (error !== "invalid shape (checkShape is false)") return { error };
+        const warnings = [
+            ...inputs.map((shape, index) => ({ shape, label: `input ${index}` })),
+            ...tools.map((shape, index) => ({ shape, label: `tool ${index}` })),
+        ]
+            .filter(({ shape }) => !this.module.Shape.check(shape))
+            .map(({ label }) => `${label} is already invalid (checkShape false)`);
+        return warnings.length ? { warning: warnings.join("; ") } : { error };
+    }
+
+    private geometryFailure(message: string): KernelResult<never> {
+        return { ok: false, error: { code: "geometry", message } };
     }
 
     private exportReplica(shape: TopoDS_Shape) {
@@ -728,3 +866,5 @@ export class WorkerKernel {
         }
     }
 }
+
+class InvalidGeometryError extends Error {}

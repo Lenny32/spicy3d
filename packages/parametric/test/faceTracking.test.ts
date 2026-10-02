@@ -17,7 +17,7 @@ import {
     Transaction,
     XYZ,
 } from "@spicy3d/core";
-import { createMockApplication, nearestOnSegment, TestDocument } from "@spicy3d/core/test-utils";
+import { createMockApplication, MockShape, nearestOnSegment, TestDocument } from "@spicy3d/core/test-utils";
 import type { EdgeRef } from "../src/features/edgeRef";
 import { type ExtrudeFeatureData, type FeatureData, featureHandler } from "../src/features/feature";
 import type { ProfileRef } from "../src/features/profileRef";
@@ -531,12 +531,11 @@ describe("ParametricBodyNode face tracking", () => {
         // Input faces 0..5 are the body's, face 6 is the tool's only face.
         const booleanCutTracked = rs.fn((_args: any[], _tools: any[]) =>
             Result.ok({
-                shape: {
-                    shapeType: ShapeTypes.solid,
+                shape: Object.assign(new MockShape({ shapeType: ShapeTypes.solid }), {
                     isEqual: () => false,
                     dispose: rs.fn(),
                     findSubShapes: () => [],
-                },
+                }),
                 faceMap: [0, 6, -1],
                 edgeMap: [0, -1],
             }),
@@ -575,6 +574,9 @@ describe("ParametricBodyNode face tracking", () => {
         const solid = (subShapes: (type: ShapeType) => unknown[]) => {
             const shape = {
                 shapeType: ShapeTypes.solid,
+                checkShape: () => true,
+                volume: () => 1,
+                boundingBox: () => new BoundingBox(XYZ.zero, new XYZ(1, 1, 1)),
                 isEqual: () => false,
                 dispose: rs.fn(),
                 findSubShapes: (type: ShapeType): unknown[] =>
@@ -621,12 +623,11 @@ describe("ParametricBodyNode face tracking", () => {
         // Faces 0..5 / edges 0..3 are the chain input's; the tool prism's follow.
         const booleanFuseTracked = rs.fn((_args: any[], _tools: any[]) =>
             Result.ok({
-                shape: {
-                    shapeType: ShapeTypes.solid,
+                shape: Object.assign(new MockShape({ shapeType: ShapeTypes.solid }), {
                     isEqual: () => false,
                     dispose: rs.fn(),
                     findSubShapes: () => [],
-                },
+                }),
                 faceMap: [0, 6, 7, -1],
                 edgeMap: [0, 4, -1],
             }),

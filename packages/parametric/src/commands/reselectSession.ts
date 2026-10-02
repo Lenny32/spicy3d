@@ -413,6 +413,7 @@ function evaluateChainSnapshot(host: ReselectHost, features: FeatureData[]): Res
     const scope = host.document.variables.evaluate().scope;
     for (const feature of features) {
         if (feature.suppressed) continue;
+        if (feature.type === "thicken" && feature.tolerant === true) break;
         const result = evaluateFeature(feature, { document: host.document, host, input, scope });
         if (!result.isOk) {
             input?.dispose();

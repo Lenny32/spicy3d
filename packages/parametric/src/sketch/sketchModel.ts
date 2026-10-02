@@ -51,6 +51,8 @@ export interface SketchEntityData {
     params: number[];
     /** Construction geometry is editable but never contributes profile edges. */
     construction?: boolean;
+    /** Derived cache marker for merge; present only while an Offset constraint owns this entity. */
+    derivation?: "offset";
     /** bspline only: where the fit points sit on the curve parameter (the tools always write it; absent reads `chord`). */
     parametrization?: BSplineParametrization;
     /** Control mode: params are editable poles; absent preserves interpolating fit points. */
@@ -106,6 +108,8 @@ export interface SketchConstraintData {
      * that resolves against the document's parameters (`resolveDatumSource`).
      */
     datum?: ParameterValue;
+    /** 1: signed datum (CCW positive); -1: migrated clockwise magnitude, including expressions. */
+    angleSide?: -1 | 1;
     /** Datum values for multi-datum kinds (Fix = [x, y]); mutually exclusive with `datum`. */
     datums?: ParameterValue[];
     /** Independent entity parameter indexes pinned by Block; stable across reloads. */
@@ -124,21 +128,19 @@ export function datumUnitSpec(kind: ConstraintKind): UnitSpec {
 }
 
 /**
- * Datum value shown in the UI: angles store the signed sweep (the sign picks the
- * side of the first line) and display its magnitude in degrees, point-line
+ * Datum value shown in the UI: angles store the signed sweep from the first
+ * directed line to the second (CCW positive) and display signed degrees, point-line
  * distances flip sign (UI: positive = left of the line direction; the solver stores
  * the negated signed distance), everything else as stored.
  */
 export function toDisplayDatum(kind: ConstraintKind, value: number): number {
-    if (kind === ConstraintKind.Angle) return (Math.abs(value) * 180) / Math.PI;
+    if (kind === ConstraintKind.Angle) return (value * 180) / Math.PI;
     if (kind === ConstraintKind.P2LDistance) return -value;
     return value;
 }
 
 /**
- * Datum value for the solver: inverse of `toDisplayDatum`. For angles this yields
- * the magnitude in radians — the solver re-attaches the side sign before solving
- * (`SketchSolver.syncAngleDatumSide`).
+ * Datum value for the solver: inverse of `toDisplayDatum`, preserving the angle sign.
  */
 export function toStorageDatum(kind: ConstraintKind, value: number): number {
     if (kind === ConstraintKind.Angle) return (value * Math.PI) / 180;

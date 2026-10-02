@@ -6,7 +6,7 @@ import type { BoundingBox, Vector3 } from "../lib/spicy-wasm";
 /** Session-scoped, never serialized into a document. Not an IShape. */
 export type KernelHandle = string;
 export type KernelFailure = {
-    code: "cancelled" | "closed" | "kernel" | "invalid" | "unavailable" | "timeout";
+    code: "cancelled" | "closed" | "kernel" | "invalid" | "geometry" | "unavailable" | "timeout";
     message: string;
 };
 export type KernelResult<T> = { ok: true; value: T } | { ok: false; error: KernelFailure };
@@ -41,6 +41,8 @@ export type ReplicaInput = ShapeReplica | { handle: KernelHandle };
 export type BooleanReplica = ShapeReplica & {
     handle?: KernelHandle;
     tracking: WorkerTracking;
+    /** Runtime diagnostic, never part of the BREP or document. */
+    warning?: string;
     mesh?: WorkerMesh;
     nativeMs?: number;
 };
@@ -69,6 +71,7 @@ export type BoundedReplicaRequest =
           continuity: "c0" | "g1" | "c1" | "g2" | "c2" | "c3" | "cn";
       }
     | { method: "makeThickSolidBySimple"; shape: ShapeReplica; thickness: number }
+    | { method: "makeThickSolidTolerant"; shape: ShapeReplica; closingFaces: number[]; thickness: number }
     | {
           method: "makeThickSolidByJoin";
           shape: ShapeReplica;
@@ -84,6 +87,7 @@ export type KernelOperations = {
         args: { shape: ShapeReplica; edges: number[]; radius: number; distances: number[]; mesh?: boolean };
         result: CornerReplica;
     };
+    checkSelfIntersectionReplica: { args: { shape: ShapeReplica }; result: boolean };
     boundedReplica: { args: BoundedReplicaRequest; result: ShapeReplica };
     ready: { args: undefined; result: undefined };
     box: { args: { origin: Vector3; size: Vector3 }; result: KernelHandle };
@@ -92,7 +96,7 @@ export type KernelOperations = {
     bounds: { args: { handle: KernelHandle }; result: BoundingBox };
     boolean: {
         args: { operation: "fuse" | "cut" | "common"; left: KernelHandle[]; right: KernelHandle[] };
-        result: { handle: KernelHandle; tracking: WorkerTracking };
+        result: { handle: KernelHandle; tracking: WorkerTracking; warning?: string };
     };
     mesh: { args: { handle: KernelHandle }; result: WorkerMesh };
     release: { args: { handles: KernelHandle[] }; result: undefined };

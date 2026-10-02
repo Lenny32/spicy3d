@@ -14,6 +14,7 @@ import {
     Id,
     type IEdge,
     type IFace,
+    type IInspectionPrecheck,
     type IShape,
     type IShapeMeshData,
     type IShell,
@@ -115,7 +116,7 @@ function occShapeDeserialize(properties: Serialized) {
     deserialize: occShapeDeserialize,
     serialize: occShapeSerialize,
 })
-export class OccShape implements IShape {
+export class OccShape implements IShape, IInspectionPrecheck {
     // Tolerances are stored on shared native subshapes, so changing one invalidates parent exports too.
     private static toleranceRevision = 0;
     private serializedToleranceRevision = -1;
@@ -332,7 +333,7 @@ export class OccShape implements IShape {
         });
     }
 
-    inspectionCommonVolume(other: IShape): Result<number> {
+    inspectionCommonVolume(other: IShape, validated?: ReadonlySet<IShape>): Result<number> {
         if (!(other instanceof OccShape) || this.isNull() || other.isNull()) {
             return Result.err("Intersection requires two non-null OCCT shapes");
         }
@@ -343,7 +344,12 @@ export class OccShape implements IShape {
         if (!other.checkShape()) {
             return Result.err("Intersection volume: the other shape is invalid (checkShape is false)");
         }
-        const value = wasm.Shape.inspectionCommonVolume(this.shape, other.shape);
+        const checked = wasm.Shape.inspectionCommonVolumePrechecked;
+        const binding =
+            validated?.has(this) && validated.has(other) && typeof checked === "function"
+                ? checked
+                : wasm.Shape.inspectionCommonVolume;
+        const value = binding(this.shape, other.shape);
         return value == null || !Number.isFinite(value) || value < 0
             ? Result.err("Intersection volume is unavailable")
             : Result.ok(value);
@@ -432,7 +438,7 @@ export class OccShape implements IShape {
         return wasm.Shape.volume(this.shape);
     }
 
-    inspectionSectionCaps(plane: Plane): Result<IShape> {
+    inspectionSectionCaps(plane: Plane, validated?: ReadonlySet<IShape>): Result<IShape> {
         if (
             this.isNull() ||
             (this.shapeType !== ShapeTypes.solid &&
@@ -444,7 +450,12 @@ export class OccShape implements IShape {
         ) {
             return Result.err("Section caps require a valid solid and finite plane");
         }
-        const caps = wasm.Shape.inspectionSectionCaps(this.shape, {
+        const checked = wasm.Shape.inspectionSectionCapsPrechecked;
+        const binding =
+            validated?.has(this) && typeof checked === "function"
+                ? checked
+                : wasm.Shape.inspectionSectionCaps;
+        const caps = binding(this.shape, {
             location: plane.origin,
             direction: plane.normal,
             xDirection: plane.xvec,
@@ -516,6 +527,18 @@ export class OccShape implements IShape {
 
     checkShape(): boolean {
         return wasm.Shape.check(this.shape);
+    }
+
+    get needsInspectionSelfIntersectionCheck(): boolean {
+        if (!selfIntersectionBinding() || this.isNull()) return false;
+        // Unique faces give a conservative cutoff: the kernel counts occurrences.
+        // Repeated faces can cause an extra pre-check, never an unsafe bypass.
+        const faces = wasm.Shape.findSubShapes(this.shape, getShapeEnum(ShapeTypes.face));
+        try {
+            return faces.length < 200;
+        } finally {
+            for (const face of faces) face.delete();
+        }
     }
 
     checkSelfIntersection(): Result<boolean> {

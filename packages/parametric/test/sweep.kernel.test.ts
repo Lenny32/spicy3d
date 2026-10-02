@@ -10,6 +10,7 @@ import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import type { SweepFeatureData } from "../src/features/feature";
 import { capturePathReference } from "../src/features/pathReferences";
+import { validateSelfIntersection } from "../src/features/selfIntersectionValidation";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../src/sketch";
 
@@ -67,6 +68,30 @@ const edgeIds = (body: ParametricBodyNode) =>
     body.shape.value.findSubShapes(ShapeTypes.edge).map((_, index) => body.edgeIdAt(index));
 
 describe("associative path sweep feature (real kernel)", () => {
+    test("a real reversed sweep fails the nonpositive-volume gate before worker validation (N8)", () => {
+        const { document, body } = setup();
+        try {
+            const result = body.shape;
+            expect(result.isOk).toBe(true);
+            const reversed = result.value.clone();
+            try {
+                expect(reversed.volume()).toBeCloseTo(40, 5);
+                reversed.reserve();
+                expect(reversed.checkShape()).toBe(true);
+                expect(reversed.volume()).toBeCloseTo(-40, 5);
+                const defer = rs.fn((_shape: typeof reversed) => {});
+                const checked = validateSelfIntersection(reversed, undefined, defer);
+                expect(checked.isOk).toBe(false);
+                expect(checked.error).toBe("Shape has invalid volume");
+                expect(defer).toHaveBeenCalledTimes(0);
+            } finally {
+                reversed.dispose();
+            }
+        } finally {
+            document.dispose();
+        }
+    });
+
     test("builds a tracked solid and follows profile edits with the same semantic face and edge IDs", () => {
         const { profile, body } = setup();
         expect(body.shape.isOk).toBe(true);

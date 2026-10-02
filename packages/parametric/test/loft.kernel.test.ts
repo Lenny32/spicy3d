@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IFace, Plane, ShapeTypes, XYZ } from "@spicy3d/core";
+import { type IFace, Plane, Result, ShapeTypes, XYZ } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import type { LoftFeatureData } from "../src/features/feature";
@@ -132,6 +132,159 @@ describe("loft feature (real kernel)", () => {
         expect(body.shape.isOk).toBe(true);
         expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
         expect(body.shape.value.volume()).toBeGreaterThan(0);
+    });
+
+    const openSpline = (height: number): SketchData => ({
+        entities: [
+            {
+                id: 1,
+                type: "bspline",
+                params: [-10, 0, -3, height, 3, height, 10, 0],
+                control: { degree: 3, knots: [0, 1], multiplicities: [4, 4] },
+            },
+        ],
+        constraints: [],
+    });
+
+    test("open B-spline sections form an editable skin, thicken into a wall, and trim by common", () => {
+        const { sketches, body } = setup(
+            [
+                { z: 0, data: openSpline(3) },
+                { z: 10, data: openSpline(4) },
+                { z: 20, data: openSpline(3) },
+            ],
+            { solid: false },
+        );
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.shell);
+        expect(facesOf(body)).toHaveLength(1);
+        expect(body.shape.value.checkShape()).toBe(true);
+        const faceId = body.faceIdAt(0);
+        expect(faceId).toBe(`sketch:${sketches[0].id}:open:ent1`);
+        const bounds = body.shape.value.boundingBox();
+        sketches[1].setDataEmitShapeChanged(openSpline(6));
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.boundingBox().max.y).toBeGreaterThan(bounds.max.y);
+        expect(body.faceIdAt(0)).toBe(faceId);
+        body.setFeaturesEmitShapeChanged([...body.features, { id: "t1", type: "thicken", thickness: 1 }]);
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
+        expect(body.shape.value.checkShape()).toBe(true);
+        const volume = body.shape.value.volume();
+        expect(volume).toBeGreaterThan(0);
+        const tool = shapeFactory.box(Plane.XY, 30, 30, 10);
+        expect(tool.isOk).toBe(true);
+        const trimmed = shapeFactory.booleanCommon([body.shape.value], [tool.value]);
+        expect(trimmed.isOk).toBe(true);
+        expect(trimmed.value.checkShape()).toBe(true);
+        expect(trimmed.value.volume()).toBeGreaterThan(0);
+        expect(trimmed.value.volume()).toBeLessThan(volume);
+    });
+
+    test("connected open line chains loft with stable entity identities", () => {
+        const data: SketchData = {
+            entities: [
+                { id: 1, type: "line", params: [-10, 0, 0, 3] },
+                { id: 2, type: "line", params: [0, 3, 10, 0] },
+            ],
+            constraints: [],
+        };
+        const { body } = setup(
+            [
+                { z: 0, data },
+                { z: 10, data },
+            ],
+            { solid: false },
+        );
+        expect(body.shape.isOk).toBe(true);
+        expect(facesOf(body)).toHaveLength(2);
+        expect(new Set(facesOf(body).map((_, index) => body.faceIdAt(index))).size).toBe(2);
+    });
+
+    test.each([
+        ["solid with open sections", openSpline(3), {}, "not closed"],
+        [
+            "disconnected open curves",
+            {
+                entities: [
+                    { id: 1, type: "line", params: [-10, 0, 0, 0] },
+                    { id: 2, type: "line", params: [5, 0, 10, 0] },
+                ],
+                constraints: [],
+            },
+            { solid: false },
+            "single profile",
+        ],
+        [
+            "branching open curves",
+            {
+                entities: [
+                    { id: 1, type: "line", params: [-10, 0, 0, 0] },
+                    { id: 2, type: "line", params: [0, 0, 10, 0] },
+                    { id: 3, type: "line", params: [0, 0, 0, 10] },
+                ],
+                constraints: [],
+            },
+            { solid: false },
+            "branch or self-intersect",
+        ],
+        [
+            "crossing open curves",
+            {
+                entities: [
+                    { id: 1, type: "line", params: [-10, -10, 10, 10] },
+                    { id: 2, type: "line", params: [10, 10, -10, 10] },
+                    { id: 3, type: "line", params: [-10, 10, 10, -10] },
+                ],
+                constraints: [],
+            },
+            { solid: false },
+            "self-intersect",
+        ],
+    ] as [
+        string,
+        SketchData,
+        Partial<LoftFeatureData>,
+        string,
+    ][])("rejects %s", (_name, data, options, error) => {
+        const { body } = setup(
+            [
+                { z: 0, data },
+                { z: 10, data },
+            ],
+            options,
+        );
+        expect(body.shape.isOk).toBe(false);
+        expect(body.featureItems()[0].error).toContain(error);
+    });
+
+    test("closed surface sections retain profile resolution with loose scaffolding", () => {
+        const data: SketchData = {
+            entities: [...square(10).entities, { id: 5, type: "line", params: [20, 0, 30, 0] }],
+            constraints: [],
+        };
+        const { body } = setup(
+            [
+                { z: 0, data },
+                { z: 10, data },
+            ],
+            { solid: false },
+        );
+        expect(body.shape.isOk).toBe(true);
+        expect(facesOf(body)).toHaveLength(4);
+        expect(body.shape.value.boundingBox().max.x).toBeCloseTo(5, 3);
+    });
+
+    test("refuses mixing open and closed sections", () => {
+        const { body } = setup(
+            [
+                { z: 0, data: openSpline(3) },
+                { z: 10, data: circle(10) },
+            ],
+            { solid: false },
+        );
+        expect(body.shape.isOk).toBe(false);
+        expect(body.featureItems()[0].error).toContain("all open or all closed");
     });
 
     test("caps take their section's seed and side faces their first section edge's", () => {
@@ -292,4 +445,26 @@ describe("loft feature (real kernel)", () => {
         expect(body.shape.isOk).toBe(false);
         expect(body.featureItems()[0].error).toContain(message);
     });
+});
+
+test("a failed wire build falls back to valid closed profiles for a surface loft", () => {
+    const { doc, body } = setup(
+        [
+            { z: 0, data: square(20) },
+            { z: 20, data: square(10) },
+        ],
+        { solid: false },
+    );
+    expect(body.shape.isOk).toBe(true);
+    const wire = rs.spyOn(shapeFactory, "wire").mockReturnValue(Result.err("Wire build refused"));
+    try {
+        body.setFeaturesEmitShapeChanged(body.features.map((feature) => ({ ...feature, name: "rebuild" })));
+        expect(wire).toHaveBeenCalled();
+        expect(body.shape.isOk).toBe(true);
+        expect(body.featureItems()[0].error).toBeUndefined();
+        expect(body.shape.value.checkShape()).toBe(true);
+    } finally {
+        wire.mockRestore();
+        doc.dispose();
+    }
 });

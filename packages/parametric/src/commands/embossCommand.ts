@@ -285,7 +285,7 @@ export class EmbossCommand extends CancelableCommand {
                 ? this.preview.evaluate(this.edited(), false)
                 : this.creationPreview();
             this.previewValid = result.error === undefined && result.shape !== undefined;
-            showPreviewProblem(result.error);
+            showPreviewProblem(result.error, "note" in result ? result.note : undefined);
             const meshes = result.shape && previewMeshes(this.body, result.shape);
             if (meshes) {
                 for (const mesh of meshes)

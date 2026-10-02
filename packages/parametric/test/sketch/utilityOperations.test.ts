@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { LENGTH_UNITS, Plane, type Result } from "@spicy3d/core";
+import { ANGLE_UNITS, LENGTH_UNITS, Plane, type Result } from "@spicy3d/core";
 import { directedDistanceDimension } from "../../src/sketch/editor/dimensionLayout";
 import {
     arcAngles,
@@ -287,6 +287,45 @@ test("move detaches external relationships and rejects invalid transforms withou
             solver.applyTransform([2], { kind: "mirror", axis: { ...axis, params: [0, 0, 0, 0] } }).isOk,
         ).toBe(false);
         expect(solver.toData()).toEqual(before);
+    } finally {
+        solver.dispose();
+    }
+});
+
+test.each([
+    Math.PI / 6,
+    "tilt",
+])("mirror preserves migrated clockwise datum %s as a signed positive sweep", (datum) => {
+    const refs = [1, 2].flatMap((entityId) => [0, 1].map((pointIndex) => ({ entityId, pointIndex })));
+    const solver = new SketchSolver(
+        Plane.XY,
+        {
+            entities: [
+                { id: 1, type: "line", params: [0, 0, 10, 0] },
+                { id: 2, type: "line", params: [100, 0, 100 + 5 * Math.sqrt(3), -5] },
+            ],
+            constraints: [
+                {
+                    id: 1,
+                    kind: ConstraintKind.Block,
+                    refs: [refs[0]],
+                    datums: [0, 0, 10, 0],
+                    blockedParams: [0, 1, 2, 3],
+                },
+                { id: 2, kind: ConstraintKind.Fix, refs: [refs[2]], datums: [100, 0] },
+                { id: 3, kind: ConstraintKind.P2PDistance, refs: refs.slice(2), datum: 10 },
+                { id: 4, kind: ConstraintKind.Angle, refs, datum, angleSide: -1 },
+            ],
+        },
+        new Map([["tilt", { value: 30, unit: ANGLE_UNITS }]]),
+    );
+    try {
+        ok(solver.applyTransform([1, 2], { kind: "mirror", axis }));
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const angle = solver.toData().constraints.find((c) => c.id === 4)!;
+        expect(angle.angleSide).toBe(1);
+        expect(angle.datum).toEqual(typeof datum === "number" ? Math.PI / 6 : "abs(tilt)");
+        near(solver.entity(2)!.params, [-100, 0, -100 - 5 * Math.sqrt(3), -5]);
     } finally {
         solver.dispose();
     }

@@ -2,10 +2,12 @@
 // See LICENSE file in the project root for full license information.
 
 import { rs } from "@rstest/core";
+import "../../parametric/src/migrations";
 import {
     type BannerOptions,
     type CloseDocumentOptions,
     DOCUMENT_FORMAT_VERSION,
+    DocumentMigrations,
     type DocumentSource,
     decodeDocumentFile,
     formatDateTime,
@@ -30,7 +32,12 @@ import { CloudDocumentRepository } from "../src/documents/repository";
 import { DocumentStatusItem } from "../src/documents/statusItem";
 import { VersionHistoryPanel } from "../src/history/historyPanel";
 import { previewOf, VersionPreviewRepository } from "../src/history/previewRepository";
-import { PREVIEW_BANNER_ID, type UnsavedBeforeRestore, VersionHistory } from "../src/history/versionHistory";
+import {
+    needsNewerApp,
+    PREVIEW_BANNER_ID,
+    type UnsavedBeforeRestore,
+    VersionHistory,
+} from "../src/history/versionHistory";
 import { CONFIG, FakeDocumentServer } from "./_helpers/fakeDocumentServer";
 import { FakeServer, problem, signedInAccount, TestRequest } from "./_helpers/fakeServer";
 
@@ -547,6 +554,46 @@ describe("preview", () => {
         await rs.waitFor(() => expect(history.previewDocument).toBeUndefined());
         expect(app.activeView).toBe(openView);
         expect(published.some(([e, args]) => e === "hideBanner" && args[0] === PREVIEW_BANNER_ID)).toBe(true);
+    });
+
+    test("a newer module in the manifest is refused before downloading payload blobs", async () => {
+        const { history, docs, repository, server, loaded } = await setup();
+        const supported = DocumentMigrations.currentVersion("sketch")!;
+        const data = documentData([node("box", "Box", { brep: "payload".repeat(1000) })]);
+        data["moduleVersions"] = { sketch: supported + 1 };
+        const version = await docs.saveContentElsewhere("doc-1", data);
+        server.requests.length = 0;
+        const load = rs.spyOn(repository, "loadVersion");
+        const assemble = rs.spyOn(repository, "assemble");
+        const shown = await history.showPreview(version);
+        expect(shown.isOk).toBe(false);
+        expect(shown.error.message).toBe("cloud.history.needsUpdate");
+        expect(load).not.toHaveBeenCalled();
+        expect(assemble).not.toHaveBeenCalled();
+        expect(loaded).toEqual([]);
+        expect(server.requests.map((r) => r.path)).toEqual([`/api/versions/${version.id}`]);
+    });
+
+    test("module preflight accepts supported versions and unknown plugin modules", () => {
+        const supported = DocumentMigrations.currentVersion("sketch")!;
+        expect(
+            needsNewerApp({
+                formatVersion: DOCUMENT_FORMAT_VERSION,
+                moduleVersions: { sketch: supported, unloadedPlugin: 999 },
+            }),
+        ).toBe(false);
+        expect(
+            needsNewerApp({
+                formatVersion: DOCUMENT_FORMAT_VERSION,
+                moduleVersions: { sketch: supported - 1 },
+            }),
+        ).toBe(false);
+        expect(
+            needsNewerApp({
+                formatVersion: DOCUMENT_FORMAT_VERSION,
+                moduleVersions: { sketch: supported + 1 },
+            }),
+        ).toBe(true);
     });
 
     test("a version of a newer format says “needs a newer Spicy3D” without downloading anything", async () => {

@@ -5,6 +5,7 @@ import {
     Config,
     FEATURE_EDIT_PREVIEW_MODES,
     type FeatureEditPreviewMode,
+    I18n,
     type IShape,
     Matrix4,
     PubSub,
@@ -59,11 +60,16 @@ export interface FeatureChainPreviewResult {
     readonly error?: string;
     /** True when the later steps were left out of `shape`. */
     readonly partial: boolean;
+    /** Cheap synchronous preview is not proof of absence of self-intersection. */
+    readonly warning?: string;
+    /** Neutral explanation for geometry deferred until confirmation. */
+    readonly note?: string;
 }
 
 export class FeatureChainPreview {
     /** Last measured (or, before the first live run, estimated) cost of the later steps. */
     private _tailMs: number;
+    private readonly warnings = new Set<string>();
     /** The state entering the edited feature, captured before any session rollback. */
     private readonly entering: FeatureTimelineState | undefined;
 
@@ -96,6 +102,12 @@ export class FeatureChainPreview {
 
     /** The body with `feature` in place of the edited one; see the module header. */
     evaluate(feature: FeatureData, interactive: boolean): FeatureChainPreviewResult {
+        this.warnings.clear();
+        const result = this.evaluatePreview(feature, interactive);
+        return { ...result, warning: [...this.warnings].join("; ") || undefined };
+    }
+
+    private evaluatePreview(feature: FeatureData, interactive: boolean): FeatureChainPreviewResult {
         // A position the last run never reached (the chain failed before it) has no input
         // to evaluate against; index 0 legitimately has none.
         if (this.index > 0 && this.entering === undefined) {
@@ -162,6 +174,13 @@ export class FeatureChainPreview {
         for (let index = this.index + 1; index < features.length; index++) {
             const feature = features[index];
             if (feature.suppressed) continue;
+            if (feature.type === "thicken" && feature.tolerant === true) {
+                return {
+                    shape: this.owned(current.shape, input),
+                    partial: true,
+                    note: I18n.translate("prompt.thicken.backgroundResult"),
+                };
+            }
             const next = this.step(feature, index, current.shape, current.state, scope);
             if (!next.isOk) {
                 // Show what the edit itself makes, and say why the rest does not follow.
@@ -194,6 +213,7 @@ export class FeatureChainPreview {
                 input,
                 scope,
                 tracking,
+                warn: (message) => this.warnings.add(message),
             }),
         );
         if (!result.isOk) return Result.err(String(result.error));
@@ -278,7 +298,8 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Says why the preview cannot show the edit (or the steps after it); undefined clears it. */
-export function showPreviewProblem(error: string | undefined): void {
-    if (error === undefined) PubSub.default.pub("clearFloatTip");
-    else PubSub.default.pub("showFloatTip", { level: "warn", msg: error });
+export function showPreviewProblem(error: string | undefined, note?: string): void {
+    if (note !== undefined) PubSub.default.pub("showFloatTip", { level: "info", msg: note });
+    else if (error !== undefined) PubSub.default.pub("showFloatTip", { level: "warn", msg: error });
+    else PubSub.default.pub("clearFloatTip");
 }

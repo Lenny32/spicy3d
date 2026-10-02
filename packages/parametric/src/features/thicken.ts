@@ -2,6 +2,8 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    I18n,
+    type IAsyncShapeOperation,
     type IEdge,
     type IFace,
     type IShape,
@@ -9,6 +11,7 @@ import {
     Result,
     resolveUnitSpec,
     ShapeTypes,
+    volumeTolerance,
 } from "@spicy3d/core";
 import { captureExtentFaceRef } from "./extrudeExtent";
 import {
@@ -74,7 +77,56 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
             ? feature
             : { ...feature, openFaces: resolvedProfiles },
 
+    prepareAsync(feature, context) {
+        if (!feature.tolerant) return undefined;
+        const failed = (message: string): IAsyncShapeOperation<IShape> => ({
+            ready: Promise.resolve(),
+            canFallback: false,
+            cancel: () => {},
+            take: () => Result.err(message),
+        });
+        const input = context.input;
+        if (!input || input.isNull()) return failed("Thicken requires a preceding feature");
+        const thickness = resolveThickness(feature, context);
+        if (!thickness.isOk) return failed(thickness.error);
+        if (feature.mode === "pipe") return failed("Tolerant thicken requires skin mode");
+        const bounded = shapeFactory.boundedOperations;
+        if (!bounded)
+            return failed("Tolerant thicken requires the bounded geometry worker; it is unavailable");
+        const faces =
+            (feature.openFaces ?? []).length > 0
+                ? matchOpenFaces(feature, context, input)
+                : Result.ok<IFace[]>([]);
+        if (!faces.isOk) return failed(faces.error);
+        let pending: IAsyncShapeOperation<IShape>;
+        try {
+            pending = bounded.shapeOperation({
+                method: "makeThickSolidTolerant",
+                shape: input,
+                closingFaces: faces.value,
+                thickness: thickness.value,
+            });
+        } finally {
+            // Preparation captures replicas synchronously; these handles need not cross the await.
+            for (const face of faces.value) face.dispose();
+        }
+        return {
+            ready: pending.ready,
+            canFallback: false,
+            cancel: () => pending.cancel(),
+            take: () => {
+                const result = pending.take();
+                if (!result.isOk) return result;
+                const oriented = rightSideOut(result.value);
+                if (oriented.isOk && context.tracking)
+                    trackThicken(feature.id, input, oriented.value, context.tracking);
+                return oriented;
+            },
+        };
+    },
+
     evaluate(feature, context): Result<IShape> {
+        if (feature.tolerant) return Result.err(I18n.translate("prompt.thicken.backgroundResult"));
         const input = context.input;
         if (input === undefined || input.isNull()) return Result.err("Thicken requires a preceding feature");
         const thickness = resolveThickness(feature, context);
@@ -186,14 +238,34 @@ function matchOpenFaces(
 
 /** `shape`, or its orientation-fixed copy when the kernel returned it inside out (negative volume). */
 function rightSideOut(shape: IShape): Result<IShape> {
-    if (shape.volume() >= 0) return Result.ok(shape);
+    if (shape.volume() >= -volumeTolerance(shape.volume(), shape.boundingBox()))
+        return checkedOrientation(shape);
     const fixed = shape.fixSolid(FIX_TOLERANCE);
     shape.dispose();
     if (fixed.isNull() || fixed.volume() <= 0) {
         if (!fixed.isNull()) fixed.dispose();
         return Result.err("Thicken failed: the thick solid is inside out");
     }
-    return checked(fixed);
+    const valid = checked(fixed);
+    return valid.isOk ? checkedOrientation(valid.value) : valid;
+}
+
+/** A positive compound total must not hide an inside-out component. No new analyzer calls. */
+function checkedOrientation(shape: IShape): Result<IShape> {
+    const solids = shape.findSubShapes(ShapeTypes.solid);
+    try {
+        const tolerance = solids.length ? volumeTolerance(shape.volume(), shape.boundingBox()) : 0;
+        for (const [index, solid] of solids.entries()) {
+            const volume = solid.volume();
+            if (!Number.isFinite(volume) || volume < -tolerance) {
+                shape.dispose();
+                return Result.err(`Thicken result: solid ${index} has invalid volume (${volume} mm³)`);
+            }
+        }
+    } finally {
+        for (const solid of solids) solid.dispose();
+    }
+    return Result.ok(shape);
 }
 
 /**

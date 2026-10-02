@@ -171,6 +171,70 @@ describe("associative construction consumers", () => {
         expect(body.featureItems().map((item) => item.error)).toEqual([undefined, undefined]);
     });
 
+    test("removing before a top-face construction keeps fresh resolution valid through undo/redo", () => {
+        const doc = documentFixture();
+        const sketch = new SketchNode({ document: doc, plane: Plane.XY, data: rectangle });
+        doc.modelManager.addNode(sketch);
+        const body = new ParametricBodyNode({
+            document: doc,
+            features: [
+                { id: "pre", type: "extrude", sketchId: sketch.id, depth: 1, suppressed: true },
+                { id: "base", type: "extrude", sketchId: sketch.id, depth: 10 },
+            ],
+        });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(true);
+        const top = (body.shape.unchecked()!.findSubShapes(ShapeTypes.face) as IFace[]).find(
+            (face) => face.normal(0, 0)[1].z > 0.99,
+        );
+        expect(top).not.toBeUndefined();
+        const captured = captureConstructionRef(doc, body, top!);
+        expect(captured.isOk).toBe(true);
+        const source = new ConstructionNode({
+            document: doc,
+            definition: {
+                kind: "plane-offset",
+                source: captured.unchecked()!,
+                distance: 0,
+            },
+        });
+        doc.modelManager.addNode(source);
+        const attached = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            constructionPlaneRef: datum(source),
+            data: rectangle,
+        });
+        doc.modelManager.addNode(attached);
+        body.insertFeatureAt(
+            { id: "after", type: "extrude", sketchId: sketch.id, depth: 1, suppressed: true },
+            2,
+        );
+        const resolveFresh = (index: number) => {
+            const definition = source.definition as Extract<
+                typeof source.definition,
+                { kind: "plane-offset" }
+            >;
+            expect(definition.source).toMatchObject({ featureIndex: index });
+            expect(resolveConstructionRef(doc, definition.source).isOk).toBe(true);
+            expect(source.geometry.isOk).toBe(true);
+            expect(attached.plane.origin.z).toBeCloseTo(10);
+        };
+        resolveFresh(2);
+        const history = doc.history.position();
+        Transaction.execute(doc, "refused move", () =>
+            expect(body.moveFeatureTo("base", 2).isOk).toBe(false),
+        );
+        expect(doc.history.position()).toEqual(history);
+        resolveFresh(2);
+        Transaction.execute(doc, "remove pre", () => body.removeFeature("pre"));
+        resolveFresh(1);
+        doc.history.undo();
+        resolveFresh(2);
+        doc.history.redo();
+        resolveFresh(1);
+    });
+
     test("a datum edit updates an attached sketch and its extrusion before undo and redo", () => {
         const doc = documentFixture();
         const source = new ConstructionNode({

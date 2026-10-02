@@ -162,6 +162,8 @@ export class History implements IDisposable {
     /** Reverts an uncommitted transaction without moving either history stack. */
     rollback(record: IHistoryRecord): void {
         this.assertWritable();
+        // A nested rollback emits onAfterReplay while the outer undo is still active;
+        // listeners needing the fully restored state must wait for the outer replay.
         const wasUndoing = this.#isUndoing;
         this.#isUndoing = true;
         this.tryOperate(

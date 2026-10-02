@@ -374,6 +374,15 @@ export default {
         "command.inspect.similarComponents": "Similar Components",
         "command.inspect.addToLibrary": "Add to Component Library",
         "command.inspect.removeFromLibrary": "Remove from Component Library",
+        "analysis.inspectionCancelled": "Inspection cancelled",
+        "analysis.inspectionInvalid": "Inspection input is invalid",
+        "analysis.inspectionWorkerRequired": "Inspection requires a bounded geometry worker",
+        "analysis.inspectionIntersects": "Inspection input intersects itself",
+        "analysis.inspectionTimedOutAfter{0}": "Inspection timed out after {0} ms (result unknown)",
+        "analysis.panel.run": "Run",
+        "parametric.loft.selectProfileFace": "Select a profile face: this sketch has several closed profiles",
+        "analysis.inspectionTimedOut": "Inspection timed out (result unknown)",
+        "analysis.inspectionRunning": "Checking geometry…",
         "analysis.panel.name": "Name",
         "analysis.panel.visible": "Visible",
         "analysis.panel.delete": "Delete analysis",
@@ -493,6 +502,9 @@ export default {
         "prompt.sketchRotationCenter": "Pick rotation center",
         "prompt.sketchRotationReference": "Pick reference direction",
         "prompt.sketchMirrorAxis": "Pick mirror line",
+        "sketch.offsetAssociative": "Associative",
+        "tooltip.sketch.offset":
+            "Offset a curve; enable Associative to follow source edits and expression distances",
         "sketch.offsetDistance": "Offset distance",
         "prompt.sketchExtendTarget": "Select the boundary to extend to",
         "prompt.sketchEditCurve": "Click a curve near the portion to edit; Escape to finish",
@@ -529,6 +541,7 @@ export default {
         "sketch.text.value": "Text",
         "sketch.text.height": "Cap height (mm)",
         "prompt.pickTextPosition": "Pick the first corner of the text frame",
+        "error.parametric.timelinePrefix{0}": "Cannot move feature: {0} would lose its timeline prefix",
         "error.sketch.emptyText": "Enter text with at least one visible character",
         "error.sketch.invalidTextSize": "Text height must be positive and placement must be finite",
         "error.sketch.unsupportedTextCharacter":
@@ -992,6 +1005,7 @@ export default {
         "option.command.merge": "Merge",
         "option.command.modifyBoundary": "Modify boundary",
         "option.command.normalOffset": "Normal Offset",
+        "option.command.tolerantThicken": "Tolerant envelope (solid only)",
         "option.command.offsetMode": "Offset Mode",
         "option.command.offsetMode.pipe": "Pipe",
         "option.command.offsetMode.rectoVerso": "Recto Verso",
@@ -1078,9 +1092,10 @@ export default {
         "prompt.select.path": "Please select path",
         "prompt.select.section": "Please select section",
         "prompt.select.loftSection":
-            "Select the section profiles in loft order, one per sketch; Confirm when done",
+            "Select section profiles in loft order, one per sketch (open curves with Solid off); Confirm when done",
         "prompt.select.thickenOpenFaces":
             "Select the faces to open, none for a closed hollow or a thickened surface; Confirm when done",
+        "prompt.thicken.backgroundResult": "Result is computed in the background after you confirm",
         "prompt.thicken.openFacesSolidOnly":
             "Open faces apply to solids only; this surface is thickened whole. Confirm when done",
         "prompt.select.shape": "Please select shape",
@@ -1132,6 +1147,7 @@ export default {
         "sketch.externalRefAssociativeOnly": "External references only accept associative constraints",
         "sketch.externalRefsLost{0}":
             "{0} sketch external references lost their source; profiles use frozen geometry",
+        "sketch.offsetWarnings{0}{1}": "Sketch warnings ({0}): {1}",
         "sketch.externalRefTypeChanged": "External reference type changed — its constraints were removed",
         "sketch.fullyConstrained": "Fully constrained",
         "sketch.noProjectableEdges": "No coplanar edges could be projected",
@@ -1159,7 +1175,7 @@ export default {
             "Lofts through the picked wires, edges or points into a fixed shape that does not update.",
         "tooltip.create.revol": "Revolves the picked shapes into a fixed shape that does not update.",
         "tooltip.feature.loft":
-            "Lofts a solid or surface through one sketch profile per section, in order. Stays linked: editing a sketch re-lofts the body.",
+            "Lofts through one sketch profile per section, in order. Turn Solid off to pick open section curves and build a skin. Editing a sketch re-lofts the body.",
         "tooltip.feature.thicken":
             "Shells a solid (open faces optional) or thickens a surface into a solid. Stays linked: the wall follows the thickness and every change upstream.",
         "tooltip.create.thickSolid": "Thickens the picked faces into a fixed solid that does not update.",
@@ -1210,6 +1226,10 @@ export default {
         "viewport.mode.solid": "Solid",
         "viewport.mode.wireframe": "Wireframe",
         "viewport.mode.solidAndWireframe": "Solid And Wireframe",
+        "warning.selfIntersection.timeout{0}":
+            "Self-intersection check timed out after {0} ms (result unknown; geometry not verified)",
+        "warning.selfIntersection.unknown":
+            "Self-intersection worker failed or is unavailable (result unknown; geometry not verified)",
         "warning.script.fromDomain": "Do you trust plugins from this origin?",
         "warning.plugin.origin":
             "A plugin runs with the same rights as the app. Only trust origins whose plugins you trust.",
@@ -1505,6 +1525,10 @@ export default {
         "cloud.merge.undoUnavailable": "This merge can no longer be undone",
         "cloud.merge.validating": "Rebuilding the merged model…",
         "cloud.merge.value.absent": "Not there",
+        "cloud.merge.value.associativeOffset": "Associative offset",
+        "cloud.merge.value.detached": "Detached",
+        "cloud.merge.value.clockwise": "clockwise",
+        "cloud.merge.value.counterclockwise": "counterclockwise",
         "cloud.merge.value.changed": "Changed",
         "cloud.merge.value.data": "Geometry data",
         "cloud.merge.value.deleted": "Deleted",

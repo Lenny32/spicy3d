@@ -1,0 +1,24 @@
+{
+    "description": "Concurrent angle expression edits choose datum source and angleSide together.",
+    "conflicts": [
+        {
+            "kind": "property",
+            "path": "node/sketch-angle/constraint/4/datum",
+            "base": {
+                "datum": "tilt",
+                "angleSide": -1
+            },
+            "ours": {
+                "datum": "45",
+                "angleSide": -1
+            },
+            "theirs": {
+                "datum": "60",
+                "angleSide": 1
+            },
+            "messageKey": "merge.conflict.property{0}{1}",
+            "args": ["constraint 4", "datum"],
+            "choices": ["ours", "theirs"]
+        }
+    ]
+}

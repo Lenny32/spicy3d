@@ -196,7 +196,9 @@ describe("associative groove/rib on a face", () => {
         try {
             section.setDataEmitShapeChanged(square(0.5));
             expect(invalid).toHaveBeenCalled();
-            expect(body.featureItems()[1].error).toBe("Face sweep entering body ancestry is incomplete");
+            expect(body.featureItems()[1].error).toBe(
+                'faceSweep step "rib": Face sweep entering body ancestry is incomplete',
+            );
             expect(body.shape.value).toBe(previous);
         } finally {
             invalid.mockRestore();
@@ -316,4 +318,31 @@ describe("associative groove/rib on a face", () => {
             build.mockRestore();
         }
     });
+});
+
+test.each([
+    ["validity", "Shape is invalid"],
+    ["volume", "Shape has invalid volume"],
+] as const)("face sweep preserves the %s gate diagnostic", (gate, expected) => {
+    const { document, body, feature } = fixture();
+    const binding = shapeFactory.faceSweepTracked;
+    if (!binding) throw new Error("Missing face-sweep binding");
+    const original = binding.bind(shapeFactory);
+    const build = rs.spyOn(shapeFactory, "faceSweepTracked").mockImplementation((...args) => {
+        const result = original(...args);
+        if (result.isOk) {
+            if (gate === "validity") rs.spyOn(result.value.shape, "checkShape").mockReturnValue(false);
+            else rs.spyOn(result.value.shape, "volume").mockReturnValue(NaN);
+        }
+        return result;
+    });
+    try {
+        body.setFeaturesEmitShapeChanged([body.features[0], { ...feature, roundCorner: true }]);
+        expect(build).toHaveBeenCalledOnce();
+        expect(body.featureItems()[1].error).toContain(expected);
+        expect(body.featureItems()[1].error).not.toContain("intersects itself");
+    } finally {
+        rs.restoreAllMocks();
+        document.dispose();
+    }
 });

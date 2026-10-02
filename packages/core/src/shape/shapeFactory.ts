@@ -191,6 +191,10 @@ export interface IShapeFactory {
         mode?: OffsetMode,
         intersection?: boolean,
     ): Result<IShape>;
+    /** Material envelope with intersection trimming; optional for older kernels.
+     * @unit length thickness
+     */
+    makeThickSolidTolerant?(shape: IShape, openFaces: IShape[], thickness: number): Result<IShape>;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
     /** OCCT smooth radius interpolation per selected edge; normalized arc length, natural curve direction.
@@ -298,15 +302,20 @@ export interface IShapeFactory {
      * chains are an error naming the section. Open chains are valid sections.
      */
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape>;
+    /** Runtime capability; the matching binding omits the page analyzer. */
+    readonly supportsDeferredGuidedLoft?: boolean;
     /**
      * Guided C2 loft retaining all authored sections and proving the whole boundary on its sides.
      * Runtime pipe history enumerates all section inputs, then spine and boundary inputs.
+     * Deferred validation skips the internal analyzer: managed async rebuilds use a bounded worker,
+     * synchronous evaluation reports a skipped-check warning. Older kernels keep their internal analyzer.
      */
     loftGuidedTracked?(
         sections: IWire[],
         spine: IWire,
         boundary: IWire,
         solid: boolean,
+        deferSelfIntersection?: boolean,
     ): Result<TrackedShape>;
     removeFeature(shape: IShape, faces: IFace[]): Result<IShape>;
     removeFillet(
@@ -335,6 +344,8 @@ export interface IShapeFactory {
 
 /** Preparation snapshots inputs synchronously. take() alone creates local results, exactly once. */
 export interface IAsyncShapeOperation<T> {
+    /** Explicit cancellation state; cancellation must never be cached as an unknown verdict. */
+    readonly cancelled?: boolean;
     readonly ready: Promise<void>;
     /** After failed take(): only compatibility failures may be retried by the synchronous kernel. */
     readonly canFallback?: boolean;
@@ -344,6 +355,8 @@ export interface IAsyncShapeOperation<T> {
 }
 
 export interface AsyncTrackedBoolean {
+    /** Runtime diagnostic, never serialized with the document. */
+    readonly warning?: string;
     readonly result: TrackedShape;
     /** Owned immutable replicas in args-then-tools order, for geometry history completion. */
     readonly inputs: IShape[];
@@ -395,6 +408,7 @@ export type BoundedShapeRequest =
     | { method: "fillet" | "chamfer"; shape: IShape; edges: number[]; value: number }
     | { method: "loft"; sections: IShape[]; isSolid: boolean; isRuled: boolean; continuity: Continuity }
     | { method: "makeThickSolidBySimple"; shape: IShape; thickness: number }
+    | { method: "makeThickSolidTolerant"; shape: IShape; closingFaces: IShape[]; thickness: number }
     | {
           method: "makeThickSolidByJoin";
           shape: IShape;
@@ -405,6 +419,10 @@ export type BoundedShapeRequest =
           intersection: boolean;
       };
 
+/** Runtime-only checks, isolated from the kernel holding the document's native shapes. */
+export type BoundedShapeQuery = { method: "checkSelfIntersection"; shape: IShape };
+
 export interface IBoundedShapeFactory {
+    shapeQuery(request: BoundedShapeQuery, signal?: AbortSignal): IAsyncShapeOperation<boolean>;
     shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape>;
 }

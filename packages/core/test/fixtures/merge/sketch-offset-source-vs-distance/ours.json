@@ -1,0 +1,72 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 14,
+        "sketch": 6
+    },
+    "id": "fixture-sketch6-offset",
+    "name": "Fixture sketch v6: associative circle offset",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":734251950211,\"type\":\"circle\",\"params\":[0,0,14],\"construction\":true},{\"id\":91827364555,\"type\":\"circle\",\"params\":[0,0,16],\"derivation\":\"offset\"}],\"constraints\":[{\"id\":527164938721,\"kind\":34,\"refs\":[{\"entityId\":734251950211,\"pointIndex\":0},{\"entityId\":91827364555,\"pointIndex\":0}],\"datum\":\"gap\"}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-offset",
+                "name": "Associative offset",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "gap",
+            "name": "gap",
+            "type": "length",
+            "expression": "2"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {
+        "offset": "untouched user data"
+    }
+}

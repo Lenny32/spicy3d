@@ -24,6 +24,7 @@ import {
     Matrix4,
     NodeUtils,
     Plane,
+    precheckInspectionShapes,
     Result,
     resolveUnitSpec,
     type Scope,
@@ -264,6 +265,7 @@ export const EDIT_METHODS: ReadonlySet<string> = new Set([
     "fillet2d",
     "makeThickSolidByJoin",
     "makeThickSolidBySimple",
+    "makeThickSolidTolerant",
     "pushPull",
     "removeFeature",
     "removeFillet",
@@ -823,6 +825,8 @@ function resolveQueryTarget(
     return entry;
 }
 
+type ResolvedQuery = { entry: LocalRef; args: unknown[] };
+
 /** Call the target's member with the op's arguments, unwrapping the Result it may return. */
 function invokeMember(cap: QueryCapability, target: Record<string, unknown>, args: unknown[]): unknown {
     const member = target[cap.name];
@@ -840,13 +844,16 @@ function runQuery(
     localRefs: Map<string, LocalRef>,
     results: Record<string, unknown>,
     numeric: NumericArgs,
+    resolved?: ResolvedQuery,
 ) {
     if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
     if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
 
-    const entry = resolveQueryTarget(cap, op.target, doc, localRefs);
+    const entry = resolved?.entry ?? resolveQueryTarget(cap, op.target, doc, localRefs);
     const target = entry.value as Record<string, unknown>;
-    const args = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric));
+    const args =
+        resolved?.args ??
+        cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric));
     const raw = invokeMember(cap, target, args);
 
     if (cap.returnKind === "mutate") {
@@ -1076,8 +1083,8 @@ interface ProgramOutput {
 
 /**
  * Runs every op in order, restating any failure as an error naming the offending op. A cancelled
- * call stops before the next op (the caller's transaction rolls everything back); an op that
- * is already running cannot be interrupted, so each op's wall time is noted for the slow-op warning.
+ * call stops before the next op (the caller's transaction rolls everything back). Bounded worker
+ * operations terminate on cancellation; synchronous ops are timed for the slow-op warning.
  */
 async function runOps(
     ops: Op[],
@@ -1100,7 +1107,8 @@ async function runOps(
                 String(op.method),
                 () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner, signal),
                 (factory as IShapeFactory).boundedOperations !== undefined &&
-                    boundedRequest(op.method, []) !== undefined,
+                    (boundedRequest(op.method, []) !== undefined ||
+                        op.method === "shape.checkSelfIntersection"),
             );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
@@ -1231,11 +1239,73 @@ async function runOp(
         return;
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
+    if (!cap && op.method === "shape.checkSelfIntersection") {
+        if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
+        if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
+        const bounded = (factory as IShapeFactory).boundedOperations;
+        if (!bounded?.shapeQuery)
+            throw new Error("Self-intersection check requires a bounded geometry worker");
+        const query = queryCapabilities.find((c) => c.method === op.method)!;
+        const pending = owner.run(() => {
+            const entry = resolveQueryTarget(query, op.target, doc, localRefs);
+            return bounded.shapeQuery(
+                { method: "checkSelfIntersection", shape: entry.value as IShape },
+                signal,
+            );
+        });
+        try {
+            await pending.ready;
+            owner.run(() => {
+                const result = pending.take();
+                if (!result.isOk) throw new Error(result.error);
+                results[op.id!] = result.value;
+            });
+        } finally {
+            pending.cancel();
+        }
+        return;
+    }
     if (!cap) {
-        owner.run(() => runQueryOp(op, doc, localRefs, created, results, numeric));
+        const resolved = ["shape.inspectionCommonVolume", "shape.inspectionSectionCaps"].includes(op.method)
+            ? await precheckInspection(op, doc, factory, localRefs, numeric, owner, signal)
+            : undefined;
+        owner.run(() => {
+            if (signal?.aborted) throw new Error("Query cancelled; inspection skipped");
+            runQueryOp(op, doc, localRefs, created, results, numeric, resolved);
+        });
         return;
     }
     await runShapeOp(cap, op, doc, factory, localRefs, created, removed, results, numeric, owner, signal);
+}
+
+async function precheckInspection(
+    op: Op,
+    doc: IDocument,
+    factory: unknown,
+    localRefs: Map<string, LocalRef>,
+    numeric: NumericArgs,
+    owner: IDocumentMutationScope,
+    signal?: AbortSignal,
+): Promise<ResolvedQuery> {
+    if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
+    if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
+    const resolved = owner.run(() => {
+        const query = queryCapabilities.find((c) => c.method === op.method)!;
+        const entry = resolveQueryTarget(query, op.target, doc, localRefs);
+        const args = query.params.map((p) =>
+            coerce(p, op.args?.[p.name], doc, localRefs, new Set(), numeric),
+        );
+        return { entry, args };
+    });
+    const target = resolved.entry.value as IShape;
+    const inputs =
+        op.method === "shape.inspectionCommonVolume" ? [target, resolved.args[0] as IShape] : [target];
+    const checked = await precheckInspectionShapes(inputs, factory as IShapeFactory, signal, (action) =>
+        owner.run(action),
+    );
+    if (!checked.isOk) throw new Error(`${op.method}: ${checked.error}; inspection skipped`);
+    resolved.args.push(checked.value);
+    return resolved;
 }
 
 function runQueryOp(
@@ -1245,6 +1315,7 @@ function runQueryOp(
     created: CreatedNode[],
     results: Record<string, unknown>,
     numeric: NumericArgs,
+    resolved?: ResolvedQuery,
 ): void {
     const query = queryCapabilities.find((c) => c.method === op.method);
     if (!query) {
@@ -1256,7 +1327,7 @@ function runQueryOp(
         runClone(query, op, doc, localRefs, created, results);
         return;
     }
-    runQuery(query, op, doc, localRefs, results, numeric);
+    runQuery(query, op, doc, localRefs, results, numeric, resolved);
 }
 
 /** The parameter each profile-sweeping op sweeps; everything else takes its args as given. */
@@ -1368,6 +1439,13 @@ function boundedRequest(method: string, args: unknown[]): BoundedShapeRequest | 
             };
         case "makeThickSolidBySimple":
             return { method, shape: args[0] as IShape, thickness: args[1] as number };
+        case "makeThickSolidTolerant":
+            return {
+                method,
+                shape: args[0] as IShape,
+                closingFaces: args[1] as IShape[],
+                thickness: args[2] as number,
+            };
         case "makeThickSolidByJoin":
             return {
                 method,

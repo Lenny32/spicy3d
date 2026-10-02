@@ -10,15 +10,34 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConstructionNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
+import { Document } from "@spicy3d/app";
+import {
+    ConstructionNode,
+    DOCUMENT_FORMAT_VERSION,
+    DocumentMigrations,
+    decodeDocumentFile,
+    encodeDocumentFile,
+    type IEdge,
+    type IFace,
+    Plane,
+    ShapeTypes,
+    Transaction,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HeadlessDocumentEvaluator } from "../../../app/src/mergeEvaluator";
 import type { RevolveFeatureData } from "../../src/features/feature";
 import type { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
-import type { SketchInfo, SketchReport } from "../../src/program/sketchProgram";
+import { type SketchInfo, type SketchReport, SketchSession } from "../../src/program/sketchProgram";
 import { bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
-import { ConstraintKind, type SketchEntityData } from "../../src/sketch/sketchModel";
+import { captureExternalRef } from "../../src/sketch/externalRef";
+import {
+    axisLineRefs,
+    ConstraintKind,
+    SKETCH_X_AXIS_ID,
+    type SketchEntityData,
+} from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -628,6 +647,106 @@ describe("sketch actions", () => {
 });
 
 describe("sketchInfo", () => {
+    test("reports the effective clockwise expression and preserves it on setDatum", () => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "tilt", name: "tilt", expression: "30", type: "angle" }]);
+        const start = { entityId: 1, pointIndex: 0 },
+            end = { entityId: 1, pointIndex: 1 };
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [{ id: 1, type: "line", params: [0, 0, 5 * Math.sqrt(3), -5] }],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                        angleSide: -1,
+                    },
+                ],
+            },
+        });
+        doc.modelManager.addNode(node);
+        const read = () =>
+            run(doc, [{ op: "sketchInfo", id: "info", sketch: node.id }]).results["info"] as SketchInfo;
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: node.id,
+                actions: [{ action: "setDatum", constraint: 4, value: "tilt" }],
+            },
+        ]);
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        expect(node.data.entities[0].params[3]).toBeCloseTo(-5, 6);
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: node.id,
+                actions: [{ action: "setDatum", constraint: 4, value: "tilt + 15" }],
+            },
+        ]);
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt + 15",
+            angleSide: 1,
+            effectiveDatum: expect.closeTo(45, 6),
+        });
+        doc.history.undo();
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        doc.history.redo();
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt + 15",
+            angleSide: 1,
+            effectiveDatum: expect.closeTo(45, 6),
+        });
+    });
+
+    test.each([
+        { initial: 20, value: -40, expected: -40 },
+        { initial: "pcb_angle", value: "pcb_angle + 45", expected: 14.5 },
+    ])("reports signed datums and orientation after setDatum ($value)", ({ initial, value, expected }) => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "pcb", name: "pcb_angle", expression: "-30.5", type: "angle" }]);
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "t1",
+                plane: "XY",
+                entities: [{ type: "line", params: [100, 0, 110, 0] }],
+                constraints: [
+                    { kind: "Fix", points: [{ entity: 1, point: 0 }], datums: [100, 0] },
+                    { kind: "Distance", entities: [1], datum: 10 },
+                    { kind: "Angle", entities: ["xAxis", 1], datum: initial },
+                ],
+            },
+            { op: "editSketch", sketch: "t1", actions: [{ action: "setDatum", constraint: 3, value }] },
+            { op: "sketchInfo", id: "info", sketch: "t1" },
+        ]);
+        const info = result.results["info"] as SketchInfo;
+        expect(info.solve).toMatch(/^Ok/);
+        const angle = info.constraints.find((c) => c.kind === "Angle")!;
+        expect(angle.datum).toEqual(typeof value === "number" ? expect.closeTo(value, 6) : value);
+        const [x1, y1, x2, y2] = info.entities[0].params;
+        expect((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI).toBeCloseTo(expected, 6);
+        expect(Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(10, 6);
+    });
+
     test("reads a sketch back in display units", () => {
         const doc = newDoc();
         const result = run(doc, [
@@ -999,4 +1118,235 @@ test("control NURBS authoring and later settings edit preserve pole and entity i
         ]),
     ).toMatch(/positive finite/);
     expect(sketch.data).toEqual(previous);
+});
+
+test("associative offset loft follows edits and retains geometry with warnings live and after reopening", async () => {
+    const doc = newDoc();
+    const variables = (gap: number) => [
+        { id: "gap", name: "gap", expression: String(gap), type: "length" as const },
+    ];
+    doc.variables.setItems(variables(2));
+    const points: [number, number][] = Array.from({ length: 16 }, (_, i) => {
+        const angle = (2 * Math.PI * i) / 16;
+        return [20 * Math.cos(angle), 30 * Math.sin(angle)];
+    });
+    const result = run(doc, [
+        { op: "sketch", id: "foot", entities: [{ type: "bspline", points, periodic: true }] },
+        { op: "construct", id: "plane", definition: { kind: "plane-offset", source: "XY", distance: 5 } },
+        {
+            op: "sketch",
+            id: "top",
+            plane: { construction: "plane" },
+            actions: [
+                { action: "paste", from: "foot", entities: [1] },
+                { action: "offset", entity: 1, distance: "gap", associative: true, name: "outline" },
+                { action: "setConstruction", entities: [1], value: true },
+            ],
+        },
+        { op: "loft", id: "skirt", sections: ["foot", "top"] },
+    ]);
+    const top = sketchOf(doc, result, "top");
+    const body = nodeById(doc, result.created.find((c) => c.id === "skirt")!.nodeId) as ParametricBodyNode;
+    const link = top.data.constraints.find((c) => c.kind === ConstraintKind.Offset)!;
+    expect(link).toMatchObject({
+        datum: "gap",
+        refs: [
+            { entityId: 1, pointIndex: 0 },
+            { entityId: 2, pointIndex: 0 },
+        ],
+    });
+    expect(top.data.entities[0].construction).toBe(true);
+    expect(top.data.entities[1].construction).toBeUndefined();
+    expect(top.data.entities[1].params[0]).toBeCloseTo(22, 3);
+    expect(body.shape.unchecked()!.checkShape()).toBe(true);
+    doc.variables.setItems(variables(4));
+    expect(top.data.entities[1].params[0]).toBeCloseTo(24, 3);
+    expect(body.shape.unchecked()!.boundingBox().max.x).toBeCloseTo(24, 2);
+    const before = top.data;
+    run(doc, [
+        {
+            op: "editSketch",
+            sketch: top.id,
+            actions: [{ action: "movePoint", entity: 1, point: 0, to: [21, 0] }],
+        },
+    ]);
+    expect(top.data.entities[1].params[0]).toBeCloseTo(25, 2);
+    const edited = top.data;
+    doc.history.undo();
+    expect(top.data).toEqual(before);
+    doc.history.redo();
+    expect(top.data).toEqual(edited);
+    const info = run(doc, [{ op: "sketchInfo", sketch: top.id }]).results["sketchInfo"] as SketchInfo;
+    expect(info.constraints.find((c) => c.id === link.id)).toMatchObject({
+        kind: "Offset",
+        datum: "gap",
+        refs: [
+            { entity: 1, point: 0 },
+            { entity: 2, point: 0 },
+        ],
+    });
+    expect(info.solve).toMatch(/^Ok/);
+    const volume = body.shape.value.volume();
+    const maxX = body.shape.value.boundingBox().max.x;
+    doc.variables.setItems(variables(-50));
+    expect(top.data.entities[1].params).toEqual(edited.entities[1].params);
+    expect(top.shape.isOk).toBe(true);
+    expect(body.shape.isOk).toBe(true);
+    expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+    expect(body.shape.value.boundingBox().max.x).toBeCloseTo(maxX, 5);
+    expect(top.warningCount).toBe(1);
+    expect(top.offsetWarnings[0]).toMatch(new RegExp(`Offset constraint ${link.id}:.*collapse`));
+    const stored = {
+        __cla$$__: "Document",
+        acts: [],
+        formatVersion: DOCUMENT_FORMAT_VERSION,
+        moduleVersions: DocumentMigrations.moduleVersions(),
+        id: doc.id,
+        name: doc.name,
+        models: doc.modelManager.serialize(),
+        variables: variables(-50),
+    };
+    const decoded = await decodeDocumentFile(await encodeDocumentFile(stored));
+    expect(decoded.isOk).toBe(true);
+    const reopened = newDoc();
+    reopened.variables.setItems(decoded.value["variables"]);
+    await reopened.modelManager.deserialize(decoded.value["models"]);
+    const reopenedTop = nodeById(reopened, top.id) as SketchNode;
+    const reopenedBody = nodeById(reopened, body.id) as ParametricBodyNode;
+    expect(reopenedTop.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.value.volume()).toBeCloseTo(volume, 5);
+    expect(reopenedBody.shape.value.boundingBox().max.x).toBeCloseTo(maxX, 5);
+    expect(reopenedTop.offsetWarnings).toEqual(top.offsetWarnings);
+    expect(reopenedTop.warningCount).toBe(1);
+    expect(reopened.modelManager.serialize()).toEqual(stored.models);
+    const evaluation = await new HeadlessDocumentEvaluator(createMockApplication()).evaluate(decoded.value);
+    expect(evaluation.isOk).toBe(true);
+    expect(evaluation.value.size).toBe(0);
+    const headless = await Document.loadHeadless(createMockApplication(), decoded.value);
+    expect(headless.isOk).toBe(true);
+    try {
+        const headlessTop = headless.value.modelManager.findNode((n) => n.id === top.id) as SketchNode;
+        const headlessBody = headless.value.modelManager.findNode(
+            (n) => n.id === body.id,
+        ) as ParametricBodyNode;
+        expect(headlessTop.shape.isOk).toBe(true);
+        expect(headlessBody.shape.isOk).toBe(true);
+        expect(headlessBody.shape.value.volume()).toBeCloseTo(volume, 5);
+        expect(headlessTop.offsetWarnings).toEqual(top.offsetWarnings);
+        expect(headlessTop.warningCount).toBe(1);
+    } finally {
+        headless.value.dispose();
+    }
+    reopened.variables.setItems(variables(3));
+    expect(reopenedTop.warningCount).toBe(0);
+    expect(reopenedTop.offsetWarnings).toEqual([]);
+    expect(reopenedBody.shape.isOk).toBe(true);
+    expect(reopenedBody.shape.value.volume()).not.toBeCloseTo(volume, 2);
+});
+
+test("external-reference followers preserve a failed offset target and warn on the node", () => {
+    const doc = newDoc();
+    const source = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [{ id: 1, type: "circle", params: [0, 0, 10] }],
+            constraints: [],
+        },
+    });
+    doc.modelManager.addNode(source);
+    expect(source.shape.isOk).toBe(true);
+    const ref = captureExternalRef(
+        -100,
+        source.id,
+        Plane.XY,
+        source.shape.value as IEdge,
+        undefined,
+        "reference",
+    );
+    expect(ref).not.toBeUndefined();
+    const follower = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [
+                { id: 10, type: "circle", params: [0, 0, 10], construction: true },
+                { id: 20, type: "circle", params: [0, 0, 2], derivation: "offset" },
+            ],
+            constraints: [
+                {
+                    id: 30,
+                    kind: ConstraintKind.Offset,
+                    datum: -8,
+                    refs: [10, 20].map((entityId) => ({ entityId, pointIndex: 0 })),
+                },
+                {
+                    id: 31,
+                    kind: ConstraintKind.EqualRadius,
+                    refs: [10, -100].map((entityId) => ({ entityId, pointIndex: 0 })),
+                },
+            ],
+            externalRefs: [ref!],
+        },
+    });
+    doc.modelManager.addNode(follower);
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.warningCount).toBe(0);
+    source.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 5] }],
+        constraints: [],
+    });
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.data.entities[0].params[2]).toBeCloseTo(5, 6);
+    expect(follower.data.entities[1].params[2]).toBe(2);
+    expect(follower.warningCount).toBe(1);
+    expect(follower.offsetWarnings[0]).toMatch(/Offset constraint 30:.*collapse/);
+    source.setDataEmitShapeChanged({
+        entities: [{ id: 1, type: "circle", params: [0, 0, 12] }],
+        constraints: [],
+    });
+    expect(follower.shape.isOk).toBe(true);
+    expect(follower.data.entities[1].params[2]).toBeCloseTo(4, 6);
+    expect(follower.warningCount).toBe(0);
+});
+
+test("a non-offset datum discovered during a failing program solve preserves the diagnosis", () => {
+    const doc = newDoc();
+    const node = new SketchNode({
+        document: doc,
+        plane: Plane.XY,
+        data: {
+            entities: [{ id: 10, type: "circle", params: [0, 0, 10] }],
+            constraints: [
+                { id: 40, kind: ConstraintKind.Radius, datum: 10, refs: [{ entityId: 10, pointIndex: 0 }] },
+            ],
+        },
+    });
+    const session = new SketchSession(
+        { resolveNode: () => node, resolveSketch: () => node },
+        node,
+        { entities: new Map(), constraints: new Map() },
+        new Map(),
+    );
+    const solve = rs.spyOn(session.solver, "solve").mockImplementation(() => {
+        (session.solver.datumErrors as Map<number, string>).set(40, "unrelated datum error");
+        return { result: "Unsolved constraints", dofs: 0 };
+    });
+    const diagnose = rs.spyOn(session.solver, "diagnose").mockReturnValue({
+        conflicting: [40],
+        redundant: [],
+        dofs: 0,
+    });
+    try {
+        expect(() => session.finish()).toThrow(
+            "the sketch does not solve (Unsolved constraints): conflicting constraints 40",
+        );
+        expect(diagnose).toHaveBeenCalledOnce();
+        expect(solve).toHaveBeenCalledOnce();
+    } finally {
+        solve.mockRestore();
+        diagnose.mockRestore();
+        session.dispose();
+    }
 });

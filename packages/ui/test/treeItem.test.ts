@@ -40,6 +40,7 @@ class MockNode {
     /** Present only on warning-capable nodes (the `isNodeWarning` guard needs both). */
     warningCount?: number;
     warningTooltip?: string;
+    warningTooltipArgs?: readonly unknown[];
     /** Present only on nodes opting into the `INodeIcon` contract. */
     icon?: string;
     private handlers = new Set<PropertyHandler>();
@@ -246,6 +247,17 @@ describe("TreeModel (TreeItem)", () => {
             const item = createItem({ warningCount: 2, warningTooltip: "sketch.externalRefsLost{0}" });
             expect(item.warningBadge.classList.contains("ti-hidden")).toBe(false);
             expect(item.warningBadge.title).toBe(I18n.translate("sketch.externalRefsLost{0}" as I18nKeys, 2));
+        });
+
+        test("runtime warning details name the failed offset in the visible tooltip", () => {
+            const message = "Offset constraint 30: offset would collapse";
+            const item = createItem({
+                warningCount: 1,
+                warningTooltip: "sketch.offsetWarnings{0}{1}",
+                warningTooltipArgs: [1, message],
+            });
+            expect(item.warningBadge.classList.contains("ti-hidden")).toBe(false);
+            expect(item.warningBadge.title).toBe(I18n.translate("sketch.offsetWarnings{0}{1}", 1, message));
         });
 
         test("a warning count without a tooltip key fails the guard and stays hidden", () => {

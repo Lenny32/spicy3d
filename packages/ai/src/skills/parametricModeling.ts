@@ -13,6 +13,8 @@ Long sketch-edit batches: use start_parametric_job with the same { ops, response
 
 Which one: if the user should be able to change a dimension afterwards, roll the timeline back, or see the feature list — run_parametric. If it is a one-off shape, a measurement, or a geometry query — run_program. A parametric body is a long-lived asset: never feed it to run_program's edit-style ops (booleanCut/booleanFuse/fillet/pushPull/...), which DELETE their inputs and would destroy the feature history. To combine bodies, use run_parametric's own boolean op.
 
+Validity: bounded run_program booleans and tracked worker booleans (including extrude operations during asynchronous rebuilds) validate result topology and every solid component's volume. Negative or non-finite component volumes always fail; a positive compound total is insufficient. Only when result topology is invalid are operands analyzed: an already invalid operand allows the result to be accepted, with a parametric warning naming the input/tool. Valid operands producing an invalid result still fail. Fillet/chamfer and loft validate inputs and results. Kernel/validity errors name the operation and feature step; user-input errors keep their wording. Worker checks use deadlines, not a guarantee against all self-intersections. Synchronous parametric boolean compatibility paths use the same result and invalid-operand checks without a face-count cutoff, and can still block.
+
 Ops run in order; later ops reference earlier ids. An op that EDITS a body (extrude with "body", fillet,
 chamfer, boolean) also registers its own id as another name for that body, so any of them works as a
 reference afterwards. Anywhere a reference is expected you may also pass the real node id of an existing
@@ -66,7 +68,8 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
 - { op: "sketchInfo", sketch, id? }   reads a sketch back: entities with their points, constraints with
-  their datums (display units), externals (projected edges, ids -100 and below), dofs, solve status,
+  their datums (display units), angleSide (+1 counterclockwise, -1 clockwise) and effectiveDatum
+  (the signed angle in degrees used by the solver), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
   a sketch you did not build in this call.
 - { op: "extrude", id, sketch, depth, symmetric?, startOffset?, startFace?, body?, operation?, extent?, secondExtent? }
@@ -95,7 +98,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   construction line drawn in a sketch). The two references follow their source when it changes.
   Always starts a new body — there is no join/cut revolve. angle is in degrees, default 360.
 - { op: "loft", id, sections, solid?, ruled?, continuity?, guided? }
-  sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes
+  sections: two or more sketch ids in loft order, each sketch holding ONE closed profile without holes,
+  or ONE connected, non-branching, non-self-intersecting OPEN wire when solid: false. Ordinary lofts
+  accept open curves (lines, arcs, splines); guided lofts still require closed profiles. All sections
+  must be all open or all closed. Open curves produce an uncapped skin; use thicken with no
+  openFaceIndexes to make a solid wall, then boolean or extrude operation "intersect" to trim it.
   (e.g. a rectangle on XY, a circle on an offset plane); consecutive sections must not share a plane.
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
@@ -109,7 +116,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
 - { op: "editLoft", body, featureId, sections?, solid?, ruled?, continuity?, guided? }
   changes the loft inputs/options as one undo step. guided:null clears both paths and restores
   ordinary lofting; replacing the guided group must supply both spine and boundary.
-- { op: "edges", body, id?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "edges", body, id?, index?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
 - { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
   Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at
   the path start, perpendicular to its tangent; this operation does not relocate a misplaced profile.
@@ -124,7 +131,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   Re-picks or changes a face-sweep feature. Omitted fields keep their previous value. Invalid picks fail
   the whole call and leave the previous committed model and undo position intact.
 
-- { op: "fillet", id, body, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, edgeIndexes?, edgeRefs?, distance }
+- { op: "fillet", id, body, index?, edgeIndexes?, edgeRefs?, radius }  /  { op: "chamfer", id, body, index?, edgeIndexes?, edgeRefs?, distance }
   Fillets also accept radiusLaw: [{position:0,radius:"noseRadius"}, {position:1,radius:"tailRadius"}].
   Use 2–64 increasing samples with endpoints 0 and 1; radii are positive lengths/expressions.
   Positions are normalized selected-edge arc length in its natural curve direction, not world-space
@@ -133,7 +140,18 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   endpoint radii on a closed contour. BREP validation can reject a law that cannot fit the shape.
   editFeature action "setRadiusLaw" replaces the whole law; omit radiusLaw to restore the saved
   constant radius. setParameter keys radiusLaw.0, radiusLaw.1, ... edit individual radius expressions.
-- { op: "thicken", id, body, thickness, joinType?, mode?, openFaceIndexes? }
+Guided lofts use a deferred native analyzer plus bounded worker validation when supported by
+the kernel. Detected self-intersection is an error; timeout/unavailable-worker verdicts accept
+with runtime warnings. Synchronous preview/program evaluation has a skipped-check warning.
+Older kernels retain the original synchronous guided-loft analyzer. Construction and section/
+guide coverage booleans remain synchronous.
+
+- { op: "thicken", id, body, thickness, joinType?, mode?, tolerant?, openFaceIndexes? }
+  tolerant:true opts into a material envelope: closed spheres/ring tori can consume an inward
+  cavity entirely. Ordinary arc thickening is tried first; intersection fallback is verified only
+  for analytic solids with only vertical-edge fillets. Free-form collapse and open skins are refused.
+  joinType/mode are ignored. Programs await the bounded worker with a 30 s deadline.
+  Intersection trimming retains the many-face guard; an older kernel reports unavailable.
   A live shell / thicken of the body's current shape. thickness is signed (a number or an expression,
   e.g. "wall_t" — the wall rebuilds when the variable changes): positive grows along the face normals
   (outward for a solid), negative inward; never zero. A SOLID with openFaceIndexes (face indexes, found
@@ -142,11 +160,17 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   does not apply to it, nor do joinType ("arc" default | "intersection") and mode ("skin" | "pipe"),
   which shape a solid's walls. Faces the thicken leaves where they were keep their ids, so a fillet
   after it survives a thickness edit.
+  Offset failures can name a likely limiting input face index, position (body coordinates, mm),
+  and sampled curvature radius. Try a smaller absolute wall_t or smooth that region; the sampled
+  radius is a local estimate, NOT a guaranteed maximum successful thickness. No reported limit
+  does not rule out a narrow crease or collisions between distant offset walls. skin/pipe and
+  arc/intersection do not provide a self-intersection-trimming envelope mode.
 - { op: "boolean", id, body, operation, tools }   // operation: fuse | cut | common
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.
 - { op: "editFeature", body, featureId, action, ... }
   action: "setParameter" (key, value) | "setRadiusLaw" (radiusLaw?, fillet only) | "rename" (value) | "suppress" (value) | "moveTo" (index) | "remove"
+  moveTo across a sketch or construction timeline anchor is refused.
 - { op: "features", body }   // reads the feature list: ids, names, parameters, errors
 - { op: "construct", id, definition, name?, displaySize? }   // construction plane / axis / point / UCS
 - { op: "editConstruction", node, definition?, name?, displaySize? }
@@ -174,7 +198,8 @@ the way the UI picks them — by entities and points — and the refs are derive
   { kind: "HorizontalDistance" | "VerticalDistance", points: [p1, p2], datum }   signed: p2 − p1
   { kind: "PointLineDistance", points: [p], entities: [line], datum }   signed: + = left of the line direction
   { kind: "Radius", entities: [circle|arc], datum }
-  { kind: "Angle", entities: [line1, line2], datum }
+  { kind: "Angle", entities: [line1, line2], datum }               signed from line1 to line2, CCW positive; angleSide preserves the chosen side
+  Re-sending the same datum expression keeps a clockwise side; sketchInfo reports effectiveDatum.
   { kind: "Scale", entities: [line1, line2], datum }    length(line1) = datum × length(line2)
   Entity keys: an id, a name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
   "direction": [u, v] rotates the axis of Horizontal/Vertical/HorizontalDistance/VerticalDistance.
@@ -203,13 +228,21 @@ sketch re-solves after each action and a failing one rolls everything back):
     "at" between its neighbouring intersections (a circle needs two)
 - { action: "split", entity, at: [u, v] }                  splits at "at" (snaps to a nearby intersection)
 - { action: "extend", entity, to: boundary, end? = "end" } lengthens a line/arc to the boundary entity
-- { action: "offset", entity, distance, name? }            parallel copy; + = left of a line / outward
+- { action: "offset", entity, distance, associative?, name? }
+  Parallel copy; + = left of a line / outward.
   Supports lines, arcs, circles and open/periodic B-splines (fit or control mode). For open B-splines
   + is left along the curve; for periodic B-splines + is outward regardless of winding. B-splines
   are approximated to 0.001 mm at checked samples, with at most 512 fit points; collapsed, inverted
-  or crossing offsets are refused. distance takes mm or a length expression, evaluated ONCE.
-  The copy is not associative: later source/variable edits do not update it. Remove the pasted
-  source from a section sketch if only the offset outline should contribute to a loft.
+  or crossing offsets are refused. distance takes mm or a length expression. Default associative:false evaluates ONCE.
+  associative:true keeps an Offset constraint linking source and target; source edits and variable
+  changes regenerate on fine solve / commit, not each pointer frame. Keep the source as construction
+  geometry when only the offset outline should contribute to a loft. Removing the source or relation
+  detaches the target. To close an open offset profile, Coincident may join a target endpoint
+  to a movable line/arc endpoint: the connector follows the frozen target on fine solve.
+  Target centers/interior B-spline points, other target constraints, and connectors that are
+  offset sources/targets, Blocked or Fixed at the joined endpoint are refused; detach first.
+  Offset chains are refused; detach first to edit a target. Move/rotate in place keep the relation. Mirror/copy/paste detach transformed relations.
+  Pasted sources are snapshots of the other sketch, not cross-sketch links.
 - { action: "move", entities, delta: [du, dv], copy? }
 - { action: "rotate", entities, center: [u, v], angle, copy? }
 - { action: "mirror", entities, axis: line|"xAxis"|"yAxis", copy? = true }   copies get Symmetric constraints
@@ -367,6 +400,22 @@ Example — the same skin as an open loft, thickened into a 1.5 mm wall driven b
  [ ...the construct and the two sketches above...,
    { op: "loft", id: "b1", sections: ["s1", "s2"], solid: false },
    { op: "thicken", id: "b1", body: "b1", thickness: "wall_t" } ]
+
+Example — an editable skin through open section curves, then a solid wall (no closing lines or caps):
+ [ { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+   { op: "sketch", id: "s1", entities: [ { type: "bspline", points: [[-10,0],[0,3],[10,0]] } ] },
+   { op: "sketch", id: "s2", plane: { construction: "p1" }, entities: [ { type: "bspline", points: [[-8,0],[0,4],[8,0]] } ] },
+   { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+   { op: "thicken", id: "wall", body: "skin", thickness: 1 } ]
+
+Fillet/chamfer creation accepts optional index, a zero-based insertion position in the
+feature list (0..feature count; omitted appends). Edge selection resolves against the
+shape entering that position. Query { op: "edges", body, index: 1, selector: ... } for
+edges after feature 0, then use { op: "fillet", id, body, index: 1, edgeRefs, radius }.
+This can round a loft before downstream cuts make its final faces unsuitable for filleting.
+The later chain rebuilds in the same undo step; a failure rolls back the whole program.
+Persistent references picked on the final body are also allowed when they resolve
+unambiguously at the insertion position. Edges created later cannot be selected there.
 
 Limits and recovery:
 - Only whole sketches are extruded; individual profiles of a sketch cannot be selected (a hole in a

@@ -164,7 +164,13 @@ export type SketchAction =
     | { action: "trim"; entity: SketchEntityKey; at: [number, number] }
     | { action: "split"; entity: SketchEntityKey; at: [number, number] }
     | { action: "extend"; entity: SketchEntityKey; to: SketchEntityKey; end?: "start" | "end" }
-    | { action: "offset"; entity: SketchEntityKey; distance: ParameterValue; name?: string }
+    | {
+          action: "offset";
+          entity: SketchEntityKey;
+          distance: ParameterValue;
+          associative?: boolean;
+          name?: string;
+      }
     | { action: "move"; entities: SketchEntityKey[]; delta: [number, number]; copy?: boolean }
     | {
           action: "rotate";
@@ -314,6 +320,10 @@ export class SketchSession {
         }
         const outcome = this.solver.solve(true);
         if (outcome.result.startsWith("Ok")) return;
+        if (this.solver.offsetErrors.size) {
+            const [id, message] = [...this.solver.offsetErrors][0];
+            throw new Error(`constraint ${id} has an unusable value: ${message}`);
+        }
         const diagnosis = this.solver.diagnose();
         const detail = [
             diagnosis.conflicting.length > 0
@@ -396,7 +406,17 @@ export class SketchSession {
                 const distance = resolveUnitSpec(action.distance, this.scope, LENGTH_UNITS);
                 if (!distance.isOk) throw new Error(distance.error);
                 const edit = offsetCurve(this.editableEntity(action.entity), distance.value);
+                const sourceId = this.entityId(action.entity);
+                if (action.associative !== undefined && typeof action.associative !== "boolean")
+                    throw new Error('"associative" must be a boolean');
+                if (action.associative) this.solver.validateOffsetSource(sourceId);
                 const ids = this.applyEdit(edit);
+                if (action.associative)
+                    this.solver.addConstraint({
+                        kind: ConstraintKind.Offset,
+                        refs: [sourceId, ids[0]].map((entityId) => ({ entityId, pointIndex: 0 })),
+                        datum: action.distance,
+                    });
                 if (action.name !== undefined) this.nameEntity(action.name, ids[0]);
                 return;
             }
@@ -604,6 +624,8 @@ export class SketchSession {
     private movePoint(action: Extract<SketchAction, { action: "movePoint" }>): void {
         const ref = this.pointRef({ entity: action.entity, point: action.point });
         if (ref.entityId < 1) throw new Error("reference geometry cannot be moved");
+        if (this.solver.isFixed(ref.entityId))
+            throw new Error("Detach the offset relation before editing its target");
         const [u, v] = uv(action.to, "to");
         // the editor's drag path: the dragged group follows, everything else re-solves around it
         this.solver.beginDrag([ref]);
@@ -1043,6 +1065,9 @@ export interface SketchInfo {
         kind: string;
         refs: { entity: number; point: number }[];
         datum?: ParameterValue;
+        /** Resolved signed datum in display units (angles in degrees). */
+        effectiveDatum?: number;
+        angleSide?: -1 | 1;
         datums?: ParameterValue[];
         structural?: boolean;
         direction?: [number, number];
@@ -1082,7 +1107,7 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
                 : node.planeRef
                   ? `face of node ${node.planeRef.nodeId}`
                   : "fixed",
-            entities: data.entities.map((entity) => ({
+            entities: solver.entities().map((entity) => ({
                 ...entity,
                 points: Array.from(
                     { length: entityPointCount(entity.type, entity.params) },
@@ -1097,6 +1122,11 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
                 };
                 if (c.datum !== undefined)
                     row.datum = typeof c.datum === "number" ? toDisplayDatum(c.kind, c.datum) : c.datum;
+                if (c.kind === ConstraintKind.Angle) {
+                    row.angleSide = c.angleSide ?? 1;
+                    const effective = solver.datumValue(c.id);
+                    if (effective !== undefined) row.effectiveDatum = toDisplayDatum(c.kind, effective);
+                }
                 if (c.datums !== undefined)
                     row.datums = c.datums.map((d) => (typeof d === "number" ? toDisplayDatum(c.kind, d) : d));
                 if (c.direction !== undefined) row.direction = c.direction;
@@ -1117,7 +1147,8 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
             redundant: diagnosis.redundant,
             suggestedDimensions: suggestDimensions(solver).map((s) => s.label),
         };
-        if (node.warningCount > 0)
+        if (solver.offsetErrors.size) info.warning = [...solver.offsetErrors.values()].join("; ");
+        else if (node.warningCount > 0)
             info.warning = String(node.constructionPlaneError ?? "dangling profile reference");
         return info;
     } finally {

@@ -114,7 +114,7 @@ export class LoftEditCommand extends CancelableCommand {
     @property("common.confirm")
     readonly confirm = () => {
         if (this.pickController) this.pickController.success();
-        else if (!this.guided || this.valid) this.controller?.success();
+        else if (this.valid) this.controller?.success();
     };
 
     protected override async executeAsync(): Promise<void> {
@@ -181,8 +181,8 @@ export class LoftEditCommand extends CancelableCommand {
             return;
         }
         const result = this.preview.evaluate(edited, false);
-        this.valid = result.shape !== undefined && result.error === undefined;
-        showPreviewProblem(result.error);
+        this.valid = result.shape !== undefined && (!edited.guided || result.error === undefined);
+        showPreviewProblem(result.error ?? result.warning, result.note);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);
         const context = this.document.visual.context;
         if (meshes !== undefined) {

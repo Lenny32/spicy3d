@@ -15,6 +15,7 @@ import {
     type INodeVisual,
     LENGTH_UNITS,
     type ParameterValue,
+    type Property,
     PubSub,
     property,
     SelectShapeStep,
@@ -81,7 +82,10 @@ export class ThickenFeatureCommand extends CancelableCommand {
         this.setProperty("thickness", value, () => this.displayPreview());
     }
 
-    @property("option.command.joinType", { combobox: Combobox.from([...THICKEN_JOIN_TYPES]) })
+    @property("option.command.joinType", {
+        combobox: Combobox.from([...THICKEN_JOIN_TYPES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get joinType(): I18nKeys {
         return this.getPrivateValue("joinType", "option.command.joinType.arc");
     }
@@ -89,12 +93,28 @@ export class ThickenFeatureCommand extends CancelableCommand {
         this.setProperty("joinType", value, () => this.displayPreview());
     }
 
-    @property("option.command.offsetMode", { combobox: Combobox.from([...THICKEN_MODES]) })
+    @property("option.command.offsetMode", {
+        combobox: Combobox.from([...THICKEN_MODES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get mode(): I18nKeys {
         return this.getPrivateValue("mode", "option.command.offsetMode.skin");
     }
     set mode(value: I18nKeys) {
         this.setProperty("mode", value, () => this.displayPreview());
+    }
+
+    // Envelope behavior is an explicit opt-in for each new feature.
+    protected override isPropertyCached(property: Property): boolean {
+        return property.name !== "tolerant";
+    }
+
+    @property("option.command.tolerantThicken")
+    get tolerant(): boolean {
+        return this.getPrivateValue("tolerant", false);
+    }
+    set tolerant(value: boolean) {
+        this.setProperty("tolerant", value, () => this.displayPreview());
     }
 
     @property("common.confirm")
@@ -162,7 +182,8 @@ export class ThickenFeatureCommand extends CancelableCommand {
             id: Id.generate(),
             type: "thicken",
             thickness: this.thickness,
-            ...thickenOptions(this.joinType, this.mode),
+            ...thickenOptions(this.joinType, this.tolerant ? "option.command.offsetMode.skin" : this.mode),
+            ...(this.tolerant ? { tolerant: true } : {}),
             ...(this.openFaces.length > 0 ? { openFaces: this.openFaces.map((x) => x.ref) } : {}),
         };
     }
@@ -185,6 +206,13 @@ export class ThickenFeatureCommand extends CancelableCommand {
         this.removePreview();
         const body = this.body;
         if (body === undefined || !body.shape.isOk) return;
+        if (this.tolerant) {
+            PubSub.default.pub("showFloatTip", {
+                level: "info",
+                msg: I18n.translate("prompt.thicken.backgroundResult"),
+            });
+            return;
+        }
         const shape = evaluateFeature(this.feature(), {
             document: this.document,
             host: body,

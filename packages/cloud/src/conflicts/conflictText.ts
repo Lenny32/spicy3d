@@ -115,6 +115,43 @@ export function formatConflictValue(conflict: MergeConflict, value: unknown, nam
     if (Array.isArray(value)) return I18n.translate("cloud.merge.value.items{0}", value.length);
     if (typeof value === "object") {
         const record = value as Record<string, unknown>;
+        if (
+            typeof record["type"] === "string" &&
+            parseMergePath(conflict.path).includes("entity") &&
+            [conflict.base, conflict.ours, conflict.theirs].some(
+                (side) =>
+                    side !== null &&
+                    typeof side === "object" &&
+                    (side as Record<string, unknown>)["derivation"] === "offset",
+            )
+        )
+            return I18n.translate(
+                record["derivation"] === "offset"
+                    ? "cloud.merge.value.associativeOffset"
+                    : "cloud.merge.value.detached",
+            );
+        if (field === "datum" && "datum" in record) {
+            const datum = formatConflictValue(conflict, record["datum"], names);
+            const angular =
+                "angleSide" in record ||
+                [conflict.base, conflict.ours, conflict.theirs].some(
+                    (side) => side !== null && typeof side === "object" && "angleSide" in side,
+                );
+            if (angular) {
+                const angle =
+                    typeof record["datum"] === "number"
+                        ? String(Number(((record["datum"] * 180) / Math.PI).toFixed(6)))
+                        : datum;
+                if (record["angleSide"] !== -1 && record["angleSide"] !== 1) return `${angle}°`;
+                const side = I18n.translate(
+                    record["angleSide"] === -1
+                        ? "cloud.merge.value.clockwise"
+                        : "cloud.merge.value.counterclockwise",
+                );
+                return `${angle}° (${side})`;
+            }
+            return datum;
+        }
         if (typeof record["$blob"] === "string") return I18n.translate("cloud.merge.value.data");
         if (typeof record["name"] === "string" && record["name"] !== "")
             return shorten(displayNodeName(record["name"]));

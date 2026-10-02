@@ -115,6 +115,22 @@ test("large replay offloads every boolean, commits once, and restores a retained
     expect(sync).not.toHaveBeenCalled();
 });
 
+test("worker topology warnings reach feature items after an async rebuild", async () => {
+    // Simulate inherited BRepCheck defects while keeping the real worker operation,
+    // response, async feature replay, and body commit in the path under test.
+    rs.spyOn(wasm.Shape, "check").mockReturnValue(false);
+    const sync = rs.spyOn(factory, "booleanFuseTracked");
+    const { body } = model();
+    await DocumentRebuilds.settled(document);
+    expect(body.shape.isOk).toBe(true);
+    expect(requests()).toHaveLength(12);
+    expect(sync).not.toHaveBeenCalled();
+    expect(body.featureItems()[1].error).toBeUndefined();
+    expect(body.featureItems()[1].warning).toBe(
+        "input 0 is already invalid (checkShape false); tool 0 is already invalid (checkShape false)",
+    );
+});
+
 test("synchronous takeover preserves the completed prefix and never imports the late worker result", async () => {
     const { body } = model();
     // Hold the second worker result: the first worker feature has already become part of this run's prefix.
@@ -212,7 +228,7 @@ test("a worker kernel failure keeps last-good geometry instead of replaying the 
     expect(await body.whenRebuilt()).toBe(false);
     expect(body.shape.value).toBe(previous);
     expect(local).not.toHaveBeenCalled();
-    expect(body.featureItems().at(-1)?.error).toBe("Native operation rejected");
+    expect(body.featureItems().at(-1)?.error).toBe('boolean step "f11": Native operation rejected');
 });
 
 test("an unavailable backend falls back locally while preserving the cached prefix", async () => {
@@ -292,7 +308,7 @@ test.each([
             body.requestRollbackIndex(undefined);
             expect(await body.whenRebuilt()).toBe(false);
             expect(body.shape.value).toBe(preview);
-            expect(body.featureItems().some((item) => item.error === message)).toBe(true);
+            expect(body.featureItems().some((item) => item.error?.endsWith(message))).toBe(true);
         }
         expect(native).toHaveBeenCalledTimes(1);
         expect(local).not.toHaveBeenCalled();

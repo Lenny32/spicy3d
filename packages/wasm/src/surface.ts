@@ -85,6 +85,10 @@ export class OccSurface extends OccGeometry implements ISurface {
         throw new Error(`Unknown surface type: ${String(surface)}`);
     }
 
+    isAnalytic(): boolean {
+        return wasm.Surface.isAnalytic?.(this.surface) ?? false;
+    }
+
     override copy(): IGeometry {
         return gc((c) => {
             const s = c(this.surface.copy());

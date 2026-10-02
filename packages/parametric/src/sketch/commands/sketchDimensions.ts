@@ -181,15 +181,14 @@ function angleCandidate(editor: SketchEditor, l1Id: number, l2Id: number): Dimen
             ];
             const d1: [number, number] = [a2[0] - a1[0], a2[1] - a1[1]];
             const d2: [number, number] = [b2[0] - b1[0], b2[1] - b1[1]];
-            // signed sweep from d1 to d2: the sign records which side of the first
-            // line the second line sits on, so later magnitude edits keep the angle
-            // in place instead of flipping the line across its reference
+            // Signed sweep from d1 to d2, CCW positive. The dialog edits signed degrees.
             const initialRad = Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]);
             commitDimension(
                 editor,
                 { kind: ConstraintKind.Angle, refs, datum: initialRad },
                 { kind: "vector", dx: position[0] - vertex[0], dy: position[1] - vertex[1] },
                 toDisplayDatum(ConstraintKind.Angle, initialRad),
+                { positiveOnly: false },
             );
         },
     };

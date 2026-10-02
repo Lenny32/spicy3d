@@ -697,8 +697,8 @@ export class SketchAnnotationManager implements IDisposable {
         const len1 = Math.hypot(d1[0], d1[1]);
         const len2 = Math.hypot(d2[0], d2[1]);
         if (len1 < 1e-12 || len2 < 1e-12) return;
-        const cos = Math.max(-1, Math.min(1, (d1[0] * d2[0] + d1[1] * d2[1]) / (len1 * len2)));
-        this.addPreviewBadge(`${((Math.acos(cos) * 180) / Math.PI).toFixed(1)}°`, geometry.textPosition);
+        const sweep = Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]);
+        this.addPreviewBadge(`${((sweep * 180) / Math.PI).toFixed(1)}°`, geometry.textPosition);
     }
 
     // ------------------------------------------------------------------ Visibility, graphics helpers and disposal

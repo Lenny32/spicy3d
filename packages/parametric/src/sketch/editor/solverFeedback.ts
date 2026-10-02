@@ -211,6 +211,7 @@ function constraintLabel(kind: ConstraintKind): string {
         [ConstraintKind.Scale]: "Length ratio",
         [ConstraintKind.PointOnBSpline]: "Point on B-spline",
         [ConstraintKind.TangentLineBSpline]: "Tangent",
+        [ConstraintKind.Offset]: "Associative offset",
     };
     return labels[kind];
 }

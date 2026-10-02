@@ -4,12 +4,21 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IEdge, type IFace, type IShape, Plane, ShapeTypes, Transaction, XYZ } from "@spicy3d/core";
+import {
+    type IEdge,
+    type IFace,
+    type IShape,
+    Plane,
+    Result,
+    ShapeTypes,
+    Transaction,
+    XYZ,
+} from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, OccShapeConverter, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import { captureExtentFaceRef } from "../src/features/extrudeExtent";
-import type { FeatureData, ThickenFeatureData } from "../src/features/feature";
+import { evaluateFeature, type FeatureData, type ThickenFeatureData } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { runParametricProgram } from "../src/program/parametricProgram";
 import { type SketchData, SketchNode } from "../src/sketch";
@@ -314,16 +323,16 @@ describe("thicken feature (real kernel)", () => {
                         { op: "thicken", id: "failed", body: body.id, thickness: -5, openFaceIndexes },
                     ]),
                 ),
-            ).toThrow("offset did not remove an opening face");
+            ).toThrow("input shape unchanged");
             expect(body.features).toHaveLength(1);
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
 
             thicken(body, { thickness: -5, openFaces: openings });
-            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(errorOf(body, "t1")).toContain("input shape unchanged");
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
 
             body.setFeatureParameter("t1", "thickness", -7);
-            expect(errorOf(body, "t1")).toContain("offset did not remove an opening face");
+            expect(errorOf(body, "t1")).toContain("input shape unchanged");
             expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
         });
 
@@ -462,7 +471,7 @@ describe("periodic ruled loft thickening (issue #126)", () => {
 
         thicken(body, { thickness });
 
-        expect(errorOf(body, "t1")).toBe(INCONSISTENT_OFFSET_ERROR);
+        expect(errorOf(body, "t1")).toBe(`thicken step "t1": ${INCONSISTENT_OFFSET_ERROR}`);
         expect(body.featureItems().find((item) => item.id === "loft")?.error).toBeUndefined();
         // The feature thickens a copy: the cached loft keeps its p-curves and tolerances.
         expect(converter.convertToBrep(skin).value).toBe(before.value);
@@ -507,4 +516,90 @@ describe("periodic ruled loft thickening (issue #126)", () => {
         expect(errorOf(body, "t1")).toBeUndefined();
         expectHalfTrim(body.shape.value);
     });
+});
+
+test("thicken rejects a negative component hidden by a positive compound volume", () => {
+    const body = boxBody(newDoc());
+    const large = shapeFactory.box(Plane.XY, 20, 20, 20).value;
+    const small = shapeFactory.box(Plane.XY, 1, 2, 3).value;
+    small.reserve();
+    const compound = shapeFactory.combine([large, small]).value;
+    expect(compound.checkShape()).toBe(true);
+    expect(compound.volume()).toBeCloseTo(7994, 5);
+    const call = rs
+        .spyOn(shapeFactory, "makeThickSolidByJoin")
+        .mockImplementation(() => Result.ok(compound.clone()));
+    try {
+        thicken(body, { thickness: -1, openFaces: [topFaceRef(body)] });
+        expect(call).toHaveBeenCalledOnce();
+        expect(errorOf(body, "t1")).toContain(
+            'thicken step "t1": Thicken result: solid 1 has invalid volume',
+        );
+        expect(body.shape.value.volume()).toBeCloseTo(4000, 5);
+    } finally {
+        call.mockRestore();
+        compound.dispose();
+        small.dispose();
+        large.dispose();
+    }
+});
+
+test.each([2, -2])("open skin -> thicken -> common trim stays valid at thickness %s (#122)", (thickness) => {
+    const doc = newDoc();
+    const body = tubeBody(doc);
+    thicken(body, { thickness });
+    expect(errorOf(body, "t1")).toBeUndefined();
+    const before = body.shape.value.volume();
+    // A box covering the full wall in XY and its middle half in Z.
+    const sketch = new SketchNode({
+        document: doc,
+        plane: planeAt(5),
+        data: {
+            entities: square.entities.map((entity) => ({
+                ...entity,
+                params: entity.params.map((value) => value * 2),
+            })),
+            constraints: [],
+        },
+    });
+    doc.modelManager.addNode(sketch);
+    const tool = new ParametricBodyNode({
+        document: doc,
+        features: [{ id: "box", type: "extrude", sketchId: sketch.id, depth: 10 }],
+    });
+    doc.modelManager.addNode(tool);
+    body.setFeaturesEmitShapeChanged([
+        ...body.features,
+        { id: "trim", type: "boolean", operation: "common", toolIds: [tool.id] },
+    ]);
+    expect(errorOf(body, "trim")).toBeUndefined();
+    expect(body.shape.value.checkShape()).toBe(true);
+    expect(body.shape.value.volume()).toBeCloseTo(before / 2, 3);
+});
+
+test("an expression thickness preserves the kernel's limiting input face diagnostic", () => {
+    const doc = newDoc();
+    setWallThickness(doc, "3.75");
+    const sphere = shapeFactory.sphere(XYZ.zero, 2);
+    expect(sphere.isOk).toBe(true);
+    const host = new ParametricBodyNode({ document: doc, features: [] });
+    try {
+        const result = evaluateFeature(
+            { id: "diagnostic", type: "thicken", thickness: "-wall_t" },
+            {
+                document: doc,
+                host,
+                input: sphere.value,
+                scope: doc.variables.evaluate().scope,
+            },
+        );
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("input face index");
+        expect(result.error).toContain("|thickness| 3.75 mm");
+        expect(sphere.value.checkShape()).toBe(true);
+    } finally {
+        sphere.value.dispose();
+        host.dispose();
+        doc.dispose();
+    }
 });

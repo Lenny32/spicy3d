@@ -106,6 +106,23 @@ describe.each(ALLOCATORS)("solver feedback (%s sketch ids)", (_name, allocator) 
         expect(solver.toData().constraints.map((c) => c.kind)).toEqual([ConstraintKind.P2PDistance]);
     });
 
+    test("associative offset row exposes expression and deletion", () => {
+        const source = solver.addCircle(0, 0, 10);
+        const target = solver.addCircle(0, 0, 12);
+        const relation = solver.addConstraint({
+            kind: ConstraintKind.Offset,
+            refs: [source, target].map((entityId) => ({ entityId, pointIndex: 0 })),
+            datum: 2,
+        });
+        panel.update(solver.solve(true), true);
+        expect(host.textContent).toContain("Associative offset");
+        button("Associative offset").click();
+        expect(select).toHaveBeenCalledWith(relation);
+        expect(button("Edit")).not.toBeNull();
+        button("Remove").click();
+        expect(remove).toHaveBeenCalledWith([relation]);
+    });
+
     test("block appears in properties and structural arc equations cannot be removed there", () => {
         const arc = solver.addArc(0, 0, 5, 0, 0, 5);
         solver.addConstraint({ kind: ConstraintKind.Block, refs: [centerRef(arc)] });

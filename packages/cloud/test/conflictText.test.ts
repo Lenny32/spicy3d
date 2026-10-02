@@ -98,6 +98,33 @@ describe("labels and values", () => {
         ],
         ["a parent, by its name", conflict("node/x/parent", { kind: "move" }), "folder-b", "Folder B"],
         ["a number", conflict("node/a/feature/f/param/depth"), 12.5000000001, "12.5"],
+        ["Distance datum", conflict("node/a/constraint/c/datum"), { datum: 12 }, "12"],
+        ["Radius datum", conflict("node/a/constraint/c/datum"), { datum: 15 }, "15"],
+        [
+            "Angle datum clockwise",
+            conflict("node/a/constraint/c/datum"),
+            { datum: Math.PI / 6, angleSide: -1 },
+            "30° (cloud.merge.value.clockwise)",
+        ],
+        [
+            "Angle datum counterclockwise",
+            conflict("node/a/constraint/c/datum"),
+            { datum: Math.PI / 4, angleSide: 1 },
+            "45° (cloud.merge.value.counterclockwise)",
+        ],
+        [
+            "Angle expression",
+            conflict("node/a/constraint/c/datum"),
+            { datum: "tilt", angleSide: -1 },
+            "tilt° (cloud.merge.value.clockwise)",
+        ],
+        ["whole constraint", conflict("node/a/constraint/c"), { type: "Angle", datum: Math.PI / 4 }, "Angle"],
+        [
+            "Angle datum without angleSide",
+            conflict("node/a/constraint/c/datum", { base: { datum: Math.PI / 6, angleSide: -1 } }),
+            { datum: Math.PI / 4 },
+            "45°",
+        ],
         ["an expression", conflict("variable/v/expression"), "w * 2", "w * 2"],
         [
             "a blob",
@@ -109,6 +136,18 @@ describe("labels and values", () => {
         ["a list", conflict("node/a/feature/f/param/edges"), [1, 2, 3], "cloud.merge.value.items3"],
         ["a flag", conflict("node/a/prop/visible"), false, "cloud.merge.value.no"],
     ])("%s", (_what, c, value, text) => {
+        expect(formatConflictValue(c, value, names)).toBe(text);
+    });
+
+    test.each([
+        [{ type: "circle", derivation: "offset" }, "cloud.merge.value.associativeOffset"],
+        [{ type: "circle" }, "cloud.merge.value.detached"],
+    ])("offset detachment shows distinct sides: %j", (value, text) => {
+        const c = conflict("node/sketch/entity/20", {
+            base: { type: "circle", derivation: "offset" },
+            ours: { type: "circle" },
+            theirs: { type: "circle", derivation: "offset" },
+        });
         expect(formatConflictValue(c, value, names)).toBe(text);
     });
 

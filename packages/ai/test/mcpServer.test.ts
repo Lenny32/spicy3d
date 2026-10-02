@@ -8,7 +8,10 @@ import { createMockApplication, createMockDocument } from "@spicy3d/core/test-ut
 import type { Tool } from "../src/llm/types";
 import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/server";
 import { SKILLS } from "../src/skills";
+import { buildTools } from "../src/tools";
 import { buildAskUserTool } from "../src/tools/askUser";
+import { buildCloudTools } from "../src/tools/cloudTools";
+import { buildExportChunkTool, retainExport } from "../src/tools/exportChunks";
 import { imageByteBudget } from "../src/tools/imageEncoding";
 import { noteOpDuration, takeSlowOpWarnings } from "../src/tools/opBudget";
 import { buildReadTools, holdDocumentReadSnapshot } from "../src/tools/readTools";
@@ -92,6 +95,36 @@ describe("createMcpServer", () => {
         expect(tools.map((t) => t.name)).toEqual(["alpha", "get_usage_guide"]);
         expect(tools[0].inputSchema).toEqual({ type: "object", properties: {} });
         expect(client.getInstructions()).toBe("be careful");
+    });
+
+    test("every registry tool advertises an input schema without top-level combinators", async () => {
+        const registry = [...buildTools(), ...buildCloudTools()];
+        expect(registry.length).toBeGreaterThan(0);
+        const { client } = await connect(registry);
+        try {
+            const { tools } = await client.listTools();
+            // ask_user requires elicitation, so check its parameters directly as well.
+            for (const tool of registry) {
+                for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+                    expect(tool.parameters, `${tool.name}: ${keyword}`).not.toHaveProperty(keyword);
+                }
+            }
+            expect(tools.map((tool) => tool.name)).toEqual([
+                ...registry.filter((tool) => tool.name !== "ask_user").map((tool) => tool.name),
+                "get_usage_guide",
+            ]);
+            for (const tool of tools) {
+                for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+                    expect(tool.inputSchema, `${tool.name}: ${keyword}`).not.toHaveProperty(keyword);
+                }
+            }
+            expect(tools.find((tool) => tool.name === "delete_node")!.inputSchema.required).toEqual([]);
+            expect(tools.find((tool) => tool.name === "set_node_visible")!.inputSchema.required).toEqual([
+                "visible",
+            ]);
+        } finally {
+            await client.close();
+        }
     });
 
     test("calls the handler with the arguments and returns its result", async () => {
@@ -310,6 +343,34 @@ test("metadata reads wait for a yielded mutation when no committed snapshot is h
         queued.mockRestore();
         rs.unstubAllGlobals();
     }
+});
+
+test("server close forgets the connection's retained exports", async () => {
+    let caller: string | undefined;
+    const retain = tool("retain", async (_args, _signal, context) => {
+        caller = context?.caller;
+        return retainExport(
+            new Blob(["abc"]),
+            { filename: "test.step", mimeType: "model/step", bytes: 3 },
+            3,
+            caller,
+        );
+    });
+    const { server, client } = await connect([retain, buildExportChunkTool()]);
+    const reply = await client.callTool({ name: "retain", arguments: {} });
+    const metadata = JSON.parse((reply.content as { text: string }[])[0].text);
+    const before = await client.callTool({
+        name: "read_export_chunk",
+        arguments: { exportId: metadata.exportId },
+    });
+    expect(JSON.parse((before.content as { text: string }[])[0].text).data).toBe(btoa("abc"));
+    await server.close();
+    const connectionReader = buildExportChunkTool();
+    const after = JSON.parse(
+        (await connectionReader.handler({ exportId: metadata.exportId }, undefined, { caller })) as string,
+    );
+    expect(after.error).toContain("not found");
+    await client.close();
 });
 
 test("built-in screenshots bypass a suspended program and lookalikes are not recognized", async () => {

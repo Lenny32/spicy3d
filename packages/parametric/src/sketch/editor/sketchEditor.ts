@@ -39,7 +39,7 @@ import {
 } from "../sketchModel";
 import type { SketchNode } from "../sketchNode";
 import { computeSketchRollback, rollbackRestoreOrder } from "../sketchRollback";
-import { SketchSolver, type SolveOutcome } from "../solver";
+import type { SketchSolver, SolveOutcome } from "../solver";
 import type { SketchTransform } from "../utilityOperations";
 import * as datumPrompt from "./datumPrompt";
 import { type DimensionAnchor, toDisplayDatum } from "./dimensionLayout";
@@ -96,6 +96,8 @@ interface PickRequest {
     kind: SketchPickKind;
     entityType?: SketchEntityTypeFilter;
     includeText?: boolean;
+    includeOffsetTargets?: boolean;
+    includeOffsetEndpoints?: boolean;
     /** Entity picks only: also allow picking the datum X/Y axes. */
     datum?: boolean;
     preview?: SketchPickPreview;
@@ -378,6 +380,9 @@ export class SketchEditor implements IDisposable {
             this.annotations = this.createAnnotations();
             teardown.push(() => this.annotations.dispose());
 
+            this.document.history.onAfterReplay.sub(this.afterHistoryReplay);
+            teardown.push(() => this.document.history.onAfterReplay.remove(this.afterHistoryReplay));
+
             node.onPropertyChanged(this.onNodeDataChanged);
             teardown.push(() => this.node.removePropertyChanged(this.onNodeDataChanged));
 
@@ -517,7 +522,7 @@ export class SketchEditor implements IDisposable {
 
     private createSessionSolver(): SketchSolver {
         const data = this.node.data;
-        const solver = new SketchSolver(this.node.plane, data, this.variableScope());
+        const solver = this.node.createSolver(data);
         // the anchor of the face the sketch sits on outlives its boundary refs
         solver.planeOwnerNodeId = this.node.planeRef?.nodeId;
         this.loadAnchors(data);
@@ -587,6 +592,11 @@ export class SketchEditor implements IDisposable {
      */
     private readonly handleVariablesChanged = (property: string) => {
         if (property !== "variablesJson" || this.disposed) return;
+        const history = this.document.history;
+        if (history.isUndoing || history.isRedoing) {
+            this.replayPending = true;
+            return;
+        }
         if (!this.solver.setScope(this.variableScope())) {
             // Nothing moved, but a datum that just stopped resolving (its parameter was
             // deleted or renamed) is only visible on its own annotation — redraw them so
@@ -598,17 +608,33 @@ export class SketchEditor implements IDisposable {
         this.commit();
     };
 
+    private replayPending = false;
+
+    private readonly afterHistoryReplay = () => {
+        if (
+            this.disposed ||
+            this.document.history.isUndoing ||
+            this.document.history.isRedoing ||
+            !this.replayPending
+        )
+            return;
+        this.replayPending = false;
+        // Restore both data and variables before solving, regardless of replay order.
+        this.solver.reset(this.node.data, this.variableScope());
+        this.loadAnchors(this.node.data);
+        this.annotations.clearConstraintSelection();
+        this.refreshExternalDisplay();
+        this.solve(true);
+        // Variable-only replay also needs derived geometry persisted without discarding redo.
+        this.node.persistSolver(this.solver);
+    };
+
     /** Undo/redo rewrites the node data behind the solver's back — resync from it. */
     private readonly onNodeDataChanged = (property: string) => {
         if (property !== "dataJson" || this.disposed) return;
         const history = this.document.history;
         if (history.isUndoing || history.isRedoing) {
-            const data = this.node.data;
-            this.solver.reset(data);
-            this.loadAnchors(data);
-            this.annotations.clearConstraintSelection();
-            this.refreshExternalDisplay();
-            this.solve(true);
+            this.replayPending = true;
             return;
         }
         // A source-part rebuild re-resolves the external references on the node behind
@@ -654,6 +680,8 @@ export class SketchEditor implements IDisposable {
               kind: SketchPickKind;
               entityType?: SketchEntityTypeFilter;
               includeText?: boolean;
+              includeOffsetTargets?: boolean;
+              includeOffsetEndpoints?: boolean;
               datum?: boolean;
               preview?: SketchPickPreview;
           }
@@ -665,18 +693,31 @@ export class SketchEditor implements IDisposable {
         prompt: I18nKeys,
         preview?: SketchPickPreview,
         controller?: AsyncController,
+        includeOffsetEndpoints = false,
     ): Promise<SketchPointRef | undefined> {
-        return this.startPick("point", prompt, undefined, undefined, preview, controller);
+        const pending = this.startPick<SketchPointRef>(
+            "point",
+            prompt,
+            undefined,
+            undefined,
+            preview,
+            controller,
+        );
+        if (this.pickRequest) this.pickRequest.includeOffsetEndpoints = includeOffsetEndpoints;
+        return pending;
     }
 
     pickEntity(
         prompt: I18nKeys,
         type?: SketchEntityTypeFilter,
-        options?: { datum?: boolean; includeText?: boolean },
+        options?: { datum?: boolean; includeText?: boolean; includeOffsetTargets?: boolean },
         controller?: AsyncController,
     ): Promise<number | undefined> {
         const pending = this.startPick<number>("entity", prompt, type, options?.datum, undefined, controller);
-        if (this.pickRequest) this.pickRequest.includeText = options?.includeText;
+        if (this.pickRequest) {
+            this.pickRequest.includeText = options?.includeText;
+            this.pickRequest.includeOffsetTargets = options?.includeOffsetTargets;
+        }
         return pending;
     }
 
@@ -761,13 +802,30 @@ export class SketchEditor implements IDisposable {
 
     // ------------------------------------------------------------------ Solving, commit and deletion
 
-    applyGeometryEdit(edit: GeometryEdit): boolean {
+    applyGeometryEdit(edit: GeometryEdit, offsetDatum?: number | string): boolean {
         if (this.disposed) return false;
         const before = this.solver.toData();
         const result = this.solver.applyGeometryEdit(edit);
         if (!result.isOk) {
             PubSub.default.pub("displayError", result.error);
             return false;
+        }
+        if (offsetDatum !== undefined) {
+            try {
+                this.solver.validateOffsetSource(edit.source.id);
+                this.solver.addConstraint({
+                    kind: ConstraintKind.Offset,
+                    refs: [edit.source.id, result.value.entityIds[0]].map((entityId) => ({
+                        entityId,
+                        pointIndex: 0,
+                    })),
+                    datum: offsetDatum,
+                });
+            } catch (error) {
+                this.solver.reset(before);
+                PubSub.default.pub("displayError", error instanceof Error ? error.message : String(error));
+                return false;
+            }
         }
         const outcome = this.solve(true);
         if (!outcome.result.startsWith("Ok")) {
@@ -822,6 +880,7 @@ export class SketchEditor implements IDisposable {
 
     solve(fine: boolean): SolveOutcome {
         const outcome = this.solver.solve(fine);
+        this.node.syncOffsetWarnings(this.solver);
         this.annotations.refresh();
         this.publishSolveStatus(outcome);
         this.feedback?.update(outcome, fine);
@@ -949,7 +1008,7 @@ export class SketchEditor implements IDisposable {
         apply: (value: ParameterValue) => void,
         unit: UnitSpec,
         onCancel?: () => void,
-        options?: { positiveOnly?: boolean },
+        options?: { positiveOnly?: boolean; skipUnchanged?: boolean },
     ): void {
         const input = this.datumInput(unit);
         datumPrompt.promptDatum(
@@ -1032,8 +1091,10 @@ export class SketchEditor implements IDisposable {
             return;
         }
         if (constraint.datum === undefined) return;
-        // point-line and horizontal/vertical distances are signed; other datums stay positive
+        // Angles and point-line/horizontal/vertical distances accept signed datums.
         const signed =
+            constraint.kind === ConstraintKind.Offset ||
+            constraint.kind === ConstraintKind.Angle ||
             constraint.kind === ConstraintKind.P2LDistance ||
             constraint.kind === ConstraintKind.HorizontalDistance ||
             constraint.kind === ConstraintKind.VerticalDistance;
@@ -1047,7 +1108,7 @@ export class SketchEditor implements IDisposable {
             (value) => this.solver.setDatumSource(constraintId, value),
             unit,
             undefined,
-            { positiveOnly: !signed },
+            { positiveOnly: !signed, skipUnchanged: true },
         );
     }
 
@@ -1166,6 +1227,7 @@ export class SketchEditor implements IDisposable {
     }
 
     private teardownSession(): void {
+        this.document.history.onAfterReplay.remove(this.afterHistoryReplay);
         this.document.variables.removePropertyChanged(this.handleVariablesChanged);
         this.eventHandler.dispose();
         this.annotations.dispose();

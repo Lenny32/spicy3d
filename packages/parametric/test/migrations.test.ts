@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { DocumentMigrations, migrateDocument } from "@spicy3d/core";
+import { DocumentMigrations, MigrationRegistry, migrateDocument } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "../src/migrations";
 
@@ -11,10 +11,10 @@ function fixture(name: string) {
     return found!;
 }
 
-describe("parametric format 14 (emboss/deboss)", () => {
+describe("parametric format 15 (tolerant thicken)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(PARAMETRIC_FORMAT_VERSION).toBe(14);
-        expect(DocumentMigrations.currentVersion("parametric")).toBe(14);
+        expect(PARAMETRIC_FORMAT_VERSION).toBe(15);
+        expect(DocumentMigrations.currentVersion("parametric")).toBe(15);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -34,6 +34,7 @@ describe("parametric format 14 (emboss/deboss)", () => {
         ["v2/parametric12-corner-setback.json", 12],
         ["v2/parametric13-guided-loft.json", 13],
         ["v2/parametric14-emboss.json", 14],
+        ["v2/parametric15-tolerant-thicken.json", 15],
     ])("%s (parametric %i) migrates with its feature lists untouched", (name, version) => {
         const { data } = fixture(name);
         expect(data["moduleVersions"]).toMatchObject({ parametric: version });
@@ -42,7 +43,7 @@ describe("parametric format 14 (emboss/deboss)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 14 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ parametric: 15 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         // Pure: the input is left as it was.
         expect(data).toEqual(original);
@@ -119,10 +120,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 4 (editable text)", () => {
+describe("sketch format 6 (associative offsets)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(4);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(4);
+        expect(SKETCH_FORMAT_VERSION).toBe(6);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(6);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -133,7 +134,7 @@ describe("sketch format 4 (editable text)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 4 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -162,12 +163,54 @@ describe("sketch format 4 (editable text)", () => {
     });
 });
 
-test("sketch v3 documents open in v4 with control definitions and all stored metadata untouched", () => {
+test("sketch v3 documents open in v5 with control definitions and all stored metadata untouched", () => {
     const { data } = fixture("v2/sketch3-control-nurbs.json");
     const original = structuredClone(data),
         migrated = migrateDocument(data);
     expect(migrated.isOk).toBe(true);
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 4 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
     expect(migrated.value["models"]).toEqual(original["models"]);
+    expect(data).toEqual(original);
+});
+
+test("sketch 5 migrates verbatim without introducing associative links", () => {
+    const { data } = fixture("v2/sketch5-angle-side.json");
+    const original = structuredClone(data);
+    const result = migrateDocument(data);
+    expect(result.isOk).toBe(true);
+    expect(result.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(result.value["models"]).toEqual(original["models"]);
+    expect(result.value["userData"]).toEqual(original["userData"]);
+    expect(data).toEqual(original);
+});
+
+test("sketch 6 fixture preserves relation, distance expression and cache marker", () => {
+    const { data } = fixture("v2/sketch6-associative-offset.json");
+    const result = migrateDocument(data);
+    expect(result.isOk).toBe(true);
+    expect(result.value).toEqual({ ...data, moduleVersions: { ...data["moduleVersions"], parametric: 15 } });
+    const sketch = JSON.parse(data["models"].nodes[1].dataJson);
+    expect(sketch.constraints[0]).toMatchObject({ kind: 34, datum: "gap" });
+    expect(sketch.entities[1].derivation).toBe("offset");
+    const newer = structuredClone(data);
+    newer["moduleVersions"]["sketch"] = 7;
+    const refused = migrateDocument(newer);
+    expect(refused.isOk).toBe(false);
+    expect(newer["models"]).toEqual(data["models"]);
+});
+
+test("a version 14 reader refuses tolerant version 15 before touching models", () => {
+    const data = fixture("v2/parametric15-tolerant-thicken.json").data;
+    const original = structuredClone(data);
+    const older = new MigrationRegistry();
+    older.registerModule("parametric", 14);
+    const result = older.migrate(data);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toMatchObject({
+        kind: "newerFormat",
+        module: "parametric",
+        version: 15,
+        supported: 14,
+    });
     expect(data).toEqual(original);
 });

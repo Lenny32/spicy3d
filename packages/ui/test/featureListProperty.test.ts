@@ -6,10 +6,11 @@ import {
     type FeatureItem,
     type IFeatureListNode,
     type INode,
+    Result,
     requestFeatureFocus,
     takeFeatureFocus,
 } from "@spicy3d/core";
-
+import { PubSubMock } from "./_helpers/coreMocks";
 // test-utils must load BEFORE the core-mock helper so the real core module is
 // fully cached by the time `rs.mock("@spicy3d/core")` registers.
 import { createMockDocument } from "./_helpers/propertyTestHelpers";
@@ -188,22 +189,23 @@ describe("FeatureListProperty", () => {
         expect(mustQuery(prop, ".fl-error-text").textContent).toBe("Edge not found after rebuild");
     });
 
-    test("warning rows render tinted without forcing expansion", () => {
+    test.each([
+        "Sketch has unresolved external references",
+        "Self-intersection check timed out after 30000 ms (result unknown; geometry not verified)",
+    ])("warning rows render tinted without forcing expansion: %s", (warning) => {
         const doc = createMockDocument();
-        const node = featureNode([], { warning: "Sketch has unresolved external references" });
+        const node = featureNode([], { warning });
         const prop = new FeatureListProperty(doc, node);
 
         const row = mustQuery<HTMLElement>(prop, ".fl-item");
         expect(row.className).toContain("fl-warning");
         expect(row.className).not.toContain("fl-error");
-        expect(row.title).toBe("Sketch has unresolved external references");
+        expect(row.title).toBe(warning);
         // no forced expansion: the text appears only once the user expands the row
         expect(prop.querySelector(".fl-warning-text")).toBeNull();
 
         expandFirstRow(prop);
-        expect(mustQuery(prop, ".fl-warning-text").textContent).toBe(
-            "Sketch has unresolved external references",
-        );
+        expect(mustQuery(prop, ".fl-warning-text").textContent).toBe(warning);
     });
 
     test("renders the feature's reference above its parameters", () => {
@@ -383,6 +385,36 @@ describe("FeatureListProperty", () => {
 
         expect(node.moveFeatureTo).toHaveBeenCalledWith("f1", 2);
         expect(rows[2].classList.contains("fl-drop-after")).toBe(false);
+    });
+
+    test("a refused drag reports the reason to the user", () => {
+        const doc = createMockDocument();
+        const items: FeatureItem[] = ["f1", "f2", "f3"].map((id) => ({
+            id,
+            display: "command.feature.fuse",
+            parameters: [],
+        }));
+        const node = {
+            featureItems: () => items,
+            moveFeatureTo: rs.fn((_id: string, _index: number) => Result.err("sketch prefix would change")),
+        } as unknown as INode & IFeatureListNode;
+        const prop = new FeatureListProperty(doc, node);
+        const rows = prop.querySelectorAll(".fl-item");
+        const headers = prop.querySelectorAll(".fl-header");
+        const publish = rs.spyOn(PubSubMock.default, "pub");
+        try {
+            headers[0].dispatchEvent(new Event("dragstart"));
+            rows[2].dispatchEvent(new MouseEvent("dragover", { bubbles: true, cancelable: true }));
+            rows[2].dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+            expect(node.moveFeatureTo).toHaveBeenCalledWith("f1", 2);
+            expect(publish).toHaveBeenCalledWith(
+                "showToast",
+                "error.default:{0}",
+                "sketch prefix would change",
+            );
+        } finally {
+            publish.mockRestore();
+        }
     });
 
     describe("menu positioning", () => {

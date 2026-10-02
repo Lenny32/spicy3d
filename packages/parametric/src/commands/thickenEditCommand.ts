@@ -6,6 +6,7 @@ import {
     CancelableCommand,
     Combobox,
     command,
+    I18n,
     type I18nKeys,
     type INode,
     LENGTH_UNITS,
@@ -58,7 +59,10 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("thickness", value, () => this.refreshPreview());
     }
 
-    @property("option.command.joinType", { combobox: Combobox.from([...THICKEN_JOIN_TYPES]) })
+    @property("option.command.joinType", {
+        combobox: Combobox.from([...THICKEN_JOIN_TYPES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get joinType(): I18nKeys {
         return this.getPrivateValue("joinType", "option.command.joinType.arc");
     }
@@ -66,12 +70,23 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("joinType", value, () => this.refreshPreview());
     }
 
-    @property("option.command.offsetMode", { combobox: Combobox.from([...THICKEN_MODES]) })
+    @property("option.command.offsetMode", {
+        combobox: Combobox.from([...THICKEN_MODES]),
+        dependencies: [{ property: "tolerant", value: false }],
+    })
     get mode(): I18nKeys {
         return this.getPrivateValue("mode", "option.command.offsetMode.skin");
     }
     set mode(value: I18nKeys) {
         this.setProperty("mode", value, () => this.refreshPreview());
+    }
+
+    @property("option.command.tolerantThicken")
+    get tolerant(): boolean {
+        return this.getPrivateValue("tolerant", false);
+    }
+    set tolerant(value: boolean) {
+        this.setProperty("tolerant", value, () => this.refreshPreview());
     }
 
     @property("common.confirm")
@@ -91,6 +106,7 @@ export class ThickenEditCommand extends CancelableCommand {
         this.setProperty("thickness", feature.thickness);
         this.setProperty("joinType", keys.joinType);
         this.setProperty("mode", keys.mode);
+        this.setProperty("tolerant", feature.tolerant ?? false);
         this.feature = feature;
         this.preview = new FeatureChainPreview(body, index);
 
@@ -122,16 +138,28 @@ export class ThickenEditCommand extends CancelableCommand {
 
     /** The feature with the panel's values, absent fields for the defaults (as the creation writes them). */
     private edited(feature: ThickenFeatureData): ThickenFeatureData {
-        const { joinType: _joinType, mode: _mode, ...rest } = feature;
-        return { ...rest, thickness: this.thickness, ...thickenOptions(this.joinType, this.mode) };
+        const { joinType: _joinType, mode: _mode, tolerant: _tolerant, ...rest } = feature;
+        return {
+            ...rest,
+            thickness: this.thickness,
+            ...thickenOptions(this.joinType, this.tolerant ? "option.command.offsetMode.skin" : this.mode),
+            ...(this.tolerant ? { tolerant: true } : {}),
+        };
     }
 
     private refreshPreview(): void {
         const body = this.body;
         if (body === undefined || this.feature === undefined || this.preview === undefined) return;
         this.clearPreview();
+        if (this.tolerant) {
+            PubSub.default.pub("showFloatTip", {
+                level: "info",
+                msg: I18n.translate("prompt.thicken.backgroundResult"),
+            });
+            return;
+        }
         const result = this.preview.evaluate(this.edited(this.feature), false);
-        showPreviewProblem(result.error);
+        showPreviewProblem(result.error ?? result.warning, result.note);
         const meshes = result.shape === undefined ? undefined : previewMeshes(body, result.shape);
         const context = this.document.visual.context;
         if (meshes !== undefined) {

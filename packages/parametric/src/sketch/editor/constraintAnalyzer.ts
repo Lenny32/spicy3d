@@ -22,6 +22,7 @@ export function analyzeConstraints(data: SketchData, unit: LengthUnit = "mm") {
         const ids = new Set(c.refs.map((r) => r.entityId));
         if (ids.size > 1) for (const id of ids) related.add(id);
         if (c.kind === ConstraintKind.Block) blocked.add(c.refs[0].entityId);
+        if (c.kind === ConstraintKind.Offset) blocked.add(c.refs[1].entityId);
     }
     // Track shared size families before numerical trials: native rank diagnostics can
     // miss equal-length dependencies at symmetric initial configurations.

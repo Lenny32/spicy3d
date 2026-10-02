@@ -16,6 +16,7 @@ import {
 } from "@spicy3d/core";
 import {
     createMockApplication,
+    MockShape,
     nearestOnCircle,
     nearestOnSegment,
     TestDocument,
@@ -115,7 +116,11 @@ function setupMocks() {
     const prismShapes: any[] = [];
     const revolvedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
     const filletedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
-    const fusedShape = { shapeType: ShapeTypes.solid, isEqual: () => false, dispose: rs.fn() };
+    const fusedShape = Object.assign(new MockShape({ shapeType: ShapeTypes.solid }), {
+        isEqual: () => false,
+        dispose: rs.fn(),
+        findSubShapes: () => [],
+    });
     const line = rs.fn((start: XYZ, end: XYZ) => Result.ok(edge(start, end)));
     /** Full-circle edge: closed, so start and end coincide on the circumference. */
     const circle = rs.fn((normal: XYZ, center: XYZ, radius: number) =>
@@ -425,7 +430,9 @@ describe("feature evaluation", () => {
         };
         const body = bodyWith([{ id: "e1", type: "extrude", sketchId: sketch.id, depth: 5 }, feature]);
         expect(body.shape.isOk).toBe(false);
-        expect(body.shape.error).toBe("Variable-radius fillets are not available in this kernel build");
+        expect(body.shape.error).toBe(
+            'fillet step "law": Variable-radius fillets are not available in this kernel build',
+        );
         expect(mocks.fillet).not.toHaveBeenCalled();
         const { radiusLaw: _removed, ...constant } = feature;
         body.setFeaturesEmitShapeChanged([body.features[0], constant]);

@@ -9,6 +9,7 @@ import {
     type FeatureItem,
     type FeatureReference,
     featureSketchIds,
+    I18n,
     type I18nKeys,
     type IAsyncShapeOperation,
     type IDocument,
@@ -38,7 +39,13 @@ import {
 import { hasFeatureEditor, startFeatureEdit } from "./commands/featureEditRegistry";
 import { ReselectFeatureCommand } from "./commands/reselectCommand";
 import { EdgeReselectSession, ProfileReselectSession } from "./commands/reselectSession";
-import { evaluateFeature, type FeatureData, featureHandler, type ShapeTracking } from "./features";
+import {
+    evaluateFeature,
+    type FeatureData,
+    featureEvaluationError,
+    featureHandler,
+    type ShapeTracking,
+} from "./features";
 import {
     BodyTimeline,
     type FeatureCacheEntry,
@@ -54,6 +61,7 @@ import type { EdgeRef } from "./features/edgeRef";
 import { findSketch } from "./features/extrude";
 import type { BooleanFeatureData, ExtrudeFeatureData } from "./features/feature";
 import type { ProfileRef } from "./features/profileRef";
+import { prepareValidatedFeature, SELF_INTERSECTION_SKIPPED } from "./features/selfIntersectionValidation";
 import { syncNodeWatches } from "./nodeWatch";
 import { RebuildJob, type RebuildSteps } from "./rebuildJob";
 import { danglingProfileRefs, SketchNode } from "./sketch/sketchNode";
@@ -186,7 +194,7 @@ export class ParametricBodyNode
     private readonly _watched = new Map<string, INode>();
     private readonly _featureErrors = new Map<string, string>();
     /** Non-fatal conditions surfaced on the feature row (e.g. a sketch's dangling external refs). */
-    private readonly _featureWarnings = new Map<string, string>();
+    private readonly _featureWarnings = new Map<string, string[]>();
     /** What the last successful run produced — cache entries and per-index chain states. */
     private readonly _timeline = new BodyTimeline();
     /** Guards against re-entrant evaluation when a watched node generates mid-evaluation. */
@@ -449,7 +457,11 @@ export class ParametricBodyNode
         if (
             !this.features.some(
                 (feature) =>
-                    feature.type === "fillet" && !feature.suppressed && feature.cornerSetbacks !== undefined,
+                    !feature.suppressed &&
+                    (feature.type === "sweep" ||
+                        feature.type === "faceSweep" ||
+                        (feature.type === "thicken" && feature.tolerant === true) ||
+                        (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
             )
         )
             return;
@@ -498,7 +510,7 @@ export class ParametricBodyNode
                 icon: typeof icon === "function" ? icon(feature) : icon,
                 suppressed: feature.suppressed === true,
                 error: this._featureErrors.get(feature.id),
-                warning: this._featureWarnings.get(feature.id),
+                warning: this._featureWarnings.get(feature.id)?.join("; "),
                 reselectable: handler?.reselectable === true,
                 editable: hasFeatureEditor(feature.type),
                 references: this.featureReferences(feature),
@@ -555,22 +567,115 @@ export class ParametricBodyNode
         this.setFeaturesEmitShapeChanged(features);
     }
 
-    moveFeature(featureId: string, offset: -1 | 1): void {
-        const features = [...this.features];
-        const index = features.findIndex((feature) => feature.id === featureId);
-        const target = index + offset;
-        if (index < 0 || target < 0 || target >= features.length) return;
-        [features[index], features[target]] = [features[target], features[index]];
-        this.setFeaturesEmitShapeChanged(features);
+    moveFeature(featureId: string, offset: -1 | 1): Result<void> {
+        const from = this.features.findIndex((feature) => feature.id === featureId);
+        const target = from + offset;
+        if (from < 0 || target < 0 || target >= this.features.length) return Result.ok(undefined);
+        return this.moveFeatureTo(featureId, target);
     }
 
-    moveFeatureTo(featureId: string, index: number): void {
+    /**
+     * An anchor N names the SET of the first N features, not the feature at N. A permutation
+     * preserves that state only when the same set remains a prefix. Its size is unchanged,
+     * so safe moves keep N; crossing any anchored boundary is refused before any mutation.
+     * Reordering within a prefix may intentionally change geometry, just like any feature edit.
+     */
+    moveFeatureTo(featureId: string, index: number): Result<void> {
+        if (!Number.isInteger(index)) return Result.err("Feature index must be an integer");
         const features = [...this.features];
         const from = features.findIndex((feature) => feature.id === featureId);
-        if (from < 0) return;
+        if (from < 0) return Result.ok(undefined);
+        const to = Math.max(0, Math.min(index, features.length - 1));
+        const anchors = this.remapTimelinePositions((anchor) =>
+            from < anchor !== to < anchor ? undefined : anchor,
+        );
+        if (!anchors.isOk) return anchors;
         const [feature] = features.splice(from, 1);
-        features.splice(Math.max(0, Math.min(index, features.length)), 0, feature);
+        features.splice(to, 0, feature);
         this.setFeaturesEmitShapeChanged(features);
+        return Result.ok(undefined);
+    }
+
+    /**
+     * All persisted positions name the state entering feature N. Collect writes first so a
+     * refused permutation cannot partially change another node or create an undo entry.
+     * Construction refs may be nested (paths, snaps, face points and definitions).
+     */
+    private remapTimelinePositions(map: (anchor: number) => number | undefined): Result<void> {
+        const writes: (() => void)[] = [];
+        const remap = (value: unknown): boolean => {
+            if (value === null || typeof value !== "object") return true;
+            const record = value as Record<string, unknown>;
+            if (record["nodeId"] === this.id && typeof record["featureIndex"] === "number") {
+                const next = map(record["featureIndex"]);
+                if (next === undefined) return false;
+                record["featureIndex"] = next;
+            }
+            return Object.values(record).every(remap);
+        };
+        for (const node of this.document.modelManager.findNodes(
+            (node) =>
+                node instanceof SketchNode ||
+                node instanceof ConstructionNode ||
+                node instanceof ParametricBodyNode,
+        )) {
+            if (node instanceof SketchNode) {
+                const data = node.data;
+                const anchor = data.refPositions?.[this.id];
+                if (anchor !== undefined) {
+                    const next = map(anchor);
+                    if (next === undefined) return this.timelineMoveRefused(node);
+                    if (next !== anchor) {
+                        data.refPositions![this.id] = next;
+                        writes.push(() => node.setDataEmitShapeChanged(data));
+                    }
+                }
+                const ref = node.constructionPlaneRef;
+                if (!remap(ref)) return this.timelineMoveRefused(node);
+                const json = ref === undefined ? undefined : JSON.stringify(ref);
+                if (json !== node.constructionPlaneRefJson)
+                    writes.push(() => {
+                        node.constructionPlaneRefJson = json;
+                    });
+            } else if (node instanceof ParametricBodyNode) {
+                // Revolves can carry a ConstructionRef directly, including a captured shape axis.
+                const features = node.features;
+                const before = JSON.stringify(features);
+                if (!remap(features)) return this.timelineMoveRefused(node);
+                if (JSON.stringify(features) !== before)
+                    writes.push(() => node.setFeaturesEmitShapeChanged(features));
+            } else if (node instanceof ConstructionNode) {
+                const definition = node.definition;
+                if (!remap(definition)) return this.timelineMoveRefused(node);
+                const json = JSON.stringify(definition);
+                if (json !== node.definitionJson)
+                    writes.push(() => {
+                        node.definitionJson = json;
+                    });
+            }
+        }
+        for (const write of writes) write();
+        return Result.ok(undefined);
+    }
+
+    private timelineMoveRefused(node: INode): Result<void> {
+        return Result.err(I18n.translate("error.parametric.timelinePrefix{0}", node.name));
+    }
+
+    insertFeatureAt(feature: FeatureData, index: number): void {
+        ParametricBodyNode.withDeferredUpstream(this.document, () => {
+            this.remapTimelinePositions((anchor) => (anchor > index ? anchor + 1 : anchor));
+            const features = [...this.features];
+            features.splice(index, 0, feature);
+            this.setFeaturesEmitShapeChanged(features);
+        });
+    }
+
+    private removeFeatureAt(index: number): void {
+        ParametricBodyNode.withDeferredUpstream(this.document, () => {
+            this.remapTimelinePositions((anchor) => (anchor > index ? anchor - 1 : anchor));
+            this.setFeaturesEmitShapeChanged(this.features.filter((_, i) => i !== index));
+        });
     }
 
     /** Renaming does not change geometry — record and notify without a rebuild. */
@@ -587,14 +692,22 @@ export class ParametricBodyNode
      * removing it undoes its effect everywhere instead of leaving them failing.
      */
     removeFeature(featureId: string): void {
-        this.setFeaturesEmitShapeChanged(this.features.filter((feature) => feature.id !== featureId));
+        const index = this.features.findIndex((feature) => feature.id === featureId);
+        if (index < 0) return;
+        this.removeFeatureAt(index);
         for (const node of this.document.modelManager.findNodes((n) => n instanceof ParametricBodyNode)) {
             const body = node as ParametricBodyNode;
             if (body === this) continue;
-            const kept = body.features.filter(
-                (x) => !(x.type === "extrudeTarget" && x.bodyId === this.id && x.featureId === featureId),
-            );
-            if (kept.length !== body.features.length) body.setFeaturesEmitShapeChanged(kept);
+            // Remove backwards so each removed link shifts anchors in its own body's timeline.
+            for (let i = body.features.length - 1; i >= 0; i--) {
+                const feature = body.features[i];
+                if (
+                    feature.type === "extrudeTarget" &&
+                    feature.bodyId === this.id &&
+                    feature.featureId === featureId
+                )
+                    body.removeFeatureAt(i);
+            }
         }
     }
 
@@ -762,9 +875,15 @@ export class ParametricBodyNode
             (this.features.length >= ParametricBodyNode.ASYNC_FEATURE_THRESHOLD ||
                 this.features.some(
                     (feature) =>
-                        feature.type === "fillet" &&
                         !feature.suppressed &&
-                        feature.cornerSetbacks !== undefined,
+                        (((feature.type === "sweep" ||
+                            feature.type === "faceSweep" ||
+                            (feature.type === "loft" &&
+                                feature.guided !== undefined &&
+                                shapeFactory.supportsDeferredGuidedLoft)) &&
+                            shapeFactory.boundedOperations?.shapeQuery !== undefined) ||
+                            (feature.type === "thicken" && feature.tolerant === true) ||
+                            (feature.type === "fillet" && feature.cornerSetbacks !== undefined)),
                 ));
         const revision = DocumentRebuilds.revision(this.document);
         const featuresJson = this.featuresJson;
@@ -1051,7 +1170,15 @@ export class ParametricBodyNode
                     scope,
                     this._timeline.entryAt(nextCache.length)?.variableDependencies,
                 );
-                const cached = invalidSuffix ? undefined : this.validCacheEntry(key, input, nextCache.length);
+                const candidate = invalidSuffix
+                    ? undefined
+                    : this.validCacheEntry(key, input, nextCache.length);
+                const cached =
+                    asynchronous &&
+                    candidate?.warning?.includes(SELF_INTERSECTION_SKIPPED) &&
+                    shapeFactory.boundedOperations?.shapeQuery !== undefined
+                        ? undefined
+                        : candidate;
                 let step: Result<FeatureStepOutput>;
                 if (cached) {
                     const featureTrace = PerformanceTrace.enabled
@@ -1062,6 +1189,7 @@ export class ParametricBodyNode
                               cacheHit: true,
                           })
                         : undefined;
+                    if (cached.warning?.length) this._featureWarnings.set(feature.id, [...cached.warning]);
                     nextCache.push(cached);
                     step = Result.ok(cached);
                     if (featureTrace) PerformanceTrace.end(featureTrace);
@@ -1098,6 +1226,9 @@ export class ParametricBodyNode
                                     nextCache,
                                     asynchronous &&
                                         (!run.synchronous ||
+                                            feature.type === "sweep" ||
+                                            feature.type === "faceSweep" ||
+                                            (feature.type === "thicken" && feature.tolerant === true) ||
                                             (feature.type === "fillet" &&
                                                 feature.cornerSetbacks !== undefined)),
                                     features.slice(index + 1, stop).every((feature) => feature.suppressed),
@@ -1357,6 +1488,12 @@ export class ParametricBodyNode
         );
     }
 
+    private addFeatureWarning(id: string, message: string): void {
+        const warnings = this._featureWarnings.get(id) ?? [];
+        if (!warnings.includes(message)) warnings.push(message);
+        this._featureWarnings.set(id, warnings);
+    }
+
     /**
      * Surfaces dangling profile-role external refs of consumed sketches as a feature-level
      * warning.
@@ -1393,7 +1530,7 @@ export class ParametricBodyNode
                 }
                 return found;
             });
-            if (dangling) this._featureWarnings.set(feature.id, "Sketch has unresolved external references");
+            if (dangling) this.addFeatureWarning(feature.id, "Sketch has unresolved external references");
         }
     }
 
@@ -1417,7 +1554,11 @@ export class ParametricBodyNode
             outputEdgeIds: [],
         };
         const variables = trackVariableScope(scope);
+        const warning: string[] = [];
         const context = {
+            warn: (message: string) => {
+                if (!warning.includes(message)) warning.push(message);
+            },
             document: this.document,
             host: this,
             input,
@@ -1449,7 +1590,16 @@ export class ParametricBodyNode
             : undefined;
         const pending =
             preparedOperation ??
-            (asynchronous ? featureHandler(feature.type)?.prepareAsync?.(feature, context) : undefined);
+            (asynchronous
+                ? (feature.type === "sweep" ||
+                      feature.type === "faceSweep" ||
+                      (feature.type === "loft" &&
+                          feature.guided !== undefined &&
+                          shapeFactory.supportsDeferredGuidedLoft)) &&
+                  shapeFactory.boundedOperations?.shapeQuery !== undefined
+                    ? prepareValidatedFeature((context) => evaluateFeature(feature, context), context)
+                    : featureHandler(feature.type)?.prepareAsync?.(feature, context)
+                : undefined);
         return {
             pending,
             finish: (synchronous) => {
@@ -1459,7 +1609,7 @@ export class ParametricBodyNode
                 const evaluationStart = parked ? started : performance.now();
                 const result = parked ? pending.take() : evaluateFeature(feature, context);
                 const evaluationMs = performance.now() - evaluationStart;
-                if (!result.isOk) return Result.err(result.error);
+                if (!result.isOk) return Result.err(featureEvaluationError(feature, result.error));
                 // A handler that cannot track (e.g. the kernel lacks history) leaves the
                 // output empty — ids stay undefined from here on rather than guessing.
                 const output: FeatureStepOutput = {
@@ -1470,6 +1620,7 @@ export class ParametricBodyNode
                     resolvedEdges: tracking.resolvedEdges,
                     resolvedFaces: tracking.resolvedFaces,
                 };
+                for (const message of warning) this.addFeatureWarning(feature.id, message);
                 const variableDependencies = variables.dependencies();
                 nextCache.push({
                     json: this.cacheKey(feature, scope, variableDependencies),
@@ -1480,6 +1631,7 @@ export class ParametricBodyNode
                     faceIds: output.faceIds,
                     edgeIds: output.edgeIds,
                     evaluationMs,
+                    warning,
                 });
                 return Result.ok(output);
             },

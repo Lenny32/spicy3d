@@ -26,15 +26,19 @@ afterEach(() => {
 });
 
 describe("native corner failure diagnostics", () => {
-    test.each(
-        operations,
-    )("%s reports available build context for excessive size without corrupting input", (operation) => {
+    test.each([
+        ["fillet", "no result faces available for BRepCheck"],
+        ["filletTracked", "no result faces available for BRepCheck"],
+        ["chamfer", "contours="],
+        ["chamferTracked", "contours="],
+    ] as const)("%s reports available build context for excessive size without corrupting input", (operation, detail) => {
         const box = keep(createBox(factory, 10, 10, 10));
         const result = factory[operation](box, [0], 100);
         expect(result.isOk).toBe(false);
         expect(result.error).toContain("OCCT build failed");
         expect(result.error).toContain(operation.startsWith("fillet") ? "radius=100" : "distance=100");
         expect(result.error).toContain("contours=");
+        expect(result.error).toContain(detail);
         expect(result.error.length).toBeGreaterThan(80);
         expect(box.checkShape()).toBe(true);
         expect(box.volume()).toBeCloseTo(1000, 6);

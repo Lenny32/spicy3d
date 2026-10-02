@@ -19,7 +19,7 @@ import type { SketchSolver } from "./solver";
  * sketch side.
  */
 export function constraintTargetEntities(solver: SketchSolver): SketchEntityData[] {
-    return [...solver.entities(), ...solver.externalEntitiesData()];
+    return [...solver.entities().filter((e) => e.derivation !== "offset"), ...solver.externalEntitiesData()];
 }
 
 /**

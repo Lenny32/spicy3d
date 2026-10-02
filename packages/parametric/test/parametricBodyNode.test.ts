@@ -5,6 +5,8 @@ import { rs } from "@rstest/core";
 import {
     type AsyncController,
     BoundingBox,
+    ConstructionNode,
+    type ConstructionRef,
     type I18nKeys,
     type INode,
     type IShape,
@@ -41,7 +43,7 @@ import type {
     RevolveFeatureData,
 } from "../src/features/feature";
 
-import { type FeatureContext, registerFeature } from "../src/features/feature";
+import { type FeatureContext, featureHandler, registerFeature } from "../src/features/feature";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { type SketchData, SketchNode } from "../src/sketch";
 
@@ -279,9 +281,23 @@ describe("ParametricBodyNode", () => {
                 },
             ],
         });
+        const handler = featureHandler("extrude")!;
+        const original = handler.evaluate;
+        const evaluation = rs.spyOn(handler, "evaluate").mockImplementation((feature, context) => {
+            context.warn?.("Operation warning one");
+            context.warn?.("Operation warning two");
+            context.warn?.("Operation warning one");
+            return original(feature, context);
+        });
         const body = bodyWith([extrudeFeature(sketch.id)]);
-        expect(body.shape.isOk).toBe(true);
-        expect(body.featureItems()[0].warning).toBe("Sketch has unresolved external references");
+        try {
+            expect(body.shape.isOk).toBe(true);
+        } finally {
+            evaluation.mockRestore();
+        }
+        const expected =
+            "Operation warning one; Operation warning two; Sketch has unresolved external references";
+        expect(body.featureItems()[0].warning).toBe(expected);
 
         // A failure in a later, unrelated feature must not wipe that warning.
         body.setFeaturesEmitShapeChanged([
@@ -291,7 +307,7 @@ describe("ParametricBodyNode", () => {
 
         const items = body.featureItems();
         expect(items[1].error).toBe("Sketch not found");
-        expect(items[0].warning).toBe("Sketch has unresolved external references");
+        expect(items[0].warning).toBe(expected);
     });
 
     test("fails when the referenced sketch is missing", () => {
@@ -356,6 +372,150 @@ describe("ParametricBodyNode", () => {
         expect(body.features[0]).toMatchObject({ depth: 5 });
         doc.history.redo();
         expect(body.features[0]).toMatchObject({ depth: 12 });
+    });
+
+    const anchorKinds = ["sketch", "construction", "sketch-on-construction", "revolve-axis"] as const;
+    function addAnchor(body: ParametricBodyNode, anchor: number, kind: (typeof anchorKinds)[number]) {
+        const ref: ConstructionRef = {
+            kind: "shape",
+            nodeId: body.id,
+            shapeType: "face",
+            index: 0,
+            featureIndex: anchor,
+        };
+        if (kind === "revolve-axis") {
+            const consumer = bodyWith([
+                {
+                    id: "revolve",
+                    type: "revolve",
+                    sketchId: sketch.id,
+                    axis: { point: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } },
+                    constructionAxisRef: ref,
+                    angle: 90,
+                    suppressed: true,
+                },
+            ]);
+            return () => JSON.parse(consumer.featuresJson)[0].constructionAxisRef.featureIndex as number;
+        }
+        if (kind === "construction") {
+            // Exercise nested refs as well as top-level definition fields.
+            const node = new ConstructionNode({
+                document: doc,
+                definition: {
+                    kind: "point-center",
+                    source: { kind: "snap", source: ref, snap: "center" },
+                },
+            });
+            doc.modelManager.addNode(node);
+            return () => JSON.parse(node.definitionJson).source.source.featureIndex as number;
+        }
+        const construction = new ConstructionNode({
+            document: doc,
+            definition: {
+                kind: "plane-offset",
+                source: ref,
+                distance: 0,
+            },
+        });
+        if (kind === "sketch-on-construction") doc.modelManager.addNode(construction);
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: kind === "sketch" ? { ...SQUARE, refPositions: { [body.id]: anchor } } : SQUARE,
+            constructionPlaneRef: kind === "sketch-on-construction" ? ref : undefined,
+        });
+        doc.modelManager.addNode(node);
+        if (kind === "sketch") return () => node.data.refPositions![body.id];
+        return () => {
+            const anchor = (node.constructionPlaneRef as Extract<ConstructionRef, { kind: "shape" }>)
+                .featureIndex!;
+            expect(JSON.parse(construction.definitionJson).source.featureIndex).toBe(anchor);
+            return anchor;
+        };
+    }
+    const anchorCases = anchorKinds.flatMap((kind) => [0, 1, 2, 3].map((anchor) => ({ kind, anchor })));
+    test.each(anchorCases)("removal remaps $kind anchor $anchor and undo/redo together", ({
+        kind,
+        anchor,
+    }) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const position = addAnchor(body, anchor, kind);
+        Transaction.execute(doc, "remove", () => body.removeFeature("f2"));
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3"]);
+        expect(position()).toBe(anchor > 1 ? anchor - 1 : anchor);
+        doc.history.undo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+        expect(position()).toBe(anchor);
+        doc.history.redo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3"]);
+        expect(position()).toBe(anchor > 1 ? anchor - 1 : anchor);
+    });
+    test.each(anchorCases)("insertion remaps $kind anchor $anchor and undo/redo together", ({
+        kind,
+        anchor,
+    }) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const position = addAnchor(body, anchor, kind);
+        Transaction.execute(doc, "insert", () =>
+            body.insertFeatureAt({ ...extrudeFeature(sketch.id), id: "inserted", suppressed: true }, 1),
+        );
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "inserted", "f2", "f3"]);
+        expect(position()).toBe(anchor > 1 ? anchor + 1 : anchor);
+        doc.history.undo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+        expect(position()).toBe(anchor);
+        doc.history.redo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "inserted", "f2", "f3"]);
+        expect(position()).toBe(anchor > 1 ? anchor + 1 : anchor);
+    });
+    test.each(
+        anchorCases.filter(({ anchor }) => anchor !== 2),
+    )("moves preserve $kind prefix $anchor with undo/redo", ({ kind, anchor }) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const position = addAnchor(body, anchor, kind);
+        Transaction.execute(doc, "move", () => expect(body.moveFeatureTo("f2", 2).isOk).toBe(true));
+        expect(position()).toBe(anchor);
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3", "f2"]);
+        doc.history.undo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+        expect(position()).toBe(anchor);
+        doc.history.redo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3", "f2"]);
+        expect(position()).toBe(anchor);
+    });
+    test.each(
+        anchorCases.filter(({ anchor }) => anchor === 2),
+    )("moves refuse crossing $kind prefix $anchor without any changes", ({ kind, anchor }) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const position = addAnchor(body, anchor, kind);
+        const before = Serializer.serializeObject(body);
+        const history = doc.history.position();
+        let moved: Result<void> = Result.ok(undefined);
+        Transaction.execute(doc, "move", () => {
+            moved = body.moveFeatureTo("f2", 2);
+        });
+        expect(moved.isOk).toBe(false);
+        expect(moved.error).toContain("error.parametric.timelinePrefix");
+        expect(Serializer.serializeObject(body)).toEqual(before);
+        expect(position()).toBe(anchor);
+        expect(doc.history.position()).toEqual(history);
+        expect(body.moveFeature("f2", 1).isOk).toBe(false);
     });
 
     test("removeFeature with no features left yields an empty compound", () => {

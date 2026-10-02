@@ -59,6 +59,18 @@ describe("parametricTools", () => {
         expect((runParametric().parameters as any).required).toEqual(["ops"]);
     });
 
+    test("tolerant thicken is a boolean option without top-level schema unions", () => {
+        const schema = runParametric().parameters as any;
+        expect(opsSchema().properties).toHaveProperty(
+            "tolerant",
+            expect.objectContaining({ type: "boolean" }),
+        );
+        for (const key of ["oneOf", "anyOf", "allOf"]) {
+            expect(schema).not.toHaveProperty(key);
+            expect(opsSchema()).not.toHaveProperty(key);
+        }
+    });
+
     test("edge queries advertise origin, adjacency, outline, curve and analytic selectors", () => {
         const properties = (opsSchema() as any).properties;
         expect(Object.keys(properties.selector.properties)).toEqual([
@@ -72,6 +84,14 @@ describe("parametricTools", () => {
         expect(properties.selector.additionalProperties).toBe(false);
         expect(properties.expectedCount.minimum).toBe(1);
         expect(properties.selector.properties.geometry.properties.elevation.required).toEqual(["value"]);
+    });
+
+    test("corner insertion and historical edge queries advertise a nonnegative integer position", () => {
+        const index = (opsSchema() as any).properties.index;
+        expect(index.type).toBe("integer");
+        expect(index.minimum).toBe(0);
+        expect(index.description).toContain("fillet/chamfer");
+        expect(index.description).toContain("edges");
     });
 
     test("the sketch schema offers every entity type and every engine action", () => {
@@ -186,7 +206,9 @@ describe("parametric response mode", () => {
 
 test("parametric job tools append after existing tools and bypass only by built-in identity", () => {
     const tools = buildTools();
-    const jobs = tools.slice(-3);
+    // #124 appended read_export_chunk after the jobs to preserve the cached tools prefix.
+    expect(tools.at(-1)?.name).toBe("read_export_chunk");
+    const jobs = tools.slice(-4, -1);
     expect(jobs.map((tool) => tool.name)).toEqual([
         "start_parametric_job",
         "get_parametric_job",

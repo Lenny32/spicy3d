@@ -318,6 +318,21 @@ export class AnalysisPanel extends HTMLElement {
         state.textContent = this.node.error ?? this.node.status;
         state.setAttribute("role", this.node.error ? "alert" : "status");
         this.results.append(state);
+        this.results.ariaBusy = String(this.node.status === "running");
+        if (this.node.status === "running") {
+            const progress = document.createElement("progress");
+            progress.ariaLabel = I18n.translate("analysis.inspectionRunning");
+            const cancel = document.createElement("button");
+            cancel.textContent = I18n.translate("common.cancel");
+            cancel.onclick = () => manager.cancelAnalysis(this.node);
+            this.results.append(progress, cancel);
+        } else if (this.node.status === "idle" || this.node.status === "invalid") {
+            const run = document.createElement("button");
+            run.textContent = I18n.translate("analysis.panel.run");
+            run.disabled = !this.node.visible;
+            run.onclick = () => void manager.evaluate(this.node);
+            this.results.append(run);
+        }
 
         for (const entry of manager.result(this.node)?.legend ?? []) {
             const legend = document.createElement("div");

@@ -227,7 +227,7 @@ class EditSession {
         this.clearPreview();
         if (feature !== undefined) {
             const result = this.preview.evaluate(feature, dragging);
-            showPreviewProblem(result.error);
+            showPreviewProblem(result.error ?? result.warning, result.note);
             const meshes = result.shape === undefined ? undefined : previewMeshes(this.body, result.shape);
             if (meshes !== undefined) {
                 this._previewId = this.body.document.visual.context.displayMesh(meshes, { meshOpacity: 1 });

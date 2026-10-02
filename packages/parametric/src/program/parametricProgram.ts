@@ -15,6 +15,7 @@ import {
     type IEdge,
     type IFace,
     type INode,
+    type IShape,
     LENGTH_UNITS,
     Matrix4,
     type ParameterValue,
@@ -27,7 +28,7 @@ import {
     type XYZLike,
 } from "@spicy3d/core";
 import { captureNextCandidateIds } from "../commands/nextExtentCandidates";
-import { isBodyTrackingNode } from "../features/bodyTracking";
+import { type FeatureTimelineState, isBodyTrackingNode } from "../features/bodyTracking";
 import { matchEdgesAnchored } from "../features/edgeMatcher";
 import { captureEdgeRef, type EdgeRef } from "../features/edgeRef";
 import { captureExtentFaceRef } from "../features/extrudeExtent";
@@ -48,6 +49,7 @@ import { resolveProfiles } from "../features/profileBuilder";
 import { captureProfileRef } from "../features/profileRef";
 import { captureProjectionTarget } from "../features/projectionTargetReferences";
 import { type FilletRadiusPoint, resolveFilletRadiusLaw } from "../features/radiusLaw";
+import { idIsShared } from "../features/trackedId";
 import { ParametricBodyNode } from "../parametricBodyNode";
 import { captureFaceBoundaryRefs } from "../sketch/commands/sketchCommands";
 import { captureFaceRef, type PlaneFaceRef, sketchPlaneOfFace } from "../sketch/planeRef";
@@ -222,7 +224,6 @@ export interface RevolveOp {
     angle?: ParameterValue;
 }
 
-/** A loft through one closed profile per sketch, in `sections` order. Always starts a new body. */
 export interface ProjectionOp {
     op: "projection";
     id: string;
@@ -235,13 +236,14 @@ export interface ProjectionOp {
     direction: XYZLike;
 }
 
+/** A loft through one profile per sketch (open wires require solid: false), in `sections` order. Always starts a new body. */
 export interface LoftOp {
     op: "loft";
     id: string;
     name?: string;
     /** Sketch op ids or existing sketch node ids, at least two; each sketch must hold a single profile. */
     sections: string[];
-    /** Capped ends (default); false = an open surface. */
+    /** Solid output (default); false = a surface, also permitting open section wires. */
     solid?: boolean;
     /** Straight faces between consecutive sections; default smooth. */
     ruled?: boolean;
@@ -331,7 +333,9 @@ export interface FilletChamferOp {
     id: string;
     name?: string;
     body: string;
-    /** Indexes into the body's current edge list (findSubShapes order). */
+    /** Insert before this zero-based feature index; omitted appends. */
+    index?: number;
+    /** Indexes into the edge list at the insertion position (findSubShapes order). */
     edgeIndexes?: number[];
     /** Body-scoped persistent refs returned by the edges op; alternative to indexes. */
     edgeRefs?: PersistentEdgeReference[];
@@ -353,7 +357,9 @@ export interface EdgesOp {
     selector?: EdgeSelector;
     expectedCount?: number;
     body: string;
-    /** Omit to query all edges; indexes describe only the current shape. */
+    /** Query the shape entering this feature index; omitted queries the final shape. */
+    index?: number;
+    /** Omit to query all edges at the requested position. */
     edgeIndexes?: number[];
 }
 
@@ -371,6 +377,7 @@ export interface EdgesReport {
  */
 export interface ThickenOp {
     op: "thicken";
+    tolerant?: boolean;
     id: string;
     name?: string;
     body: string;
@@ -458,6 +465,8 @@ interface State {
     readonly changed: Map<ParametricBodyNode, Set<string>>;
     /** Entity/constraint names given in this program, per sketch node id. */
     readonly sketchNames: Map<string, SketchNames>;
+    deferValidation: boolean;
+    readonly pendingChecks: Map<ParametricBodyNode, Set<string> | undefined>;
 }
 
 /**
@@ -513,7 +522,7 @@ export async function runParametricProgramAsync(
 ): Promise<ProgramResult> {
     const refs = refsFor(document);
     const previousRefs = new Map(refs);
-    const steps = evaluateProgram(document, ops, options);
+    const steps = evaluateProgram(document, ops, options, true);
     const cancel = () =>
         owner.run(() => {
             for (const node of document.modelManager.findNodes()) {
@@ -545,6 +554,7 @@ function* evaluateProgram(
     document: IDocument,
     ops: readonly ParametricOp[],
     options: ProgramRunOptions,
+    asynchronous = false,
 ): Generator<number, ProgramResult, void> {
     if (options.responseMode !== undefined && !["full", "compact"].includes(options.responseMode)) {
         throw new Error('"responseMode" must be "full" or "compact"');
@@ -558,6 +568,8 @@ function* evaluateProgram(
         touched: new Set(),
         changed: new Map(),
         sketchNames: new Map(),
+        deferValidation: false,
+        pendingChecks: new Map(),
     };
     const bodies = () =>
         document.modelManager
@@ -588,10 +600,27 @@ function* evaluateProgram(
                 while (index < ops.length && ops[index].op === "editSketch");
             });
         } else {
-            // Topology-dependent operations must validate before the next operation reads it.
-            ParametricBodyNode.withSynchronousEvaluation(document, run);
+            // Tolerant steps require the bounded worker, including upstream edits.
+            state.deferValidation =
+                asynchronous &&
+                ((ops[index].op === "thicken" && (ops[index] as ThickenOp).tolerant === true) ||
+                    bodies().some((body) =>
+                        body.features.some(
+                            (feature) => feature.type === "thicken" && feature.tolerant === true,
+                        ),
+                    ));
+            if (state.deferValidation) run();
+            else ParametricBodyNode.withSynchronousEvaluation(document, run);
         }
         yield index;
+        state.deferValidation = false;
+        try {
+            for (const [body, before] of state.pendingChecks) checkBody(state, body, before);
+        } catch (err) {
+            const opIndex = index - 1;
+            throw new Error(`op ${opIndex} ("${ops[opIndex].op}") failed: ${(err as Error).message}`);
+        }
+        state.pendingChecks.clear();
     }
     // Checked once all ops ran, so a later op may repair what an earlier sketch edit broke downstream.
     for (const body of bodies()) {
@@ -1369,10 +1398,29 @@ function runEditFaceSweepOp(state: State, op: EditFaceSweepOp): void {
     markChanged(state, body, [feature.id]);
 }
 
+/** Read cached timeline geometry without changing the displayed body or its references. */
+function edgeInputAt(
+    body: ParametricBodyNode,
+    index: number | undefined,
+): FeatureTimelineState & { shape: IShape; edgeIds: string[] } {
+    const current = body.shape;
+    if (!current.isOk) throw new Error(`body "${body.id}" has no valid shape: ${current.error}`);
+    if (index === undefined) {
+        const edges = current.value.findSubShapes(ShapeTypes.edge);
+        return { shape: current.value, edgeIds: edges.map((_, i) => body.edgeIdAt(i) ?? "") };
+    }
+    if (!Number.isInteger(index) || index < 0 || index > body.features.length)
+        throw new Error(`"index" must be an integer in 0..${body.features.length}`);
+    const input = body.cornerEditStateAt(index);
+    if (input?.shape === undefined) throw new Error(`body has no input shape at feature index ${index}`);
+    return { ...input, shape: input.shape, edgeIds: input.edgeIds ?? [] };
+}
+
 function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
     const body = resolveBody(state, op.body);
-    const shape = body.shape;
-    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    const insertionIndex = op.index ?? body.features.length;
+    const input = edgeInputAt(body, op.index);
+    const shape = input.shape;
     const scope = state.document.variables.evaluate().scope;
     if (op.op === "chamfer" && op.radiusLaw !== undefined)
         throw new Error("Radius laws apply only to fillets");
@@ -1385,25 +1433,26 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
         throw new Error(`"${op.op}" requires "${op.op === "fillet" ? "radius" : "distance"}"`);
     ensureUnit(value, scope, LENGTH_UNITS, op.op === "fillet" ? "radius" : "distance");
 
-    const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    const edges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];
     if ((op.edgeIndexes !== undefined) === (op.edgeRefs !== undefined)) {
         throw new Error('provide exactly one of "edgeIndexes" or "edgeRefs"');
     }
     const refs =
         op.edgeRefs !== undefined
             ? persistentEdges(op.edgeRefs, body)
-            : captureIndexes(body, edges, op.edgeIndexes!);
+            : captureIndexes(body, edges, op.edgeIndexes!, input.edgeIds);
     if (refs.length === 0) throw new Error("select at least one edge");
-    if (op.edgeRefs !== undefined) {
-        const matched = matchEdgesAnchored(
-            shape.value,
-            refs,
-            edges.map((_, index) => body.edgeIdAt(index) ?? ""),
-        );
+    let indexes = op.edgeIndexes;
+    if (indexes === undefined) {
+        const matched = matchEdgesAnchored(shape, refs, input.edgeIds);
         if (!matched.isOk) {
             throw new Error(`persistent edge selection is missing or ambiguous: ${matched.error}`);
         }
+        indexes = matched.value.indexes;
     }
+    // Capture before replay can dispose the cached input. Deferring diagnostics would require
+    // retaining an extra shape on every success solely for failure reporting.
+    const selection = cornerSelectionContext(shape, edges, indexes);
 
     const feature: FeatureData =
         op.op === "fillet"
@@ -1417,11 +1466,50 @@ function runEdgeCornerOp(state: State, op: FilletChamferOp): void {
                       : { radiusLaw: op.radiusLaw.map(({ position, radius }) => ({ position, radius })) }),
               }
             : { id: Id.generate(), type: "chamfer", distance: value, edges: refs };
-    appendFeature(state, body, feature);
+    try {
+        appendFeature(state, body, feature, insertionIndex);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const hint =
+            op.index === undefined && insertionIndex > 1
+                ? ". Try inserting before downstream cuts with index."
+                : "";
+        throw new Error(`${message}; ${op.op} input at feature index ${insertionIndex}: ${selection}${hint}`);
+    }
     state.refs.set(op.id, body.id);
 }
 
-function captureIndexes(body: ParametricBodyNode, edges: IEdge[], indexes: number[]): EdgeRef[] {
+/** Input topology context; this identifies the attempted combination, not OCCT's invalid output faces. */
+function cornerSelectionContext(shape: IShape, edges: IEdge[], indexes: number[]): string {
+    const faces = shape.findSubShapes(ShapeTypes.face);
+    try {
+        return (
+            indexes
+                .slice(0, 8)
+                .map((index) => {
+                    const ancestors = edges[index].findAncestor(ShapeTypes.face, shape);
+                    try {
+                        const adjacent = faces.flatMap((face, i) =>
+                            ancestors.some((ancestor) => face.isSame(ancestor)) ? [i] : [],
+                        );
+                        return `edge ${index} adjoining faces [${adjacent.join(", ")}]`;
+                    } finally {
+                        for (const face of ancestors) face.dispose();
+                    }
+                })
+                .join("; ") + (indexes.length > 8 ? `; ${indexes.length - 8} more selected edges` : "")
+        );
+    } finally {
+        for (const face of faces) face.dispose();
+    }
+}
+
+function captureIndexes(
+    body: ParametricBodyNode,
+    edges: IEdge[],
+    indexes: number[],
+    edgeIds = edges.map((_, index) => body.edgeIdAt(index) ?? ""),
+): EdgeRef[] {
     if (!Array.isArray(indexes)) throw new Error('"edgeIndexes" must be an array');
     return indexes.map((index) => {
         const edge = Number.isInteger(index) ? edges[index] : undefined;
@@ -1432,8 +1520,8 @@ function captureIndexes(body: ParametricBodyNode, edges: IEdge[], indexes: numbe
         }
         // Same capture the interactive fillet uses: the tracked id is what makes the
         // ref survive a rebuild, the fingerprint is what matches when it does not.
-        const id = body.edgeIdAt(index);
-        return captureEdgeRef(edge, id, body.edgeIdIsShared(id));
+        const id = edgeIds[index] || undefined;
+        return captureEdgeRef(edge, id, idIsShared(edgeIds, id));
     });
 }
 
@@ -1489,9 +1577,9 @@ function persistentEdges(given: PersistentEdgeReference[], body: ParametricBodyN
 
 function runEdgesOp(state: State, op: EdgesOp): void {
     const body = resolveBody(state, op.body);
-    const shape = body.shape;
-    if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
-    const edges = shape.value.findSubShapes(ShapeTypes.edge) as IEdge[];
+    const input = edgeInputAt(body, op.index);
+    const shape = input.shape;
+    const edges = shape.findSubShapes(ShapeTypes.edge) as IEdge[];
     if (op.selector !== undefined && op.edgeIndexes !== undefined)
         throw new Error("use selector or edgeIndexes, not both");
     if (op.selector !== undefined) validateEdgeSelector(op.selector);
@@ -1502,7 +1590,7 @@ function runEdgesOp(state: State, op: EdgesOp): void {
             ? undefined
             : allIndexes.map((index) => {
                   try {
-                      return captureIndexes(body, edges, [index])[0];
+                      return captureIndexes(body, edges, [index], input.edgeIds)[0];
                   } catch (error) {
                       unselectableEdges.push({
                           index,
@@ -1520,10 +1608,11 @@ function runEdgesOp(state: State, op: EdgesOp): void {
                   allRefs!,
                   op.selector,
                   op.selector.curves === undefined ? undefined : persistentEdges(op.selector.curves, body),
+                  op.index === undefined ? undefined : input,
               );
     const refs =
         allRefs === undefined
-            ? captureIndexes(body, edges, indexes)
+            ? captureIndexes(body, edges, indexes, input.edgeIds)
             : indexes.map((index) => {
                   const ref = allRefs[index];
                   if (ref === undefined) throw new Error(`selected edge ${index} has no capturable curve`);
@@ -1547,6 +1636,8 @@ function runThickenOp(state: State, op: ThickenOp): void {
     const body = resolveBody(state, op.body);
     const shape = body.shape;
     if (!shape.isOk) throw new Error(`body "${op.body}" has no valid shape: ${shape.error}`);
+    if (op.tolerant !== undefined && typeof op.tolerant !== "boolean")
+        throw new Error("Thicken tolerant must be a boolean");
     if (op.thickness === undefined) throw new Error('"thicken" requires "thickness"');
     ensureUnit(op.thickness, state.document.variables.evaluate().scope, LENGTH_UNITS, "thickness");
     if (op.joinType !== undefined && !(THICKEN_JOIN_TYPE_NAMES as readonly string[]).includes(op.joinType)) {
@@ -1574,6 +1665,7 @@ function runThickenOp(state: State, op: ThickenOp): void {
         id: Id.generate(),
         type: "thicken",
         thickness: op.thickness,
+        ...(op.tolerant ? { tolerant: true } : {}),
         ...(op.joinType === undefined || op.joinType === "arc" ? {} : { joinType: op.joinType }),
         ...(op.mode === undefined || op.mode === "skin" ? {} : { mode: op.mode }),
         ...(openFaces.length > 0 ? { openFaces } : {}),
@@ -1651,7 +1743,10 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             break;
         case "moveTo":
             if (typeof op.index !== "number") throw new Error('"moveTo" requires a numeric "index"');
-            body.moveFeatureTo(op.featureId, op.index);
+            {
+                const moved = body.moveFeatureTo(op.featureId, op.index);
+                if (!moved.isOk) throw new Error(moved.error);
+            }
             break;
         case "remove":
             body.removeFeature(op.featureId);
@@ -1768,14 +1863,26 @@ function createBody(
  * success. Only *new* errors count: a stale failure from an earlier edit must not make
  * every later op look broken.
  */
-function appendFeature(state: State, body: ParametricBodyNode, feature: FeatureData): void {
+function appendFeature(
+    state: State,
+    body: ParametricBodyNode,
+    feature: FeatureData,
+    index = body.features.length,
+): void {
     const before = erroredFeatureIds(body);
-    body.setFeaturesEmitShapeChanged([...body.features, feature]);
+    body.insertFeatureAt(feature, index);
     checkBody(state, body, before);
     markChanged(state, body, [feature.id]);
 }
 
 function checkBody(state: State, body: ParametricBodyNode, before: Set<string> | undefined): void {
+    if (state.deferValidation) {
+        // Reading shape starts a lazy rebuild; validation resumes after settled().
+        void body.shape;
+        if (!state.pendingChecks.has(body)) state.pendingChecks.set(body, before);
+        state.touched.add(body);
+        return;
+    }
     // A newly created body can still be lazy. Evaluate before inspecting its feature failures.
     const shape = body.shape;
     const failed = body

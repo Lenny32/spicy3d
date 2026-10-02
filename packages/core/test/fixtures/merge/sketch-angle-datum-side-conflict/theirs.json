@@ -1,0 +1,72 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 14,
+        "sketch": 5
+    },
+    "id": "fixture-sketch5-angle-side",
+    "name": "Fixture sketch v5: explicit clockwise expression side",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":1,\"type\":\"line\",\"params\":[100,0,108.66025403784438,-5]}],\"constraints\":[{\"id\":2,\"kind\":22,\"refs\":[{\"entityId\":1,\"pointIndex\":0}],\"datums\":[100,0]},{\"id\":3,\"kind\":1,\"refs\":[{\"entityId\":1,\"pointIndex\":0},{\"entityId\":1,\"pointIndex\":1}],\"datum\":10},{\"id\":4,\"kind\":9,\"refs\":[{\"entityId\":-2,\"pointIndex\":0},{\"entityId\":-2,\"pointIndex\":1},{\"entityId\":1,\"pointIndex\":0},{\"entityId\":1,\"pointIndex\":1}],\"datum\":\"60\",\"angleSide\":1}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-angle",
+                "name": "Migrated clockwise angle",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [
+        {
+            "id": "tilt",
+            "name": "tilt",
+            "type": "angle",
+            "expression": "30"
+        }
+    ],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {
+        "angleSide": "untouched user data"
+    }
+}

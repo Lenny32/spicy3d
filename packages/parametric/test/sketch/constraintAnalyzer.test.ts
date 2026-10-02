@@ -67,3 +67,42 @@ test("a 100-line sketch is analyzed without mutation", () => {
     expect(performance.now() - start).toBeLessThan(1000);
     expect(solver.toData()).toEqual(data);
 });
+
+test("dimension review sizes the connector without suggesting dimensions on its offset target", () => {
+    solver.reset({
+        entities: [
+            { id: 10, type: "line", construction: true, params: [0, 20, 10, 20] },
+            { id: 20, type: "line", derivation: "offset", params: [0, 25, 10, 25] },
+            { id: 40, type: "line", params: [10, 25, 20, 30] },
+        ],
+        constraints: [
+            {
+                id: 30,
+                kind: ConstraintKind.Offset,
+                refs: [
+                    { entityId: 10, pointIndex: 0 },
+                    { entityId: 20, pointIndex: 0 },
+                ],
+                datum: 5,
+            },
+            {
+                id: 50,
+                kind: ConstraintKind.P2PCoincident,
+                refs: [
+                    { entityId: 20, pointIndex: 1 },
+                    { entityId: 40, pointIndex: 0 },
+                ],
+            },
+        ],
+    });
+    const before = solver.toData();
+    const suggestions = suggestDimensions(solver);
+    expect(suggestions.map((s) => s.constraint.refs[0].entityId)).toEqual([40]);
+    expect(solver.toData()).toEqual(before);
+    expect(applyDimensions(solver, suggestions)).toBe(true);
+    expect(solver.diagnose().conflicting).toEqual([]);
+    expect(solver.diagnose().redundant).toEqual([]);
+    expect(solver.setDatumSource(30, 7).isOk).toBe(true);
+    expect(solver.solve(true).result).toMatch(/^Ok/);
+    expect(solver.pointOf({ entityId: 40, pointIndex: 0 })).toEqual([10, 27]);
+});

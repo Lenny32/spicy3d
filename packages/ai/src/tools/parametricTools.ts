@@ -119,7 +119,7 @@ const CONSTRAINT_SCHEMA = {
         },
         datum: {
             description:
-                "Dimension value in mm, degrees (Angle) or a ratio (Scale), or an expression naming document variables. Omit to keep the current measurement.",
+                "Dimension value in mm, signed degrees from the first directed line to the second, CCW positive (Angle), or a ratio (Scale), or an expression naming document variables. Omit to keep the current measurement.",
         },
         datums: { description: "Multi-value datum, e.g. Fix = [u, v]" },
         direction: {
@@ -167,6 +167,10 @@ const ACTION_SCHEMA = {
             description: "add: entity specs; otherwise the entity ids/names acted on",
         },
         constraints: { type: "array", description: "add: constraint specs; remove: constraint ids/names" },
+        associative: {
+            type: "boolean",
+            description: "offset: keep source and expression linked (default false); no offset chains",
+        },
         entity: { description: "Entity id or name (movePoint/trim/split/extend/offset)" },
         poles: {
             type: "array",
@@ -201,7 +205,7 @@ const ACTION_SCHEMA = {
         end: { type: "string", enum: ["start", "end"], description: "extend: which end grows (default end)" },
         distance: {
             description:
-                "offset: mm or a length expression, evaluated once; + = left for open curves / outward for closed curves. B-splines produce a fixed approximate copy.",
+                "offset: mm or a length expression; + = left for open curves / outward for closed curves. Default evaluates once; associative:true keeps a source/distance relation, regenerated on commit.",
         },
         delta: { type: "array", items: { type: "number" }, description: "move/paste: [du, dv]" },
         center: { type: "array", items: { type: "number" }, description: "rotate/polygon: [u, v]" },
@@ -274,7 +278,7 @@ const EDGE_SELECTOR_SCHEMA = {
             minItems: 1,
             items: { type: "object" },
             description:
-                "Persistent reference objects returned by edges. Resolve to current topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
+                "Persistent reference objects returned by edges. Resolve to the queried timeline topology first, then select edges on the same supporting line/circle; other curves use tracked ancestry.",
         },
         geometry: {
             type: "object",
@@ -422,7 +426,7 @@ const OPS_SCHEMA = {
             type: "array",
             items: { type: "string" },
             description:
-                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
+                "Loft only: the section sketches (op ids or node ids) in loft order, at least two, each holding one closed profile without holes, or one open non-self-intersecting wire when solid:false (ordinary lofts only). All sections must be all open or all closed; no two consecutive ones on the same plane. The loft follows every sketch when it changes. Always starts a new body.",
         },
         guided: {
             type: ["object", "null"],
@@ -462,7 +466,8 @@ const OPS_SCHEMA = {
         },
         solid: {
             type: "boolean",
-            description: "Loft/sweep: capped ends (default true); false = an open surface",
+            description:
+                "Loft/sweep: solid output (default true); false = a surface. Ordinary lofts also accept open section wires with false",
         },
         section: {
             type: "object",
@@ -556,7 +561,7 @@ const OPS_SCHEMA = {
             type: "array",
             items: { type: "number" },
             description:
-                "fillet/chamfer/projection: indexes into the current source edge list; alternative to edgeRefs. edges query: optional subset of indexes (omit for all). Query with run_parametric edges for indexes plus persistent references.",
+                "fillet/chamfer: edge indexes at the insertion position (final shape when index is omitted). Projection: indexes into the current source edge list. Alternative to edgeRefs. edges query: optional subset at the queried position (omit for all). Query with run_parametric edges for indexes plus persistent references.",
         },
         radius: { description: "Fillet radius in mm" },
         radiusLaw: {
@@ -589,6 +594,11 @@ const OPS_SCHEMA = {
             enum: ["skin", "pipe"],
             description: "Thicken only, solids: offset mode (default skin)",
         },
+        tolerant: {
+            type: "boolean",
+            description:
+                "Thicken only: opt-in trimmed material envelope. Closed spheres and ring tori tolerate inward cavity collapse. Ordinary arc thickening is tried first; intersection fallback is verified only for analytic solids with only vertical-edge fillets. Free-form collapse and open skins are refused. joinType/mode are ignored. Programs await the bounded worker with a 30 s deadline. Default false.",
+        },
         openFaceIndexes: {
             type: "array",
             items: { type: "number" },
@@ -610,7 +620,12 @@ const OPS_SCHEMA = {
         featureId: { type: "string", description: "The feature's id, as reported by the `features` op" },
         key: { type: "string", description: 'setParameter: the parameter name, e.g. "depth"' },
         value: { description: "setParameter: the new value; suppress: true/false; rename: the new name" },
-        index: { type: "number", description: "moveTo: the feature's absolute index in the list" },
+        index: {
+            type: "integer",
+            minimum: 0,
+            description:
+                "fillet/chamfer: insert before this zero-based feature index (omit to append). edges: query the input shape at this index. Edge indexes and references are resolved there. moveTo: the feature's absolute index in the list.",
+        },
         definition: {
             type: "object",
             description:
@@ -680,7 +695,20 @@ export async function runParametric(
         parametric.SketchEditor.exit();
 
     let result: ProgramResult | undefined;
-    if (capturedDocument) {
+    const needsAsyncRebuild =
+        ops.some(
+            (op) =>
+                (op as { op?: string; tolerant?: boolean }).op === "thicken" &&
+                (op as { tolerant?: boolean }).tolerant === true,
+        ) ||
+        document.modelManager
+            .findNodes()
+            .some(
+                (node) =>
+                    node instanceof parametric.ParametricBodyNode &&
+                    node.features.some((feature) => feature.type === "thicken" && feature.tolerant === true),
+            );
+    if (capturedDocument || needsAsyncRebuild) {
         const assertIdle = () => {
             if (globalThis.app.executingCommand || Transaction.isActive(document))
                 throw new Error(

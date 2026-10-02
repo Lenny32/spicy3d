@@ -514,7 +514,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
         }
         const result = preview.evaluate(edited, dragging);
         if (this.extent === EXTENT_NEXT) this._nextPreviewError = this._nextError ?? result.error;
-        showPreviewProblem(result.error);
+        showPreviewProblem(result.error ?? result.warning, result.note);
         if (result.shape === undefined) return { meshes: [] };
         const meshes = previewMeshes(body, result.shape);
         if (meshes === undefined) return { meshes: [] };
@@ -759,7 +759,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
             const edited = this.editedFeature(feature);
             body.setFeaturesEmitShapeChanged(body.features.map((x) => (x.id === edited.id ? edited : x)));
             for (const [other, linkId] of removed) {
-                other.setFeaturesEmitShapeChanged(other.features.filter((x) => x.id !== linkId));
+                other.removeFeature(linkId);
             }
             for (const other of added) addExtrudeTarget(other, body, feature.id);
             this.document.visual.update();

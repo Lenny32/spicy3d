@@ -272,7 +272,9 @@ test("an offset failure disposes previously built relief and permits a subsequen
         if (result.isOk) released = rs.spyOn(result.value, "dispose");
         return result;
     });
-    expect(apply(state, { ...state.feature, profiles })).toBe("injected offset failure");
+    expect(apply(state, { ...state.feature, profiles })).toBe(
+        'emboss step "emboss": injected offset failure',
+    );
     expect(released).not.toBeUndefined();
     expect(released).toHaveBeenCalledOnce();
     stub.mockRestore();
@@ -302,7 +304,7 @@ test("parametric 13 migration preserves existing models and newer readers enforc
     } as Serialized;
     const result = DocumentMigrations.migrate(data);
     expect(result.isOk).toBe(true);
-    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 14, sketch: 4 });
+    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 15, sketch: 6 });
     expect(result.value["models"]).toEqual(data["models"]);
     expect(result.value["userData"]).toEqual(data["userData"]);
 });

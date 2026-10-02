@@ -12,6 +12,7 @@ import {
     type ShapeMeshData,
     VisualConfig,
 } from "@spicy3d/core";
+import { offsetEndpointIndexes } from "../associativeOffset";
 import {
     applyDragAutoConstraints,
     type DragSnap,
@@ -26,7 +27,6 @@ import {
     ellipsePoint,
     entityPointCount,
     isDatumEntityId,
-    isExternalEntityId,
     originRef,
     SKETCH_EDGE_LINE_WIDTH,
     SKETCH_X_AXIS_ID,
@@ -253,6 +253,12 @@ export class SketchEventHandler implements IEventHandler {
         for (const entity of this.pickableEntities()) {
             const pointCount = entityPointCount(entity.type, entity.params);
             for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+                if (
+                    entity.derivation === "offset" &&
+                    this.editor.activePick?.includeOffsetEndpoints &&
+                    !offsetEndpointIndexes(entity).includes(pointIndex)
+                )
+                    continue;
                 const [u, v] = solver.pointOf({ entityId: entity.id, pointIndex });
                 const screen = view.worldToScreen(toWorld(plane, u, v));
                 const distance = Math.hypot(screen.x - event.offsetX, screen.y - event.offsetY);
@@ -271,9 +277,17 @@ export class SketchEventHandler implements IEventHandler {
         return best;
     }
 
-    /** Real entities plus the seeded external references (constraint targets). */
+    /** Ordinary selection includes offset targets; constraint picks exclude them. */
     private pickableEntities(): SketchEntityData[] {
-        return constraintTargetEntities(this.editor.solver);
+        const solver = this.editor.solver;
+        return this.editor.activePick && !this.editor.activePick.includeOffsetTargets
+            ? [
+                  ...constraintTargetEntities(solver),
+                  ...(this.editor.activePick.includeOffsetEndpoints
+                      ? solver.entities().filter((e) => e.derivation === "offset")
+                      : []),
+              ]
+            : [...solver.entities(), ...solver.externalEntitiesData()];
     }
 
     hitTestEntity(
@@ -421,8 +435,8 @@ export class SketchEventHandler implements IEventHandler {
             return;
         }
         const ref = this.hitTestPoint(view, event);
-        // the datum origin and external references are pickable for constraints but never draggable
-        if (ref !== undefined && !isDatumEntityId(ref.entityId) && !isExternalEntityId(ref.entityId)) {
+        // Datum, external references and generated offsets are pinned and never draggable.
+        if (ref !== undefined && !this.editor.solver.isFixed(ref.entityId)) {
             this.beginPointDrag(view, ref);
             return;
         }
@@ -920,8 +934,13 @@ export function sketchEntityMeshes(editor: SketchEditor): ShapeMeshData[] {
 function entityPointMeshes(editor: SketchEditor): ShapeMeshData[] {
     const plane = editor.node.plane;
     const meshes: ShapeMeshData[] = [];
-    for (const entity of constraintTargetEntities(editor.solver)) {
+    for (const entity of [
+        ...constraintTargetEntities(editor.solver),
+        ...editor.solver.entities().filter((e) => e.derivation === "offset"),
+    ]) {
         for (let pointIndex = 0; pointIndex < entityPointCount(entity.type, entity.params); pointIndex++) {
+            if (entity.derivation === "offset" && !offsetEndpointIndexes(entity).includes(pointIndex))
+                continue;
             const [u, v] = editor.solver.pointOf({ entityId: entity.id, pointIndex });
             meshes.push(
                 MeshDataUtils.createVertexMesh(

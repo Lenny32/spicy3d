@@ -14,7 +14,8 @@ import {
     VisualNode,
     validateStlTessellation,
 } from "@spicy3d/core";
-import type { Tool } from "../llm/types";
+import type { Tool, ToolCallContext } from "../llm/types";
+import { MAX_CHUNK_EXPORT_BYTES, retainExport } from "./exportChunks";
 import { imageByteBudget } from "./imageEncoding";
 
 const DEFAULT_EXPORT_BYTES = 1024 * 1024;
@@ -69,22 +70,27 @@ function resolveFilename(visuals: VisualNode[], format: string, filename: unknow
     return name;
 }
 
-async function handleExportNodes(args: Record<string, unknown>): Promise<string> {
+async function handleExportNodes(
+    args: Record<string, unknown>,
+    _signal?: AbortSignal,
+    context?: ToolCallContext,
+): Promise<string> {
     const app = globalThis.app;
     const doc = getDocument();
     if (!doc) return JSON.stringify({ error: I18n.translate("ai.error.noDocument") });
 
     const delivery = args["delivery"] === undefined ? "download" : args["delivery"];
-    if (delivery !== "download" && delivery !== "base64")
-        return JSON.stringify({ error: 'delivery must be "download" or "base64"' });
-    const maxBytes = args["maxBytes"] === undefined ? DEFAULT_EXPORT_BYTES : args["maxBytes"];
-    if (
-        typeof maxBytes !== "number" ||
-        !Number.isInteger(maxBytes) ||
-        maxBytes < 1 ||
-        maxBytes > MAX_EXPORT_BYTES
-    )
-        return JSON.stringify({ error: `maxBytes must be an integer from 1 to ${MAX_EXPORT_BYTES}` });
+    if (delivery !== "download" && delivery !== "base64" && delivery !== "chunks")
+        return JSON.stringify({ error: 'delivery must be "download", "base64" or "chunks"' });
+    const byteLimit = delivery === "chunks" ? MAX_CHUNK_EXPORT_BYTES : MAX_EXPORT_BYTES;
+    const maxBytes =
+        args["maxBytes"] === undefined
+            ? delivery === "chunks"
+                ? byteLimit
+                : DEFAULT_EXPORT_BYTES
+            : args["maxBytes"];
+    if (typeof maxBytes !== "number" || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > byteLimit)
+        return JSON.stringify({ error: `maxBytes must be an integer from 1 to ${byteLimit}` });
     if (
         args["filename"] !== undefined &&
         (typeof args["filename"] !== "string" ||
@@ -117,7 +123,8 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
     const mode = args["mode"] === undefined ? "merged" : args["mode"];
     if (mode !== "merged" && mode !== "separate")
         return JSON.stringify({ error: 'mode must be "merged" or "separate"' });
-    if (mode === "separate") return handleSeparateExport(app, doc, args, format, delivery, maxBytes, options);
+    if (mode === "separate")
+        return handleSeparateExport(app, doc, args, format, delivery, maxBytes, options, context?.caller);
 
     const nodes = resolveNodes(doc, args["ids"]);
     if (typeof nodes === "string") return JSON.stringify({ error: nodes });
@@ -141,6 +148,7 @@ async function handleExportNodes(args: Record<string, unknown>): Promise<string>
         },
         delivery,
         maxBytes,
+        context?.caller,
     );
 }
 
@@ -162,8 +170,9 @@ interface BatchExportOutput {
 async function deliverExport(
     data: BlobPart[],
     details: ExportMetadata,
-    delivery: "download" | "base64",
+    delivery: "download" | "base64" | "chunks",
     maxBytes: number,
+    caller?: string,
 ): Promise<string> {
     const blob = new Blob(data);
     const metadata = {
@@ -171,10 +180,11 @@ async function deliverExport(
         ...details,
         bytes: blob.size,
     };
+    if (delivery === "chunks") return retainExport(blob, metadata, maxBytes, caller);
     if (delivery === "base64") {
         if (blob.size > maxBytes) {
             return JSON.stringify({
-                error: "Export exceeds maxBytes; increase the limit or use browser download",
+                error: "Export exceeds maxBytes; increase the limit or use chunks/browser download",
                 bytes: blob.size,
                 maxBytes,
                 filename: details.filename,
@@ -194,7 +204,7 @@ async function deliverExport(
         ).byteLength;
         if (budget !== undefined && responseBytes > budget) {
             return JSON.stringify({
-                error: "Export exceeds the relay response limit; use browser download or export less geometry",
+                error: "Export exceeds the relay response limit; use chunks, browser download or export less geometry",
                 filename: details.filename,
                 bytes: blob.size,
                 responseBytes,
@@ -213,9 +223,10 @@ async function handleSeparateExport(
     document: IDocument,
     args: Record<string, unknown>,
     format: string,
-    delivery: "download" | "base64",
+    delivery: "download" | "base64" | "chunks",
     maxBytes: number,
     options?: DataExportOptions,
+    caller?: string,
 ): Promise<string> {
     const ids = args["ids"];
     if (ids !== undefined && (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")))
@@ -294,6 +305,7 @@ async function handleSeparateExport(
         },
         delivery,
         maxBytes,
+        caller,
     );
 }
 
@@ -334,7 +346,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; base64 returns exact bytes with filename/MIME metadata. Returned bytes default to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes.",
             parameters: {
                 type: "object",
                 properties: {
@@ -346,8 +358,9 @@ export function buildFileTools(): Tool[] {
                     format: { type: "string", description: "Export format, e.g. '.step'" },
                     delivery: {
                         type: "string",
-                        enum: ["download", "base64"],
-                        description: "Browser download (default) or returned base64 bytes",
+                        enum: ["download", "base64", "chunks"],
+                        description:
+                            "Browser download (default), inline base64, or metadata with chunk retrieval",
                     },
                     mode: {
                         type: "string",
@@ -358,9 +371,9 @@ export function buildFileTools(): Tool[] {
                     maxBytes: {
                         type: "integer",
                         minimum: 1,
-                        maximum: MAX_EXPORT_BYTES,
-                        default: DEFAULT_EXPORT_BYTES,
-                        description: "Maximum decoded bytes for base64 delivery; relay limits also apply",
+                        maximum: MAX_CHUNK_EXPORT_BYTES,
+                        description:
+                            "Decoded-byte limit: base64 defaults to 1 MiB (max 8 MiB); chunks defaults to 32 MiB (max 32 MiB). Also bounds separate outputs before archiving; relay limits apply to responses",
                     },
                     filename: {
                         type: "string",

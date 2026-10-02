@@ -29,7 +29,12 @@ afterEach(async () => {
 
 function setup() {
     const doc = new TestDocument({ selection: createMockDocument().selection });
-    const shape = () => new MockShape({ shapeType: ShapeTypes.solid });
+    const shape = () =>
+        Object.assign(new MockShape({ shapeType: ShapeTypes.solid }), {
+            checkSelfIntersection: () => {
+                throw new Error("Check must not run on the main kernel");
+            },
+        });
     let settle!: () => void;
     let entered!: () => void;
     const entry = new Promise<void>((resolve) => {
@@ -54,7 +59,19 @@ function setup() {
     });
     const app = createMockApplication({
         shapeProvider: {
-            factory: { box: () => Result.ok(shape()), boundedOperations: { shapeOperation } },
+            factory: {
+                box: () => Result.ok(shape()),
+                boundedOperations: {
+                    shapeOperation,
+                    shapeQuery: (request: unknown, signal?: AbortSignal) => {
+                        const task = shapeOperation(request, signal);
+                        return {
+                            ...task,
+                            take: () => (answer.isOk ? Result.ok(true) : Result.err(answer.error)),
+                        };
+                    },
+                },
+            },
         } as never,
     });
     app.activeView = { document: doc } as never;
@@ -115,6 +132,44 @@ test("a worker-held job returns immediately, reports progress, and preserves the
     expect(completed.result.removed).toHaveLength(1);
     expect(await next).toEqual({ ran: true });
     expect(marker).toHaveBeenCalledTimes(1);
+});
+
+test("a self-intersection job leaves metadata responsive and cancellation releases queued mutations", async () => {
+    const { doc, entry, shapeOperation } = setup();
+    const { call, marker } = await connect();
+    const started = await call("start_program_job", {
+        ops: [boxOp, { id: "clean", method: "shape.checkSelfIntersection", target: "source" }],
+    });
+    await entry;
+    expect(shapeOperation).toHaveBeenCalledWith(
+        { method: "checkSelfIntersection", shape: expect.any(MockShape) },
+        expect.any(AbortSignal),
+    );
+    expect((await call("get_program_job", { jobId: started.jobId })).progress).toEqual({
+        completed: 1,
+        total: 2,
+        method: "shape.checkSelfIntersection",
+    });
+    expect((await call("get_document_state")).nodes).toEqual([]);
+    const next = call("mutation");
+    await call("cancel_program_job", { jobId: started.jobId });
+    expect((await terminal(call, started.jobId)).state).toBe("cancelled");
+    expect(doc.modelManager.findNodes(() => true)).toEqual([]);
+    expect(await next).toEqual({ ran: true });
+    expect(marker).toHaveBeenCalledTimes(1);
+});
+
+test("a completed self-intersection query reports its boolean in program results", async () => {
+    const { entry, settle } = setup();
+    const { call } = await connect();
+    const started = await call("start_program_job", {
+        ops: [boxOp, { id: "clean", method: "shape.checkSelfIntersection", target: "source" }],
+    });
+    await entry;
+    settle();
+    const done = await terminal(call, started.jobId);
+    expect(done.state).toBe("completed");
+    expect(done.result.results).toEqual({ clean: true });
 });
 
 test("cancellation bypasses the queue, rolls back before the next mutation and retains the terminal answer", async () => {

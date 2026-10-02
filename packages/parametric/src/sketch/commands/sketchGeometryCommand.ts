@@ -1,7 +1,16 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { AsyncController, MeshDataUtils, PubSub, Result, VisualConfig } from "@spicy3d/core";
+import {
+    AsyncController,
+    LENGTH_UNITS,
+    MeshDataUtils,
+    type ParameterValue,
+    PubSub,
+    Result,
+    resolveUnitSpec,
+    VisualConfig,
+} from "@spicy3d/core";
 import { bsplineOffsetSide } from "../bsplineOffset";
 import type { SketchEditor } from "../editor/sketchEditor";
 import { entityDistance, sketchEntityMesh } from "../editor/sketchEventHandler";
@@ -19,8 +28,11 @@ import { SketchConstraintCommand } from "./sketchConstraints";
 
 export abstract class SketchGeometryCommand extends SketchConstraintCommand {
     protected abstract readonly operation: "trim" | "extend" | "split" | "offset";
-    protected get offsetDistance(): number {
-        return 1;
+    protected get associativeOffset(): boolean {
+        return false;
+    }
+    protected offsetValue(_editor: SketchEditor, side: number): ParameterValue {
+        return side;
     }
 
     protected async executeWithEditor(editor: SketchEditor): Promise<void> {
@@ -33,7 +45,9 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                 this.operation === "offset"
                     ? ["line", "arc", "circle", "bspline"]
                     : ["line", "arc", "circle"],
-                undefined,
+                this.operation === "offset" && this.associativeOffset
+                    ? { datum: true, includeOffsetTargets: true }
+                    : undefined,
                 this.controller,
             );
             if (id === undefined) return;
@@ -68,8 +82,23 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                           .filter((hit) => hit.distance <= editor.screenTolerance())
                           .sort((a, b) => a.distance - b.distance)[0]?.e
                     : editor.solver.entity(sourceId);
-            if (!source || editor.solver.isFixed(source.id))
+            if (!source) {
+                if (this.operation === "offset" && this.associativeOffset && sourceId !== undefined) {
+                    try {
+                        editor.solver.validateOffsetSource(sourceId);
+                    } catch (error) {
+                        return Result.err(error instanceof Error ? error.message : String(error));
+                    }
+                }
                 return Result.err("Select editable sketch geometry");
+            }
+            if (this.operation === "offset" && this.associativeOffset) {
+                try {
+                    editor.solver.validateOffsetSource(source.id);
+                } catch (error) {
+                    return Result.err(error instanceof Error ? error.message : String(error));
+                }
+            } else if (editor.solver.isFixed(source.id)) return Result.err("Select editable sketch geometry");
             if (this.operation === "trim") return trimCurve(source, curves, uv);
             if (this.operation === "split") return splitCurve(source, uv, curves, editor.screenTolerance());
             if (this.operation === "extend") {
@@ -79,7 +108,12 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                     : Result.err("The extension target no longer exists");
             }
             try {
-                return offset(source, this.offsetDistance * offsetSide(source, uv));
+                const distance = resolveUnitSpec(
+                    this.offsetValue(editor, offsetSide(source, uv)),
+                    editor.document.variables.evaluate().scope,
+                    LENGTH_UNITS,
+                );
+                return distance.isOk ? offset(source, distance.value) : Result.err(distance.error);
             } catch (e) {
                 return Result.err(e instanceof Error ? e.message : String(e));
             }
@@ -121,7 +155,11 @@ export abstract class SketchGeometryCommand extends SketchConstraintCommand {
                     PubSub.default.pub("displayError", edit.error);
                     continue;
                 }
-                const applied = editor.applyGeometryEdit(edit.value);
+                const datum =
+                    this.operation === "offset" && this.associativeOffset
+                        ? this.offsetValue(editor, offsetSide(edit.value.source, uv))
+                        : undefined;
+                const applied = editor.applyGeometryEdit(edit.value, datum);
                 if (applied && this.operation === "offset") break;
             }
         } finally {

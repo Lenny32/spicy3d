@@ -272,6 +272,17 @@ feature by its `type`:
 
 ## Sketches
 
+Sketch module v5 stores `angleSide` on Angle constraints. `1` means a signed datum (from the
+first directed line to the second, CCW positive); `-1` preserves a legacy clockwise magnitude
+as `-abs(datum)`, including expression results. New constraints and explicit datum edits store
+`1`. The pure v4 → v5 migration derives the side once from stored geometry and the saved
+variable table, using the former solver's matching-magnitude and nondegenerate-sweep checks.
+It leaves unresolved, stale, negative and near-0°/180° datums signed. No runtime geometry
+inference remains. The envelope stays at format 2; newer sketch module versions are refused.
+The marker merges independently of entity geometry, so a positive edit stays positive even
+when another device contributes geometry at the same clockwise magnitude. Manifests and
+`.spicy` files carry the marker as ordinary sketch payload data.
+
 Editable text (sketch module v4) is keyed by object id. Content and contour identities merge as
 one group; frame position is another group. Layout fields merge independently. A dangling text
 profile reference resolves by restoring the owning text record, including its contour slots.
@@ -286,7 +297,7 @@ profile reference resolves by restoring the owning text record, including its co
   differently → `property` conflict at `node/<sketch>/entity/<id>/params`.
 - `constraints`: `stable` list of `constraint` by `id`; `kind` scalar; `refs` one value that must
   resolve (every `entityId` a merged entity, a datum id −1…−3, or a merged external); `datum` an
-  expression, `datums`, `blockedParams`, `direction` one value each. Structural constraints (an arc's
+  expression, `angleSide` scalar, `datums`, `blockedParams`, `direction` one value each. Structural constraints (an arc's
   `PointOnArc`, an ellipse's `Perpendicular`) travel with the entity that added them.
 - `anchors` (dimension label positions): keyed by the constraint id they belong to; an anchor
   whose constraint is gone is dropped silently (the solver does the same, `anchors.filter(retained)`).
@@ -833,6 +844,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
       - `suppressed`: scalar
       - `name`: scalar
       - `thickness`: expression
+      - `tolerant`: scalar
       - `joinType`: scalar
       - `mode`: scalar
       - `openFaces`: atomic of ref → profile
@@ -853,7 +865,7 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
 
 #### Payload `sketch.data`
 
-`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` one value that must resolve. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
+`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` one value that must resolve. Offset sources and targets use these refs; their expression datum merges independently. Entities marked derivation=offset carry derived geometry rebuilt after merging. Detaching an offset versus editing it is an entity conflict. Angle datum source and side (`angleSide`) merge as one value, independently of geometry. The resolution results of an external reference (`type`, `snapshot`, `dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min. Paths below `node/<id>`.
 
 - `texts`: list of `text` by `id` (stable order)
   - `id`: scalar
@@ -873,21 +885,34 @@ the serializer, next to them (`registerMergeRule(className, rule)`, `registerMer
   - group `content` (one value): `value`, `profileIds`
   - group `position` (one value): `x`, `y`
 - `entities`: list of `entity` by `id` (stable order)
-  - `id`: scalar
-  - `type`: scalar
-  - `params`: atomic
-  - `construction`: scalar
-  - `control`: atomic
-  - `parametrization`: scalar
-  - `periodic`: scalar
+  - union on `derivation` (offset, any other)
+    - `derivation: "offset"`
+      - `id`: scalar
+      - `type`: scalar
+      - `derivation`: scalar
+      - `params`: derived
+      - `control`: derived
+      - `parametrization`: derived
+      - `periodic`: derived
+      - `construction`: scalar
+    - any other `derivation`
+      - `id`: scalar
+      - `type`: scalar
+      - `params`: atomic
+      - `construction`: scalar
+      - `control`: atomic
+      - `parametrization`: scalar
+      - `periodic`: scalar
 - `constraints`: list of `constraint` by `id` (stable order)
   - `id`: scalar
   - `kind`: scalar
   - `refs`: atomic of { entityId: ref → sketch-entity; pointIndex: scalar }
   - `datum`: expression
+  - `angleSide`: scalar
   - `datums`: atomic of expression
   - `blockedParams`: atomic
   - `direction`: atomic
+  - group `datum` (one value): `datum`, `angleSide`
 - `anchors`: list of `anchor` by `id` (stable order)
   - `id`: ref → sketch-constraint
   - `anchor`: atomic

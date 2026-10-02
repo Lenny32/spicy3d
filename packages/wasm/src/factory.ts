@@ -33,6 +33,7 @@ import {
     type TrackedShape,
     validateFilletCornerSetback,
     validateFilletRadiusLaw,
+    volumeTolerance,
     type XYZ,
     type XYZLike,
 } from "@spicy3d/core";
@@ -51,6 +52,7 @@ import { convertFromContinuity, getJoinType, getOffsetMode } from "./helper";
 import { guardKernelResults } from "./kernelGuard";
 import { prepareLoftSection } from "./loftSections";
 import { OccEdge, OccShape } from "./shape";
+import { thickenFailureDiagnostic } from "./thickenDiagnostics";
 
 function ensureOccShape(shapes: IShape | IShape[]): TopoDS_Shape[] {
     if (Array.isArray(shapes)) {
@@ -146,11 +148,52 @@ function bsplineLayoutError(
     return undefined;
 }
 
+/**
+ * Check every solid's orientation, including compounds whose total hides a negative component.
+ * Empty booleans and non-solid sections remain valid. This walks solids, never face wrappers.
+ */
+function operationVolumeError(
+    params: unknown[],
+    op: string,
+    role = "input",
+    checkSolids = /^(Fuse|Boolean|Prism|Loft|Fillet|Chamfer)/.test(op),
+): string | undefined {
+    if (!checkSolids) return undefined;
+    const shapes = params
+        .flat(Infinity)
+        .filter(
+            (value): value is TopoDS_Shape =>
+                value !== null && typeof value === "object" && "shapeType" in value && "isNull" in value,
+        );
+    try {
+        for (const [index, shape] of shapes.entries()) {
+            const solids = wasm.Shape.findSubShapes(shape, wasm.TopAbs_ShapeEnum.TopAbs_SOLID);
+            try {
+                const tolerance = solids.length
+                    ? volumeTolerance(wasm.Shape.volume(shape), wasm.Shape.boundingBox(shape, false))
+                    : 0;
+                for (const [solidIndex, solid] of solids.entries()) {
+                    const volume = wasm.Shape.volume(solid);
+                    if (!Number.isFinite(volume) || volume < -tolerance)
+                        return `${op} ${role} ${index}: solid ${solidIndex} has invalid volume (${volume} mm³)`;
+                }
+            } finally {
+                for (const solid of solids) solid.delete();
+            }
+        }
+    } catch (error) {
+        return kernelCallFailure(`${op} ${role} validation`, error);
+    }
+    return undefined;
+}
+
 function convertShapeResult<P extends unknown[] = unknown[]>(
     factory: (...params: P) => ShapeResult,
     params: P,
     op: string,
 ): Result<IShape, string> {
+    const inputError = operationVolumeError(params, op);
+    if (inputError) return Result.err(inputError);
     let result: ShapeResult;
     const span = PerformanceTrace.enabled
         ? PerformanceTrace.begin("kernel.operation", {
@@ -171,7 +214,12 @@ function convertShapeResult<P extends unknown[] = unknown[]>(
     if (!result.isOk) {
         res = Result.err(result.error);
     } else {
-        res = Result.ok(OccShape.wrap(result.shape));
+        const shape = OccShape.wrap(result.shape);
+        const error = operationVolumeError([(shape as OccShape).shape], op, "result");
+        if (error) {
+            shape.dispose();
+            res = Result.err(error);
+        } else res = Result.ok(shape);
     }
 
     result.delete();
@@ -236,9 +284,26 @@ function validThickSolid(
         shape.dispose();
         return Result.err(`${op} failed: the result is not a solid (${type})${notSolidHint}`);
     }
-    if (shape.checkShape()) return result;
-    shape.dispose();
-    return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+    let oriented = shape;
+    const tolerance = volumeTolerance(shape.volume(), shape.boundingBox());
+    if (shape.volume() < -tolerance) {
+        oriented = shape.fixSolid(1e-6);
+        shape.dispose();
+        if (oriented.isNull() || oriented.volume() <= 0) {
+            oriented.dispose();
+            return Result.err(`${op} failed: thick solid is inside out`);
+        }
+    }
+    if (!oriented.checkShape()) {
+        oriented.dispose();
+        return Result.err(`${op} failed: Thick solid is invalid (checkShape is false)`);
+    }
+    const error = operationVolumeError([(oriented as OccShape).shape], op, "result", true);
+    if (error) {
+        oriented.dispose();
+        return Result.err(error);
+    }
+    return Result.ok(oriented);
 }
 
 function containsSolid(shape: IShape): boolean {
@@ -255,13 +320,19 @@ function containsSolid(shape: IShape): boolean {
  * pairwise; on a shell of many narrow faces it may never finish, and a kernel call on the main
  * thread cannot be interrupted, so the tab hangs. Arc joins and simple offsets do not.
  */
-export function refuseIntersectionJoin(shape: IShape, joinType: JoinType): string | undefined {
+export function refuseIntersectionJoin(
+    shape: IShape,
+    joinType: JoinType,
+    tolerant = false,
+): string | undefined {
     if (joinType !== "intersection") return undefined;
     const limit = Config.instance.thickSolidIntersectionMaxFaces;
     const faces = shape.findSubShapes(ShapeTypes.face);
     const count = faces.length;
     for (const face of faces) face.dispose();
     if (count <= limit) return undefined;
+    if (tolerant)
+        return `Tolerant thicken refused: ${count} input faces exceed the envelope trimming limit ${limit}; simplify the solid or use ordinary thicken`;
     return `MakeThickSolidByJoin refused: joinType "intersection" on a shape with ${count} faces (limit ${limit}) may never finish and would freeze the tab; use joinType "arc" or makeThickSolidBySimple (Config.thickSolidIntersectionMaxFaces raises the limit)`;
 }
 
@@ -301,6 +372,8 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     params: P,
     op: string,
 ): Result<TrackedShape, string> {
+    const inputError = operationVolumeError(params, op);
+    if (inputError) return Result.err(inputError);
     let result: TrackedShapeResult;
     // OCCT's tracked call includes history completion in C++; it cannot be timed separately here.
     const span = PerformanceTrace.enabled
@@ -323,8 +396,16 @@ function convertTrackedShapeResult<P extends unknown[] = unknown[]>(
     if (!result.isOk) {
         res = Result.err(result.error);
     } else {
+        const shape = OccShape.wrap(result.shape);
+        const error = operationVolumeError([(shape as OccShape).shape], op, "result");
+        if (error) {
+            shape.dispose();
+            result.delete();
+            if (PerformanceTrace.enabled) PerformanceTrace.end(history);
+            return Result.err(error);
+        }
         res = Result.ok({
-            shape: OccShape.wrap(result.shape),
+            shape,
             faceMap: toIntArray(result.faceMap),
             edgeMap: toIntArray(result.edgeMap),
             faceEdgeMap: toIntArray(result.faceEdgeMap),
@@ -1226,8 +1307,76 @@ export class ShapeFactory implements IShapeFactory {
             "Combine",
         ) as Result<ICompound>;
     }
+    private validTolerantWall(result: Result<IShape>, source: IShape, thickness: number): Result<IShape> {
+        if (!result.isOk) return result;
+        const wall = result.value;
+        if (wall.volume() < 0) wall.reserve();
+        const volume = wall.volume();
+        if (!wall.checkShape() || !containsSolid(wall)) {
+            wall.dispose();
+            return Result.err("Tolerant envelope produced an invalid solid");
+        }
+        if (
+            !Number.isFinite(volume) ||
+            volume <= 0 ||
+            (thickness < 0 && volume >= Math.abs(source.volume()) * (1 - 1e-7))
+        ) {
+            wall.dispose();
+            return Result.err("Tolerant envelope failed volume sanity check");
+        }
+        return result;
+    }
+    makeThickSolidTolerant(shape: IShape, openingFaces: IShape[], thickness: number): Result<IShape> {
+        const binding = wasm.ShapeFactory.makeThickSolidTolerant;
+        if (typeof binding !== "function")
+            return Result.err("Tolerant thicken is not available in this kernel build");
+        const refused = refuseIntersectionJoin(shape, "intersection", true);
+        if (refused) {
+            const ordinary = this.makeThickSolidByJoin(shape, openingFaces, thickness, "arc");
+            if (!ordinary.isOk) return Result.err(refused);
+            if (openingFaces.length > 0) return this.validTolerantWall(ordinary, shape, thickness);
+            // Closed ordinary offsets describe the cavity/outer envelope. Return the
+            // material between it and the source, as the native tolerant path does.
+            try {
+                const wall =
+                    thickness < 0
+                        ? this.booleanCut([shape], [ordinary.value])
+                        : this.booleanCut([ordinary.value], [shape]);
+                return this.validTolerantWall(wall, shape, thickness);
+            } finally {
+                ordinary.value.dispose();
+            }
+        }
+        const result = convertShapeResult(
+            binding,
+            [ensureOccShape(shape)[0], ensureOccShape(openingFaces), thickness],
+            "MakeThickSolidTolerant",
+        );
+        if (!result.isOk)
+            return Result.err(thickenFailureDiagnostic(result.error, shape, thickness, openingFaces));
+        // Filled analytic cavities legitimately return the original volume: do not apply
+        // the ordinary offset's unchanged-result rejection to a material envelope.
+        const output = result.value;
+        const solids = output.findSubShapes(ShapeTypes.solid);
+        try {
+            if (
+                !output.checkShape() ||
+                solids.length === 0 ||
+                solids.some((solid) => {
+                    const volume = solid.volume();
+                    return !Number.isFinite(volume) || volume <= 0;
+                })
+            ) {
+                output.dispose();
+                return Result.err("Tolerant thicken produced an invalid solid or volume");
+            }
+        } finally {
+            for (const solid of solids) solid.dispose();
+        }
+        return result;
+    }
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape> {
-        return validThickSolid(
+        const result = validThickSolid(
             convertShapeResult(
                 wasm.ShapeFactory.makeThickSolidBySimple,
                 [ensureOccShape(shape)[0], thickness],
@@ -1236,6 +1385,7 @@ export class ShapeFactory implements IShapeFactory {
             "MakeThickSolidBySimple",
             shape,
         );
+        return result.isOk ? result : Result.err(thickenFailureDiagnostic(result.error, shape, thickness));
     }
     makeThickSolidByJoin(
         shape: IShape,
@@ -1247,7 +1397,7 @@ export class ShapeFactory implements IShapeFactory {
     ): Result<IShape> {
         const refused = refuseIntersectionJoin(shape, joinType);
         if (refused) return Result.err(refused);
-        return validThickSolid(
+        const result = validThickSolid(
             convertShapeResult(
                 wasm.ShapeFactory.makeThickSolidByJoin,
                 [
@@ -1265,6 +1415,9 @@ export class ShapeFactory implements IShapeFactory {
             closingFaces,
             "; for an open shell use makeThickSolidBySimple",
         );
+        return result.isOk
+            ? result
+            : Result.err(thickenFailureDiagnostic(result.error, shape, thickness, closingFaces));
     }
     loft(sections: IShape[], isSolid: boolean, isRuled: boolean, continuity: Continuity): Result<IShape> {
         const prepared: IShape[] = [];
@@ -1286,17 +1439,25 @@ export class ShapeFactory implements IShapeFactory {
             for (const shape of created) shape.dispose();
         }
     }
+    get supportsDeferredGuidedLoft(): boolean {
+        return typeof wasm.ShapeFactory.loftGuidedTrackedDeferred === "function";
+    }
     loftGuidedTracked(
         sections: IWire[],
         spine: IWire,
         boundary: IWire,
         solid: boolean,
+        deferSelfIntersection = false,
     ): Result<TrackedShape> {
-        const binding = (
+        const legacyBinding = (
             wasm.ShapeFactory as unknown as {
                 loftGuidedTracked?: (...args: unknown[]) => TrackedShapeResult;
             }
         ).loftGuidedTracked;
+        const binding =
+            deferSelfIntersection && this.supportsDeferredGuidedLoft
+                ? (wasm.ShapeFactory.loftGuidedTrackedDeferred as typeof legacyBinding)
+                : legacyBinding;
         if (!binding) return Result.err("Guided loft requires a newer geometry kernel");
         if (sections.length < 2 || sections.length > 16)
             return Result.err("Guided loft requires 2 to 16 sections");

@@ -333,6 +333,15 @@ export const shapeCapabilities: ShapeCapability[] = [
         ],
     },
     {
+        method: "makeThickSolidTolerant",
+        returnKind: "shape",
+        params: [
+            { name: "shape", kind: "ref" },
+            { name: "openFaces", kind: "refArray" },
+            { name: "thickness", kind: "number", unit: "length" },
+        ],
+    },
+    {
         method: "fillet",
         returnKind: "shape",
         params: [
@@ -1667,6 +1676,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "surface.isAnalytic",
+        name: "isAnalytic",
+        owner: "surface",
+        family: "surface",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "surface.isUClosed",
         name: "isUClosed",
         owner: "surface",
@@ -2073,6 +2090,7 @@ export const capabilitiesSource = `Available modeling capabilities (from IShapeF
   combine(shapes: refArray) -> compound
   makeThickSolidBySimple(shape: ref, thickness: length) -> shape
   makeThickSolidByJoin(shape: ref, openFaces: refArray, thickness: length, joinType: arc|tangent|intersection, mode: skin|pipe|rectoVerso?, intersection: boolean?) -> shape
+  makeThickSolidTolerant(shape: ref, openFaces: refArray, thickness: length) -> shape
   fillet(shape: ref, edges: numberArray, radius: length) -> shape
   chamfer(shape: ref, edges: numberArray, distance: length) -> shape
   fillet2d(face: ref, edge1: ref, edge2: ref, radius: length) -> face
@@ -2088,7 +2106,7 @@ JSON encoding: XYZ={x,y,z}; Plane={origin:{x,y,z}, normal:{x,y,z}?, xvec:{x,y,z}
 Expressions: every numeric param (length, angle, number) takes a number OR an expression string over the document variables (document_variables), e.g. "wall_t", "wall_t / 2 + 1", "2 cm" — a length or angle expression must come out as that unit or unitless (a bare number counts as mm / degrees; "draft_angle" as a thickness is an error), a dimensionless param takes the value as is; number[] parameters (weights, edge indexes) stay plain numbers. The expression is evaluated ONCE, when the op runs: run_program builds direct, non-parametric nodes, so changing the variable later does NOT update them — use run_parametric (load_skill parametric-modeling) when the dimension must follow the variable. Each op that used an expression reports the numbers it resolved to in the response's "resolved" under its id (ops[<index>] without one), e.g. resolved.shell = { thickness: 3.75 }.
 Placement: box/rect/pyramid — plane.origin is a CORNER, the shape extends +dx/+dy/+dz from it. cylinder/cone — center is the BASE-FACE center, the shape extends +dz along normal. sphere — center is the true center. To center a box at P use origin = P - (dx/2,dy/2,dz/2); to center a cylinder/cone at P use center = P - normal*(dz/2).
 polygon: pass the corner points in PERIMETER ORDER, at least 3, ALL ON ONE PLANE, and REPEAT THE FIRST POINT as the last point to close the wire explicitly. polygon returns a WIRE, not a face — prism/revolve take it as it is: a CLOSED wire (or a closed edge such as a circle) is closed into a face for you and sweeps a solid, while an UNCLOSED one is swept into an open SHELL, a silent wrong result that breaks downstream booleans and fillets. A self-crossing point order (bowtie) yields a degenerate near-zero-area face, not an error — order points around the perimeter.
-loft: sections are lofted in array order; each may be a wire, an edge, a face (its outer wire), a vertex (first/last only) or a node whose shape is a compound of edges — a sketch node id works directly, its edges are chained into the section wire. OPEN chains are valid (an open skin), but a section whose edges form SEVERAL separate chains is an error: pick one with shape.findSubShapes + wire. For a re-editable loft of CLOSED single-profile sketches, use run_parametric's loft op instead.
+loft: sections are lofted in array order; each may be a wire, an edge, a face (its outer wire), a vertex (first/last only) or a node whose shape is a compound of edges — a sketch node id works directly, its edges are chained into the section wire. OPEN chains are valid (an open skin), but a section whose edges form SEVERAL separate chains is an error: pick one with shape.findSubShapes + wire. For a re-editable loft of single-profile sketches (closed, or open with solid: false), use run_parametric's loft op instead.
 makeThickSolidByJoin: joinType "intersection" on a shell with many faces (a lofted or swept skin, G2 lofts in particular) may never finish — OCCT intersects the offset faces pairwise, and a running kernel op freezes the tab and cannot be cancelled. It is refused above 40 input faces (Config.thickSolidIntersectionMaxFaces); use joinType "arc", or makeThickSolidBySimple for an open skin.
 makeThickSolid*: an error "offset edge curves are inconsistent with their surfaces" (open ruled lofts between periodic bsplines) means the offset would break later booleans; thicken a solid loft with its end caps as open faces instead (makeThickSolidByJoin), or change the thickness or the sections.`;
 
@@ -2288,6 +2306,7 @@ surface.* (target must be a surface (or a subtype of it)):
   surface.uIso(target, u: number) -> curve ref (registered under the op id)
   surface.vIso(target, v: number) -> curve ref (registered under the op id)
   surface.isPlanar(target) -> boolean
+  surface.isAnalytic(target) -> boolean
   surface.isUClosed(target) -> boolean
   surface.isVClosed(target) -> boolean
   surface.isUPeriodic(target) -> boolean

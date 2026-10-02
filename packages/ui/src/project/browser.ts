@@ -284,7 +284,7 @@ export class Browser extends HTMLElement {
         warning.textContent = count ? "!" : "";
         warning.title =
             count && entry.node && isNodeWarning(entry.node)
-                ? I18n.translate(entry.node.warningTooltip, count)
+                ? I18n.translate(entry.node.warningTooltip, ...(entry.node.warningTooltipArgs ?? [count]))
                 : "";
         const swatch = row.querySelector<HTMLElement>("[data-swatch]")!;
         const colored =

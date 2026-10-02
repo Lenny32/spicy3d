@@ -10,6 +10,7 @@ import {
     type Scope,
 } from "@spicy3d/core";
 import { INCIDENCE_TOLERANCE } from "../features/refGeometry";
+import { offsetEndpointIndexes, validateOffsetRelations } from "./associativeOffset";
 import {
     type BSplineOptions,
     type BSplineParametrization,
@@ -34,7 +35,7 @@ import {
     ExternalEntityRegistry,
     type ExternalPins,
 } from "./externalEntities";
-import { editableCurve, type GeometryEdit } from "./geometryEditing";
+import { editableCurve, type GeometryEdit, offsetCurve } from "./geometryEditing";
 import type { SolverDiagnosis, SolverSystem } from "./planegcs";
 import { newSolverSystem } from "./planegcs";
 import { defaultSketchIds, type SketchIdAllocator } from "./sketchIds";
@@ -47,6 +48,7 @@ import {
     type ExternalRefData,
     isDatumEntityId,
     isExternalEntityId,
+    isStructuralConstraint,
     pointRefKey,
     resolveDatumSource,
     SKETCH_ORIGIN_ID,
@@ -135,6 +137,8 @@ interface ConstraintRecord {
      */
     datumSources?: ParameterValue[];
     direction?: [number, number];
+    /** Persisted datum semantics; -1 preserves a migrated clockwise unsigned angle. */
+    angleSide?: -1 | 1;
     helperParams?: number[];
     helperConstraints?: number[];
     blockedParams?: number[];
@@ -233,6 +237,110 @@ export class SketchSolver implements ExternalEntityHost {
     private _scope: Scope;
     /** Expression datums that failed to resolve, by constraint id — the editor surfaces them. */
     private readonly _datumErrors = new Map<number, string>();
+    private derivingOffsets = false;
+    private loadingConstraints = false;
+    private readonly offsetInputs = new Map<number, string>();
+
+    /** Generated targets are leaves: detach the relation before editing/constraining one. */
+    validateOffsetSource(id: number): void {
+        if (
+            [...this.constraints.values()].some(
+                (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === id,
+            )
+        )
+            throw new Error("Associative offset chains are not supported; detach the existing offset first");
+        if (this.isFixed(id)) throw new Error("The source must be an editable sketch curve");
+        const entity = this.entity(id);
+        if (!entity || !["line", "arc", "circle", "bspline"].includes(entity.type))
+            throw new Error("Associative offsets require an editable line, arc, circle or B-spline");
+    }
+
+    /** Only offset regeneration errors may affect derived geometry or its warnings. */
+    get offsetErrors(): ReadonlyMap<number, string> {
+        return new Map(
+            [...this._datumErrors].filter(([id]) => this.constraints.get(id)?.kind === ConstraintKind.Offset),
+        );
+    }
+
+    /** Full fitting runs only on fine solves, after the source has solved; no pointer-frame fitting. */
+    private regenerateOffsets(): SolveOutcome | undefined {
+        if (![...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)) return;
+        const before = this.toData();
+        const next = structuredClone(before);
+        const signatures = new Map<number, string>();
+        let changed = false;
+        let failed = false;
+        for (const c of next.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+            this._datumErrors.delete(c.id);
+            const source = next.entities.find((e) => e.id === c.refs[0].entityId)!;
+            const target = next.entities.find((e) => e.id === c.refs[1].entityId)!;
+            const distance = resolveDatumSource(c.kind, c.datum!, this._scope);
+            const signature = JSON.stringify([source, distance.isOk ? distance.value : distance.error]);
+            signatures.set(c.id, signature);
+            if (distance.isOk && this.offsetInputs.get(c.id) === signature) continue;
+            const result = distance.isOk ? offsetCurve(source, distance.value) : Result.err(distance.error);
+            if (!result.isOk) {
+                this._datumErrors.set(c.id, `Offset constraint ${c.id}: ${result.error}`);
+                failed = true;
+                continue;
+            }
+            const piece = result.value.pieces[0];
+            const replacement = { ...piece, id: target.id, derivation: "offset" as const };
+            // Source construction is independent of whether its generated curve contributes a profile.
+            if (target.construction) replacement.construction = true;
+            else delete replacement.construction;
+            // Fitted B-splines can change point count. Keep endpoint joins on the new end.
+            const oldEnd = offsetEndpointIndexes(target).at(-1);
+            const newEnd = offsetEndpointIndexes(replacement).at(-1);
+            if (oldEnd !== undefined && newEnd !== undefined && oldEnd !== newEnd) {
+                for (const join of next.constraints) {
+                    if (join.kind !== ConstraintKind.P2PCoincident) continue;
+                    for (const ref of join.refs) {
+                        if (ref.entityId === target.id && ref.pointIndex === oldEnd) ref.pointIndex = newEnd;
+                    }
+                }
+            }
+            const index = next.entities.indexOf(target);
+            next.entities[index] = replacement;
+            changed ||= JSON.stringify(target) !== JSON.stringify(replacement);
+        }
+        // A failed pass never publishes partial geometry or changes the last good target.
+        if (failed) return;
+        let regenerated: SolveOutcome | undefined;
+        if (changed) {
+            this.derivingOffsets = true;
+            try {
+                const outcome = this.reset(next);
+                regenerated = outcome;
+                // Safety net: sources are frozen during regeneration, so connectors should never move them.
+                for (const relation of next.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+                    const source = next.entities.find((e) => e.id === relation.refs[0].entityId)!;
+                    const solved = this.entity(source.id)!;
+                    if (solved.params.some((value, i) => Math.abs(value - source.params[i]) > 1e-7)) {
+                        throw new Error(
+                            "connecting geometry would move the offset source; adjust connector constraints or detach the relation",
+                        );
+                    }
+                }
+                if (!outcome.result.startsWith("Ok"))
+                    throw new Error(
+                        "connecting geometry conflicts with the regenerated offset; adjust connector constraints or detach the relation",
+                    );
+            } catch (error) {
+                this.reset(before);
+                for (const id of signatures.keys())
+                    this._datumErrors.set(
+                        id,
+                        `Offset constraint ${id}: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                return;
+            } finally {
+                this.derivingOffsets = false;
+            }
+        }
+        for (const [id, signature] of signatures) this.offsetInputs.set(id, signature);
+        return regenerated;
+    }
 
     /**
      * `SketchData.entityIdSeq`/`externalIdSeq` as loaded, carried back verbatim by `toData` so a
@@ -280,8 +388,9 @@ export class SketchSolver implements ExternalEntityHost {
     setScope(scope: Scope): boolean {
         this._scope = scope;
         this._datumErrors.clear();
-        let changed = false;
+        let changed = [...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset);
         for (const record of this.constraints.values()) {
+            if (record.kind === ConstraintKind.Offset) continue;
             const sources = record.datumSources;
             const paramIds = record.datumParamIds;
             if (sources === undefined || paramIds === undefined) continue;
@@ -292,8 +401,9 @@ export class SketchSolver implements ExternalEntityHost {
                     continue;
                 }
                 const current = this.system.get_params(new Uint32Array([paramIds[index]]))[0];
-                if (current === resolved.value) continue;
-                this.system.set_param(paramIds[index], resolved.value);
+                const value = record.angleSide !== -1 ? resolved.value : -Math.abs(resolved.value);
+                if (current === value) continue;
+                this.system.set_param(paramIds[index], value);
                 changed = true;
             }
         }
@@ -308,6 +418,17 @@ export class SketchSolver implements ExternalEntityHost {
      */
     setDatumSource(constraintId: number, input: ParameterValue, index = 0): Result<void> {
         const record = this.constraints.get(constraintId);
+        if (record?.kind === ConstraintKind.Offset && index === 0) {
+            const resolved = resolveDatumSource(record.kind, input, this._scope);
+            if (!resolved.isOk) return Result.err(resolved.error);
+            const source = this.entity(record.refs[0].entityId)!;
+            const preview = offsetCurve(source, resolved.value);
+            if (!preview.isOk) return Result.err(`Offset constraint ${constraintId}: ${preview.error}`);
+            record.datumSources = [input];
+            this.offsetInputs.delete(constraintId);
+            this._datumErrors.delete(constraintId);
+            return Result.ok(undefined);
+        }
         const paramId = record?.datumParamIds?.[index];
         if (record === undefined || paramId === undefined) {
             return Result.err(`Constraint ${constraintId} has no datum ${index}`);
@@ -315,10 +436,13 @@ export class SketchSolver implements ExternalEntityHost {
         const source = toDatumSource(record.kind, input);
         const resolved = resolveDatumSource(record.kind, source, this._scope);
         if (!resolved.isOk) return Result.err(resolved.error);
+        if (record.kind === ConstraintKind.Angle && record.datumSources?.[index] !== source) {
+            record.angleSide = 1;
+        }
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = source;
         this._datumErrors.delete(constraintId);
-        this.system.set_param(paramId, resolved.value);
+        this.system.set_param(paramId, record.angleSide === -1 ? -Math.abs(resolved.value) : resolved.value);
         return Result.ok(undefined);
     }
 
@@ -388,7 +512,7 @@ export class SketchSolver implements ExternalEntityHost {
         data.entities[data.entities.findIndex((item) => item.id === id)] = replacement;
         let trial: SketchSolver | undefined;
         try {
-            trial = new SketchSolver(this.plane, data, this._scope);
+            trial = new SketchSolver(this.plane, data, this._scope, this.ids);
             const outcome = trial.solve(true);
             if (!outcome.result.startsWith("Ok"))
                 return Result.err(`Control B-spline edit failed: ${outcome.result}`);
@@ -509,13 +633,35 @@ export class SketchSolver implements ExternalEntityHost {
         // whose constraint was cascaded away untransacted by syncExternalRefs), and
         // a no-op beats throwing from a delete handler.
         if (record === undefined) return;
-        this.system.remove_constraint(record.solverId);
+        if (record.solverId >= 0) this.system.remove_constraint(record.solverId);
         for (const id of record.helperConstraints ?? []) this.system.remove_constraint(id);
         for (const id of record.helperParams ?? []) this.system.remove_param(id);
         for (const datumParamId of record.datumParamIds ?? []) {
             this.system.remove_param(datumParamId);
         }
         this.constraints.delete(id);
+        if (record.kind === ConstraintKind.Offset) {
+            const targetId = record.refs[1].entityId;
+            this.fixedEntities.delete(targetId);
+            this.system.set_frozen_params(this.entityParams.get(targetId)!, false);
+            if (this.entityTypes.get(targetId) === "bspline") {
+                const options = this.bsplineOptions.get(targetId)!;
+                this.attachBSpline(
+                    targetId,
+                    options.parametrization,
+                    options.periodic === true,
+                    options.control,
+                );
+            }
+            this.offsetInputs.delete(id);
+            const structural = this.toData().constraints.filter(
+                (c) => c.refs[0]?.entityId === targetId && isStructuralConstraint(c, this.entities()),
+            );
+            for (const constraint of structural) {
+                this.removeConstraint(constraint.id);
+                this.addConstraintWithId(constraint.id, constraint);
+            }
+        }
         this._datumErrors.delete(id);
     }
 
@@ -666,7 +812,7 @@ export class SketchSolver implements ExternalEntityHost {
         return removedConstraints;
     }
 
-    /** Whether the entity is fixed (datum or external): targetable, but never movable/deletable/editable. */
+    /** Native pins prevent movement. Offset targets still allow deletion and construction toggling. */
     isFixed(entityId: number): boolean {
         return this.fixedEntities.has(entityId);
     }
@@ -683,12 +829,24 @@ export class SketchSolver implements ExternalEntityHost {
         return removed;
     }
 
-    setDatum(constraintId: number, value: number, index = 0): void {
+    /** Effective signed datum in storage units, including a migrated angle's side. */
+    datumValue(constraintId: number, index = 0): number | undefined {
         const paramId = this.constraints.get(constraintId)?.datumParamIds?.[index];
-        if (paramId === undefined) {
+        return paramId === undefined ? undefined : this.system.get_params(new Uint32Array([paramId]))[0];
+    }
+
+    setDatum(constraintId: number, value: number, index = 0): void {
+        const record = this.constraints.get(constraintId);
+        const paramId = record?.datumParamIds?.[index];
+        if (record === undefined || paramId === undefined) {
             throw new Error(`Constraint ${constraintId} has no datum ${index}`);
         }
-        this.system.set_param(paramId, value);
+        if (record.kind === ConstraintKind.Angle && record.datumSources?.[index] !== value) {
+            record.angleSide = 1;
+        }
+        if (record.datumSources === undefined) record.datumSources = [];
+        record.datumSources[index] = value;
+        this.system.set_param(paramId, record.angleSide === -1 ? -Math.abs(value) : value);
     }
 
     /** Moves a point without solving; used by auto-constraint snapping before a solve. */
@@ -699,6 +857,8 @@ export class SketchSolver implements ExternalEntityHost {
         if (isExternalEntityId(ref.entityId)) {
             throw new Error("An external reference cannot be moved");
         }
+        if (this.isFixed(ref.entityId))
+            throw new Error("Detach the offset relation before editing its target");
         const [xId, yId] = this.pointParamIds(ref);
         this.system.set_param(xId, u);
         this.system.set_param(yId, v);
@@ -770,7 +930,6 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     solve(fine: boolean): SolveOutcome {
-        this.syncAngleDatumSide();
         let report = this.system.solve(fine);
         this.refreshCache();
         // A fine solve can silently stall when the geometry starts far off its
@@ -780,8 +939,13 @@ export class SketchSolver implements ExternalEntityHost {
             report = this.system.solve(true);
             this.refreshCache();
         }
+        const regenerated = fine && !this.derivingOffsets ? this.regenerateOffsets() : undefined;
         return {
-            result: typeof report === "string" ? report : String(report?.result),
+            result: [...this._datumErrors.keys()].some(
+                (id) => this.constraints.get(id)?.kind === ConstraintKind.Offset,
+            )
+                ? "Unsolved constraints"
+                : (regenerated?.result ?? (typeof report === "string" ? report : String(report?.result))),
             dofs: this.system.dofs(),
         };
     }
@@ -856,23 +1020,6 @@ export class SketchSolver implements ExternalEntityHost {
         }
     }
 
-    /**
-     * Angle datums are signed: the sign records which side of the first line the
-     * second line sits on (the UI edits only the magnitude). Sync the sign with
-     * the current geometry before solving, so an edit never flips a line across
-     * its reference — and legacy unsigned datums adopt the loaded geometry's side.
-     */
-    private syncAngleDatumSide(): void {
-        for (const [id, record] of this.constraints) {
-            if (record.kind !== ConstraintKind.Angle || record.datumParamIds === undefined) continue;
-            const sweep = this.currentSweep(record.refs);
-            // ambiguous at 0°/180° — leave the datum sign alone
-            if (Math.abs(sweep) < 1e-9 || Math.abs(Math.PI - Math.abs(sweep)) < 1e-9) continue;
-            const datum = Number(this.system.get_params(new Uint32Array(record.datumParamIds))[0]);
-            if (datum !== 0 && sweep * datum < 0) this.setDatum(id, -datum);
-        }
-    }
-
     /** Signed sweep (radians) from the first line's direction to the second's. */
     private currentSweep(refs: readonly SketchPointRef[]): number {
         const [x1, y1] = this.pointOf(refs[0]);
@@ -896,7 +1043,7 @@ export class SketchSolver implements ExternalEntityHost {
     /** Data of every real (editable) entity; fixed datum/external entities are excluded. */
     entities(): SketchEntityData[] {
         return [...this.entityCache.entries()]
-            .filter(([id]) => !this.fixedEntities.has(id))
+            .filter(([id]) => id > 0)
             .map(([id, params]) => this.entityDataOf(id, this.entityTypes.get(id)!, params));
     }
 
@@ -907,6 +1054,11 @@ export class SketchSolver implements ExternalEntityHost {
             id,
             type,
             params: [...params],
+            ...([...this.constraints.values()].some(
+                (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === id,
+            )
+                ? { derivation: "offset" as const }
+                : {}),
             ...(this.constructionEntities.has(id) ? { construction: true } : {}),
             ...(options?.parametrization === undefined ? {} : { parametrization: options.parametrization }),
             ...(options?.periodic ? { periodic: true } : {}),
@@ -1073,6 +1225,7 @@ export class SketchSolver implements ExternalEntityHost {
             const sources = this.persistedDatums(record);
             if (record.blockedParams) data.blockedParams = [...record.blockedParams];
             if (record.direction) data.direction = [...record.direction];
+            if (record.angleSide !== undefined) data.angleSide = record.angleSide;
             if (sources !== undefined) {
                 if (sources.length === 1) {
                     data.datum = sources[0];
@@ -1086,13 +1239,13 @@ export class SketchSolver implements ExternalEntityHost {
 
     /**
      * The datums of a record as they should be persisted, in order. A literal is read
-     * back from the solver — that is where the solver's normalization lands (the angle sign
-     * `syncAngleDatumSide` settles on, the geometric fallback a datumless constraint
-     * started from). An expression is returned as written: reading the solver back over it
+     * back from the solver, including the geometric fallback a datumless constraint
+     * started from. An expression is returned as written: reading the solver back over it
      * would replace the user's expression with whatever it currently evaluates to, once
      * per commit.
      */
     private persistedDatums(record: ConstraintRecord): ParameterValue[] | undefined {
+        if (record.kind === ConstraintKind.Offset) return record.datumSources;
         const paramIds = record.datumParamIds;
         if (paramIds === undefined) return undefined;
         const values = Array.from(this.system.get_params(new Uint32Array(paramIds)));
@@ -1106,8 +1259,9 @@ export class SketchSolver implements ExternalEntityHost {
         this.system.free();
     }
 
-    /** Replaces all state with `data` — undo/redo rewrites the node data behind the solver. */
-    reset(data: SketchData): void {
+    /** Replaces all state with `data` resolved against the supplied parameter table. */
+    reset(data: SketchData, scope: Scope = this._scope): SolveOutcome {
+        this._scope = scope;
         this.system.free();
         this.system = newSolverSystem();
         this.entityTypes.clear();
@@ -1117,12 +1271,13 @@ export class SketchSolver implements ExternalEntityHost {
         this.bsplineOptions.clear();
         this.bsplineCurves.clear();
         this.constraints.clear();
+        this.offsetInputs.clear();
         this.fixedEntities.clear();
         this.external.clear();
         this.legacyCounters = {};
         this.draggedParamIds = [];
         this.seedDatum();
-        this.loadData(data);
+        return this.loadData(data);
     }
 
     // ------------------------------------------------------------------ Datum seeding (see `solverEntities` / `sketchModel` for the reserved ids)
@@ -1296,6 +1451,65 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     private addConstraintWithId(id: number, constraint: Omit<SketchConstraintData, "id">): void {
+        if (constraint.kind === ConstraintKind.Offset) {
+            const proposed = { ...constraint, id };
+            if (!this.loadingConstraints) {
+                const data = this.toData();
+                validateOffsetRelations({ ...data, constraints: [...data.constraints, proposed] });
+            }
+            const targetId = constraint.refs[1].entityId;
+            // A derived B-spline is a cache, not another free interpolating curve in PlaneGCS.
+            const curve = this.bsplineCurves.get(targetId);
+            if (curve !== undefined) {
+                this.system.remove_bspline(curve);
+                this.bsplineCurves.delete(targetId);
+            }
+            this.system.set_frozen_params(this.entityParams.get(targetId)!, true);
+            this.constraints.set(id, {
+                id,
+                kind: constraint.kind,
+                refs: structuredClone(constraint.refs),
+                solverId: -1,
+                datumSources: [constraint.datum!],
+            });
+            this.fixedEntities.add(targetId);
+            // Regenerated arc geometry already satisfies its intrinsic equation. Emitting
+            // it over entirely frozen parameters would diagnose it as redundant.
+            for (const structural of this.constraints.values()) {
+                if (
+                    structural.solverId >= 0 &&
+                    structural.refs[0]?.entityId === targetId &&
+                    isStructuralConstraint({ ...structural, refs: structural.refs }, this.entities())
+                ) {
+                    this.system.remove_constraint(structural.solverId);
+                    structural.solverId = -1;
+                }
+            }
+            return;
+        }
+        if (
+            !this.loadingConstraints &&
+            [...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)
+        ) {
+            const data = this.toData();
+            validateOffsetRelations({ ...data, constraints: [...data.constraints, { ...constraint, id }] });
+        }
+        if (
+            constraint.refs[0] &&
+            this.isFixed(constraint.refs[0].entityId) &&
+            isStructuralConstraint({ ...constraint, id }, this.entities()) &&
+            [...this.constraints.values()].some(
+                (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === constraint.refs[0].entityId,
+            )
+        ) {
+            this.constraints.set(id, {
+                id,
+                kind: constraint.kind,
+                refs: structuredClone(constraint.refs),
+                solverId: -1,
+            });
+            return;
+        }
         if (constraint.kind === ConstraintKind.PointOnBSpline) {
             this.addPointOnBSpline(id, constraint);
             return;
@@ -1309,6 +1523,11 @@ export class SketchSolver implements ExternalEntityHost {
             helperConstraints,
             blockedParams,
         } = this.buildConstraintParams(constraint, id);
+        if (constraint.kind === ConstraintKind.Angle && constraint.angleSide === -1) {
+            const paramId = datumParamIds![0];
+            const value = this.system.get_params(new Uint32Array([paramId]))[0];
+            this.system.set_param(paramId, -Math.abs(value));
+        }
         const solverId = this.system.add_constraint(
             solverKind ?? constraint.kind,
             new Uint32Array(params),
@@ -1325,6 +1544,7 @@ export class SketchSolver implements ExternalEntityHost {
             datumParamIds,
             datumSources,
             direction: constraint.direction ? [...constraint.direction] : undefined,
+            angleSide: constraint.kind === ConstraintKind.Angle ? (constraint.angleSide ?? 1) : undefined,
             helperParams,
             helperConstraints,
         });
@@ -1517,7 +1737,7 @@ export class SketchSolver implements ExternalEntityHost {
                 );
             case ConstraintKind.Angle:
                 return this.withDatum(this.pointParams(...refs), id, constraint, () =>
-                    this.currentAngle(refs),
+                    this.currentSweep(refs),
                 );
             case ConstraintKind.HorizontalDistance:
             case ConstraintKind.VerticalDistance:
@@ -1748,11 +1968,6 @@ export class SketchSolver implements ExternalEntityHost {
         return (dy * (px - x1) - dx * (py - y1)) / length;
     }
 
-    /** Angle magnitude (radians) between the directions of the two referenced lines. */
-    private currentAngle(refs: SketchPointRef[]): number {
-        return Math.abs(this.currentSweep(refs));
-    }
-
     /** Signed axis distance (axis 0: p2.x − p1.x; axis 1: p2.y − p1.y). */
     private currentSignedDistance(a: SketchPointRef, b: SketchPointRef, axis: 0 | 1): number {
         return this.pointOf(b)[axis] - this.pointOf(a)[axis];
@@ -1775,7 +1990,8 @@ export class SketchSolver implements ExternalEntityHost {
         }
     }
 
-    private loadData(data: SketchData): void {
+    private loadData(data: SketchData): SolveOutcome {
+        validateOffsetRelations(data);
         this.textRecords = structuredClone(data.texts ?? []);
         // The constraints are rebuilt below, so their datum errors are too.
         this._datumErrors.clear();
@@ -1787,7 +2003,18 @@ export class SketchSolver implements ExternalEntityHost {
         for (const entity of data.entities) {
             this.registerEntity(entity.type, this.addEntityParams(entity.type, entity.params), entity.id);
             if (entity.type === "spline") this.entityCache.set(entity.id, [...entity.params]);
-            if (entity.type === "bspline") {
+            if (
+                entity.type === "bspline" &&
+                data.constraints.some(
+                    (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === entity.id,
+                )
+            ) {
+                this.bsplineOptions.set(entity.id, {
+                    parametrization: entity.parametrization,
+                    periodic: entity.periodic === true,
+                    control: entity.control,
+                });
+            } else if (entity.type === "bspline") {
                 this.attachBSpline(
                     entity.id,
                     entity.parametrization,
@@ -1797,16 +2024,42 @@ export class SketchSolver implements ExternalEntityHost {
             }
             if (entity.construction) this.constructionEntities.add(entity.id);
         }
-        for (const constraint of data.constraints) {
-            this.addConstraintWithId(constraint.id, constraint);
+        this.loadingConstraints = true;
+        try {
+            for (const constraint of data.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
+                this.addConstraintWithId(constraint.id, constraint);
+            }
+            for (const constraint of data.constraints.filter((c) => c.kind !== ConstraintKind.Offset)) {
+                this.addConstraintWithId(constraint.id, constraint);
+            }
+        } finally {
+            this.loadingConstraints = false;
         }
+        // Freeze owners before adding joins, while preserving the snapshot's incidental
+        // constraint order so reopening does not record a phantom dataJson change.
+        const ordered = data.constraints.map((c) => this.constraints.get(c.id)!);
+        this.constraints.clear();
+        for (const constraint of ordered) this.constraints.set(constraint.id, constraint);
         this.legacyCounters = {};
         if (data.entityIdSeq !== undefined) this.legacyCounters.entityIdSeq = data.entityIdSeq;
         if (data.externalIdSeq !== undefined) this.legacyCounters.externalIdSeq = data.externalIdSeq;
         // normalize roles for documents written before role derivation (and for
         // hand-edited data): an unpinned ref any constraint references is a profile
         syncExternalRoles({ constraints: data.constraints, externalRefs: [...this.external.refs] });
-        this.solve(true);
+        if (!this.derivingOffsets) return this.solve(true);
+        // Regeneration has already solved the sources. Hold them at that state while
+        // connectors adapt, including equations coupled to underconstrained sources.
+        // This is temporary native pinning, never a persisted constraint or edit lock.
+        const sources = new Set(
+            data.constraints.filter((c) => c.kind === ConstraintKind.Offset).map((c) => c.refs[0].entityId),
+        );
+        const params = [...sources].flatMap((id) => this.entityParams.get(id)!);
+        this.system.set_frozen_params(params, true);
+        try {
+            return this.solve(true);
+        } finally {
+            this.system.set_frozen_params(params, false);
+        }
     }
 
     private addEntityParams(type: SketchEntityType, values: number[]): number[] {

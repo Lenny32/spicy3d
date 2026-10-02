@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+    DocumentRebuilds,
+    I18n,
     type IFace,
     type IPicker,
     Matrix4,
@@ -22,6 +24,8 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory } from "../../wasm/src/hybridShapeFactory";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { LoftFeatureCommand } from "../src/commands/loftCommand";
 import type { LoftEditCommand } from "../src/commands/loftEditCommand";
 import type { LoftFeatureData } from "../src/features/feature";
@@ -85,6 +89,7 @@ function pickSections(
     command: LoftFeatureCommand,
     sketches: SketchNode[],
     onFirstPick?: () => void,
+    open = false,
 ) {
     const queue = [...sketches];
     let first = true;
@@ -98,7 +103,9 @@ function pickSections(
                 return [];
             }
             const pick = {
-                shape: profileOf(sketch),
+                shape: open
+                    ? (sketch.shape.value.findSubShapes(ShapeTypes.edge)[0] ?? sketch.shape.value)
+                    : profileOf(sketch),
                 owner: { node: sketch },
                 transform: Matrix4.identity(),
                 indexes: [0],
@@ -112,6 +119,43 @@ const bodies = (doc: TestDocument) =>
     doc.modelManager.findNodes((n) => n instanceof ParametricBodyNode) as ParametricBodyNode[];
 
 describe("loft command (real kernel)", () => {
+    test("an edge from a multi-profile sketch asks for a profile face using translated text", async () => {
+        const { app, doc, base, top } = setup();
+        const data = square(10);
+        base.setDataEmitShapeChanged({
+            ...data,
+            entities: [
+                ...data.entities,
+                ...data.entities.map((entity) => ({
+                    ...entity,
+                    id: entity.id + 4,
+                    params: entity.params.map((value, index) => (index % 2 === 0 ? value + 40 : value)),
+                })),
+            ],
+        });
+        class UncachedLoftCommand extends LoftFeatureCommand {
+            protected override isPropertyCached(): boolean {
+                return false;
+            }
+        }
+        const command = new UncachedLoftCommand();
+        command.solid = false;
+        const pub = rs.spyOn(PubSub.default, "pub");
+        try {
+            pickSections(doc, command, [base, top], undefined, true);
+            await command.execute(app);
+            expect(pub).toHaveBeenCalledWith("showFloatTip", {
+                level: "warn",
+                msg: I18n.translate("parametric.loft.selectProfileFace"),
+            });
+            expect(bodies(doc)).toHaveLength(0);
+            expect(base.visible).toBe(true);
+        } finally {
+            pub.mockRestore();
+            doc.dispose();
+        }
+    });
+
     test("lofts the picked sections into a new body and hides their sketches", async () => {
         const { app, doc, base, top } = setup();
         const command = new LoftFeatureCommand();
@@ -149,6 +193,42 @@ describe("loft command (real kernel)", () => {
         await command.execute(app);
 
         expect(bodies(doc)[0].features[0]).toMatchObject({ solid: false, ruled: true });
+    });
+
+    test("picking open curves creates a surface using the existing sketch-only section payload", async () => {
+        const { app, doc, base, top } = setup();
+        const openData: SketchData = {
+            entities: [{ id: 1, type: "line", params: [-10, 0, 10, 0] }],
+            constraints: [],
+        };
+        base.setDataEmitShapeChanged(openData);
+        top.setDataEmitShapeChanged(openData);
+        const command = new LoftFeatureCommand();
+        pickSections(
+            doc,
+            command,
+            [base, top],
+            () => {
+                command.solid = false;
+            },
+            true,
+        );
+        await command.execute(app);
+        expect(bodies(doc)).toHaveLength(1);
+        const body = bodies(doc)[0];
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.shell);
+        expect(body.features[0]).toMatchObject({
+            solid: false,
+            sections: [{ sketchId: base.id }, { sketchId: top.id }],
+        });
+        expect(
+            (body.features[0] as LoftFeatureData).sections.every((section) => section.profile === undefined),
+        ).toBe(true);
+        expect([base.visible, top.visible]).toEqual([false, false]);
+        doc.history.undo();
+        expect(bodies(doc)).toHaveLength(0);
+        expect([base.visible, top.visible]).toEqual([true, true]);
     });
 
     test("a single section creates nothing", async () => {
@@ -230,6 +310,63 @@ describe("loft edit session (real kernel)", () => {
         expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
     });
 
+    test("open-section edits reject solid output and confirm valid surface options with undo", async () => {
+        const { app, doc, base, top } = setup();
+        const data: SketchData = {
+            entities: [{ id: 1, type: "line", params: [-10, 0, 10, 0] }],
+            constraints: [],
+        };
+        base.setDataEmitShapeChanged(data);
+        top.setDataEmitShapeChanged(data);
+        const feature: LoftFeatureData = {
+            id: "l1",
+            type: "loft",
+            solid: false,
+            sections: [{ sketchId: base.id }, { sketchId: top.id }],
+        };
+        const body = new ParametricBodyNode({ document: doc, featuresJson: JSON.stringify([feature]) });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(true);
+        const done = body.editFeature("l1");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const session = app.executingCommand as LoftEditCommand;
+        expect(session.solid).toBe(false);
+        session.solid = true;
+        session.confirm();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(app.executingCommand).toBe(session);
+        expect(body.features[0]).toEqual(feature);
+        session.solid = false;
+        session.ruled = true;
+        session.confirm();
+        await done;
+        expect(body.features[0]).toMatchObject({ solid: false, ruled: true });
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.shell);
+        doc.history.undo();
+        expect(body.features[0]).toEqual(feature);
+    });
+
+    test("confirming a valid loft edit permits a downstream feature failure", async () => {
+        const { app, doc, base, top } = setup();
+        const body = loftBody(doc, base, top);
+        body.setFeaturesEmitShapeChanged([
+            ...body.features,
+            { id: "bad", type: "extrude", sketchId: "missing", depth: 1 },
+        ]);
+        expect(body.featureItems()[1].error).toBe("Sketch not found");
+        const before = doc.history.undoCount();
+        await editWith(app, body, (session) => {
+            session.ruled = true;
+            session.confirm();
+        });
+        expect(body.features[0]).toMatchObject({ ruled: true });
+        expect(body.featureItems()[1].error).toBe("Sketch not found");
+        expect(doc.history.undoCount()).toBe(before + 1);
+        doc.history.undo();
+        expect(body.features[0]).not.toHaveProperty("ruled");
+    });
+
     test("cancelling leaves the feature untouched", async () => {
         const { app, doc, base, top } = setup();
         const body = loftBody(doc, base, top);
@@ -241,5 +378,47 @@ describe("loft edit session (real kernel)", () => {
         });
 
         expect(JSON.stringify(body.features)).toBe(before);
+    });
+
+    test("upstream edit panel shows a neutral note for the tolerant tail", async () => {
+        const originalFactory = shapeFactory;
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        const pub = rs.spyOn(PubSub.default, "pub");
+        globalThis.shapeFactory = new ShapeFactory(undefined, hybrid);
+        let document: TestDocument | undefined;
+        try {
+            const { app, doc, base, top } = setup();
+            const body = loftBody(doc, base, top);
+            document = doc;
+            body.setFeaturesEmitShapeChanged([
+                ...body.features,
+                { id: "wall", type: "thicken", thickness: -0.1, tolerant: true },
+            ]);
+            await DocumentRebuilds.settled(doc);
+            expect(body.featureItems().filter((item) => item.error !== undefined)).toEqual([]);
+            pub.mockClear();
+            const done = body.editFeature("l1");
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            const session = app.executingCommand as LoftEditCommand;
+            expect(session).not.toBeUndefined();
+            session.ruled = true;
+            session.cancel();
+            await done;
+            expect(pub.mock.calls.filter(([event]) => event === "showFloatTip")).toContainEqual([
+                "showFloatTip",
+                {
+                    level: "info",
+                    msg: I18n.translate("prompt.thicken.backgroundResult"),
+                },
+            ]);
+            expect(
+                JSON.stringify(pub.mock.calls.filter(([event]) => event === "showFloatTip")),
+            ).not.toContain("unavailable in synchronous evaluation");
+        } finally {
+            document?.dispose();
+            hybrid.dispose();
+            globalThis.shapeFactory = originalFactory;
+            pub.mockRestore();
+        }
     });
 });

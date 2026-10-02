@@ -6,6 +6,7 @@ import {
     DOCUMENT_FILE_EXTENSION,
     DOCUMENT_FORMAT_VERSION,
     type DocumentChange,
+    DocumentMigrations,
     download,
     encodeDocumentFile,
     formatDateTime,
@@ -72,9 +73,16 @@ function repositoryFailure(error: Parameters<typeof repositoryErrorMessage>[0]):
     return failure(key, ...args);
 }
 
-/** A version saved by a newer Spicy3D: this build can't read it, so it isn't even downloaded. */
-export function needsNewerApp(version: CloudVersion): boolean {
-    return Number(version.formatVersion) > DOCUMENT_FORMAT_VERSION;
+/** A newer envelope or known module: refuse payload downloads that this build cannot read. */
+export function needsNewerApp(version: { formatVersion: number; moduleVersions?: unknown }): boolean {
+    if (Number(version.formatVersion) > DOCUMENT_FORMAT_VERSION) return true;
+    const modules = version.moduleVersions;
+    if (typeof modules !== "object" || modules === null || Array.isArray(modules)) return false;
+    return Object.entries(modules).some(([module, version]) => {
+        const supported = DocumentMigrations.currentVersion(module);
+        // Unknown plugin modules pass through, just as they do during document loading.
+        return supported !== undefined && Number(version) > supported;
+    });
 }
 
 /**
@@ -186,6 +194,19 @@ export class VersionHistory {
 
     private async content(version: CloudVersion): Promise<Result<Serialized, HistoryFailure>> {
         if (needsNewerApp(version)) return Result.err(failure("cloud.history.needsUpdate"));
+        // VersionResponse has no moduleVersions. Fetch the small, cached manifest first:
+        // its envelope carries those versions even when the payloads are blob references.
+        const manifest = await this.repository.manifestOf(version);
+        if (!manifest.isOk) return Result.err(repositoryFailure(manifest.error));
+        const envelope = manifest.value.manifest;
+        if (
+            typeof envelope === "object" &&
+            envelope !== null &&
+            "formatVersion" in envelope &&
+            needsNewerApp(envelope as { formatVersion: number; moduleVersions?: unknown })
+        ) {
+            return Result.err(failure("cloud.history.needsUpdate"));
+        }
         const loaded = await this.repository.loadVersion(version);
         return loaded.isOk ? Result.ok(loaded.value) : Result.err(repositoryFailure(loaded.error));
     }

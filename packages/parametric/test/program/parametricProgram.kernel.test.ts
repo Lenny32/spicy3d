@@ -23,8 +23,10 @@ import {
     type IEdge,
     type IFace,
     PerformanceTrace,
+    Plane,
     ShapeTypes,
     Transaction,
+    XYZ,
 } from "@spicy3d/core";
 import {
     createMockApplication,
@@ -38,6 +40,9 @@ import { buildParametricTools, runParametric } from "../../../ai/src/tools/param
 import { buildParametricJobTools, buildProgramJobTools } from "../../../ai/src/tools/programJobs";
 import { buildReadTools } from "../../../ai/src/tools/readTools";
 import { waitForTerminalJob } from "../../../ai/test/_helpers/waitForTerminalJob";
+import { HybridShapeFactory } from "../../../wasm/src/hybridShapeFactory";
+import { KernelWorkerClient } from "../../../wasm/src/workerClient";
+import { NativeWorkerTransport } from "../../../wasm/test/workerHarness";
 import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
@@ -46,6 +51,7 @@ import {
     type ProgramRunOptions,
     runParametricProgram,
 } from "../../src/program/parametricProgram";
+import type { SketchData } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -649,6 +655,52 @@ describe("loft", () => {
         expect(extent(body)[3]).toBeCloseTo(15, 3);
     });
 
+    test("the documented open-curve workflow lofts and thickens without adding section payload fields", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [-10, 0],
+                            [0, 3],
+                            [10, 0],
+                        ],
+                    },
+                ],
+            },
+            {
+                op: "sketch",
+                id: "s2",
+                plane: { construction: "p1" },
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [-8, 0],
+                            [0, 4],
+                            [8, 0],
+                        ],
+                    },
+                ],
+            },
+            { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+            { op: "thicken", id: "wall", body: "skin", thickness: 1 },
+        ]);
+        const body = createdBody(doc, result, "skin");
+        expectClean(body);
+        expect(body.shape.value.shapeType).toBe(ShapeTypes.solid);
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect(body.shape.value.volume()).toBeGreaterThan(0);
+        expect(body.features.map((feature) => feature.type)).toEqual(["loft", "thicken"]);
+        expect(body.features[0]).toMatchObject({ solid: false });
+        expect(Object.keys(body.features[0]).sort()).toEqual(["id", "sections", "solid", "type"]);
+    });
+
     test("stores the options it was given", () => {
         const doc = newDoc();
         const result = run(doc, [
@@ -687,6 +739,120 @@ describe("thicken", () => {
             doc.variables.setItems([{ id: "v1", name: "wall_t", expression, type: "length" }]);
         });
     }
+
+    test("MCP tolerant thicken and upstream parameter edits await the worker and roll back failures", async () => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        rs.stubGlobal("app", app);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        try {
+            const tool = buildParametricTools()[0];
+            const result = run(doc, plate(20));
+            const body = createdBody(doc, result, "b1");
+            await tool.handler({
+                ops: [
+                    {
+                        op: "thicken",
+                        id: "t1",
+                        body: body.id,
+                        thickness: -2,
+                        tolerant: true,
+                        openFaceIndexes: [topFaceIndex(body)],
+                    },
+                ],
+            });
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 20 - 36 * 26 * 18, 3);
+            const edit = (value: number) =>
+                tool.handler({
+                    ops: [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[0].id,
+                            action: "setParameter",
+                            key: "depth",
+                            value,
+                        },
+                    ],
+                });
+            await edit(30);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+            const suppress = (value: boolean) =>
+                tool.handler({
+                    ops: [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: body.features[1].id,
+                            action: "suppress",
+                            value,
+                        },
+                    ],
+                });
+            await suppress(true);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30, 3);
+            await suppress(false);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+            await expect(edit(0)).rejects.toThrow(/extrude|depth|feature|body/i);
+            expect(body.features[0]).toMatchObject({ depth: 30 });
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 30 - 36 * 26 * 28, 3);
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test.each([
+        "timeout",
+        "cancel",
+    ])("MCP tolerant %s reports the failure and restores the body", async (failure) => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        const controller = new AbortController();
+        let requests = 0;
+        const hybrid = new HybridShapeFactory(() => {
+            const transport = new NativeWorkerTransport();
+            transport.hold = true;
+            const post = transport.postMessage.bind(transport);
+            transport.postMessage = (message) => {
+                requests++;
+                post(message);
+                if (failure === "cancel") setTimeout(() => controller.abort(), 0);
+            };
+            return new KernelWorkerClient(transport, 50);
+        });
+        rs.stubGlobal("app", app);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        try {
+            const body = createdBody(doc, run(doc, plate(20)), "b1");
+            const before = body.features;
+            await expect(
+                runParametric(
+                    { ops: [{ op: "thicken", id: "t1", body: body.id, thickness: -2, tolerant: true }] },
+                    controller.signal,
+                ),
+            ).rejects.toThrow(failure === "cancel" ? /cancelled/i : /op 0 \("thicken"\) failed:.*timed out/i);
+            expect(requests).toBe(1);
+            expect(body.features).toEqual(before);
+            expectClean(body);
+            expect(body.shape.value.volume()).toBeCloseTo(40 * 30 * 20, 3);
+            expect(DocumentMutations.isHeld(doc)).toBe(false);
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            rs.unstubAllGlobals();
+        }
+    });
 
     test("shells a body open at the picked face, following the thickness variable", () => {
         const doc = newDoc();
@@ -955,6 +1121,489 @@ describe("fillet and boolean", () => {
         run(doc, [{ op: "fillet", id: "f1", body: body.id, edgeIndexes: [topIndex], radius: 4 }]);
         expectClean(body);
         expect(body.featureItems()).toHaveLength(2);
+    });
+
+    test("a bottom loop fillet fails after near-wall recesses but works before them", () => {
+        const doc = newDoc();
+        // Existing mouse-skirt fixture from #126; synthetic recesses exercise the #132 workflow.
+        const sections = JSON.parse(
+            readFileSync(path.resolve(import.meta.dirname, "../fixtures/mouseSkirt.json"), "utf8"),
+        ) as { z: number; data: SketchData }[];
+        const sketches = sections.map(({ z, data }) => {
+            const sketch = new SketchNode({
+                document: doc,
+                plane: new Plane({ origin: new XYZ(0, 0, z), normal: XYZ.unitZ, xvec: XYZ.unitX }),
+                data,
+            });
+            doc.modelManager.addNode(sketch);
+            return sketch;
+        });
+        const body = new ParametricBodyNode({
+            document: doc,
+            features: [
+                {
+                    id: "mouseLoft",
+                    type: "loft",
+                    sections: sketches.map((sketch) => ({ sketchId: sketch.id })),
+                    solid: true,
+                    ruled: true,
+                },
+            ],
+        });
+        doc.modelManager.addNode(body);
+        expect(body.shape.isOk).toBe(true);
+        run(doc, [
+            {
+                op: "sketch",
+                id: "recesses",
+                entities: [
+                    { type: "circle", params: [-41, 0, 3] },
+                    { type: "circle", params: [0, 0, 3] },
+                    { type: "circle", params: [15, 0, 3] },
+                ],
+            },
+            { op: "extrude", id: "pockets", body: body.id, sketch: "recesses", depth: 3, operation: "cut" },
+        ]);
+        const original = body.features;
+        const volume = body.shape.value.volume();
+        const picks = run(doc, [
+            {
+                op: "edges",
+                body: body.id,
+                selector: { geometry: { kind: "other", elevation: { value: 0 } }, tolerance: 0.001 },
+                expectedCount: 1,
+            },
+        ]).results["edges"] as EdgesReport;
+        expect(picks.selection?.status).toBe("matched");
+        expect(picks.edges).toHaveLength(1);
+        const message = runExpectingFailure(doc, [
+            { op: "fillet", id: "appended", body: body.id, edgeRefs: [picks.edges[0].reference], radius: 4 },
+        ]);
+        expect(message).toContain("Failed to fillet");
+        expect(message).toContain("invalid result face index");
+        expect(message).toContain("BRepCheck: Intersecting Wires");
+        expect(message).toContain("edge 0 adjoining faces [0, 1]");
+        expect(message).toContain("before downstream cuts with index");
+        expect(body.features).toEqual(original);
+        expectClean(body);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        run(doc, [
+            {
+                op: "fillet",
+                id: "bottom",
+                body: body.id,
+                index: 1,
+                edgeRefs: [picks.edges[0].reference],
+                radius: 4,
+            },
+        ]);
+        expect(body.features.map((feature) => feature.type)).toEqual(["loft", "fillet", "extrude"]);
+        expect(body.features[2].id).toBe(original[1].id);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        expect(Math.abs(body.shape.value.volume() - volume)).toBeGreaterThan(1);
+    });
+
+    test.each([
+        "fillet",
+        "chamfer",
+    ] as const)("inserts a %s before a cut and restores it through undo/redo", (op) => {
+        const doc = newDoc();
+        const result = run(doc, [
+            ...plate(20),
+            { op: "sketch", id: "hole", entities: [{ type: "circle", params: [20, 15, 3] }] },
+            { op: "extrude", id: "cut", body: "b1", sketch: "hole", depth: 20, operation: "cut" },
+        ]);
+        const body = createdBody(doc, result, "b1");
+        const original = body.features;
+        const volume = body.shape.value.volume();
+        const picks = run(doc, [
+            {
+                op: "edges",
+                body: body.id,
+                index: 1,
+                selector: { geometry: { kind: "line", elevation: { value: 20 } } },
+                expectedCount: 4,
+            },
+        ]).results["edges"] as EdgesReport;
+        expect(picks.selection?.status).toBe("matched");
+        expect(picks.edges).toHaveLength(4);
+        // Querying historical topology must leave the displayed shape and saved list alone.
+        expect(body.features).toEqual(original);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
+        const corner = {
+            op,
+            id: "round",
+            body: body.id,
+            index: 1,
+            edgeRefs: [JSON.parse(JSON.stringify(picks.edges[0].reference))],
+            ...(op === "fillet" ? { radius: 1 } : { distance: 1 }),
+        };
+        run(doc, [corner]);
+        expect(body.features.map((feature) => feature.type)).toEqual(["extrude", op, "extrude"]);
+        expect(body.features[2].id).toBe(original[1].id);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+        const roundedVolume = body.shape.value.volume();
+        expect(roundedVolume).toBeLessThan(volume);
+        doc.history.undo();
+        expect(body.features).toEqual(original);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 6);
+        doc.history.redo();
+        expectClean(body);
+        expect(body.features.map((feature) => feature.type)).toEqual(["extrude", op, "extrude"]);
+        expect(body.shape.value.volume()).toBeCloseTo(roundedVolume, 6);
+    });
+
+    test("removal shifts face-sketch anchors and unsafe moves are refused through undo/redo", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(10)), "b1");
+        function topFace(z: number): number {
+            const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+            try {
+                const index = faces.findIndex(
+                    (face) => face.normal(0, 0)[1].z > 0.999 && Math.abs(face.boundingBox().min.z - z) < 1e-5,
+                );
+                expect(index).toBeGreaterThanOrEqual(0);
+                return index;
+            } finally {
+                for (const face of faces) face.dispose();
+            }
+        }
+        const bossResult = run(doc, [
+            {
+                op: "sketch",
+                id: "bossSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(10) },
+                entities: rect(10, 10, 20, 20),
+            },
+            { op: "extrude", id: "boss", body: body.id, sketch: "bossSketch", depth: 5, operation: "fuse" },
+        ]);
+        const cutResult = run(doc, [
+            {
+                op: "sketch",
+                id: "cutSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(15) },
+                entities: rect(10, 10, 20, 20),
+            },
+            { op: "extrude", id: "cut", body: body.id, sketch: "cutSketch", depth: -3, operation: "cut" },
+        ]);
+        const bossSketch = doc.modelManager.findNode(
+            (node) => node.id === bossResult.created[0].nodeId,
+        ) as SketchNode;
+        const cutSketch = doc.modelManager.findNode(
+            (node) => node.id === cutResult.created[0].nodeId,
+        ) as SketchNode;
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        const original = body.features;
+        const volume = body.shape.value.volume();
+        const moved = body.moveFeatureTo(body.features[1].id, 2);
+        expect(moved.isOk).toBe(false);
+        expect(moved.error).toContain("sketch");
+        expect(body.features).toEqual(original);
+        runExpectingFailure(doc, [
+            { op: "editFeature", body: body.id, featureId: body.features[1].id, action: "moveTo", index: 2 },
+        ]);
+        expect(body.features).toEqual(original);
+        // A suppressed upstream step changes indexes without changing the model.
+        run(doc, [{ op: "chamfer", id: "corner", body: body.id, index: 1, edgeIndexes: [0], distance: 1 }]);
+        const corner = body.features[1].id;
+        run(doc, [{ op: "editFeature", body: body.id, featureId: corner, action: "suppress", value: true }]);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        run(doc, [{ op: "editFeature", body: body.id, featureId: corner, action: "remove" }]);
+        expectClean(body);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.undo();
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.redo();
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+    });
+
+    test("insertion preserves face-sketch anchors, planes and the downstream cut through undo/redo", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(10)), "b1");
+        function topFace(z: number): number {
+            const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+            try {
+                const index = faces.findIndex(
+                    (face) => face.normal(0, 0)[1].z > 0.999 && Math.abs(face.boundingBox().min.z - z) < 1e-5,
+                );
+                expect(index).toBeGreaterThanOrEqual(0);
+                return index;
+            } finally {
+                for (const face of faces) face.dispose();
+            }
+        }
+        const bossResult = run(doc, [
+            {
+                op: "sketch",
+                id: "bossSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(10) },
+                entities: rect(10, 10, 20, 20),
+            },
+            { op: "extrude", id: "boss", body: body.id, sketch: "bossSketch", depth: 5, operation: "fuse" },
+        ]);
+        const cutResult = run(doc, [
+            {
+                op: "sketch",
+                id: "cutSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(15) },
+                entities: [{ type: "circle", params: [15, 15, 2] }],
+            },
+            { op: "extrude", id: "cut", body: body.id, sketch: "cutSketch", depth: -3, operation: "cut" },
+        ]);
+        const bossSketch = doc.modelManager.findNode(
+            (node) => node.id === bossResult.created[0].nodeId,
+        ) as SketchNode;
+        const cutSketch = doc.modelManager.findNode(
+            (node) => node.id === cutResult.created[0].nodeId,
+        ) as SketchNode;
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        const original = body.features;
+        const volume = body.shape.value.volume();
+        expect(volume).toBeCloseTo(40 * 30 * 10 + 100 * 5 - Math.PI * 4 * 3, 5);
+        const edges = body.cornerEditStateAt(1)!.shape!.findSubShapes(ShapeTypes.edge) as IEdge[];
+        let edgeIndex: number;
+        let removedVolume: number;
+        try {
+            edgeIndex = edges.findIndex((edge) => edge.boundingBox().min.z > 9.999);
+            expect(edgeIndex).toBeGreaterThanOrEqual(0);
+            removedVolume = edges[edgeIndex].length() / 2;
+        } finally {
+            for (const edge of edges) edge.dispose();
+        }
+        run(doc, [
+            { op: "chamfer", id: "corner", body: body.id, index: 1, edgeIndexes: [edgeIndex], distance: 1 },
+        ]);
+        expectClean(body);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        expect(bossSketch.plane.origin.z).toBeCloseTo(10, 6);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume - removedVolume, 5);
+        doc.history.undo();
+        expectClean(body);
+        expect(body.features).toEqual(original);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.redo();
+        expectClean(body);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume - removedVolume, 5);
+        // A failed insertion restores shifted anchors together with the feature list.
+        const chamfered = body.features;
+        runExpectingFailure(doc, [
+            { op: "chamfer", id: "bad", body: body.id, index: 1, edgeIndexes: [edgeIndex], distance: 1000 },
+        ]);
+        expectClean(body);
+        expect(body.features).toEqual(chamfered);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume - removedVolume, 5);
+    });
+
+    test.each([
+        "fillet",
+        "chamfer",
+    ] as const)("a sketch at the insertion index keeps the projected edge consumed by a %s", (op) => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(10)), "b1");
+        const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+        let faceIndex: number;
+        try {
+            faceIndex = faces.findIndex((face) => face.normal(0, 0)[1].z > 0.999);
+            expect(faceIndex).toBeGreaterThanOrEqual(0);
+        } finally {
+            for (const face of faces) face.dispose();
+        }
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "cavity",
+                plane: { nodeId: body.id, faceIndex },
+                entities: [{ type: "circle", params: [20, 15, 3] }],
+            },
+            { op: "extrude", id: "cut", body: body.id, sketch: "cavity", depth: -3, operation: "cut" },
+        ]);
+        const sketch = doc.modelManager.findNode(
+            (node) => node.id === result.created[0].nodeId,
+        ) as SketchNode;
+        expect(sketch.data.refPositions?.[body.id]).toBe(1);
+        const refs = sketch.data.externalRefs!;
+        expect(refs).toHaveLength(4);
+        const projected = refs[0];
+        expect(projected.dangling).not.toBe(true);
+        const picks = run(doc, [{ op: "edges", body: body.id, index: 1 }]).results["edges"] as EdgesReport;
+        const consumed = picks.edges.find((pick) => pick.reference.edge.edgeId === projected.edge.edgeId);
+        expect(consumed).not.toBeUndefined();
+        const cutVolume = body.cornerEditStateAt(1)!.shape!.volume() - body.shape.value.volume();
+        expect(cutVolume).toBeCloseTo(Math.PI * 9 * 3, 5);
+        run(doc, [
+            {
+                op,
+                id: "corner",
+                body: body.id,
+                index: 1,
+                edgeRefs: [consumed!.reference],
+                ...(op === "fillet" ? { radius: 1 } : { distance: 1 }),
+            },
+        ]);
+        expectClean(body);
+        expect(sketch.data.refPositions?.[body.id]).toBe(1);
+        const after = sketch.data.externalRefs!.find((ref) => ref.entityId === projected.entityId);
+        expect(after).not.toBeUndefined();
+        expect(after!.dangling).not.toBe(true);
+        expect(after!.snapshot).toEqual(projected.snapshot);
+        expect(body.cornerEditStateAt(2)!.shape!.volume() - body.shape.value.volume()).toBeCloseTo(
+            cutVolume,
+            5,
+        );
+    });
+
+    test.each([
+        -1,
+        0,
+        1.5,
+        3,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+    ])("rejects unusable insertion index %s without changes", (index) => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const original = body.features;
+        expect(() =>
+            run(doc, [{ op: "fillet", id: "f", body: body.id, index, edgeIndexes: [0], radius: 1 }]),
+        ).toThrow(index === 0 ? "no input shape" : "must be an integer");
+        expect(body.features).toEqual(original);
+        expectClean(body);
+    });
+
+    test("edges created by a later cut cannot be selected for an earlier fillet", () => {
+        const doc = newDoc();
+        const body = createdBody(
+            doc,
+            run(doc, [
+                ...plate(20),
+                { op: "sketch", id: "hole", entities: [{ type: "circle", params: [20, 15, 3] }] },
+                { op: "extrude", id: "cut", body: "b1", sketch: "hole", depth: 20, operation: "cut" },
+            ]),
+            "b1",
+        );
+        const original = body.features;
+        const final = run(doc, [{ op: "edges", body: body.id, selector: { geometry: { kind: "circle" } } }])
+            .results["edges"] as EdgesReport;
+        expect(final.edges).toHaveLength(2);
+        const historical = run(doc, [
+            { op: "edges", body: body.id, index: 1, selector: { geometry: { kind: "circle" } } },
+        ]).results["edges"] as EdgesReport;
+        expect(historical.edges).toHaveLength(0);
+        expect(() =>
+            run(doc, [
+                {
+                    op: "fillet",
+                    id: "f",
+                    body: body.id,
+                    index: 1,
+                    edgeRefs: [final.edges[0].reference],
+                    radius: 0.5,
+                },
+            ]),
+        ).toThrow("persistent edge selection is missing or ambiguous");
+        expect(body.features).toEqual(original);
+        expectClean(body);
+    });
+
+    test("historical adjacency uses the input faces after insertion", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const picks = run(doc, [{ op: "edges", body: body.id, index: 1 }]).results["edges"] as EdgesReport;
+        const input = body.cornerEditStateAt(1)!;
+        const edges = input.shape!.findSubShapes(ShapeTypes.edge);
+        const faces = input.shape!.findSubShapes(ShapeTypes.face);
+        const adjacent = edges[0].findAncestor(ShapeTypes.face, input.shape!);
+        const faceIds = faces.flatMap((face, index) =>
+            adjacent.some((other) => other.isSame(face)) ? [input.faceIds![index]] : [],
+        );
+        expect(faceIds).toHaveLength(2);
+        for (const shape of [...adjacent, ...faces, ...edges]) shape.dispose();
+        run(doc, [{ op: "fillet", id: "f", body: body.id, index: 1, edgeIndexes: [0], radius: 1 }]);
+        const selected = run(doc, [
+            {
+                op: "edges",
+                body: body.id,
+                index: 1,
+                selector: { adjoiningFaces: { exact: faceIds }, curves: [picks.edges[0].reference] },
+            },
+        ]).results["edges"] as EdgesReport;
+        expect(selected.edges).toEqual([picks.edges[0]]);
+        expect(body.features.map((feature) => feature.type)).toEqual(["extrude", "fillet"]);
+        expectClean(body);
+    });
+
+    test("an explicit end index appends a corner feature", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        run(doc, [
+            {
+                op: "fillet",
+                id: "f",
+                body: body.id,
+                index: body.features.length,
+                edgeIndexes: [0],
+                radius: 1,
+            },
+        ]);
+        expect(body.features.map((feature) => feature.type)).toEqual(["extrude", "fillet"]);
+        expectClean(body);
+        expect(body.shape.value.checkShape()).toBe(true);
+    });
+
+    test("insertion resolves edge indexes at its input and rolls back a broken tail", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const original = body.features;
+        run(doc, [{ op: "fillet", id: "first", body: body.id, edgeIndexes: [0], radius: 1 }]);
+        const rounded = body.features;
+        // Both corners cannot round the same edge: failure in the existing tail must roll back insertion.
+        const message = runExpectingFailure(doc, [
+            { op: "fillet", id: "insert", body: body.id, index: 1, edgeIndexes: [0], radius: 1 },
+        ]);
+        expect(message).toContain(rounded[1].id);
+        expect(message).toContain("fillet input at feature index 1: edge 0 adjoining faces [");
+
+        expect(body.features).toEqual(rounded);
+        expectClean(body);
+        doc.history.undo();
+        expect(body.features).toEqual(original);
+    });
+
+    test("a failed fillet on a single feature reports topology without an insertion hint", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const original = body.features;
+        const message = runExpectingFailure(doc, [
+            { op: "fillet", id: "f", body: body.id, edgeIndexes: [0], radius: 1000 },
+        ]);
+        expect(message).toContain("fillet input at feature index 1: edge 0 adjoining faces [");
+        expect(message).not.toContain("before downstream cuts with index");
+        expect(body.features).toEqual(original);
+        expectClean(body);
     });
 
     test("a boolean adopts its tool nodes as hidden children instead of deleting them", () => {

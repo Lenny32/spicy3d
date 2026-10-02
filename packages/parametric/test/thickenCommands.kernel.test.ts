@@ -25,6 +25,8 @@ import {
     TestDocument,
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
+import { HybridShapeFactory } from "../../wasm/src/hybridShapeFactory";
+import { NativeWorkerTransport } from "../../wasm/test/workerHarness";
 import { ThickenFeatureCommand } from "../src/commands/thickenCommand";
 import type { ThickenEditCommand } from "../src/commands/thickenEditCommand";
 import type { ThickenFeatureData } from "../src/features/feature";
@@ -45,6 +47,14 @@ beforeAll(async () => {
         writable: true,
         configurable: true,
     });
+});
+
+let testHybrid: HybridShapeFactory | undefined;
+afterEach(() => {
+    testHybrid?.dispose();
+    testHybrid = undefined;
+    rs.unstubAllGlobals();
+    rs.restoreAllMocks();
 });
 
 const square: SketchData = {
@@ -170,6 +180,33 @@ describe("thicken command (real kernel)", () => {
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 6, 3);
     });
 
+    test("tolerant checkbox persists the envelope option in one undo step", async () => {
+        const { app, doc, body } = setup();
+        const hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        testHybrid = hybrid;
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        const publish = rs.spyOn(PubSub.default, "pub");
+        const command = new ThickenFeatureCommand();
+        pickFaces(doc, command, body, [topFacePick(body)], () => {
+            command.thickness = -2;
+            command.mode = "option.command.offsetMode.pipe";
+            command.tolerant = true;
+        });
+        await command.execute(app);
+        expect(publish).toHaveBeenCalledWith("showFloatTip", {
+            level: "info",
+            msg: I18n.translate("prompt.thicken.backgroundResult"),
+        });
+        publish.mockRestore();
+        expect(body.features[1]).not.toHaveProperty("mode");
+        expect(body.features[1]).toMatchObject({ type: "thicken", thickness: -2, tolerant: true });
+        await body.whenRebuilt();
+        expect(body.shape.isOk).toBe(true);
+        expect(body.shape.value.volume()).toBeCloseTo(4000 - 16 * 16 * 8, 3);
+        doc.history.undo();
+        expect(body.features).toHaveLength(1);
+    });
+
     test("an expression thickness is stored as typed", async () => {
         const { app, doc, body } = setup();
         Transaction.execute(doc, "edit variables", () => {
@@ -290,6 +327,34 @@ describe("thicken edit session (real kernel)", () => {
         expect(body.shape.value.volume()).toBeCloseTo(4000 - 14 * 14 * 4, 3);
         doc.history.undo();
         expect(body.features[1]).toEqual({ id: "t1", type: "thicken", thickness: -2 });
+    });
+
+    test("editing can enable and remove the stored tolerant option", async () => {
+        const { app, body } = thickened();
+        testHybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client);
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, testHybrid));
+        const publish = rs.spyOn(PubSub.default, "pub");
+        await editWith(app, body, (session) => {
+            session.mode = "option.command.offsetMode.pipe";
+            session.tolerant = true;
+            session.confirm();
+        });
+        expect(publish).toHaveBeenCalledWith("showFloatTip", {
+            level: "info",
+            msg: I18n.translate("prompt.thicken.backgroundResult"),
+        });
+        publish.mockRestore();
+        expect(body.features[1]).not.toHaveProperty("mode");
+        expect(body.features[1]).toMatchObject({ tolerant: true, thickness: -2 });
+        await body.whenRebuilt();
+        expect(body.shape.isOk).toBe(true);
+        await editWith(app, body, (session) => {
+            expect(session.tolerant).toBe(true);
+            session.tolerant = false;
+            session.confirm();
+        });
+        expect(body.features[1]).not.toHaveProperty("tolerant");
+        expect(body.shape.isOk).toBe(true);
     });
 
     test("cancelling leaves the feature untouched", async () => {

@@ -105,10 +105,13 @@ export enum ConstraintKind {
      * direction only: the joint itself is a coincidence of its own.
      */
     TangentLineBSpline = 33,
+    /** Sketch-level derived relation: refs = [source, target], datum = signed offset. Never sent to WASM. */
+    Offset = 34,
 }
 
 /** Param count and trailing datum count of every kind. */
 const LAYOUT: Record<ConstraintKind, { params: number; datums: number }> = {
+    [ConstraintKind.Offset]: { params: 0, datums: 0 },
     [ConstraintKind.Collinear]: { params: 0, datums: 0 },
     [ConstraintKind.Block]: { params: 0, datums: 0 },
     [ConstraintKind.EqualAngle]: { params: 16, datums: 0 },
@@ -297,6 +300,7 @@ export class SolverSystem {
     private datumParams = new Set<number>();
     /** Datum params whose value shapes the native constraints; writing one forces a rebuild. */
     private structuralDatums = new Set<number>();
+    private readonly frozenParams = new Set<number>();
     private dirty = true;
     private cachedDofs: number | undefined;
 
@@ -312,6 +316,16 @@ export class SolverSystem {
         }
         this.invalidate();
         return ids;
+    }
+
+    /** Derived geometry uses native fixed parameters, without one equality equation per coordinate. */
+    set_frozen_params(ids: readonly number[], frozen: boolean): void {
+        for (const id of ids) {
+            this.assertParam(id);
+            if (frozen) this.frozenParams.add(id);
+            else this.frozenParams.delete(id);
+        }
+        this.invalidate();
     }
 
     get_params(ids: Uint32Array): Float64Array {
@@ -345,6 +359,7 @@ export class SolverSystem {
             if (curve?.fit.includes(id)) throw new Error(`ParamInUse: param ${id} is a B-spline fit point`);
         }
         this.alive[id] = false;
+        this.frozenParams.delete(id);
         this.dragged.delete(id);
         this.invalidate();
     }
@@ -369,6 +384,7 @@ export class SolverSystem {
         _tag: number,
         branch?: number | null,
     ): number {
+        if (kind === ConstraintKind.Offset) throw new Error("Offset is a sketch-level derived relation");
         const layout = LAYOUT[kind];
         if (layout === undefined) throw new Error(`Unknown constraint kind: ${kind}`);
         if (kind === ConstraintKind.PointOnBSpline)
@@ -611,7 +627,11 @@ export class SolverSystem {
      */
     private primeDiagnosis(native: GcsSystem): void {
         for (const id of this.dragged)
-            native.set_p_param(this.nativeIndex[id], this.values[id], this.datumParams.has(id));
+            native.set_p_param(
+                this.nativeIndex[id],
+                this.values[id],
+                this.datumParams.has(id) || this.frozenParams.has(id),
+            );
         native.set_max_iterations(1);
         native.solve_system(DOG_LEG);
         native.set_max_iterations(this.defaultMaxIterations);
@@ -731,7 +751,7 @@ export class SolverSystem {
     private solutionMoved(native: GcsSystem): boolean {
         native.apply_solution();
         for (let id = 0; id < this.values.length; id++) {
-            if (!this.alive[id] || this.datumParams.has(id)) continue;
+            if (!this.alive[id] || this.datumParams.has(id) || this.frozenParams.has(id)) continue;
             const moved = Math.abs(native.get_p_param(this.nativeIndex[id]) - this.values[id]);
             if (moved > SOLUTION_MOVE_TOLERANCE) return true;
         }
@@ -937,7 +957,7 @@ export class SolverSystem {
     }
 
     private isFixed(id: number): boolean {
-        return this.datumParams.has(id) || this.dragged.has(id);
+        return this.datumParams.has(id) || this.frozenParams.has(id) || this.dragged.has(id);
     }
 
     private point(ids: readonly number[], at: number): [number, number] {
@@ -1067,7 +1087,10 @@ export class SolverSystem {
             if (!this.alive[id]) continue;
             // datums are fixed from the start; dragged params are held per solve (`applyDragged`),
             // and the diagnosis solve (`primeDiagnosis`) counts them as free
-            this.nativeIndex[id] = native.push_p_param(this.values[id], this.datumParams.has(id));
+            this.nativeIndex[id] = native.push_p_param(
+                this.values[id],
+                this.datumParams.has(id) || this.frozenParams.has(id),
+            );
         }
         this.curves.forEach((curve, id) => {
             if (curve !== undefined) this.emitCurve(native, curve, id);
@@ -1155,7 +1178,11 @@ export class SolverSystem {
     private applyDragged(fixed: boolean): void {
         if (this.dirty || this.native === undefined) return;
         for (const id of this.dragged) {
-            this.native.set_p_param(this.nativeIndex[id], this.values[id], fixed || this.datumParams.has(id));
+            this.native.set_p_param(
+                this.nativeIndex[id],
+                this.values[id],
+                fixed || this.datumParams.has(id) || this.frozenParams.has(id),
+            );
         }
     }
 
@@ -1163,7 +1190,7 @@ export class SolverSystem {
     private applySolution(native: GcsSystem, includeDragged = false): void {
         native.apply_solution();
         for (let id = 0; id < this.values.length; id++) {
-            if (!this.alive[id] || this.datumParams.has(id)) continue;
+            if (!this.alive[id] || this.datumParams.has(id) || this.frozenParams.has(id)) continue;
             if (!includeDragged && this.dragged.has(id)) continue;
             this.values[id] = native.get_p_param(this.nativeIndex[id]);
         }

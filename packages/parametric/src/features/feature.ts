@@ -164,7 +164,8 @@ export interface RevolveFeatureData extends FeatureBase {
 /** One cross-section of a loft: a closed profile of a sketch. */
 export interface LoftSection {
     readonly sketchId: string;
-    /** Fingerprint of the picked profile (`profileRef.ts`); absent = the sketch's only outer profile. */
+    /** Fingerprint of the picked profile (`profileRef.ts`); absent = the sketch's only outer profile
+     * or, with solid:false, its only open wire. */
     readonly profile?: ProfileRef;
 }
 
@@ -208,6 +209,8 @@ export interface SweepFeatureData extends FeatureBase {
  */
 export interface ThickenFeatureData extends FeatureBase {
     readonly type: "thicken";
+    /** Opt-in material envelope (parametric 15); absent retains ordinary offset behavior. */
+    readonly tolerant?: boolean;
     /**
      * Signed wall thickness, the kernel's convention: positive grows along the face normals
      * (outward for a solid), negative inward. Never zero.
@@ -313,6 +316,10 @@ export interface FeatureContext {
     readonly tracking?: ShapeTracking;
     /** Only the final result of this replay needs an eagerly transferred worker mesh. */
     readonly meshResult?: boolean;
+    /** Runtime diagnostic; never serialized. */
+    readonly warn?: (message: string) => void;
+    /** Runtime validation pending: capture now, await before committing the feature. */
+    readonly deferSelfIntersection?: (shape: IShape, failure?: string) => void;
 }
 
 export interface ShapeTracking {
@@ -505,5 +512,22 @@ export function featureHandler(type: string): FeatureHandler | undefined {
 export function evaluateFeature(feature: FeatureData, context: FeatureContext): Result<IShape> {
     const handler = handlers.get(feature.type);
     if (handler === undefined) return Result.err(`Unknown feature type: ${feature.type}`);
-    return handler.evaluate(feature, context);
+    const result = handler.evaluate(feature, context);
+    return result.isOk ? result : Result.err(featureEvaluationError(feature, result.error));
+}
+
+// Feature handlers return strings for both user validation and kernel failures. Recognize
+// operation/validity diagnostics rather than adding context to every user-facing message.
+const KERNEL_FAILURE_PATTERNS = [
+    /invalid (?:shape|solid|volume|topology)|shape to thicken is invalid|BRepCheck|inside out/i,
+    /result:|input \d+:|validation failed|Standard_|kernel/i,
+    /(?:fillet|chamfer|loft|thicken|boolean|extrude|sweep|revolve|offset|native operation).*(?:failed|failure|rejected)/i,
+    /Boolean .*produced an empty shape|ancestry is incomplete/i,
+];
+
+/** Keep kernel geometry failures attached to the feature that attempted to consume them. */
+export function featureEvaluationError(feature: FeatureData, error: string): string {
+    const prefix = `${feature.type} step "${feature.id}": `;
+    if (error.startsWith(prefix)) return error;
+    return KERNEL_FAILURE_PATTERNS.some((pattern) => pattern.test(error)) ? prefix + error : error;
 }

@@ -1,12 +1,31 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { Config, type IDisposable, type IFace, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
+import {
+    Config,
+    DocumentRebuilds,
+    I18n,
+    type IDisposable,
+    type IFace,
+    Matrix4,
+    Result,
+    ShapeTypes,
+    XYZ,
+} from "@spicy3d/core";
+import { createMockApplication, TestDocument } from "@spicy3d/core/test-utils";
+import {
+    featureHandler,
+    registerFeature,
+    type SweepFeatureData,
+} from "../../parametric/src/features/feature";
+import { validateSelfIntersection } from "../../parametric/src/features/selfIntersectionValidation";
+import { ParametricBodyNode } from "../../parametric/src/parametricBodyNode";
 import { ShapeFactory } from "../src/factory";
 import { HybridShapeFactory } from "../src/hybridShapeFactory";
+import type { OccShape } from "../src/shape";
 import { type IKernelWorkerTransport, KernelWorkerClient } from "../src/workerClient";
 import type { KernelMessage } from "../src/workerProtocol";
-import { createBox, unwrapOk } from "./helpers";
+import { createBox, createSphere, unwrapOk } from "./helpers";
 import { NativeWorkerTransport } from "./workerHarness";
 import "./setup";
 
@@ -245,6 +264,33 @@ test("an opening face from a different shape fails before entering the worker", 
     }
 });
 
+test("a bounded thicken failure names the limiting curvature region", async () => {
+    const factory = new ShapeFactory();
+    const sphere = keep(createSphere(factory, undefined, 2));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: sphere,
+            closingFaces: [],
+            thickness: -3.75,
+            joinType: "arc",
+            mode: "skin",
+            intersection: false,
+        });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("input face index 0 near (");
+        expect(result.error).toContain("curvature radius 2 mm <= |thickness| 3.75 mm");
+        expect(sphere.checkShape()).toBe(true);
+        expect(sphere.volume()).toBeCloseTo((4 / 3) * Math.PI * 8, 6);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
 test("bounded loft prepares edge sections through the existing section rules", async () => {
     const factory = new ShapeFactory();
     const a = keep(unwrapOk(factory.circle(XYZ.unitZ, XYZ.zero, 5)));
@@ -297,7 +343,7 @@ test("bounded fuse applies requested simplification before exporting its replica
     }
 });
 
-test("bounded simple thickening matches the existing open-shell behavior", async () => {
+test("bounded simple thickening repairs the existing open-shell result orientation", async () => {
     const factory = new ShapeFactory();
     const box = keep(createBox(factory));
     const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
@@ -311,6 +357,8 @@ test("bounded simple thickening matches the existing open-shell behavior", async
         const result = keep(unwrapOk(task.take()));
         const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1)));
         expect(result.checkShape()).toBe(true);
+        expect(baseline.checkShape()).toBe(true);
+        expect(baseline.volume()).toBeGreaterThan(0);
         expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
     } finally {
         hybrid.dispose();
@@ -489,5 +537,379 @@ test("cancelling a bounded operation leaves a simultaneous boolean request runni
         boolean!.cancel();
     } finally {
         hybrid.dispose();
+    }
+});
+
+test.each([
+    true,
+    false,
+])("bounded self-intersection forwards the kernel answer %s without touching the source", async (answer) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const binding = rs.spyOn(wasm.Shape, "checkSelfIntersection").mockReturnValue(answer);
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        expect(binding).not.toHaveBeenCalled();
+        await task.ready;
+        expect(unwrapOk(task.take())).toBe(answer);
+        expect(binding).toHaveBeenCalledTimes(1);
+        expect(transport.client.isClosed).toBe(true);
+        expect(box.volume()).toBeCloseTo(6000, 7);
+    } finally {
+        binding.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+function freeFormShell() {
+    const factory = new ShapeFactory();
+    const sections = Array.from({ length: 9 }, (_, i) =>
+        keep(
+            unwrapOk(
+                factory.polygon(
+                    Array.from({ length: 8 }, (_, j) => {
+                        const angle = ((j % 7) * 2 * Math.PI) / 7;
+                        const radius = 80 + 15 * Math.sin(i * 0.6 + angle);
+                        return new XYZ(radius * Math.cos(angle) + i * 3, radius * Math.sin(angle), i * 25);
+                    }),
+                ),
+            ),
+        ),
+    );
+    return keep(unwrapOk(factory.loft(sections, false, false, "c2")));
+}
+
+test.each([
+    "timeout",
+    "cancel",
+] as const)("a large free-form shell check ends on %s and the next query uses a fresh worker", async (stop) => {
+    const shell = freeFormShell();
+    const before = wasm.Converter.convertToBrep((shell as OccShape).shape);
+    const faces = shell.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    expect(faces).toHaveLength(7);
+    const transport = new HungTransport();
+    let generations = 0;
+    const hybrid = new HybridShapeFactory(() =>
+        ++generations === 1 ? new KernelWorkerClient(transport) : new NativeWorkerTransport().client,
+    );
+    const signal = new AbortController();
+    const budget = Config.instance.slowOpWarningSeconds;
+    try {
+        Config.instance.slowOpWarningSeconds = 30;
+        rs.useFakeTimers();
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: shell }, signal.signal);
+        expect(transport.messages[0]).toMatchObject({ operation: "checkSelfIntersectionReplica" });
+        await rs.advanceTimersByTimeAsync(29_999);
+        expect(transport.terminated).toBe(0);
+        if (stop === "cancel") signal.abort();
+        else await rs.advanceTimersByTimeAsync(1);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(stop === "cancel" ? "cancelled" : "timed out after 30000 ms");
+        expect(task.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+        expect(wasm.Converter.convertToBrep((shell as OccShape).shape)).toBe(before);
+        expect(shell.checkShape()).toBe(true);
+        rs.useRealTimers();
+        const box = keep(createBox(new ShapeFactory()));
+        const next = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await next.ready;
+        expect(unwrapOk(next.take())).toBe(true);
+        expect(generations).toBe(2);
+    } finally {
+        Config.instance.slowOpWarningSeconds = budget;
+        hybrid.dispose();
+    }
+});
+
+test.each([5, Infinity])("self-intersection stays bounded with slow-op budget %s", async (seconds) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const previous = Config.instance.slowOpWarningSeconds;
+    try {
+        rs.useFakeTimers();
+        Config.instance.slowOpWarningSeconds = seconds;
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        const deadline = 30_000;
+        await rs.advanceTimersByTimeAsync(deadline);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toBe(`Self-intersection check timed out after ${deadline} ms (result unknown)`);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        Config.instance.slowOpWarningSeconds = previous;
+        hybrid.dispose();
+    }
+});
+
+test.each([
+    "missing",
+    "failure",
+] as const)("a %s self-intersection binding returns an error Result", async (mode) => {
+    const box = keep(createBox(new ShapeFactory()));
+    const original = wasm.Shape.checkSelfIntersection;
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    try {
+        if (mode === "missing")
+            Object.defineProperty(wasm.Shape, "checkSelfIntersection", {
+                value: undefined,
+                configurable: true,
+                writable: true,
+            });
+        else
+            wasm.Shape.checkSelfIntersection = () => {
+                throw new Error("native check failed");
+            };
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(
+            mode === "missing"
+                ? "not available in this kernel build"
+                : "Worker operation failed: checkSelfIntersectionReplica",
+        );
+        expect(task.canFallback).toBe(false);
+        expect(transport.client.isClosed).toBe(true);
+        expect(box.volume()).toBeCloseTo(6000, 7);
+    } finally {
+        wasm.Shape.checkSelfIntersection = original;
+        hybrid.dispose();
+    }
+});
+
+test("a pre-aborted self-intersection query never copies inputs or creates a worker", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const serialize = rs.spyOn(wasm.Converter, "convertToBrep");
+    const createWorker = rs.fn(() => new NativeWorkerTransport().client);
+    const hybrid = new HybridShapeFactory(createWorker);
+    const signal = new AbortController();
+    signal.abort();
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box }, signal.signal);
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("cancelled");
+        expect(createWorker).not.toHaveBeenCalled();
+        expect(serialize).not.toHaveBeenCalled();
+    } finally {
+        serialize.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+test("free-form shell feature validation terminates a hung worker and accepts unknown geometry", async () => {
+    const shell = freeFormShell();
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const document = new TestDocument({ application: createMockApplication() });
+    const original = featureHandler("sweep")!;
+    const budget = Config.instance.slowOpWarningSeconds;
+    const mainCheck = rs.spyOn(wasm.Shape, "checkSelfIntersection");
+    try {
+        Config.instance.slowOpWarningSeconds = 30;
+        rs.useFakeTimers();
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        // Reproduce validation of the expensive seven-face spline shell without spending
+        // minutes in a real analyzer. Construction/tracking is independent of this regression.
+        registerFeature("sweep", {
+            display: "body.sweep",
+            nodeIds: () => [],
+            parameters: () => [],
+            setParameter: (feature: SweepFeatureData) => feature,
+            evaluate: (_feature, context) => {
+                const output = shell.transformedMul(Matrix4.identity());
+                const clean = validateSelfIntersection(output, context.warn, context.deferSelfIntersection);
+                if (!clean.isOk) {
+                    output.dispose();
+                    return Result.err(clean.error);
+                }
+                return Result.ok(output);
+            },
+        });
+        const node = new ParametricBodyNode({
+            document,
+            featuresJson: JSON.stringify([{ id: "shell", type: "sweep" }]),
+        });
+        document.modelManager.addNode(node);
+        void node.shape;
+        await rs.advanceTimersByTimeAsync(0);
+        expect(transport.messages[0]).toMatchObject({ operation: "checkSelfIntersectionReplica" });
+        await rs.advanceTimersByTimeAsync(29_999);
+        expect(DocumentRebuilds.pending(document)).toBe(true);
+        expect(transport.terminated).toBe(0);
+        await rs.advanceTimersByTimeAsync(1);
+        await DocumentRebuilds.settled(document);
+        expect(transport.terminated).toBe(1);
+        expect(node.featureItems()[0].error).toBeUndefined();
+        expect(node.featureItems()[0].warning).toBe(
+            I18n.translate("warning.selfIntersection.timeout{0}", 30_000),
+        );
+        expect(node.shape.isOk).toBe(true);
+        expect(mainCheck).toHaveBeenCalledTimes(0);
+        expect(shell.checkShape()).toBe(true);
+    } finally {
+        document.dispose();
+        hybrid.dispose();
+        registerFeature("sweep", original);
+        rs.unstubAllGlobals();
+        mainCheck.mockRestore();
+        Config.instance.slowOpWarningSeconds = budget;
+    }
+});
+
+class ScriptedTransport extends HungTransport {
+    override postMessage(message: KernelMessage) {
+        super.postMessage(message);
+        if (message.type === "request") this.dispatchEvent(new Event("error"));
+    }
+}
+
+test("a worker initialization error is unknown, without synchronous fallback", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new ScriptedTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await task.ready;
+        expect(task.take().error).toBe("Geometry worker initialization failed");
+        expect(task.cancelled).toBe(false);
+        expect(task.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("factory disposal explicitly cancels a pending self-intersection verdict", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+    hybrid.dispose();
+    await task.ready;
+    expect(task.cancelled).toBe(true);
+    expect(task.take().isOk).toBe(false);
+    expect(transport.terminated).toBe(1);
+});
+
+test("bounded tolerant thicken returns the filled sphere envelope without a main-thread offset", async () => {
+    const sphere = keep(createSphere(new ShapeFactory(), undefined, 2));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const binding = rs.spyOn(wasm.ShapeFactory, "makeThickSolidTolerant");
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidTolerant",
+            shape: sphere,
+            closingFaces: [],
+            thickness: -3.75,
+        });
+        await task.ready;
+        const result = keep(unwrapOk(task.take()));
+        expect(result.checkShape()).toBe(true);
+        expect(result.volume()).toBeCloseTo(sphere.volume(), 6);
+        expect(binding).toHaveBeenCalledTimes(1);
+        expect(transport.requests).toContainEqual(
+            expect.objectContaining({
+                operation: "boundedReplica",
+                args: expect.objectContaining({ method: "makeThickSolidTolerant", closingFaces: [] }),
+            }),
+        );
+        expect(task.canFallback).toBe(false);
+        expect(sphere.checkShape()).toBe(true);
+    } finally {
+        binding.mockRestore();
+        hybrid.dispose();
+    }
+});
+
+test("tolerant thicken times out as a build error and terminates the worker", async () => {
+    rs.useFakeTimers();
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const input = keep(createSphere(new ShapeFactory(), undefined, 2));
+    try {
+        const pending = hybrid.shapeOperation({
+            method: "makeThickSolidTolerant",
+            shape: input,
+            closingFaces: [],
+            thickness: -3.75,
+        });
+        await rs.advanceTimersByTimeAsync(30_000);
+        await pending.ready;
+        expect(pending.take().error).toBe("Tolerant thicken timed out after 30000 ms");
+        expect(pending.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+        expect(input.volume()).toBeCloseTo((4 / 3) * Math.PI * 8, 6);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("a superseding rebuild terminates tolerant feature work before caching it", async () => {
+    rs.useFakeTimers();
+    const transports: HungTransport[] = [];
+    const hybrid = new HybridShapeFactory(() => {
+        const transport = new HungTransport();
+        transports.push(transport);
+        return new KernelWorkerClient(transport);
+    });
+    const input = keep(createSphere(new ShapeFactory(), undefined, 2));
+    const document = new TestDocument({ application: createMockApplication() });
+    const original = featureHandler("sweep");
+    if (!original) throw new Error("Missing sweep handler");
+    try {
+        rs.stubGlobal("shapeFactory", new ShapeFactory(undefined, hybrid));
+        registerFeature("sweep", {
+            ...original,
+            nodeIds: () => [],
+            cacheKey: () => undefined,
+            evaluate: () => Result.ok(input.clone()),
+        });
+        const node = new ParametricBodyNode({
+            document,
+            featuresJson: JSON.stringify([
+                {
+                    id: "source",
+                    type: "sweep",
+                    section: { sketchId: "source-sketch", profiles: [] },
+                    path: { nodeId: "source-path", edges: [] },
+                },
+                { id: "wall", type: "thicken", thickness: -3.75, tolerant: true },
+            ]),
+        });
+        document.modelManager.addNode(node);
+        void node.shape;
+        await rs.advanceTimersByTimeAsync(100);
+        expect(node.featureItems()[0].error).toBeUndefined();
+        expect(node.featureItems()[1].error).toBeUndefined();
+        expect(transports).toHaveLength(1);
+        expect(transports[0].messages[0]).toMatchObject({
+            operation: "boundedReplica",
+            args: { method: "makeThickSolidTolerant" },
+        });
+        expect(DocumentRebuilds.pending(document)).toBe(true);
+        node.setFeatureParameter("wall", "thickness", -4);
+        await rs.advanceTimersByTimeAsync(100);
+        expect(transports[0].terminated).toBe(1);
+        expect(transports).toHaveLength(2);
+        await rs.advanceTimersByTimeAsync(30_000);
+        await DocumentRebuilds.settled(document);
+        expect(node.featureItems()[1].error).toContain("Tolerant thicken timed out after 30000 ms");
+        expect(node.featureItems()[1].warning).toBeUndefined();
+        expect(transports[1].terminated).toBe(1);
+    } finally {
+        document.dispose();
+        hybrid.dispose();
+        registerFeature("sweep", original);
+        rs.unstubAllGlobals();
     }
 });

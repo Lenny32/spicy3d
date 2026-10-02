@@ -53,6 +53,7 @@
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 
+#include "faceValidation.hpp"
 #include "guard.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
@@ -295,15 +296,25 @@ public:
 
     static std::optional<double> inspectionCommonVolume(const TopoDS_Shape& first, const TopoDS_Shape& second)
     {
-        if (!containsOnlySolids(first) || !containsOnlySolids(second)
-            || !BRepCheck_Analyzer(first).IsValid()
+        return inspectionCommonVolumeImpl(first, second, false);
+    }
+
+    static std::optional<double> inspectionCommonVolumePrechecked(const TopoDS_Shape& firstShape, const TopoDS_Shape& second)
+    {
+        return inspectionCommonVolumeImpl(firstShape, second, true);
+    }
+
+    static std::optional<double> inspectionCommonVolumeImpl(const TopoDS_Shape& firstShape, const TopoDS_Shape& second, bool skipSelfIntersection)
+    {
+        if (!containsOnlySolids(firstShape) || !containsOnlySolids(second)
+            || !BRepCheck_Analyzer(firstShape).IsValid()
             || !BRepCheck_Analyzer(second).IsValid())
             return std::nullopt;
         // BRepCheck_Analyzer does not test self-intersection, and the boolean may raise on a
         // self-intersecting solid (an offset whose faces cross). Bounded, see the face limit.
-        if (!boundedSelfIntersectionFree(first) || !boundedSelfIntersectionFree(second))
+        if (!skipSelfIntersection && (!boundedSelfIntersectionFree(firstShape) || !boundedSelfIntersectionFree(second)))
             return std::nullopt;
-        BRepAlgoAPI_Common common(first, second);
+        BRepAlgoAPI_Common common(firstShape, second);
         common.Build();
         if (!common.IsDone() || common.HasErrors() || common.Shape().IsNull())
             return std::nullopt;
@@ -328,6 +339,16 @@ public:
     }
 
     static TopoDS_Shape inspectionSectionCaps(const TopoDS_Shape& shape, const Pln& plane)
+    {
+        return inspectionSectionCapsImpl(shape, plane, false);
+    }
+
+    static TopoDS_Shape inspectionSectionCapsPrechecked(const TopoDS_Shape& shape, const Pln& plane)
+    {
+        return inspectionSectionCapsImpl(shape, plane, true);
+    }
+
+    static TopoDS_Shape inspectionSectionCapsImpl(const TopoDS_Shape& shape, const Pln& plane, bool skipSelfIntersection)
     {
         const Vector3& o = plane.location;
         const Vector3& n = plane.direction;
@@ -363,7 +384,7 @@ public:
         if (!halfSpace.IsDone() || halfSpace.Solid().IsNull())
             return TopoDS_Shape();
         // As in inspectionCommonVolume: a self-intersecting solid may make the boolean raise.
-        if (!boundedSelfIntersectionFree(shape))
+        if (!skipSelfIntersection && !boundedSelfIntersectionFree(shape))
             return TopoDS_Shape();
         BRepAlgoAPI_Common common(shape, halfSpace.Solid());
         common.Build();
@@ -414,110 +435,6 @@ public:
         return selfIntersectionFree(shape);
     }
 
-    static const char* checkStatusName(BRepCheck_Status status)
-    {
-        switch (status) {
-        case BRepCheck_NoError:
-            return "No Error";
-        case BRepCheck_InvalidPointOnCurve:
-            return "Invalid Point On Curve";
-        case BRepCheck_InvalidPointOnCurveOnSurface:
-            return "Invalid Point On Curve On Surface";
-        case BRepCheck_InvalidPointOnSurface:
-            return "Invalid Point On Surface";
-        case BRepCheck_No3DCurve:
-            return "No 3D Curve";
-        case BRepCheck_Multiple3DCurve:
-            return "Multiple 3D Curve";
-        case BRepCheck_Invalid3DCurve:
-            return "Invalid 3D Curve";
-        case BRepCheck_NoCurveOnSurface:
-            return "No Curve On Surface";
-        case BRepCheck_InvalidCurveOnSurface:
-            return "Invalid Curve On Surface";
-        case BRepCheck_InvalidCurveOnClosedSurface:
-            return "Invalid Curve On Closed Surface";
-        case BRepCheck_InvalidSameRangeFlag:
-            return "Invalid Same Range Flag";
-        case BRepCheck_InvalidSameParameterFlag:
-            return "Invalid Same Parameter Flag";
-        case BRepCheck_InvalidDegeneratedFlag:
-            return "Invalid Degenerated Flag";
-        case BRepCheck_FreeEdge:
-            return "Free Edge";
-        case BRepCheck_InvalidMultiConnexity:
-            return "Invalid Multi Connexity";
-        case BRepCheck_InvalidRange:
-            return "Invalid Range";
-        case BRepCheck_EmptyWire:
-            return "Empty Wire";
-        case BRepCheck_RedundantEdge:
-            return "Redundant Edge";
-        case BRepCheck_SelfIntersectingWire:
-            return "Self Intersecting Wire";
-        case BRepCheck_NoSurface:
-            return "No Surface";
-        case BRepCheck_InvalidWire:
-            return "Invalid Wire";
-        case BRepCheck_RedundantWire:
-            return "Redundant Wire";
-        case BRepCheck_IntersectingWires:
-            return "Intersecting Wires";
-        case BRepCheck_InvalidImbricationOfWires:
-            return "Invalid Imbrication Of Wires";
-        case BRepCheck_EmptyShell:
-            return "Empty Shell";
-        case BRepCheck_RedundantFace:
-            return "Redundant Face";
-        case BRepCheck_InvalidImbricationOfShells:
-            return "Invalid Imbrication Of Shells";
-        case BRepCheck_UnorientableShape:
-            return "Unorientable Shape";
-        case BRepCheck_NotClosed:
-            return "Not Closed";
-        case BRepCheck_NotConnected:
-            return "Not Connected";
-        case BRepCheck_SubshapeNotInShape:
-            return "Subshape Not In Shape";
-        case BRepCheck_BadOrientation:
-            return "Bad Orientation";
-        case BRepCheck_BadOrientationOfSubshape:
-            return "Bad Orientation Of Subshape";
-        case BRepCheck_InvalidPolygonOnTriangulation:
-            return "Invalid Polygon On Triangulation";
-        case BRepCheck_InvalidToleranceValue:
-            return "Invalid Tolerance Value";
-        case BRepCheck_EnclosedRegion:
-            return "Enclosed Region";
-        case BRepCheck_CheckFail:
-            return "Check Fail";
-        default:
-            return "Unknown";
-        }
-    }
-
-    static std::string joinStatusNames(const NCollection_List<BRepCheck_Status>& statusList)
-    {
-        std::string result;
-        for (auto it = statusList.begin(); it != statusList.end(); ++it) {
-            if (!result.empty()) {
-                result += ", ";
-            }
-            result += checkStatusName(*it);
-        }
-        return result;
-    }
-
-    static std::string collectFaceStatus(const BRepCheck_Analyzer& analyzer, const TopoDS_Shape& face)
-    {
-        std::string statuses;
-        const auto& faceResult = analyzer.Result(face);
-        if (!faceResult.IsNull()) {
-            statuses = joinStatusNames(faceResult->Status());
-        }
-        return statuses;
-    }
-
     static std::vector<FaceCheckResult> checkFaces(const TopoDS_Shape& shape)
     {
         BRepCheck_Analyzer analyzer(shape);
@@ -532,7 +449,7 @@ public:
             FaceCheckResult result;
             result.index = i - 1;
             result.isValid = analyzer.IsValid(face);
-            result.status = collectFaceStatus(analyzer, face);
+            result.status = FaceValidation::collectFaceStatus(analyzer, face);
             results.push_back(result);
         }
 
@@ -980,8 +897,10 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("orientedBoundingBox", guardedEntry<&Shape::orientedBoundingBox>("Shape.orientedBoundingBox"))
         .class_function("extremaDistance", guardedEntry<&Shape::extremaDistance>("Shape.extremaDistance"))
         .class_function("inspectionDistance", guardedEntry<&Shape::inspectionDistance>("Shape.inspectionDistance"))
+        .class_function("inspectionCommonVolumePrechecked", guardedEntry<&Shape::inspectionCommonVolumePrechecked>("Shape.inspectionCommonVolumePrechecked"))
         .class_function("inspectionCommonVolume", guardedEntry<&Shape::inspectionCommonVolume>("Shape.inspectionCommonVolume"))
         .class_function("inspectionMass", guardedEntry<&Shape::inspectionMass>("Shape.inspectionMass"))
+        .class_function("inspectionSectionCapsPrechecked", guardedEntry<&Shape::inspectionSectionCapsPrechecked>("Shape.inspectionSectionCapsPrechecked"))
         .class_function("inspectionSectionCaps", guardedEntry<&Shape::inspectionSectionCaps>("Shape.inspectionSectionCaps"))
         .class_function("clean", guardedEntry<&Shape::clean>("Shape.clean"))
         .class_function("clone", guardedEntry<&Shape::clone>("Shape.clone"))

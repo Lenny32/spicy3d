@@ -4,7 +4,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type IEdge, type IFace, Matrix4, Plane, ShapeTypes, type TrackedShape, XYZ } from "@spicy3d/core";
+import {
+    type IEdge,
+    type IFace,
+    type IShape,
+    Matrix4,
+    Plane,
+    ShapeTypes,
+    type TrackedShape,
+    XYZ,
+} from "@spicy3d/core";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import type { LoftFeatureData } from "../src/features/feature";
@@ -42,6 +51,21 @@ const edgeIds = (body: ParametricBodyNode) =>
         shape.dispose();
         return body.edgeIdAt(index);
     });
+
+test("guided loft deferred validation never runs a synchronous TS analyzer", () => {
+    expect(shapeFactory.loftGuidedTracked).not.toBeUndefined();
+    const original = shapeFactory.loftGuidedTracked!.bind(shapeFactory);
+    const checks: Array<ReturnType<typeof rs.spyOn<IShape, "checkSelfIntersection">>> = [];
+    rs.spyOn(shapeFactory, "loftGuidedTracked").mockImplementation((...args) => {
+        const result = original(...args);
+        if (result.isOk) checks.push(rs.spyOn(result.value.shape, "checkSelfIntersection"));
+        return result;
+    });
+    const { body } = setup();
+    expect(body.shape.isOk, body.shape.error).toBe(true);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).not.toHaveBeenCalled();
+});
 
 test("guided loft derives distinct reusable identities from genuine sketch ancestry", () => {
     const { body } = setup();

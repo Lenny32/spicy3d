@@ -76,14 +76,16 @@ describe("thick solid results are checked", () => {
             );
             try {
                 expect(result.isOk).toBe(false);
-                expect(result.error).toContain("offset did not remove an opening face");
+                expect(result.error).toContain("input shape unchanged");
             } finally {
                 result.delete();
             }
         } else {
             const result = factory.makeThickSolidByJoin(input, openings, -5, "arc");
             expect(result.isOk).toBe(false);
-            expect(result.error).toContain("offset did not remove an opening face");
+            expect(result.error).toContain("input shape unchanged");
+            expect(result.error).toContain("possible offset collapse on input face index");
+            expect(result.error).toContain("sampled curvature radius 3.025 mm <= |thickness| 5 mm");
         }
         expect(input.checkShape()).toBe(true);
         expect(input.volume()).toBeCloseTo(8790, 6);
@@ -278,9 +280,32 @@ describe("checkSelfIntersection is feature-detected on the kernel build", () => 
         const box = occBox();
         withBinding(undefined, () => {
             expect(shapeClass().checkSelfIntersection).toBeUndefined();
+            expect(box.needsInspectionSelfIntersectionCheck).toBe(false);
             const result = box.checkSelfIntersection();
             expect(result.isOk ? "" : result.error).toBe(SELF_INTERSECTION_UNAVAILABLE);
         });
+    });
+
+    test.each([
+        199, 200,
+    ])("inspection pre-check matches the %s-face cutoff without running the analyzer", (count) => {
+        const box = occBox();
+        const release = rs.fn(() => {});
+        const faces = rs
+            .spyOn(wasm.Shape, "findSubShapes")
+            .mockReturnValue(
+                Array.from({ length: count }, () => ({ delete: release }) as unknown as TopoDS_Shape),
+            );
+        const analyzer = rs.fn((_shape: TopoDS_Shape) => true);
+        try {
+            withBinding(analyzer, () => {
+                expect(box.needsInspectionSelfIntersectionCheck).toBe(count < 200);
+                expect(analyzer).not.toHaveBeenCalled();
+                expect(release).toHaveBeenCalledTimes(count);
+            });
+        } finally {
+            faces.mockRestore();
+        }
     });
 
     test("the committed binary has the binding: a box has no self-intersection", () => {
