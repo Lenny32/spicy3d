@@ -175,7 +175,8 @@ containing either feature take the asynchronous scheduler route even below the t
 checks **before caching, tracking commit, or displaying the new body**. Checks run at every
 shape size: the 32-face/64-edge heuristic and 256-face refusal have been removed. Worker
 termination enforces a fixed 30-second deadline independent of the slow-op warning setting.
-Detected self-intersection is a feature error. Timeout, worker failure and unavailable worker
+Detected self-intersection is a feature error. A fast machine can detect self-intersection and reject
+a shape that a slower machine accepts after timeout; there is no strict mode. Timeout, worker failure and unavailable worker
 results accept the geometry with a runtime warning (result unknown; geometry not verified).
 The warning appears on the timeline, edit panel, body warning list and MCP diagnostics;
 later features still evaluate, including on document open and during merge validation.

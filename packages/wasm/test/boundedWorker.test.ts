@@ -764,3 +764,38 @@ test("free-form shell feature validation terminates a hung worker and accepts un
         Config.instance.slowOpWarningSeconds = budget;
     }
 });
+
+class ScriptedTransport extends HungTransport {
+    override postMessage(message: KernelMessage) {
+        super.postMessage(message);
+        if (message.type === "request") this.dispatchEvent(new Event("error"));
+    }
+}
+
+test("a worker initialization error is unknown, without synchronous fallback", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new ScriptedTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    try {
+        const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+        await task.ready;
+        expect(task.take().error).toBe("Geometry worker initialization failed");
+        expect(task.cancelled).toBe(false);
+        expect(task.canFallback).toBe(false);
+        expect(transport.terminated).toBe(1);
+    } finally {
+        hybrid.dispose();
+    }
+});
+
+test("factory disposal explicitly cancels a pending self-intersection verdict", async () => {
+    const box = keep(createBox(new ShapeFactory()));
+    const transport = new HungTransport();
+    const hybrid = new HybridShapeFactory(() => new KernelWorkerClient(transport));
+    const task = hybrid.shapeQuery({ method: "checkSelfIntersection", shape: box });
+    hybrid.dispose();
+    await task.ready;
+    expect(task.cancelled).toBe(true);
+    expect(task.take().isOk).toBe(false);
+    expect(transport.terminated).toBe(1);
+});

@@ -335,6 +335,8 @@ export interface IShapeFactory {
 
 /** Preparation snapshots inputs synchronously. take() alone creates local results, exactly once. */
 export interface IAsyncShapeOperation<T> {
+    /** Explicit cancellation state; cancellation must never be cached as an unknown verdict. */
+    readonly cancelled?: boolean;
     readonly ready: Promise<void>;
     /** After failed take(): only compatibility failures may be retried by the synchronous kernel. */
     readonly canFallback?: boolean;

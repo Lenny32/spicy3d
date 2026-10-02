@@ -1168,7 +1168,9 @@ export class ParametricBodyNode
                     ? undefined
                     : this.validCacheEntry(key, input, nextCache.length);
                 const cached =
-                    asynchronous && candidate?.warning?.includes(SELF_INTERSECTION_SKIPPED)
+                    asynchronous &&
+                    shapeFactory.boundedOperations?.shapeQuery !== undefined &&
+                    candidate?.warning?.includes(SELF_INTERSECTION_SKIPPED)
                         ? undefined
                         : candidate;
                 let step: Result<FeatureStepOutput>;

@@ -94,7 +94,7 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         request: BoundedShapeRequest | BoundedShapeQuery,
         signal?: AbortSignal,
     ): IAsyncShapeOperation<IShape | boolean> {
-        if (signal?.aborted) return this.failedShapeOperation("Geometry worker operation cancelled");
+        if (signal?.aborted) return this.failedShapeOperation("Geometry worker operation cancelled", true);
         if (this.nativeFailure) return this.failedShapeOperation(this.nativeFailure);
         const prepared: IShape[] = [];
         const capture = (shape: IShape): ShapeReplica => {
@@ -194,6 +194,9 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         return {
             ready,
             cancel,
+            get cancelled() {
+                return abort.signal.aborted;
+            },
             canFallback: false,
             take: () => {
                 if (consumed || !reply) return Result.err(this.nativeFailure ?? "Worker result unavailable");
@@ -242,9 +245,10 @@ export class HybridShapeFactory implements IAsyncShapeFactory, IBoundedShapeFact
         };
     }
 
-    private failedShapeOperation<T>(message: string): IAsyncShapeOperation<T> {
+    private failedShapeOperation<T>(message: string, cancelled = false): IAsyncShapeOperation<T> {
         return {
             ready: Promise.resolve(),
+            cancelled,
             canFallback: false,
             take: () => Result.err(message),
             cancel: () => {},

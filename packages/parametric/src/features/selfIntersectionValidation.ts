@@ -89,7 +89,7 @@ export function prepareValidatedFeature(
                 const clean = check.take();
                 if (!clean.isOk) {
                     // Cancellation belongs to the superseded run, never to its cache.
-                    if (/cancelled|canceled/i.test(clean.error)) {
+                    if (check.cancelled) {
                         disposeOutput();
                         return Result.err(clean.error);
                     }

@@ -294,13 +294,11 @@ const handler: FeatureHandler<SweepFeatureData> = {
                 shape,
                 context.warn,
                 context.deferSelfIntersection,
-                "Sweep intersects itself or cannot be validated",
+                "Sweep intersects itself",
             );
             if (!clean?.isOk || !clean.value) {
                 shape.dispose();
-                return Result.err(
-                    clean && !clean.isOk ? clean.error : "Sweep intersects itself or cannot be validated",
-                );
+                return Result.err(clean && !clean.isOk ? clean.error : "Sweep intersects itself");
             }
             const ids = trackSweep(feature, section.value, path.value, swept.value);
             if (!ids.isOk) {

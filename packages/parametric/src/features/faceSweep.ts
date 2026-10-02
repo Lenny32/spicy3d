@@ -251,10 +251,9 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
                 swept.value.shape,
                 context.warn,
                 context.deferSelfIntersection,
-                "Face sweep intersects itself or cannot be validated",
+                "Face sweep tool intersects itself",
             );
-            if (!clean?.isOk || !clean.value)
-                return Result.err("Face sweep intersects itself or cannot be validated");
+            if (!clean?.isOk || !clean.value) return Result.err("Face sweep tool intersects itself");
             const ids = trackSweep(feature, section.value, path.value, swept.value);
             if (!ids.isOk) return Result.err(ids.error);
             // Support controls the native Darboux frame; it is an explicit causal semantic origin,
@@ -317,10 +316,10 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
                 output,
                 context.warn,
                 context.deferSelfIntersection,
-                "Face sweep boolean intersects itself or cannot be validated",
+                "Face sweep result intersects itself",
             );
             if (!outputClean?.isOk || !outputClean.value)
-                return Result.err("Face sweep boolean intersects itself or cannot be validated");
+                return Result.err("Face sweep result intersects itself");
             const tracked = trackBoolean(
                 feature,
                 input,

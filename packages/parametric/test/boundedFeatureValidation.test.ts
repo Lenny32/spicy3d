@@ -16,7 +16,6 @@ import {
 import { createMockApplication, MockShape, TestDocument } from "@spicy3d/core/test-utils";
 import { Document } from "../../app/src/document";
 import { HeadlessDocumentEvaluator } from "../../app/src/mergeEvaluator";
-import en from "../../i18n/src/en";
 import { FeatureChainPreview } from "../src/commands/featureEditPreview";
 import { featureHandler, registerFeature, type SweepFeatureData } from "../src/features/feature";
 import {
@@ -27,8 +26,8 @@ import {
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { runParametricProgram } from "../src/program/parametricProgram";
 
-const originalLocale = I18n.getLanguages().find((locale) => locale.language === "en")!;
-const original = featureHandler("sweep")!;
+const original = featureHandler("sweep");
+if (!original) throw new Error("Sweep handler not registered");
 const feature: SweepFeatureData = {
     id: "sweep",
     type: "sweep",
@@ -46,7 +45,6 @@ let answer: Result<boolean> | undefined;
 let faceCount: number;
 
 beforeEach(() => {
-    I18n.addLanguage(en);
     rs.useFakeTimers();
     document = new TestDocument({ application: createMockApplication() });
     outputs = [];
@@ -57,8 +55,9 @@ beforeEach(() => {
         combine: () => Result.ok(new MockShape()),
         boundedOperations: {
             shapeQuery: ({ shape }: { shape: IShape }): IAsyncShapeOperation<boolean> => {
-                let resolve!: () => void;
+                let resolve = () => {};
                 let reply: Result<boolean> | undefined;
+                let cancelled = false;
                 const ready = new Promise<void>((done) => {
                     resolve = done;
                 });
@@ -75,12 +74,21 @@ beforeEach(() => {
                     30_000,
                 );
                 const cancel = rs.fn(() => {
+                    cancelled = true;
                     clearTimeout(timer);
                     resolve();
                 });
                 queries.push({ shape, cancel, complete });
                 if (answer) complete(answer);
-                return { ready, canFallback: false, cancel, take: () => reply ?? Result.err("cancelled") };
+                return {
+                    ready,
+                    canFallback: false,
+                    cancel,
+                    get cancelled() {
+                        return cancelled;
+                    },
+                    take: () => reply ?? Result.err("Worker result unavailable"),
+                };
             },
         },
     });
@@ -108,7 +116,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-    I18n.addLanguage(originalLocale);
     document.dispose();
     registerFeature("sweep", original);
     rs.unstubAllGlobals();
@@ -127,8 +134,7 @@ async function start(): Promise<void> {
 }
 
 const timeoutError = "Self-intersection check timed out after 30000 ms (result unknown)";
-const timeoutWarning =
-    "Self-intersection check timed out after 30000 ms (result unknown; geometry not verified)";
+const timeoutWarning = I18n.translate("warning.selfIntersection.timeout{0}", 30_000);
 
 test("timeout accepts geometry, evaluates later steps and caches the warning until inputs change", async () => {
     const node = body([feature, { ...feature, id: "later" }]);
@@ -176,9 +182,7 @@ test.each([
     await DocumentRebuilds.settled(document);
     expect(node.shape.isOk).toBe(true);
     expect(node.featureItems()[0].error).toBeUndefined();
-    expect(node.featureItems()[0].warning).toBe(
-        "Self-intersection worker failed or is unavailable (result unknown; geometry not verified)",
-    );
+    expect(node.featureItems()[0].warning).toBe(I18n.translate("warning.selfIntersection.unknown"));
     node.applyVariables();
     await start();
     await DocumentRebuilds.settled(document);
@@ -314,6 +318,11 @@ test.each([
     expect(outputs).toHaveLength(count);
     expect(outputs[0].dispose).toHaveBeenCalledTimes(0);
     expect(queries).toHaveLength(0);
+    node.applyVariables();
+    await rs.runAllTimersAsync();
+    await DocumentRebuilds.settled(document);
+    expect(outputs).toHaveLength(count);
+    expect(node.shape.isOk).toBe(true);
 });
 
 test("headless evaluation cancellation terminates pending validation", async () => {
@@ -347,12 +356,11 @@ test.each([
     try {
         const pending = prepareValidatedFeature(
             (context) => {
-                context.deferSelfIntersection!(tool, "Face sweep intersects itself or cannot be validated");
+                const defer = context.deferSelfIntersection;
+                if (!defer) throw new Error("Missing deferred validation");
+                defer(tool, "Face sweep tool intersects itself");
                 tool.dispose();
-                context.deferSelfIntersection!(
-                    output,
-                    "Face sweep boolean intersects itself or cannot be validated",
-                );
+                defer(output, "Face sweep result intersects itself");
                 return Result.ok(output);
             },
             { document, host, scope: new Map() },
@@ -363,9 +371,7 @@ test.each([
         queries[1].complete(Result.ok(failed !== 1));
         await pending.ready;
         expect(pending.take().error).toBe(
-            failed === 0
-                ? "Face sweep intersects itself or cannot be validated"
-                : "Face sweep boolean intersects itself or cannot be validated",
+            failed === 0 ? "Face sweep tool intersects itself" : "Face sweep result intersects itself",
         );
         expect(output.dispose).toHaveBeenCalledTimes(1);
         pending.cancel();
@@ -380,7 +386,9 @@ test("failed handler cancels already captured checks immediately", async () => {
     try {
         const pending = prepareValidatedFeature(
             (context) => {
-                context.deferSelfIntersection!(new MockShape());
+                const defer = context.deferSelfIntersection;
+                if (!defer) throw new Error("Missing deferred validation");
+                defer(new MockShape());
                 return Result.err("boolean failed");
             },
             { document, host, scope: new Map() },
@@ -410,6 +418,46 @@ test("direct preparation without bounded support retains cheap gates and the ski
         expect(warn.mock.calls).toEqual([[SELF_INTERSECTION_SKIPPED]]);
         accepted.value.dispose();
         expect(queries).toHaveLength(0);
+    } finally {
+        host.dispose();
+    }
+});
+
+test("explicitly cancelled check discards geometry even with an unavailable-result message", async () => {
+    let cancelled = false;
+    rs.stubGlobal("shapeFactory", {
+        boundedOperations: {
+            shapeQuery: () => ({
+                ready: Promise.resolve(),
+                canFallback: false,
+                get cancelled() {
+                    return cancelled;
+                },
+                cancel: () => {
+                    cancelled = true;
+                },
+                take: () => Result.err("Worker result unavailable"),
+            }),
+        },
+    });
+    const host = new ParametricBodyNode({ document, featuresJson: "[]" });
+    const output = Object.assign(new MockShape(), { dispose: rs.fn(() => {}) });
+    const warn = rs.fn((_message: string) => {});
+    try {
+        const pending = prepareValidatedFeature(
+            (context) => {
+                const defer = context.deferSelfIntersection;
+                if (!defer) throw new Error("Missing deferred validation");
+                defer(output);
+                return Result.ok(output);
+            },
+            { document, host, scope: new Map(), warn },
+        );
+        cancelled = true;
+        await pending.ready;
+        expect(pending.take().isOk).toBe(false);
+        expect(output.dispose).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(0);
     } finally {
         host.dispose();
     }
