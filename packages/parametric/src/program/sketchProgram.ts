@@ -1043,6 +1043,9 @@ export interface SketchInfo {
         kind: string;
         refs: { entity: number; point: number }[];
         datum?: ParameterValue;
+        /** Resolved signed datum in display units (angles in degrees). */
+        effectiveDatum?: number;
+        angleSide?: -1 | 1;
         datums?: ParameterValue[];
         structural?: boolean;
         direction?: [number, number];
@@ -1097,6 +1100,11 @@ export function describeSketch(node: SketchNode, scope: Scope): SketchInfo {
                 };
                 if (c.datum !== undefined)
                     row.datum = typeof c.datum === "number" ? toDisplayDatum(c.kind, c.datum) : c.datum;
+                if (c.kind === ConstraintKind.Angle) {
+                    row.angleSide = c.angleSide ?? 1;
+                    const effective = solver.datumValue(c.id);
+                    if (effective !== undefined) row.effectiveDatum = toDisplayDatum(c.kind, effective);
+                }
                 if (c.datums !== undefined)
                     row.datums = c.datums.map((d) => (typeof d === "number" ? toDisplayDatum(c.kind, d) : d));
                 if (c.direction !== undefined) row.direction = c.direction;

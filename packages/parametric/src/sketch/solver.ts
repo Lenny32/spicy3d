@@ -318,11 +318,13 @@ export class SketchSolver implements ExternalEntityHost {
         const source = toDatumSource(record.kind, input);
         const resolved = resolveDatumSource(record.kind, source, this._scope);
         if (!resolved.isOk) return Result.err(resolved.error);
+        if (record.kind === ConstraintKind.Angle && record.datumSources?.[index] !== source) {
+            record.angleSide = 1;
+        }
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = source;
-        if (record.kind === ConstraintKind.Angle) record.angleSide = 1;
         this._datumErrors.delete(constraintId);
-        this.system.set_param(paramId, resolved.value);
+        this.system.set_param(paramId, record.angleSide === -1 ? -Math.abs(resolved.value) : resolved.value);
         return Result.ok(undefined);
     }
 
@@ -687,16 +689,24 @@ export class SketchSolver implements ExternalEntityHost {
         return removed;
     }
 
+    /** Effective signed datum in storage units, including a migrated angle's side. */
+    datumValue(constraintId: number, index = 0): number | undefined {
+        const paramId = this.constraints.get(constraintId)?.datumParamIds?.[index];
+        return paramId === undefined ? undefined : this.system.get_params(new Uint32Array([paramId]))[0];
+    }
+
     setDatum(constraintId: number, value: number, index = 0): void {
         const record = this.constraints.get(constraintId);
         const paramId = record?.datumParamIds?.[index];
         if (record === undefined || paramId === undefined) {
             throw new Error(`Constraint ${constraintId} has no datum ${index}`);
         }
-        if (record.kind === ConstraintKind.Angle) record.angleSide = 1;
+        if (record.kind === ConstraintKind.Angle && record.datumSources?.[index] !== value) {
+            record.angleSide = 1;
+        }
         if (record.datumSources === undefined) record.datumSources = [];
         record.datumSources[index] = value;
-        this.system.set_param(paramId, value);
+        this.system.set_param(paramId, record.angleSide === -1 ? -Math.abs(value) : value);
     }
 
     /** Moves a point without solving; used by auto-constraint snapping before a solve. */

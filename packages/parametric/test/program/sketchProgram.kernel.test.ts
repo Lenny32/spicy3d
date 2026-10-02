@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConstructionNode, type IEdge, type IFace, ShapeTypes, Transaction } from "@spicy3d/core";
+import { ConstructionNode, type IEdge, type IFace, Plane, ShapeTypes, Transaction } from "@spicy3d/core";
 import { createMockApplication, createMockVisualWithDocument, TestDocument } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import type { RevolveFeatureData } from "../../src/features/feature";
@@ -18,7 +18,12 @@ import type { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { type ParametricOp, runParametricProgram } from "../../src/program/parametricProgram";
 import type { SketchInfo, SketchReport } from "../../src/program/sketchProgram";
 import { bsplinePointAt, interpolateBSpline } from "../../src/sketch/bsplineGeometry";
-import { ConstraintKind, type SketchEntityData } from "../../src/sketch/sketchModel";
+import {
+    axisLineRefs,
+    ConstraintKind,
+    SKETCH_X_AXIS_ID,
+    type SketchEntityData,
+} from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "../sketch/setup";
 
@@ -628,6 +633,76 @@ describe("sketch actions", () => {
 });
 
 describe("sketchInfo", () => {
+    test("reports the effective clockwise expression and preserves it on setDatum", () => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "tilt", name: "tilt", expression: "30", type: "angle" }]);
+        const start = { entityId: 1, pointIndex: 0 },
+            end = { entityId: 1, pointIndex: 1 };
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [{ id: 1, type: "line", params: [0, 0, 5 * Math.sqrt(3), -5] }],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                        angleSide: -1,
+                    },
+                ],
+            },
+        });
+        doc.modelManager.addNode(node);
+        const read = () =>
+            run(doc, [{ op: "sketchInfo", id: "info", sketch: node.id }]).results["info"] as SketchInfo;
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: node.id,
+                actions: [{ action: "setDatum", constraint: 4, value: "tilt" }],
+            },
+        ]);
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        expect(node.data.entities[0].params[3]).toBeCloseTo(-5, 6);
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: node.id,
+                actions: [{ action: "setDatum", constraint: 4, value: "tilt + 15" }],
+            },
+        ]);
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt + 15",
+            angleSide: 1,
+            effectiveDatum: expect.closeTo(45, 6),
+        });
+        doc.history.undo();
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt",
+            angleSide: -1,
+            effectiveDatum: expect.closeTo(-30, 6),
+        });
+        doc.history.redo();
+        expect(read().constraints.find((c) => c.id === 4)).toMatchObject({
+            datum: "tilt + 15",
+            angleSide: 1,
+            effectiveDatum: expect.closeTo(45, 6),
+        });
+    });
+
     test.each([
         { initial: 20, value: -40, expected: -40 },
         { initial: "pcb_angle", value: "pcb_angle + 45", expected: 14.5 },

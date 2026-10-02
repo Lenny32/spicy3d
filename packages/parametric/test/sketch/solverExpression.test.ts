@@ -221,6 +221,28 @@ describe("signed Angle datums", () => {
         }
     }
 
+    test.each(["tilt", Math.PI / 6])("unchanged datum source %s keeps the migrated side", (datum) => {
+        const { data, line, id } = legacyClockwiseData(datum);
+        const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
+        try {
+            expectOrientation(solver, line, -30);
+            expect(solver.setDatumSource(id, typeof datum === "string" ? datum : 30).isOk).toBe(true);
+            expectOrientation(solver, line, -30);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(-1);
+            expect(solver.datumValue(id)).toBeCloseTo(-Math.PI / 6, 6);
+            if (typeof datum === "number") {
+                solver.setDatum(id, datum);
+                expectOrientation(solver, line, -30);
+                expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(-1);
+            }
+            expect(solver.setDatumSource(id, typeof datum === "string" ? "tilt + 15" : 45).isOk).toBe(true);
+            expectOrientation(solver, line, 45);
+            expect(solver.toData().constraints.find((c) => c.id === id)?.angleSide).toBe(1);
+        } finally {
+            solver.dispose();
+        }
+    });
+
     test.each([
         Math.PI / 6,
         "tilt",
@@ -384,14 +406,14 @@ describe("signed Angle datums", () => {
         }
     });
 
-    test("fork before solve copies explicit expression semantics at equal magnitude", () => {
+    test("fork before solve preserves the side of an unchanged expression", () => {
         const { data, line, id } = legacyClockwiseData("tilt");
         const solver = new SketchSolver(Plane.XY, data, scopeOf({ tilt: angle(30) }));
         let trial: SketchSolver | undefined;
         try {
             expect(solver.setDatumSource(id, "tilt").isOk).toBe(true);
             trial = solver.fork();
-            expectOrientation(trial, line, 30);
+            expectOrientation(trial, line, -30);
         } finally {
             trial?.dispose();
             solver.dispose();

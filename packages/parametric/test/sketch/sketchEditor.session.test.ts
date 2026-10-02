@@ -108,6 +108,55 @@ function setup(): TestContext {
     };
 }
 
+test("confirming the same clockwise expression in the dimension dialog preserves its side", () => {
+    const { doc, restoreFactory } = setup();
+    const previous = PubSub.default.pub;
+    let dialog: { content: HTMLElement; buttons: any[] } | undefined;
+    PubSub.default.pub = ((topic: string, ...args: any[]) => {
+        if (topic === "showDialog") dialog = { content: args[1], buttons: args[2] };
+    }) as typeof previous;
+    Object.assign(shapeFactory, { line: () => Result.ok(new MockShape()) });
+    try {
+        doc.variables.setItems([{ id: "tilt", name: "tilt", type: "angle", expression: "30" }]);
+        const start = { entityId: 1, pointIndex: 0 },
+            end = { entityId: 1, pointIndex: 1 };
+        const node = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: {
+                entities: [{ id: 1, type: "line", params: [0, 0, 5 * Math.sqrt(3), -5] }],
+                constraints: [
+                    { id: 2, kind: ConstraintKind.Fix, refs: [start], datums: [0, 0] },
+                    { id: 3, kind: ConstraintKind.P2PDistance, refs: [start, end], datum: 10 },
+                    {
+                        id: 4,
+                        kind: ConstraintKind.Angle,
+                        refs: [...axisLineRefs(SKETCH_X_AXIS_ID), start, end],
+                        datum: "tilt",
+                        angleSide: -1,
+                    },
+                ],
+            },
+        });
+        const editor = SketchEditor.enter(node);
+        editor.editDatum(4);
+        expect(dialog).not.toBeUndefined();
+        const input = dialog!.content.querySelector("input");
+        expect(input).not.toBeNull();
+        expect(input!.value).toBe("tilt");
+        expect(dialog!.buttons[0].shouldClose()).toBe(true);
+        expect(editor.solver.pointOf(end)[1]).toBeCloseTo(-5, 6);
+        expect(node.data.constraints.find((c) => c.id === 4)).toMatchObject({ datum: "tilt", angleSide: -1 });
+        editor.exit();
+        node.dispose();
+    } finally {
+        PubSub.default.pub = previous;
+        SketchEditor.exit();
+        restoreFactory();
+        doc.dispose();
+    }
+});
+
 test.each([-20, -30])("session entry follows a pending tilt 30 -> %s change", (degrees) => {
     const { doc, restoreFactory } = setup();
     const variable = { id: "tilt", name: "tilt", type: "angle" as const, expression: "30" };
