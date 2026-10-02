@@ -484,7 +484,7 @@ describe("geometry command interaction", () => {
 
     test("plain offset ignores generated targets without an associative-chain warning", async () => {
         const data: SketchData = {
-            entities: [source, { id: 20, type: "line", params: [0, 2, 100, 2] }],
+            entities: [source, { id: 20, type: "line", params: [0, 20, 100, 20] }],
             constraints: [
                 {
                     id: 30,
@@ -493,20 +493,23 @@ describe("geometry command interaction", () => {
                         { entityId: 1, pointIndex: 0 },
                         { entityId: 20, pointIndex: 0 },
                     ],
-                    datum: 2,
+                    datum: 20,
                 },
             ],
         };
         const { editor, node, click, pressEscape } = setup(data);
         const before = node.data;
         const validate = rs.spyOn(editor.solver, "validateOffsetSource");
+        const position = rs.spyOn(editor, "pickPosition");
         const errors = rs.fn((_message: string) => {});
         PubSub.default.sub("displayError", errors);
         try {
             const command = new SketchOffsetCommand();
             command.associative = false;
             const run = command.executeAsync();
-            await click(20, 2);
+            await click(20, 20);
+            await Promise.resolve();
+            expect(position).not.toHaveBeenCalled();
             expect(editor.isPicking).toBe(true);
             pressEscape();
             await run;
