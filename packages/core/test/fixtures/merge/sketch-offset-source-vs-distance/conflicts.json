@@ -1,0 +1,4 @@
+{
+    "description": "Source geometry and offset expression merge independently; target cache is derived and rebuilt during validation.",
+    "conflicts": []
+}

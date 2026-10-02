@@ -119,10 +119,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 5 (persisted angle side)", () => {
+describe("sketch format 6 (associative offsets)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(5);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(5);
+        expect(SKETCH_FORMAT_VERSION).toBe(6);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(6);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -133,7 +133,7 @@ describe("sketch format 5 (persisted angle side)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 5 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -167,7 +167,33 @@ test("sketch v3 documents open in v5 with control definitions and all stored met
     const original = structuredClone(data),
         migrated = migrateDocument(data);
     expect(migrated.isOk).toBe(true);
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 5 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
     expect(migrated.value["models"]).toEqual(original["models"]);
     expect(data).toEqual(original);
+});
+
+test("sketch 5 migrates verbatim without introducing associative links", () => {
+    const { data } = fixture("v2/sketch5-angle-side.json");
+    const original = structuredClone(data);
+    const result = migrateDocument(data);
+    expect(result.isOk).toBe(true);
+    expect(result.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(result.value["models"]).toEqual(original["models"]);
+    expect(result.value["userData"]).toEqual(original["userData"]);
+    expect(data).toEqual(original);
+});
+
+test("sketch 6 fixture preserves relation, distance expression and cache marker", () => {
+    const { data } = fixture("v2/sketch6-associative-offset.json");
+    const result = migrateDocument(data);
+    expect(result.isOk).toBe(true);
+    expect(result.value).toEqual(data);
+    const sketch = JSON.parse(data["models"].nodes[1].dataJson);
+    expect(sketch.constraints[0]).toMatchObject({ kind: 34, datum: "gap" });
+    expect(sketch.entities[1].derivation).toBe("offset");
+    const newer = structuredClone(data);
+    newer["moduleVersions"]["sketch"] = 7;
+    const refused = migrateDocument(newer);
+    expect(refused.isOk).toBe(false);
+    expect(newer["models"]).toEqual(data["models"]);
 });

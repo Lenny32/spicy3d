@@ -37,7 +37,7 @@ export function bsplineOffsetSide(entity: SketchEntityData, at: BSplinePoint): n
     return side < 0 ? -1 : 1;
 }
 
-/** A fixed, tolerance-checked normal offset; no relation or new saved payload is introduced. */
+/** Tolerance-checked normal offset geometry, shared by fixed copies and associative regeneration. */
 export function offsetBSpline(source: SketchEntityData, distance: number): Result<SketchEntityData> {
     if (source.params.length % 2 !== 0) return Result.err("B-spline params must be [u, v] pairs");
     try {

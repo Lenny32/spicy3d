@@ -48,7 +48,7 @@ test.each([
         before = structuredClone(input);
     const migrated = migrateDocument(input);
     expect(migrated.isOk).toBe(true);
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 5 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
     const data: SketchData = JSON.parse(sketch(migrated.value)["dataJson"]);
     expect(data.constraints.find((item) => item.kind === ConstraintKind.Angle)).toMatchObject({
         datum,
@@ -127,7 +127,7 @@ test.each([
                 angleSide: -1,
             });
             const saved = loaded!.serialize();
-            expect(saved["moduleVersions"]).toMatchObject({ sketch: 5 });
+            expect(saved["moduleVersions"]).toMatchObject({ sketch: 6 });
         } finally {
             solver.dispose();
         }
@@ -140,7 +140,7 @@ test.each([
 test("Document.load refuses sketch 6 with the existing toast and leaves input untouched", async () => {
     const app = createMockApplication(),
         input = fixture();
-    input["moduleVersions"]["sketch"] = 6;
+    input["moduleVersions"]["sketch"] = 7;
     const before = structuredClone(input),
         pub = rs.spyOn(PubSub.default, "pub");
     try {

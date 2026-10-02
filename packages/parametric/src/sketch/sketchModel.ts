@@ -51,6 +51,8 @@ export interface SketchEntityData {
     params: number[];
     /** Construction geometry is editable but never contributes profile edges. */
     construction?: boolean;
+    /** Derived cache marker for merge; present only while an Offset constraint owns this entity. */
+    derivation?: "offset";
     /** bspline only: where the fit points sit on the curve parameter (the tools always write it; absent reads `chord`). */
     parametrization?: BSplineParametrization;
     /** Control mode: params are editable poles; absent preserves interpolating fit points. */

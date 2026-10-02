@@ -39,6 +39,8 @@ export function transformPoint(x: number, y: number, transform: SketchTransform)
 }
 
 export function transformEntity(entity: SketchEntityData, transform: SketchTransform): SketchEntityData {
+    const plain = { ...entity };
+    delete plain.derivation;
     const params = [...entity.params];
     const count = entity.type === "circle" ? 2 : params.length;
     for (let i = 0; i < count; i += 2) {
@@ -48,7 +50,7 @@ export function transformEntity(entity: SketchEntityData, transform: SketchTrans
     if (entity.type === "arc" && transform.kind === "mirror") {
         [params[2], params[3], params[4], params[5]] = [params[4], params[5], params[2], params[3]];
     }
-    return { ...entity, params };
+    return { ...plain, params };
 }
 
 export function selectionCenter(
@@ -180,6 +182,8 @@ export function transformSketchSelection(
     // Symmetry already transfers the originals' relationships. Duplicating Fix or
     // axis constraints would freeze the copies when the source or mirror axis moves.
     for (const original of copy && transform.kind === "mirror" ? [] : source.constraints) {
+        // Utility transforms detach derived offsets, including copies/paste of a complete pair.
+        if (original.kind === ConstraintKind.Offset) continue;
         const constraint = { ...original, refs: original.refs.map(remap) };
         const transformed = transformConstraint(constraint, transform, entities);
         if (!transformed.isOk) return Result.err(transformed.error);
@@ -202,6 +206,8 @@ export function transformSketchSelection(
     result.constraints.push(...constraints.map((c) => ({ ...c, id: duplicate ? newConstraintId() : c.id })));
     if (copy && transform.kind === "mirror") {
         for (const e of source.entities) {
+            // Generated targets are copied as plain snapshots, without symmetry back to pinned targets.
+            if (e.derivation === "offset") continue;
             for (let pointIndex = 0; pointIndex < entityPointCount(e.type, e.params); pointIndex++) {
                 const original = { entityId: e.id, pointIndex };
                 result.constraints.push({
@@ -221,6 +227,10 @@ export function transformSketchSelection(
                 });
         }
     }
+    const derived = new Set(
+        result.constraints.filter((c) => c.kind === ConstraintKind.Offset).map((c) => c.refs[1].entityId),
+    );
+    for (const e of result.entities) if (!derived.has(e.id)) delete e.derivation;
     const retained = new Set(result.constraints.map((c) => c.id));
     if (result.anchors) result.anchors = result.anchors.filter((a) => retained.has(a.id));
     return Result.ok({ data: result, ids: [...entities.map((e) => e.id), ...texts.map((text) => text.id)] });

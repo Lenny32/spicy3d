@@ -34,8 +34,9 @@ export const PARAMETRIC_FORMAT_VERSION = 14;
  * 3: optional control definition; params are control poles when present, fit points otherwise.
  * 4: optional editable text records with frame/layout settings and stable contour identities.
  * 5: explicit Angle datum semantics; migrated clockwise magnitudes retain their stored side.
+ * 6: optional Offset constraints; older readers cannot regenerate their derived geometry.
  */
-export const SKETCH_FORMAT_VERSION = 5;
+export const SKETCH_FORMAT_VERSION = 6;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -96,3 +97,6 @@ registerMigration("parametric", 13, (document) => document);
 
 // sketch 4 → 5: persist the side previously inferred by the solver at load time.
 registerMigration("sketch", 4, migrateSketchAngles);
+
+// sketch 5 → 6: existing entities remain plain geometry, without associative links.
+registerMigration("sketch", 5, (document) => document);

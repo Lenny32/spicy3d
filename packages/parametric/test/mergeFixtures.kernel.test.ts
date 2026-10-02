@@ -70,6 +70,18 @@ describe.each(cases)("merge fixture %s", (_name, fixture, file) => {
         const failing = parts.filter((n) => !n.shape.isOk).map((n) => n.id);
         expect(failing.filter((id) => !expectedFailures.has(id))).toEqual([]);
 
-        expect(doc.modelManager.serialize()).toEqual(data["models"]);
+        // This merge combines source and distance edits; its derived target cache is deliberately
+        // from one parent until rebuild. Everything except that cache still round-trips verbatim.
+        if (fixture.name === "sketch-offset-source-vs-distance" && file === "expected") {
+            const expected = structuredClone(data["models"]);
+            const sketch = expected.nodes.find((n: Serialized) => n["id"] === "sketch-offset");
+            const payload = JSON.parse(sketch.dataJson);
+            expect(payload.entities[0].params).toEqual([0, 0, 14]);
+            expect(payload.constraints[0].datum).toBe("gap + 1 mm");
+            expect(payload.entities[1].params).toEqual([0, 0, 16]);
+            payload.entities[1].params = [0, 0, 17];
+            sketch.dataJson = JSON.stringify(payload);
+            expect(doc.modelManager.serialize()).toEqual(expected);
+        } else expect(doc.modelManager.serialize()).toEqual(data["models"]);
     });
 });

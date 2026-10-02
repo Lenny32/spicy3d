@@ -1105,3 +1105,76 @@ test("control NURBS authoring and later settings edit preserve pole and entity i
     ).toMatch(/positive finite/);
     expect(sketch.data).toEqual(previous);
 });
+
+test("associative offset loft follows variables and source edits with undo/redo and sketchInfo", () => {
+    const doc = newDoc();
+    const variables = (gap: number) => [
+        { id: "gap", name: "gap", expression: String(gap), type: "length" as const },
+    ];
+    doc.variables.setItems(variables(2));
+    const points: [number, number][] = Array.from({ length: 16 }, (_, i) => {
+        const angle = (2 * Math.PI * i) / 16;
+        return [20 * Math.cos(angle), 30 * Math.sin(angle)];
+    });
+    const result = run(doc, [
+        { op: "sketch", id: "foot", entities: [{ type: "bspline", points, periodic: true }] },
+        { op: "construct", id: "plane", definition: { kind: "plane-offset", source: "XY", distance: 5 } },
+        {
+            op: "sketch",
+            id: "top",
+            plane: { construction: "plane" },
+            actions: [
+                { action: "paste", from: "foot", entities: [1] },
+                { action: "offset", entity: 1, distance: "gap", associative: true, name: "outline" },
+                { action: "setConstruction", entities: [1], value: true },
+            ],
+        },
+        { op: "loft", id: "skirt", sections: ["foot", "top"] },
+    ]);
+    const top = sketchOf(doc, result, "top");
+    const body = nodeById(doc, result.created.find((c) => c.id === "skirt")!.nodeId) as ParametricBodyNode;
+    const link = top.data.constraints.find((c) => c.kind === ConstraintKind.Offset)!;
+    expect(link).toMatchObject({
+        datum: "gap",
+        refs: [
+            { entityId: 1, pointIndex: 0 },
+            { entityId: 2, pointIndex: 0 },
+        ],
+    });
+    expect(top.data.entities[0].construction).toBe(true);
+    expect(top.data.entities[1].construction).toBeUndefined();
+    expect(top.data.entities[1].params[0]).toBeCloseTo(22, 3);
+    expect(body.shape.unchecked()!.checkShape()).toBe(true);
+    doc.variables.setItems(variables(4));
+    expect(top.data.entities[1].params[0]).toBeCloseTo(24, 3);
+    expect(body.shape.unchecked()!.boundingBox().max.x).toBeCloseTo(24, 2);
+    const before = top.data;
+    run(doc, [
+        {
+            op: "editSketch",
+            sketch: top.id,
+            actions: [{ action: "movePoint", entity: 1, point: 0, to: [21, 0] }],
+        },
+    ]);
+    expect(top.data.entities[1].params[0]).toBeCloseTo(25, 2);
+    const edited = top.data;
+    doc.history.undo();
+    expect(top.data).toEqual(before);
+    doc.history.redo();
+    expect(top.data).toEqual(edited);
+    const info = run(doc, [{ op: "sketchInfo", sketch: top.id }]).results["sketchInfo"] as SketchInfo;
+    expect(info.constraints.find((c) => c.id === link.id)).toMatchObject({
+        kind: "Offset",
+        datum: "gap",
+        refs: [
+            { entity: 1, point: 0 },
+            { entity: 2, point: 0 },
+        ],
+    });
+    expect(info.solve).toMatch(/^Ok/);
+    doc.variables.setItems(variables(-50));
+    expect(top.data.entities[1].params).toEqual(edited.entities[1].params);
+    expect(top.generateShape().isOk).toBe(false);
+    const error = top.generateShape();
+    expect(error.error).toContain(`Offset constraint ${link.id}`);
+});

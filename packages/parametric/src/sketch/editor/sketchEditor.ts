@@ -1058,6 +1058,7 @@ export class SketchEditor implements IDisposable {
         if (constraint.datum === undefined) return;
         // Angles and point-line/horizontal/vertical distances accept signed datums.
         const signed =
+            constraint.kind === ConstraintKind.Offset ||
             constraint.kind === ConstraintKind.Angle ||
             constraint.kind === ConstraintKind.P2LDistance ||
             constraint.kind === ConstraintKind.HorizontalDistance ||

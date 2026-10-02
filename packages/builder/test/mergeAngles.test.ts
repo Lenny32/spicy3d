@@ -165,7 +165,7 @@ test.each([
         datum: "tilt",
         angleSide: -1,
     });
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 5 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
 });
 
 test.each([4, 5])("resolving a sketch %s datum conflict takes its angle side too", (version) => {

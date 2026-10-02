@@ -84,6 +84,7 @@ export function applyAutoConstraints(
     options: AutoConstraintOptions,
 ): Omit<SketchConstraintData, "id">[] {
     const added: Omit<SketchConstraintData, "id">[] = [];
+    if (solver.isFixed(entityId)) return [];
     const entity = solver.entities().find((x) => x.id === entityId);
     if (entity === undefined) return added;
 

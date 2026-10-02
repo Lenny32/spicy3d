@@ -275,7 +275,7 @@ test("a spicy file reopens exact outlines and an extrusion with glyph holes", as
         moduleVersions: DocumentMigrations.moduleVersions(),
         models: doc.modelManager.serialize(),
     };
-    expect(envelope.moduleVersions["sketch"]).toBe(5);
+    expect(envelope.moduleVersions["sketch"]).toBe(6);
     const decoded = await decodeDocumentFile(await encodeDocumentFile(envelope));
     expect(decoded.isOk).toBe(true);
     const reopened = newDocument();

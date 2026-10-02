@@ -37,6 +37,7 @@ import { type ExternalResolveResult, resolveExternalRefs } from "./externalRef";
 import { type PlaneFaceRef, resolveFacePlane } from "./planeRef";
 import {
     arcAngles,
+    ConstraintKind,
     type ExternalRefData,
     isProfileEntity,
     profileExternalRefs,
@@ -330,7 +331,25 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         // sync stays unconditional like syncPlaneRefWatch (a ref-set change from
         // projectEdges, delete, undo/redo must re-watch sources on THIS evaluation);
         // refresh never changes ref nodeIds, so watching post-refresh refs is equal.
-        const data = this.data;
+        let data = this.data;
+        if (!this._editingSession && data.constraints.some((c) => c.kind === ConstraintKind.Offset)) {
+            try {
+                const solver = this.createSolver(data);
+                try {
+                    if (solver.datumErrors.size)
+                        return Result.err([...solver.datumErrors.values()].join("; "));
+                    const solved = solver.toData();
+                    if (data.anchors) solved.anchors = data.anchors;
+                    if (JSON.stringify(solved) !== JSON.stringify(data))
+                        this.withoutHistory(() => this.setProperty("dataJson", JSON.stringify(solved)));
+                    data = solved;
+                } finally {
+                    solver.dispose();
+                }
+            } catch (error) {
+                return Result.err(String(error));
+            }
+        }
         this.syncExternalRefWatch(data.externalRefs ?? []);
 
         const edges = this.buildEdges(data);

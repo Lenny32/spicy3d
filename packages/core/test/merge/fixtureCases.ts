@@ -277,6 +277,37 @@ const OURS_LINE_ID = 734_251_950_211;
 const THEIRS_LINE_ID = 91_827_364_555;
 
 const CASES: Record<string, CaseBuilder> = {
+    "sketch-offset-source-vs-distance": () => {
+        const base = clone(
+            loadDocumentFixtures().find((entry) => entry.name === "v2/sketch6-associative-offset.json")!.data,
+        );
+        const ours = edit(base, (d) =>
+            editSketch(d, "sketch-offset", (data) => {
+                data["entities"][0]["params"][2] = 14;
+                data["entities"][1]["params"][2] = 16;
+            }),
+        );
+        const theirs = edit(base, (d) =>
+            editSketch(d, "sketch-offset", (data) => {
+                data["constraints"][0]["datum"] = "gap + 1 mm";
+                data["entities"][1]["params"][2] = 13;
+            }),
+        );
+        const expected = edit(ours, (d) =>
+            editSketch(d, "sketch-offset", (data) => {
+                data["constraints"][0]["datum"] = "gap + 1 mm";
+            }),
+        );
+        return {
+            description:
+                "Source geometry and offset expression merge independently; target cache is derived and rebuilt during validation.",
+            base,
+            ours,
+            theirs,
+            expected,
+            conflicts: [],
+        };
+    },
     "sketch-angle-datum-side-conflict": () => {
         const base = clone(
             loadDocumentFixtures().find((entry) => entry.name === "v2/sketch5-angle-side.json")!.data,

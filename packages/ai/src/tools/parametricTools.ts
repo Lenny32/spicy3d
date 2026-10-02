@@ -167,6 +167,10 @@ const ACTION_SCHEMA = {
             description: "add: entity specs; otherwise the entity ids/names acted on",
         },
         constraints: { type: "array", description: "add: constraint specs; remove: constraint ids/names" },
+        associative: {
+            type: "boolean",
+            description: "offset: keep source and expression linked (default false); no offset chains",
+        },
         entity: { description: "Entity id or name (movePoint/trim/split/extend/offset)" },
         poles: {
             type: "array",
@@ -201,7 +205,7 @@ const ACTION_SCHEMA = {
         end: { type: "string", enum: ["start", "end"], description: "extend: which end grows (default end)" },
         distance: {
             description:
-                "offset: mm or a length expression, evaluated once; + = left for open curves / outward for closed curves. B-splines produce a fixed approximate copy.",
+                "offset: mm or a length expression; + = left for open curves / outward for closed curves. Default evaluates once; associative:true keeps a source/distance relation, regenerated on commit.",
         },
         delta: { type: "array", items: { type: "number" }, description: "move/paste: [du, dv]" },
         center: { type: "array", items: { type: "number" }, description: "rotate/polygon: [u, v]" },
