@@ -37,8 +37,8 @@ B-spline interior points, periodic curves, curve incidence, collinearity, tangen
 and dimensions on the target remain refused. A connector cannot itself be an
 offset source or target, be Blocked, or have Fix on the joined endpoint. These
 cases give the relation id and an actionable message to adjust the connector or
-detach the relation. Removing the relation permits ordinary target editing. Source deletion removes the relation and retains a
-plain target with its last good geometry. Deleting the target removes the relation.
+detach the relation. Removing the relation permits ordinary target editing. Source
+deletion removes the relation and retains a plain target with its last good geometry. Deleting the target removes the relation.
 Trim/split/extend replace a source entity and therefore detach its relations too.
 Move and rotate in place retain relations and regenerate their targets, whether
 the source alone or both source and target are selected. Mirror detaches relations
@@ -61,7 +61,10 @@ target as a cheap preview. A per-session signature skips unchanged source/distan
 inputs; fitting never runs in the pointer-move path. Each regeneration uses the
 existing bounded fitter; the native target pinning adds no new WASM bindings.
 When targets change, one additional fine solve updates connectors against the new
-frozen endpoints. Frozen offset arcs retain their intrinsic arc constraint in the
+frozen endpoints. Offset source parameters are temporarily frozen during this
+solve, so arc caps and dimensioned connectors adapt without nudging an
+underconstrained source. Sources are then released for ordinary editing and
+DOF/constraint diagnostics. Frozen offset arcs retain their intrinsic arc constraint in the
 snapshot, but omit its redundant native equation; detaching restores it.
 Fitted B-spline end refs are remapped if the fit point count
 changes. A pass that fails, or whose connectors would move an offset source,
@@ -90,7 +93,8 @@ older applications refuse sketch 6 through the existing newer-module guard.
 ## Known limitations / follow-ups
 
 - Only Coincident between open target endpoints and movable line/arc endpoints;
-  other target constraints and connector feedback into offset sources are refused.
+  other target constraints and connectors that cannot adapt with the source held
+  in place are refused.
 - No cross-sketch links.
 - No offset chains.
 - No extrusion draft angle.

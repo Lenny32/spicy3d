@@ -327,7 +327,10 @@ export class SketchSolver implements ExternalEntityHost {
             } catch (error) {
                 this.reset(before);
                 for (const id of signatures.keys())
-                    this._datumErrors.set(id, `Offset constraint ${id}: ${String(error)}`);
+                    this._datumErrors.set(
+                        id,
+                        `Offset constraint ${id}: ${error instanceof Error ? error.message : String(error)}`,
+                    );
                 return;
             } finally {
                 this.derivingOffsets = false;
@@ -2033,7 +2036,20 @@ export class SketchSolver implements ExternalEntityHost {
         // normalize roles for documents written before role derivation (and for
         // hand-edited data): an unpinned ref any constraint references is a profile
         syncExternalRoles({ constraints: data.constraints, externalRefs: [...this.external.refs] });
-        return this.solve(true);
+        if (!this.derivingOffsets) return this.solve(true);
+        // Regeneration has already solved the sources. Hold them at that state while
+        // connectors adapt, including equations coupled to underconstrained sources.
+        // This is temporary native pinning, never a persisted constraint or edit lock.
+        const sources = new Set(
+            data.constraints.filter((c) => c.kind === ConstraintKind.Offset).map((c) => c.refs[0].entityId),
+        );
+        const params = [...sources].flatMap((id) => this.entityParams.get(id)!);
+        this.system.set_frozen_params(params, true);
+        try {
+            return this.solve(true);
+        } finally {
+            this.system.set_frozen_params(params, false);
+        }
     }
 
     private addEntityParams(type: SketchEntityType, values: number[]): number[] {
