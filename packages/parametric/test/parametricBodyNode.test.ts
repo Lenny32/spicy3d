@@ -358,6 +358,65 @@ describe("ParametricBodyNode", () => {
         expect(body.features[0]).toMatchObject({ depth: 12 });
     });
 
+    test.each([0, 1, 2, 3])("removal remaps anchor %s and undo/redo together", (anchor) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const anchored = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { ...SQUARE, refPositions: { [body.id]: anchor } },
+        });
+        doc.modelManager.addNode(anchored);
+        Transaction.execute(doc, "remove", () => body.removeFeature("f2"));
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3"]);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor > 1 ? anchor - 1 : anchor);
+        doc.history.undo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor);
+        doc.history.redo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3"]);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor > 1 ? anchor - 1 : anchor);
+    });
+
+    test.each([0, 1, 2, 3])("moves preserve prefix %s or refuse without an undo entry", (anchor) => {
+        const body = bodyWith([
+            extrudeFeature(sketch.id),
+            { ...extrudeFeature(sketch.id), id: "f2", suppressed: true },
+            { ...extrudeFeature(sketch.id), id: "f3", suppressed: true },
+        ]);
+        const anchored = new SketchNode({
+            document: doc,
+            plane: Plane.XY,
+            data: { ...SQUARE, refPositions: { [body.id]: anchor } },
+        });
+        doc.modelManager.addNode(anchored);
+        const position = doc.history.position();
+        let moved: Result<void> = Result.ok(undefined);
+        Transaction.execute(doc, "move", () => {
+            moved = body.moveFeatureTo("f2", 2);
+        });
+        // Only anchor 2 separates the moved steps: that prefix cannot exist after the move.
+        expect(moved.isOk).toBe(anchor !== 2);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor);
+        if (anchor === 2) {
+            expect(moved.error).toContain("timeline prefix");
+            expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+            expect(doc.history.position()).toEqual(position);
+            expect(body.moveFeature("f2", 1).isOk).toBe(false);
+            return;
+        }
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3", "f2"]);
+        doc.history.undo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f2", "f3"]);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor);
+        doc.history.redo();
+        expect(body.features.map((f) => f.id)).toEqual(["f1", "f3", "f2"]);
+        expect(anchored.data.refPositions![body.id]).toBe(anchor);
+    });
+
     test("removeFeature with no features left yields an empty compound", () => {
         const body = bodyWith([extrudeFeature(sketch.id)]);
         expect(body.shape.isOk).toBe(true);

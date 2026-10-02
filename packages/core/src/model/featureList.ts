@@ -1,6 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
+import type { Result } from "../foundation/result";
 import type { I18nKeys } from "../i18n";
 import type { UnitSpec } from "../parameters/unitSpec";
 import type { INode } from "./node";
@@ -71,9 +72,9 @@ export interface IFeatureListNode {
     featureItems(): readonly FeatureItem[];
     setFeatureParameter(featureId: string, key: string, value: number | string | boolean): void;
     setFeatureSuppressed(featureId: string, suppressed: boolean): void;
-    moveFeature(featureId: string, offset: -1 | 1): void;
+    moveFeature(featureId: string, offset: -1 | 1): void | Result<void>;
     /** Moves a feature to an absolute index in one step; panels fall back to `moveFeature`. */
-    moveFeatureTo?(featureId: string, index: number): void;
+    moveFeatureTo?(featureId: string, index: number): void | Result<void>;
     /** Assigns a custom display name; an empty name clears it. */
     renameFeature?(featureId: string, name: string): void;
     removeFeature(featureId: string): void;

@@ -759,7 +759,7 @@ export class ExtrudeEditCommand extends CancelableCommand {
             const edited = this.editedFeature(feature);
             body.setFeaturesEmitShapeChanged(body.features.map((x) => (x.id === edited.id ? edited : x)));
             for (const [other, linkId] of removed) {
-                other.setFeaturesEmitShapeChanged(other.features.filter((x) => x.id !== linkId));
+                other.removeFeature(linkId);
             }
             for (const other of added) addExtrudeTarget(other, body, feature.id);
             this.document.visual.update();

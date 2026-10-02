@@ -367,17 +367,26 @@ export class FeatureListProperty extends HTMLElement {
 
     private moveFeatureTo(featureId: string, index: number) {
         if (this.node.moveFeatureTo !== undefined) {
-            this.node.moveFeatureTo(featureId, index);
+            const moved = this.node.moveFeatureTo(featureId, index);
+            if (moved && !moved.isOk) PubSub.default.pub("showToast", "error.default:{0}", moved.error);
             return;
         }
         // Fallback for nodes without absolute moves: step towards the target index.
         let current = this.node.featureItems().findIndex((x) => x.id === featureId);
         while (current !== -1 && current < index) {
-            this.node.moveFeature(featureId, 1);
+            const moved = this.node.moveFeature(featureId, 1);
+            if (moved && !moved.isOk) {
+                PubSub.default.pub("showToast", "error.default:{0}", moved.error);
+                return;
+            }
             current++;
         }
         while (current !== -1 && current > index) {
-            this.node.moveFeature(featureId, -1);
+            const moved = this.node.moveFeature(featureId, -1);
+            if (moved && !moved.isOk) {
+                PubSub.default.pub("showToast", "error.default:{0}", moved.error);
+                return;
+            }
             current--;
         }
     }

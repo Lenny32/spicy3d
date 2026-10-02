@@ -1705,7 +1705,10 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             break;
         case "moveTo":
             if (typeof op.index !== "number") throw new Error('"moveTo" requires a numeric "index"');
-            body.moveFeatureTo(op.featureId, op.index);
+            {
+                const moved = body.moveFeatureTo(op.featureId, op.index);
+                if (!moved.isOk) throw new Error(moved.error);
+            }
             break;
         case "remove":
             body.removeFeature(op.featureId);

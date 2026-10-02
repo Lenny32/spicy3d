@@ -1135,6 +1135,79 @@ describe("fillet and boolean", () => {
         expect(body.shape.value.volume()).toBeCloseTo(roundedVolume, 6);
     });
 
+    test("removal shifts face-sketch anchors and unsafe moves are refused through undo/redo", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(10)), "b1");
+        function topFace(z: number): number {
+            const faces = body.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
+            try {
+                const index = faces.findIndex(
+                    (face) => face.normal(0, 0)[1].z > 0.999 && Math.abs(face.boundingBox().min.z - z) < 1e-5,
+                );
+                expect(index).toBeGreaterThanOrEqual(0);
+                return index;
+            } finally {
+                for (const face of faces) face.dispose();
+            }
+        }
+        const bossResult = run(doc, [
+            {
+                op: "sketch",
+                id: "bossSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(10) },
+                entities: rect(10, 10, 20, 20),
+            },
+            { op: "extrude", id: "boss", body: body.id, sketch: "bossSketch", depth: 5, operation: "fuse" },
+        ]);
+        const cutResult = run(doc, [
+            {
+                op: "sketch",
+                id: "cutSketch",
+                plane: { nodeId: body.id, faceIndex: topFace(15) },
+                entities: rect(10, 10, 20, 20),
+            },
+            { op: "extrude", id: "cut", body: body.id, sketch: "cutSketch", depth: -3, operation: "cut" },
+        ]);
+        const bossSketch = doc.modelManager.findNode(
+            (node) => node.id === bossResult.created[0].nodeId,
+        ) as SketchNode;
+        const cutSketch = doc.modelManager.findNode(
+            (node) => node.id === cutResult.created[0].nodeId,
+        ) as SketchNode;
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        const original = body.features;
+        const volume = body.shape.value.volume();
+        const moved = body.moveFeatureTo(body.features[1].id, 2);
+        expect(moved.isOk).toBe(false);
+        expect(moved.error).toContain("sketch");
+        expect(body.features).toEqual(original);
+        runExpectingFailure(doc, [
+            { op: "editFeature", body: body.id, featureId: body.features[1].id, action: "moveTo", index: 2 },
+        ]);
+        expect(body.features).toEqual(original);
+        // A suppressed upstream step changes indexes without changing the model.
+        run(doc, [{ op: "chamfer", id: "corner", body: body.id, index: 1, edgeIndexes: [0], distance: 1 }]);
+        const corner = body.features[1].id;
+        run(doc, [{ op: "editFeature", body: body.id, featureId: corner, action: "suppress", value: true }]);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        run(doc, [{ op: "editFeature", body: body.id, featureId: corner, action: "remove" }]);
+        expectClean(body);
+        expect(bossSketch.data.refPositions?.[body.id]).toBe(1);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.undo();
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(3);
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+        doc.history.redo();
+        expect(cutSketch.plane.origin.z).toBeCloseTo(15, 6);
+        expect(cutSketch.data.refPositions?.[body.id]).toBe(2);
+        expect(body.shape.value.volume()).toBeCloseTo(volume, 5);
+    });
+
     test("insertion preserves face-sketch anchors, planes and the downstream cut through undo/redo", () => {
         const doc = newDoc();
         const body = createdBody(doc, run(doc, plate(10)), "b1");

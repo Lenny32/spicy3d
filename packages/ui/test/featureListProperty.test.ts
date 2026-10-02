@@ -6,10 +6,11 @@ import {
     type FeatureItem,
     type IFeatureListNode,
     type INode,
+    Result,
     requestFeatureFocus,
     takeFeatureFocus,
 } from "@spicy3d/core";
-
+import { PubSubMock } from "./_helpers/coreMocks";
 // test-utils must load BEFORE the core-mock helper so the real core module is
 // fully cached by the time `rs.mock("@spicy3d/core")` registers.
 import { createMockDocument } from "./_helpers/propertyTestHelpers";
@@ -383,6 +384,36 @@ describe("FeatureListProperty", () => {
 
         expect(node.moveFeatureTo).toHaveBeenCalledWith("f1", 2);
         expect(rows[2].classList.contains("fl-drop-after")).toBe(false);
+    });
+
+    test("a refused drag reports the reason to the user", () => {
+        const doc = createMockDocument();
+        const items: FeatureItem[] = ["f1", "f2", "f3"].map((id) => ({
+            id,
+            display: "command.feature.fuse",
+            parameters: [],
+        }));
+        const node = {
+            featureItems: () => items,
+            moveFeatureTo: rs.fn((_id: string, _index: number) => Result.err("sketch prefix would change")),
+        } as unknown as INode & IFeatureListNode;
+        const prop = new FeatureListProperty(doc, node);
+        const rows = prop.querySelectorAll(".fl-item");
+        const headers = prop.querySelectorAll(".fl-header");
+        const publish = rs.spyOn(PubSubMock.default, "pub");
+        try {
+            headers[0].dispatchEvent(new Event("dragstart"));
+            rows[2].dispatchEvent(new MouseEvent("dragover", { bubbles: true, cancelable: true }));
+            rows[2].dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+            expect(node.moveFeatureTo).toHaveBeenCalledWith("f1", 2);
+            expect(publish).toHaveBeenCalledWith(
+                "showToast",
+                "error.default:{0}",
+                "sketch prefix would change",
+            );
+        } finally {
+            publish.mockRestore();
+        }
     });
 
     describe("menu positioning", () => {

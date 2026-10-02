@@ -555,22 +555,59 @@ export class ParametricBodyNode
         this.setFeaturesEmitShapeChanged(features);
     }
 
-    moveFeature(featureId: string, offset: -1 | 1): void {
-        const features = [...this.features];
-        const index = features.findIndex((feature) => feature.id === featureId);
-        const target = index + offset;
-        if (index < 0 || target < 0 || target >= features.length) return;
-        [features[index], features[target]] = [features[target], features[index]];
-        this.setFeaturesEmitShapeChanged(features);
+    moveFeature(featureId: string, offset: -1 | 1): Result<void> {
+        const from = this.features.findIndex((feature) => feature.id === featureId);
+        const target = from + offset;
+        if (from < 0 || target < 0 || target >= this.features.length) return Result.ok(undefined);
+        return this.moveFeatureTo(featureId, target);
     }
 
-    moveFeatureTo(featureId: string, index: number): void {
+    /**
+     * An anchor N names the SET of the first N features, not the feature at N. A permutation
+     * preserves that state only when the same set remains a prefix. Its size is unchanged,
+     * so safe moves keep N; crossing any anchored boundary is refused before any mutation.
+     * Reordering within a prefix may intentionally change geometry, just like any feature edit.
+     */
+    moveFeatureTo(featureId: string, index: number): Result<void> {
+        if (!Number.isInteger(index)) return Result.err("Feature index must be an integer");
         const features = [...this.features];
         const from = features.findIndex((feature) => feature.id === featureId);
-        if (from < 0) return;
+        if (from < 0) return Result.ok(undefined);
+        const to = Math.max(0, Math.min(index, features.length - 1));
+        for (const sketch of this.anchoredSketches()) {
+            const anchor = sketch.data.refPositions![this.id];
+            if (from < anchor !== to < anchor) {
+                return Result.err(
+                    `Cannot move feature: sketch ${sketch.name} would lose its timeline prefix`,
+                );
+            }
+        }
         const [feature] = features.splice(from, 1);
-        features.splice(Math.max(0, Math.min(index, features.length)), 0, feature);
+        features.splice(to, 0, feature);
         this.setFeaturesEmitShapeChanged(features);
+        return Result.ok(undefined);
+    }
+
+    private anchoredSketches(): SketchNode[] {
+        return this.document.modelManager.findNodes(
+            (node) => node instanceof SketchNode && node.data.refPositions?.[this.id] !== undefined,
+        ) as SketchNode[];
+    }
+
+    private removeFeatureAt(index: number): void {
+        ParametricBodyNode.withDeferredUpstream(this.document, () => {
+            for (const sketch of this.anchoredSketches()) {
+                const data = sketch.data;
+                const anchor = data.refPositions![this.id];
+                // At index, the sketch already saw the removed step's input. Later states
+                // lose one preceding step. The normal setters join the caller's transaction.
+                if (anchor > index) {
+                    data.refPositions![this.id] = anchor - 1;
+                    sketch.setDataEmitShapeChanged(data);
+                }
+            }
+            this.setFeaturesEmitShapeChanged(this.features.filter((_, i) => i !== index));
+        });
     }
 
     /** Renaming does not change geometry — record and notify without a rebuild. */
@@ -587,14 +624,22 @@ export class ParametricBodyNode
      * removing it undoes its effect everywhere instead of leaving them failing.
      */
     removeFeature(featureId: string): void {
-        this.setFeaturesEmitShapeChanged(this.features.filter((feature) => feature.id !== featureId));
+        const index = this.features.findIndex((feature) => feature.id === featureId);
+        if (index < 0) return;
+        this.removeFeatureAt(index);
         for (const node of this.document.modelManager.findNodes((n) => n instanceof ParametricBodyNode)) {
             const body = node as ParametricBodyNode;
             if (body === this) continue;
-            const kept = body.features.filter(
-                (x) => !(x.type === "extrudeTarget" && x.bodyId === this.id && x.featureId === featureId),
-            );
-            if (kept.length !== body.features.length) body.setFeaturesEmitShapeChanged(kept);
+            // Remove backwards so each removed link shifts anchors in its own body's timeline.
+            for (let i = body.features.length - 1; i >= 0; i--) {
+                const feature = body.features[i];
+                if (
+                    feature.type === "extrudeTarget" &&
+                    feature.bodyId === this.id &&
+                    feature.featureId === featureId
+                )
+                    body.removeFeatureAt(i);
+            }
         }
     }
 
