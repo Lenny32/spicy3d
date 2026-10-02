@@ -6,11 +6,28 @@ name: Offline smoke test
 # app starts, the WebAssembly kernel works, local save/open works, and the insecure-context banner
 # shows over plain HTTP on a LAN name only.
 
+# Only when something that goes into the build or the smoke test changed: docs-only pushes, C++
+# sources alone (the committed packages/wasm/lib binary is what ships) and empty commits trigger nothing.
 on:
     push:
         branches: ["main", "develop"]
+        paths: &build-paths
+            - "packages/**"
+            - "plugins/**"
+            - "public/**"
+            - "package.json"
+            - "package-lock.json"
+            - "tsconfig.json"
+            - "rspack.config.ts"
+            - "scripts/build-plugins.mjs"
+            - "scripts/check-external-urls.mjs"
+            - "scripts/smoke-offline.mjs"
+            - "docker/default.conf.template"
+            - ".github/workflows/smoke.yml"
+            - "!**.md"
     pull_request:
         branches: ["main", "develop"]
+        paths: *build-paths
     workflow_dispatch:
 
 permissions:

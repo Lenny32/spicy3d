@@ -1,10 +1,31 @@
 name: Test
 
+# Only when code the tests run or read changed: docs-only pushes (except the docs tests read) and empty
+# commits trigger nothing.
 on:
     push:
         branches: ["main"]
+        paths: &test-paths
+            - "packages/**"
+            - "plugins/**"
+            - "public/**"
+            - "package.json"
+            - "package-lock.json"
+            - "tsconfig.json"
+            - "rstest.config.ts"
+            - ".github/workflows/main.yml"
+            # Read by tests (CSP, origin validation, dependency pins, generator freshness).
+            - "rspack.config.ts"
+            - "docker/**"
+            - "scripts/generate-cloud-api.mjs"
+            - "scripts/generate-shape-capabilities.mjs"
+            - ".github/dependabot.yml"
+            - "!**.md"
+            # Read by packages/builder/test/mergeRules.test.ts.
+            - "docs/merge.md"
     pull_request:
         branches: ["main"]
+        paths: *test-paths
 
 jobs:
     test-and-deploy:
