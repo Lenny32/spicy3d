@@ -290,7 +290,12 @@ const handler: FeatureHandler<SweepFeatureData> = {
             );
             if (!swept.isOk) return Result.err(swept.error);
             const shape = swept.value.shape;
-            const clean = validateSelfIntersection(shape, context.warn, context.deferSelfIntersection);
+            const clean = validateSelfIntersection(
+                shape,
+                context.warn,
+                context.deferSelfIntersection,
+                "Sweep intersects itself or cannot be validated",
+            );
             if (!clean?.isOk || !clean.value) {
                 shape.dispose();
                 return Result.err(

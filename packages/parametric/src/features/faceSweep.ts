@@ -251,6 +251,7 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
                 swept.value.shape,
                 context.warn,
                 context.deferSelfIntersection,
+                "Face sweep intersects itself or cannot be validated",
             );
             if (!clean?.isOk || !clean.value)
                 return Result.err("Face sweep intersects itself or cannot be validated");
@@ -312,7 +313,12 @@ const handler: FeatureHandler<FaceSweepFeatureData> = {
             } finally {
                 for (const solid of solids) solid.dispose();
             }
-            const outputClean = validateSelfIntersection(output, context.warn, context.deferSelfIntersection);
+            const outputClean = validateSelfIntersection(
+                output,
+                context.warn,
+                context.deferSelfIntersection,
+                "Face sweep boolean intersects itself or cannot be validated",
+            );
             if (!outputClean?.isOk || !outputClean.value)
                 return Result.err("Face sweep boolean intersects itself or cannot be validated");
             const tracked = trackBoolean(

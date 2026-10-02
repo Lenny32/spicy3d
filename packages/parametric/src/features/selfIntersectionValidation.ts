@@ -11,7 +11,8 @@ export const SELF_INTERSECTION_SKIPPED =
 export function validateSelfIntersection(
     shape: IShape,
     warn?: (message: string) => void,
-    defer?: (shape: IShape) => void,
+    defer?: (shape: IShape, failure?: string) => void,
+    failure = "Shape intersects itself",
 ): Result<boolean> {
     if (!shape.checkShape()) return Result.err("Shape is invalid");
     const volume = shape.volume();
@@ -22,7 +23,7 @@ export function validateSelfIntersection(
     } finally {
         for (const solid of solids) solid.dispose();
     }
-    if (defer) defer(shape);
+    if (defer) defer(shape, failure);
     else warn?.(SELF_INTERSECTION_SKIPPED);
     return Result.ok(true);
 }
@@ -33,26 +34,31 @@ export function prepareValidatedFeature(
     context: FeatureContext,
 ): IAsyncShapeOperation<IShape> {
     const checks: IAsyncShapeOperation<boolean>[] = [];
+    const failures = new Map<IAsyncShapeOperation<boolean>, string>();
     let result: Result<IShape>;
     try {
         result = evaluate({
             ...context,
-            deferSelfIntersection: (shape) => {
-                try {
-                    const bounded = shapeFactory.boundedOperations;
-                    if (!bounded?.shapeQuery)
-                        throw new Error("Self-intersection validation requires a bounded worker");
-                    checks.push(bounded.shapeQuery({ method: "checkSelfIntersection", shape }));
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    checks.push({
-                        ready: Promise.resolve(),
-                        canFallback: false,
-                        cancel: () => {},
-                        take: () => Result.err(message),
-                    });
-                }
-            },
+            deferSelfIntersection: shapeFactory.boundedOperations?.shapeQuery
+                ? (shape, failure) => {
+                      try {
+                          const bounded = shapeFactory.boundedOperations;
+                          if (!bounded?.shapeQuery)
+                              throw new Error("Self-intersection validation requires a bounded worker");
+                          const check = bounded.shapeQuery({ method: "checkSelfIntersection", shape });
+                          checks.push(check);
+                          failures.set(check, failure ?? "Shape intersects itself");
+                      } catch (error) {
+                          const message = error instanceof Error ? error.message : String(error);
+                          checks.push({
+                              ready: Promise.resolve(),
+                              canFallback: false,
+                              cancel: () => {},
+                              take: () => Result.err(message),
+                          });
+                      }
+                  }
+                : undefined,
         });
     } catch (error) {
         for (const check of checks) check.cancel();
@@ -95,7 +101,7 @@ export function prepareValidatedFeature(
                     );
                 } else if (!clean.value) {
                     disposeOutput();
-                    return Result.err("Shape intersects itself");
+                    return Result.err(failures.get(check) ?? "Shape intersects itself");
                 }
             }
             return result;

@@ -186,7 +186,10 @@ releases the unaccepted output. A synchronous scheduler drain cannot fall back t
 analyzer. Document open and headless merge evaluation can await these scheduled rebuilds.
 No validation state or shape is stored in the document.
 
-Factories without bounded-worker support, explicit synchronous program scopes, nested
+run_program feature ops evaluate synchronously (cheap gates + skip warning); editSketch-triggered
+rebuilds can await worker validation.
+Factories without bounded-worker support in every rebuild mode (including chains of twelve
+or more features), explicit synchronous program scopes, nested
 producer/consumer rebuilds, and the current synchronous feature-preview API cannot await a worker. These run only the cheap checks,
 with the runtime warning “Self-intersection check skipped in synchronous evaluation
 (result unknown; rebuild validates in worker)”. Preview results expose the warning and

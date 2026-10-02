@@ -1582,7 +1582,8 @@ export class ParametricBodyNode
         const pending =
             preparedOperation ??
             (asynchronous
-                ? feature.type === "sweep" || feature.type === "faceSweep"
+                ? (feature.type === "sweep" || feature.type === "faceSweep") &&
+                  shapeFactory.boundedOperations?.shapeQuery !== undefined
                     ? prepareValidatedFeature((context) => evaluateFeature(feature, context), context)
                     : featureHandler(feature.type)?.prepareAsync?.(feature, context)
                 : undefined);

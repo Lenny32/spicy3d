@@ -147,7 +147,7 @@ test("timeout accepts geometry, evaluates later steps and caches the warning unt
     expect(node.featureItems()[0].warning).toBe(timeoutWarning);
     expect(outputs[0].dispose).toHaveBeenCalledTimes(0);
     const report = runParametricProgram(document, [{ op: "features", body: node.id }]);
-    expect(report.results.features).toEqual(
+    expect(report.results["features"]).toEqual(
         expect.arrayContaining([expect.objectContaining({ id: "sweep", warning: timeoutWarning })]),
     );
     node.applyVariables();
@@ -299,14 +299,19 @@ test("undo and redo cancel pending validation and validate replayed features", a
     expect(node.featureItems()[0].error).toBeUndefined();
 });
 
-test("synchronous-only factory accepts cheap gates with a visible warning and never runs analyzer", async () => {
+test.each([
+    1, 12,
+])("synchronous-only factory accepts %s features with skip warnings in every rebuild mode", async (count) => {
     rs.stubGlobal("shapeFactory", { combine: () => Result.ok(new MockShape()) });
-    const node = body();
-    await start();
+    const node = body(Array.from({ length: count }, (_, index) => ({ ...feature, id: `sweep-${index}` })));
+    await rs.runAllTimersAsync();
     await DocumentRebuilds.settled(document);
     expect(node.shape.isOk).toBe(true);
     expect(node.featureItems()[0].error).toBeUndefined();
-    expect(node.featureItems()[0].warning).toBe(SELF_INTERSECTION_SKIPPED);
+    expect(node.featureItems().map((item) => item.warning)).toEqual(
+        Array(count).fill(SELF_INTERSECTION_SKIPPED),
+    );
+    expect(outputs).toHaveLength(count);
     expect(outputs[0].dispose).toHaveBeenCalledTimes(0);
     expect(queries).toHaveLength(0);
 });
@@ -333,26 +338,35 @@ test("headless evaluation cancellation terminates pending validation", async () 
     expect(queries[0].cancel).toHaveBeenCalled();
 });
 
-test("temporary tool and boolean output must both pass before acceptance", async () => {
+test.each([
+    0, 1,
+])("temporary tool and boolean output retain failure context (failed check %s)", async (failed) => {
     const tool = Object.assign(new MockShape(), { dispose: rs.fn(() => {}) });
     const output = Object.assign(new MockShape(), { dispose: rs.fn(() => {}) });
     const host = new ParametricBodyNode({ document, featuresJson: "[]" });
     try {
         const pending = prepareValidatedFeature(
             (context) => {
-                context.deferSelfIntersection!(tool);
+                context.deferSelfIntersection!(tool, "Face sweep intersects itself or cannot be validated");
                 tool.dispose();
-                context.deferSelfIntersection!(output);
+                context.deferSelfIntersection!(
+                    output,
+                    "Face sweep boolean intersects itself or cannot be validated",
+                );
                 return Result.ok(output);
             },
             { document, host, scope: new Map() },
         );
         expect(queries.map((query) => query.shape)).toEqual([tool, output]);
         expect(tool.dispose).toHaveBeenCalledTimes(1);
-        queries[0].complete(Result.ok(true));
-        queries[1].complete(Result.ok(false));
+        queries[0].complete(Result.ok(failed !== 0));
+        queries[1].complete(Result.ok(failed !== 1));
         await pending.ready;
-        expect(pending.take().error).toBe("Shape intersects itself");
+        expect(pending.take().error).toBe(
+            failed === 0
+                ? "Face sweep intersects itself or cannot be validated"
+                : "Face sweep boolean intersects itself or cannot be validated",
+        );
         expect(output.dispose).toHaveBeenCalledTimes(1);
         pending.cancel();
         expect(output.dispose).toHaveBeenCalledTimes(1);
@@ -375,6 +389,27 @@ test("failed handler cancels already captured checks immediately", async () => {
         expect(queries[0].cancel).toHaveBeenCalled();
         expect(pending.take().error).toBe("boolean failed");
         pending.cancel();
+    } finally {
+        host.dispose();
+    }
+});
+
+test("direct preparation without bounded support retains cheap gates and the skip warning", async () => {
+    rs.stubGlobal("shapeFactory", { combine: () => Result.ok(new MockShape()) });
+    const host = new ParametricBodyNode({ document, featuresJson: "[]" });
+    const warn = rs.fn((_message: string) => {});
+    try {
+        const pending = prepareValidatedFeature(
+            (context) => featureHandler("sweep")!.evaluate(feature, context),
+            { document, host, scope: new Map(), warn },
+        );
+        await pending.ready;
+        const accepted = pending.take();
+        expect(accepted.isOk).toBe(true);
+        expect(accepted.value).toBe(outputs[0]);
+        expect(warn.mock.calls).toEqual([[SELF_INTERSECTION_SKIPPED]]);
+        accepted.value.dispose();
+        expect(queries).toHaveLength(0);
     } finally {
         host.dispose();
     }
