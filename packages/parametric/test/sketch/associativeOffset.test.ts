@@ -502,3 +502,54 @@ test("failed offset regeneration keeps the last good joined geometry and recover
         solver.dispose();
     }
 });
+
+test("arc creation structural constraints do not produce join redundancy diagnostics", () => {
+    const solver = new SketchSolver(Plane.XY);
+    try {
+        const source = solver.addArc(0, 0, 10, 0, 0, 10);
+        const edit = offsetCurve(solver.entity(source)!, 2);
+        expect(edit.isOk).toBe(true);
+        const applied = solver.applyGeometryEdit(edit.value);
+        expect(applied.isOk).toBe(true);
+        const target = applied.value.entityIds[0];
+        solver.addConstraint({
+            kind: ConstraintKind.Offset,
+            refs: [source, target].map((entityId) => ({ entityId, pointIndex: 0 })),
+            datum: 2,
+        });
+        const connector = solver.addLine(12, 0, 20, 5);
+        solver.addConstraint({
+            kind: ConstraintKind.P2PCoincident,
+            refs: [
+                { entityId: target, pointIndex: 1 },
+                { entityId: connector, pointIndex: 0 },
+            ],
+        });
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.diagnose().redundant).toEqual([]);
+        expect(solver.diagnose().conflicting).toEqual([]);
+        expect(
+            solver.setDatumSource(
+                solver.toData().constraints.find((c) => c.kind === ConstraintKind.Offset)!.id,
+                4,
+            ).isOk,
+        ).toBe(true);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        expect(solver.pointOf({ entityId: connector, pointIndex: 0 })).toEqual([14, 0]);
+        expect(solver.diagnose().redundant).toEqual([]);
+        const relation = solver.toData().constraints.find((c) => c.kind === ConstraintKind.Offset)!;
+        solver.removeConstraint(relation.id);
+        expect(solver.isFixed(target)).toBe(false);
+        solver.removeConstraintsOn(connector);
+        solver.setPointPosition({ entityId: target, pointIndex: 2 }, 0, 20);
+        expect(solver.solve(true).result).toMatch(/^Ok/);
+        const arc = solver.entity(target)!.params;
+        expect(Math.hypot(arc[2] - arc[0], arc[3] - arc[1])).toBeCloseTo(
+            Math.hypot(arc[4] - arc[0], arc[5] - arc[1]),
+            7,
+        );
+        expect(solver.diagnose().redundant).toEqual([]);
+    } finally {
+        solver.dispose();
+    }
+});

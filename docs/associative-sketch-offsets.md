@@ -61,7 +61,9 @@ target as a cheap preview. A per-session signature skips unchanged source/distan
 inputs; fitting never runs in the pointer-move path. Each regeneration uses the
 existing bounded fitter; the native target pinning adds no new WASM bindings.
 When targets change, one additional fine solve updates connectors against the new
-frozen endpoints. Fitted B-spline end refs are remapped if the fit point count
+frozen endpoints. Frozen offset arcs retain their intrinsic arc constraint in the
+snapshot, but omit its redundant native equation; detaching restores it.
+Fitted B-spline end refs are remapped if the fit point count
 changes. A pass that fails, or whose connectors would move an offset source,
 restores the previous target/connector geometry and reports the runtime warning;
 it never iterates regeneration to chase a feedback loop. Independent source and

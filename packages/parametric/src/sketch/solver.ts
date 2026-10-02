@@ -48,6 +48,7 @@ import {
     type ExternalRefData,
     isDatumEntityId,
     isExternalEntityId,
+    isStructuralConstraint,
     pointRefKey,
     resolveDatumSource,
     SKETCH_ORIGIN_ID,
@@ -308,8 +309,7 @@ export class SketchSolver implements ExternalEntityHost {
         if (changed) {
             this.derivingOffsets = true;
             try {
-                this.reset(next);
-                const outcome = this.solve(true);
+                const outcome = this.reset(next);
                 regenerated = outcome;
                 for (const relation of next.constraints.filter((c) => c.kind === ConstraintKind.Offset)) {
                     const source = next.entities.find((e) => e.id === relation.refs[0].entityId)!;
@@ -649,6 +649,13 @@ export class SketchSolver implements ExternalEntityHost {
                 );
             }
             this.offsetInputs.delete(id);
+            const structural = this.toData().constraints.filter(
+                (c) => c.refs[0]?.entityId === targetId && isStructuralConstraint(c, this.entities()),
+            );
+            for (const constraint of structural) {
+                this.removeConstraint(constraint.id);
+                this.addConstraintWithId(constraint.id, constraint);
+            }
         }
         this._datumErrors.delete(id);
     }
@@ -1248,7 +1255,7 @@ export class SketchSolver implements ExternalEntityHost {
     }
 
     /** Replaces all state with `data` resolved against the supplied parameter table. */
-    reset(data: SketchData, scope: Scope = this._scope): void {
+    reset(data: SketchData, scope: Scope = this._scope): SolveOutcome {
         this._scope = scope;
         this.system.free();
         this.system = newSolverSystem();
@@ -1265,7 +1272,7 @@ export class SketchSolver implements ExternalEntityHost {
         this.legacyCounters = {};
         this.draggedParamIds = [];
         this.seedDatum();
-        this.loadData(data);
+        return this.loadData(data);
     }
 
     // ------------------------------------------------------------------ Datum seeding (see `solverEntities` / `sketchModel` for the reserved ids)
@@ -1461,11 +1468,39 @@ export class SketchSolver implements ExternalEntityHost {
                 datumSources: [constraint.datum!],
             });
             this.fixedEntities.add(targetId);
+            // Regenerated arc geometry already satisfies its intrinsic equation. Emitting
+            // it over entirely frozen parameters would diagnose it as redundant.
+            for (const structural of this.constraints.values()) {
+                if (
+                    structural.solverId >= 0 &&
+                    structural.refs[0]?.entityId === targetId &&
+                    isStructuralConstraint({ ...structural, refs: structural.refs }, this.entities())
+                ) {
+                    this.system.remove_constraint(structural.solverId);
+                    structural.solverId = -1;
+                }
+            }
             return;
         }
         if ([...this.constraints.values()].some((c) => c.kind === ConstraintKind.Offset)) {
             const data = this.toData();
             validateOffsetRelations({ ...data, constraints: [...data.constraints, { ...constraint, id }] });
+        }
+        if (
+            constraint.refs[0] &&
+            this.isFixed(constraint.refs[0].entityId) &&
+            isStructuralConstraint({ ...constraint, id }, this.entities()) &&
+            [...this.constraints.values()].some(
+                (c) => c.kind === ConstraintKind.Offset && c.refs[1].entityId === constraint.refs[0].entityId,
+            )
+        ) {
+            this.constraints.set(id, {
+                id,
+                kind: constraint.kind,
+                refs: structuredClone(constraint.refs),
+                solverId: -1,
+            });
+            return;
         }
         if (constraint.kind === ConstraintKind.PointOnBSpline) {
             this.addPointOnBSpline(id, constraint);
@@ -1947,7 +1982,7 @@ export class SketchSolver implements ExternalEntityHost {
         }
     }
 
-    private loadData(data: SketchData): void {
+    private loadData(data: SketchData): SolveOutcome {
         validateOffsetRelations(data);
         this.textRecords = structuredClone(data.texts ?? []);
         // The constraints are rebuilt below, so their datum errors are too.
@@ -1993,7 +2028,7 @@ export class SketchSolver implements ExternalEntityHost {
         // normalize roles for documents written before role derivation (and for
         // hand-edited data): an unpinned ref any constraint references is a profile
         syncExternalRoles({ constraints: data.constraints, externalRefs: [...this.external.refs] });
-        this.solve(true);
+        return this.solve(true);
     }
 
     private addEntityParams(type: SketchEntityType, values: number[]): number[] {
