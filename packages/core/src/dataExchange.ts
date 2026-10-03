@@ -30,7 +30,28 @@ export interface DataExportOptions {
     readonly lengthUnit?: LengthUnit;
     /** STL only. Linear tolerance is in millimetres, independent of the file's output unit. */
     readonly stl?: StlTessellationOptions;
+    /**
+     * Stops waiting for the document's pending rebuilds; the export then fails as
+     * `rebuild-pending` instead of reading geometry that is not current yet.
+     */
+    readonly signal?: AbortSignal;
 }
+
+/**
+ * Why an export produced no file: `rebuild-pending` = `signal` aborted while geometry was still
+ * rebuilding (retry later), `no-geometry` = none of the nodes has a shape after its rebuild
+ * (`nodes` lists them), `failed` = the writer or kernel refused (`message` is its error).
+ */
+/** A written file; `skipped` = selected shape nodes left out because they have no geometry. */
+export interface DataExport {
+    readonly data: BlobPart[];
+    readonly skipped: readonly string[];
+}
+
+export type DataExportError =
+    | { readonly kind: "rebuild-pending"; readonly message: string }
+    | { readonly kind: "no-geometry"; readonly message: string; readonly nodes: readonly string[] }
+    | { readonly kind: "failed"; readonly message: string };
 
 /** Runtime options only; reference scans use the existing MeshNode payload. */
 export interface ReferenceMeshImportOptions {
@@ -54,7 +75,14 @@ export interface IDataExchange {
         file: File,
         options?: ReferenceMeshImportOptions,
     ): Promise<Result<MeshNode>>;
+    /** Shows the failure as a toast and resolves `undefined`; see `exportResult`. */
     export(type: string, nodes: VisualNode[], options?: DataExportOptions): Promise<BlobPart[] | undefined>;
+    /** Like `export`, without UI: the failure is returned to the caller. */
+    exportResult?(
+        type: string,
+        nodes: VisualNode[],
+        options?: DataExportOptions,
+    ): Promise<Result<DataExport, DataExportError>>;
 }
 
 /** The unit an export of `handling` actually writes, given the one asked for. */

@@ -138,4 +138,62 @@ describe("DefaultDataExchange scheduled kernel export", () => {
         expect(node.resolvedShape).toBeUndefined();
         expect(toast).toHaveBeenCalledWith("showToast", "error.export.noNodeCanBeExported");
     });
+
+    test("an aborted wait reports the pending rebuild instead of stale or missing geometry", async () => {
+        const node = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features()) });
+        document.modelManager.addNode(node);
+        void node.shape;
+        await node.whenRebuilt();
+        node.featuresJson = JSON.stringify(features(1));
+        expect(node.isRebuilding).toBe(true);
+        const controller = new AbortController();
+        const exchange = new DefaultDataExchange();
+
+        const exported = exchange.exportResult(".stl binary", [node], { signal: controller.signal });
+        controller.abort();
+        const result = await exported;
+
+        expect(result.isOk).toBe(false);
+        expect(result.error.kind).toBe("rebuild-pending");
+        expect(result.error.message).toMatch(/^the model is still rebuilding \(at feature \d+\)$/);
+        expect(converter.convertToSTL).not.toHaveBeenCalled();
+        expect(node.isRebuilding).toBe(true);
+
+        // The rebuild was left running: a later export gets the edited geometry.
+        await DocumentRebuilds.settled(document);
+        const retried = await exchange.exportResult(".stl binary", [node], {
+            signal: new AbortController().signal,
+        });
+        expect(retried.isOk).toBe(true);
+        expect(converter.convertToSTL.mock.calls[0][0]).toEqual([outputs[outputs.length - 1].placed]);
+        expect(outputs[outputs.length - 1].shape.id).toBe("f11@1");
+    });
+
+    test("a body without geometry after its rebuild is named in the failure", async () => {
+        const node = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features(0, true)) });
+        document.modelManager.addNode(node);
+
+        const result = await new DefaultDataExchange().exportResult(".step", [node]);
+
+        expect(result.isOk).toBe(false);
+        expect(result.error).toEqual({
+            kind: "no-geometry",
+            message: "No selected node has geometry after its rebuild",
+            nodes: [node.id],
+        });
+        expect(converter.convertToSTEP).not.toHaveBeenCalled();
+    });
+
+    test("a merged export lists the bodies it left out for lack of geometry", async () => {
+        const good = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features()) });
+        const failed = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features(0, true)) });
+        document.modelManager.addNode(good);
+        document.modelManager.addNode(failed);
+
+        const result = await new DefaultDataExchange().exportResult(".step", [good, failed]);
+
+        expect(result.isOk).toBe(true);
+        expect(result.value).toEqual({ data: ["step-data"], skipped: [failed.id] });
+        expect(converter.convertToSTEP.mock.calls[0][0]).toEqual([outputs[outputs.length - 1].placed]);
+    });
 });

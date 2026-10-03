@@ -2,7 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    awaitExportRebuilds,
+    type DataExportError,
     type DataExportOptions,
+    DocumentRebuilds,
     download,
     I18n,
     type IApplication,
@@ -19,6 +22,11 @@ import { MAX_CHUNK_EXPORT_BYTES, retainExport } from "./exportChunks";
 import { imageByteBudget } from "./imageEncoding";
 
 const DEFAULT_EXPORT_BYTES = 1024 * 1024;
+/**
+ * How long an export waits for pending rebuilds. Tool calls run one at a time, so an unbounded
+ * wait blocks every later call; this leaves the writer time within the relay's 120 s answer limit.
+ */
+export const EXPORT_REBUILD_WAIT_MS = 60_000;
 const MAX_EXPORT_BYTES = 8 * DEFAULT_EXPORT_BYTES;
 
 function exportMimeType(format: string): string {
@@ -70,9 +78,77 @@ function resolveFilename(visuals: VisualNode[], format: string, filename: unknow
     return name;
 }
 
+interface RebuildWait {
+    /** Aborted by the call's signal or once the budget is spent. */
+    readonly signal: AbortSignal;
+    /** The caller went away: no retry advice is owed. */
+    readonly cancelled: () => boolean;
+    dispose(): void;
+}
+
+/**
+ * The budget counts from `receivedAt`: time spent behind earlier calls in the page's tool queue
+ * shares the relay's deadline. The timer cannot fire during a synchronous kernel step, so the
+ * wait can run over by the length of one such step.
+ */
+function rebuildWait(signal?: AbortSignal, receivedAt?: number): RebuildWait {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const queued = receivedAt === undefined ? 0 : performance.now() - receivedAt;
+    const timer = setTimeout(abort, Math.max(0, EXPORT_REBUILD_WAIT_MS - queued));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    return {
+        signal: controller.signal,
+        cancelled: () => signal?.aborted === true,
+        dispose: () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", abort);
+        },
+    };
+}
+
+type ExportOutcome = { data: BlobPart[]; skipped: readonly string[] } | { error: DataExportError };
+
+async function exportNodes(
+    app: IApplication,
+    format: string,
+    nodes: VisualNode[],
+    options: DataExportOptions,
+): Promise<ExportOutcome> {
+    if (app.dataExchange.exportResult) {
+        const result = await app.dataExchange.exportResult(format, nodes, options);
+        return result.isOk ? result.value : { error: result.error };
+    }
+    const data = await app.dataExchange.export(format, nodes, options);
+    return data ? { data, skipped: [] } : { error: { kind: "failed", message: "no file was produced" } };
+}
+
+function exportErrorMessage(error: DataExportError, wait: RebuildWait): string {
+    if (error.kind === "rebuild-pending")
+        return wait.cancelled()
+            ? `Export cancelled while the model was rebuilding (${error.message})`
+            : `Rebuild in progress, nothing was exported (${error.message}); retry export_nodes once get_rebuild_status reports pending 0`;
+    if (error.kind === "no-geometry")
+        return `Export failed: ${error.message}; check the nodes' rebuild errors`;
+    return `Export failed: ${error.message}`;
+}
+
+function exportError(
+    document: IDocument,
+    error: DataExportError,
+    wait: RebuildWait,
+): Record<string, unknown> {
+    const message = exportErrorMessage(error, wait);
+    if (error.kind === "rebuild-pending")
+        return { error: message, rebuild: DocumentRebuilds.status(document) };
+    if (error.kind === "no-geometry") return { error: message, nodes: error.nodes };
+    return { error: message };
+}
+
 async function handleExportNodes(
     args: Record<string, unknown>,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
     context?: ToolCallContext,
 ): Promise<string> {
     const app = globalThis.app;
@@ -106,7 +182,7 @@ async function handleExportNodes(
     const formatError = validateFormat(app, format);
     if (formatError) return JSON.stringify({ error: formatError });
     const custom = args["linearTolerance"] !== undefined || args["angularTolerance"] !== undefined;
-    let options: DataExportOptions | undefined;
+    let options: DataExportOptions = {};
     if (custom) {
         if (format !== ".stl" && format !== ".stl binary")
             return JSON.stringify({ error: "Tessellation tolerances apply only to STL exports" });
@@ -124,27 +200,45 @@ async function handleExportNodes(
     if (mode !== "merged" && mode !== "separate")
         return JSON.stringify({ error: 'mode must be "merged" or "separate"' });
     if (mode === "separate")
-        return handleSeparateExport(app, doc, args, format, delivery, maxBytes, options, context?.caller);
+        return handleSeparateExport(
+            app,
+            doc,
+            args,
+            format,
+            delivery,
+            maxBytes,
+            options,
+            rebuildWait(signal, context?.receivedAt),
+            context?.caller,
+        );
 
     const nodes = resolveNodes(doc, args["ids"]);
     if (typeof nodes === "string") return JSON.stringify({ error: nodes });
     const visuals = nodes.filter((n): n is VisualNode => n instanceof VisualNode);
     if (visuals.length === 0) return JSON.stringify({ error: "no exportable nodes" });
 
-    const data = options
-        ? await app.dataExchange.export(format, visuals, options)
-        : await app.dataExchange.export(format, visuals);
-    if (!data) {
-        return JSON.stringify({ error: "export failed: no exportable geometry for this format" });
+    const wait = rebuildWait(signal, context?.receivedAt);
+    let outcome: ExportOutcome;
+    try {
+        outcome = await exportNodes(app, format, visuals, { ...options, signal: wait.signal });
+    } finally {
+        wait.dispose();
     }
+    if ("error" in outcome) return JSON.stringify(exportError(doc, outcome.error, wait));
 
     const filename = resolveFilename(visuals, format, args["filename"]);
+    const skipped = [...outcome.skipped];
     return deliverExport(
-        data,
+        outcome.data,
         {
             filename,
             mimeType: exportMimeType(format),
-            nodes: visuals.map((node) => node.id),
+            nodes: visuals.map((node) => node.id).filter((id) => !skipped.includes(id)),
+            ...(skipped.length > 0 && {
+                skipped,
+                warning:
+                    "Nodes without geometry after their rebuild were left out; check their rebuild errors",
+            }),
         },
         delivery,
         maxBytes,
@@ -157,6 +251,8 @@ interface ExportMetadata {
     mimeType: string;
     nodes: string[];
     outputs?: BatchExportOutput[];
+    skipped?: string[];
+    warning?: string;
 }
 
 interface BatchExportOutput {
@@ -225,7 +321,26 @@ async function handleSeparateExport(
     format: string,
     delivery: "download" | "base64" | "chunks",
     maxBytes: number,
-    options?: DataExportOptions,
+    options: DataExportOptions,
+    wait: RebuildWait,
+    caller?: string,
+): Promise<string> {
+    try {
+        return await exportSeparately(app, document, args, format, delivery, maxBytes, options, wait, caller);
+    } finally {
+        wait.dispose();
+    }
+}
+
+async function exportSeparately(
+    app: IApplication,
+    document: IDocument,
+    args: Record<string, unknown>,
+    format: string,
+    delivery: "download" | "base64" | "chunks",
+    maxBytes: number,
+    options: DataExportOptions,
+    wait: RebuildWait,
     caller?: string,
 ): Promise<string> {
     const ids = args["ids"];
@@ -246,6 +361,13 @@ async function handleSeparateExport(
     const names = new Set<string>();
     const exported: string[] = [];
     let accumulatedBytes = 0;
+    // Rebuild every requested node up front: a body evaluated only at its turn would find the
+    // budget spent by earlier writers and throw the finished outputs away.
+    const visuals = requested
+        .map((id) => document.modelManager.findNodes((candidate) => candidate.id === id)[0])
+        .filter((node): node is VisualNode => node instanceof VisualNode);
+    const rebuilt = await awaitExportRebuilds(visuals, wait.signal);
+    if (!rebuilt.isOk) return JSON.stringify(exportError(document, rebuilt.error, wait));
     for (const id of requested) {
         const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
         const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
@@ -267,14 +389,15 @@ async function handleSeparateExport(
         while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
         output.filename = filename;
         try {
-            const data = options
-                ? await app.dataExchange.export(format, [node], options)
-                : await app.dataExchange.export(format, [node]);
-            if (!data) {
-                output.error = "Export failed: no exportable geometry for this format";
+            const outcome = await exportNodes(app, format, [node], { ...options, signal: wait.signal });
+            if ("error" in outcome) {
+                // A rebuild started after the batch wait: stop instead of exporting stale geometry.
+                if (outcome.error.kind === "rebuild-pending")
+                    return JSON.stringify({ ...exportError(document, outcome.error, wait), outputs });
+                output.error = exportErrorMessage(outcome.error, wait);
                 continue;
             }
-            const blob = new Blob(data);
+            const blob = new Blob(outcome.data);
             accumulatedBytes += blob.size;
             if (accumulatedBytes > maxBytes) {
                 return JSON.stringify({
@@ -346,7 +469,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes. Waits about 60 s from the request (queue time included; a long synchronous kernel step can extend it) for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0. Merged exports list nodes left out for lack of geometry in skipped.",
             parameters: {
                 type: "object",
                 properties: {

@@ -256,6 +256,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         if (!tool) throw new McpError(ErrorCode.InvalidParams, `unknown tool "${name}"`);
         const caller = callerOf(request.params._meta as Record<string, unknown> | undefined);
         callers.add(caller);
+        const receivedAt = performance.now();
         const invoke = async () => {
             if (extra.signal.aborted) throw new McpError(ErrorCode.RequestTimeout, "cancelled");
             let result: CallToolResult;
@@ -265,6 +266,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
                     await withImageByteBudget(budget, () =>
                         tool.handler(args ?? {}, extra.signal, {
                             caller,
+                            receivedAt,
                             ...(isProgramJobTool(tool) && {
                                 scheduleMutation: (task: () => Promise<void>) => queue.run(task),
                             }),

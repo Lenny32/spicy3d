@@ -134,24 +134,6 @@ describe("DefaultDataExchange", () => {
         });
     });
 
-    describe("handleExportResult (private)", () => {
-        test("should return array with value when result is ok", () => {
-            const blobPart = "blob-data";
-            const result = (exchange as any).handleExportResult(Result.ok(blobPart));
-            expect(result).toEqual([blobPart]);
-        });
-
-        test("should return undefined when result is undefined", () => {
-            const result = (exchange as any).handleExportResult(undefined);
-            expect(result).toBeUndefined();
-        });
-
-        test("should return undefined when result is err", () => {
-            const result = (exchange as any).handleExportResult(Result.err("error"));
-            expect(result).toBeUndefined();
-        });
-    });
-
     describe("import", () => {
         test("should handle empty file list", async () => {
             const doc = {
@@ -438,6 +420,21 @@ describe("DefaultDataExchange", () => {
                 "error.default:{0}",
                 expect.stringContaining("only to STL"),
             );
+        });
+
+        test("returns the kernel's error to exportResult callers and toasts it from export", async () => {
+            const converter = stubShapeConverter();
+            converter.convertToSTL.mockReturnValue(Result.err("BRepMesh failed"));
+            const doc = createMockDocument();
+            const { node } = createShapeNode(doc, "mesh-failure");
+
+            const result = await exchange.exportResult(".stl binary", [node]);
+
+            expect(result.isOk).toBe(false);
+            expect(result.error).toEqual({ kind: "failed", message: "BRepMesh failed" });
+            expect(pubSpy).not.toHaveBeenCalled();
+            expect(await exchange.export(".stl binary", [node])).toBeUndefined();
+            expect(pubSpy).toHaveBeenCalledWith("showToast", "error.default:{0}", "BRepMesh failed");
         });
 
         test("should scale an STL export in cm by 0.1 and keep the physical size", async () => {
