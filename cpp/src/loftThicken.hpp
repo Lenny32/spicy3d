@@ -78,23 +78,23 @@ inline TopoDS_Shape recover(const TopoDS_Shape& input, double thickness)
     TopExp::MapShapes(input, TopAbs_SOLID, solids);
     TopExp::MapShapes(input, TopAbs_EDGE, edges);
     if (faces.Extent() != 1 || !solids.IsEmpty() || edges.IsEmpty() || edges.Extent() > 16)
-        return {};
+        return { };
     const auto surface = Handle(Geom_BSplineSurface)::DownCast(BRep_Tool::Surface(TopoDS::Face(faces.FindKey(1))));
     if (surface.IsNull() || surface->IsUPeriodic() || surface->IsVPeriodic())
-        return {};
+        return { };
     const int knots = surface->NbUKnots() + surface->NbVKnots();
     if (knots > 256)
-        return {};
+        return { };
     const int segments = std::max(64, 4 * knots);
     BRepBuilderAPI_Copy copy(input, true, false);
     const TopoDS_Shape source = copy.Shape();
     BRepOffsetAPI_MakeOffsetShape offset;
     offset.PerformBySimple(source, thickness);
     if (!offset.IsDone() || offset.Shape().IsNull())
-        return {};
+        return { };
     for (TopExp_Explorer offsetFaces(offset.Shape(), TopAbs_FACE); offsetFaces.More(); offsetFaces.Next())
         if (!rebuildBoundaryCurves(TopoDS::Face(offsetFaces.Current()), segments))
-            return {};
+            return { };
 
     BRepBuilderAPI_Sewing sewing(tolerance);
     sewing.SetMaxTolerance(tolerance);
@@ -104,12 +104,12 @@ inline TopoDS_Shape recover(const TopoDS_Shape& input, double thickness)
         const TopoDS_Edge edge = TopoDS::Edge(boundaries.Current());
         const auto generated = offset.Generated(edge);
         if (generated.Size() != 1 || generated.First().ShapeType() != TopAbs_EDGE)
-            return {};
+            return { };
         double first, last, offsetFirst, offsetLast;
         const auto curve = BRep_Tool::Curve(edge, first, last);
         const auto offsetCurve = BRep_Tool::Curve(TopoDS::Edge(generated.First()), offsetFirst, offsetLast);
         if (curve.IsNull() || offsetCurve.IsNull())
-            return {};
+            return { };
         GeomFill_Generator rim;
         rim.AddCurve(new Geom_TrimmedCurve(curve, first, last));
         rim.AddCurve(new Geom_TrimmedCurve(offsetCurve, offsetFirst, offsetLast));
@@ -118,23 +118,23 @@ inline TopoDS_Shape recover(const TopoDS_Shape& input, double thickness)
         rim.Perform(0);
         BRepBuilderAPI_MakeFace makeFace(rim.Surface(), Precision::Confusion());
         if (!makeFace.IsDone())
-            return {};
+            return { };
         sewing.Add(makeFace.Face());
     }
     sewing.Perform();
     const TopoDS_Shape sewn = sewing.SewedShape();
     if (sewn.IsNull() || sewn.ShapeType() != TopAbs_SHELL || sewing.NbFreeEdges() != 0)
-        return {};
+        return { };
     ShapeFix_Shell orient(TopoDS::Shell(sewn));
     orient.FixFaceOrientation(TopoDS::Shell(sewn));
     if (orient.NbShells() != 1)
-        return {};
+        return { };
     BRepBuilderAPI_MakeSolid solid(orient.Shell());
     if (!solid.IsDone())
-        return {};
+        return { };
     TopoDS_Solid result = solid.Solid();
     if (!BRepLib::OrientClosedSolid(result) || !BRepCheck_Analyzer(result, true, false, true).IsValid())
-        return {};
+        return { };
     return result;
 }
 }
