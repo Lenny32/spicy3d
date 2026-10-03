@@ -368,6 +368,33 @@ test("bounded simple thickening refuses a topologically valid wall with crossing
     }
 });
 
+test("bounded thickening reports a self-intersection analyzer failure instead of a generic worker error", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const shell = keep(unwrapOk(factory.shell(faces.slice(0, 5))));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const details = rs.spyOn(wasm.Shape, "selfIntersectionDetails").mockImplementation(() => {
+        throw new Error("Self-intersection check could not complete (result unknown)");
+    });
+    try {
+        const task = hybrid.shapeOperation({ method: "makeThickSolidBySimple", shape: shell, thickness: 1 });
+        await task.ready;
+        const result = task.take();
+        expect(details).toHaveBeenCalledTimes(1);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(
+            "Thicken result: Self-intersection check could not complete (result unknown)",
+        );
+        expect(result.error).not.toContain("Worker operation failed");
+    } finally {
+        details.mockRestore();
+        hybrid.dispose();
+    }
+});
+
 test("bounded thickening preserves the configured intersection face limit before creating a worker", async () => {
     const factory = new ShapeFactory();
     const box = keep(createBox(factory));

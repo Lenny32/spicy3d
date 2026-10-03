@@ -614,7 +614,14 @@ export class WorkerKernel {
                                 return this.geometryFailure(
                                     "Thicken requires self-intersection details; update the kernel build",
                                 );
-                            const diagnostic = details(shape);
+                            let diagnostic: string;
+                            try {
+                                diagnostic = details(shape);
+                            } catch (error) {
+                                return this.geometryFailure(
+                                    `Thicken result: ${error instanceof Error ? error.message : String(error)}`,
+                                );
+                            }
                             if (diagnostic) return this.geometryFailure(`Thicken result: ${diagnostic}`);
                         }
                         return { ok: true, value: this.exportReplica(shape) };

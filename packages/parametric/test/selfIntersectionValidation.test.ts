@@ -7,6 +7,8 @@ import {
     SELF_INTERSECTION_SKIPPED,
     validateSelfIntersection,
 } from "../src/features/selfIntersectionValidation";
+import "../src/features/thicken";
+import { featureHandler } from "../src/features/feature";
 
 test.each([
     [true, 1, 1, true],
@@ -83,6 +85,23 @@ test.each([
         }
         task.cancel();
         expect(dispose).toHaveBeenCalledTimes(error === undefined ? 0 : 1);
+    } finally {
+        rs.unstubAllGlobals();
+    }
+});
+
+test("strict thicken without diagnostic support evaluates on the main thread instead of failing", () => {
+    const shapeQuery = rs.fn();
+    rs.stubGlobal("shapeFactory", { boundedOperations: { shapeQuery } });
+    try {
+        const handler = featureHandler("thicken");
+        expect(handler?.prepareAsync).toBeInstanceOf(Function);
+        const pending = handler?.prepareAsync?.(
+            { type: "thicken", thickness: 1, mode: "skin" } as any,
+            { scope: {}, input: undefined } as any,
+        );
+        expect(pending).toBeUndefined();
+        expect(shapeQuery).toHaveBeenCalledTimes(0);
     } finally {
         rs.unstubAllGlobals();
     }

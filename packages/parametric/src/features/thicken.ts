@@ -79,12 +79,15 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
             : { ...feature, openFaces: resolvedProfiles },
 
     prepareAsync(feature, context) {
-        if (!feature.tolerant)
+        if (!feature.tolerant) {
+            // Without diagnostic support the step runs on the main thread, as in a synchronous rebuild.
+            if (!shapeFactory.boundedOperations?.selfIntersectionDetails) return undefined;
             return prepareValidatedFeature(
                 (preparedContext) => thickenHandler.evaluate(feature, preparedContext),
                 context,
                 true,
             );
+        }
         const failed = (message: string): IAsyncShapeOperation<IShape> => ({
             ready: Promise.resolve(),
             canFallback: false,

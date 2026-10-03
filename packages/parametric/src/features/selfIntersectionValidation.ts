@@ -36,17 +36,6 @@ export function prepareValidatedFeature(
 ): IAsyncShapeOperation<IShape> {
     const checks: IAsyncShapeOperation<boolean | string>[] = [];
     const failures = new Map<IAsyncShapeOperation<boolean | string>, string>();
-    if (strict && !shapeFactory.boundedOperations?.selfIntersectionDetails) {
-        return {
-            ready: Promise.resolve(),
-            canFallback: false,
-            cancel: () => {},
-            take: () =>
-                Result.err(
-                    "Thicken self-intersection validation requires a bounded worker with diagnostic support",
-                ),
-        };
-    }
     let result: Result<IShape>;
     try {
         result = evaluate({
