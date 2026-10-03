@@ -202,6 +202,9 @@ the way the UI picks them — by entities and points — and the refs are derive
   Re-sending the same datum expression keeps a clockwise side; sketchInfo reports effectiveDatum.
   { kind: "Scale", entities: [line1, line2], datum }    length(line1) = datum × length(line2)
   Entity keys: an id, a name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
+  Point indexes are zero-based; point: -1 selects the last point in constraints (points or refs)
+  and movePoint. For an open B-spline, point: 0 and point: -1 are its start and end; for a periodic
+  B-spline, -1 is the last fit point/control pole (a periodic curve has no endpoints).
   "direction": [u, v] rotates the axis of Horizontal/Vertical/HorizontalDistance/VerticalDistance.
   Explicit { kind, refs: [{entity, point}, ...] } in the solver layout also works for every solver kind.
   "datum" may be an expression naming document variables (e.g. "width / 2"). "name" names the constraint
@@ -239,6 +242,7 @@ sketch re-solves after each action and a failing one rolls everything back):
   geometry when only the offset outline should contribute to a loft. Removing the source or relation
   detaches the target. To close an open offset profile, Coincident may join a target endpoint
   to a movable line/arc endpoint: the connector follows the frozen target on fine solve.
+  Use {entity: "offsetName", point: -1} for the target's end without reading its fit-point array.
   Target centers/interior B-spline points, other target constraints, and connectors that are
   offset sources/targets, Blocked or Fixed at the joined endpoint are refused; detach first.
   Offset chains are refused; detach first to edit a target. Move/rotate in place keep the relation. Mirror/copy/paste detach transformed relations.

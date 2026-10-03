@@ -1120,6 +1120,144 @@ test("control NURBS authoring and later settings edit preserve pole and entity i
     expect(sketch.data).toEqual(previous);
 });
 
+test("last-point refs close an associative B-spline offset and follow distance changes", () => {
+    const doc = newDoc();
+    const points: [number, number][] = Array.from({ length: 10 }, (_, i) => [i * 3, Math.sin(i / 3) * 2]);
+    const result = run(doc, [
+        {
+            op: "sketch",
+            id: "wall",
+            entities: [{ type: "bspline", points, name: "outer" }],
+            constraints: [{ kind: "Block", entities: ["outer"] }],
+            actions: [
+                { action: "offset", entity: "outer", distance: 1, associative: true, name: "inner" },
+                {
+                    action: "add",
+                    entities: [
+                        { type: "line", params: [0, 0, 0, 1], name: "startCap" },
+                        { type: "line", params: [27, 0, 27, 1], name: "endCap" },
+                    ],
+                    constraints: [
+                        {
+                            kind: "Coincident",
+                            points: [
+                                { entity: "outer", point: 0 },
+                                { entity: "startCap", point: 0 },
+                            ],
+                        },
+                        {
+                            kind: "Coincident",
+                            points: [
+                                { entity: "inner", point: 0 },
+                                { entity: "startCap", point: -1 },
+                            ],
+                        },
+                        {
+                            kind: "Coincident",
+                            refs: [
+                                { entity: "outer", point: -1 },
+                                { entity: "endCap", point: 0 },
+                            ],
+                        },
+                        {
+                            kind: "Coincident",
+                            refs: [
+                                { entity: "inner", point: -1 },
+                                { entity: "endCap", point: -1 },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+        { op: "extrude", id: "solid", sketch: "wall", depth: 2 },
+    ]);
+    const sketch = sketchOf(doc, result, "wall");
+    const { outer, inner, endCap } = report(result, "wall").names;
+    const target = entity(sketch, inner);
+    expect(target.params.length / 2).toBeGreaterThan(points.length);
+    const endJoin = sketch.data.constraints.find(
+        (c) =>
+            c.kind === ConstraintKind.P2PCoincident &&
+            c.refs[0].entityId === inner &&
+            c.refs[1].entityId === endCap,
+    );
+    expect(endJoin?.refs).toEqual([
+        { entityId: inner, pointIndex: target.params.length / 2 - 1 },
+        { entityId: endCap, pointIndex: 1 },
+    ]);
+    expect(sketch.data.constraints.every((c) => c.refs.every((r) => r.pointIndex >= 0))).toBe(true);
+    const body = nodeById(doc, result.created.find((c) => c.id === "solid")!.nodeId) as ParametricBodyNode;
+    const initialVolume = body.shape.value.volume();
+    expect(initialVolume).toBeGreaterThan(0);
+    const link = sketch.data.constraints.find((c) => c.kind === ConstraintKind.Offset)!;
+    run(doc, [
+        {
+            op: "editSketch",
+            sketch: sketch.id,
+            actions: [{ action: "setDatum", constraint: link.id, value: 2 }],
+        },
+    ]);
+    expect(body.shape.value.volume()).toBeGreaterThan(initialVolume);
+    expect(entity(sketch, outer).params).toEqual(points.flat());
+    expect(entity(sketch, endCap).params.slice(2)).toEqual(entity(sketch, inner).params.slice(-2));
+});
+
+test.each([-2, 0.5, 10])("invalid B-spline point index %s rolls back the edit", (point) => {
+    const doc = newDoc();
+    const result = run(doc, [
+        {
+            op: "sketch",
+            id: "s",
+            entities: [
+                {
+                    type: "bspline",
+                    points: [
+                        [0, 0],
+                        [5, 2],
+                        [10, 0],
+                    ],
+                },
+            ],
+        },
+    ]);
+    const sketch = sketchOf(doc, result, "s");
+    const original = sketch.dataJson;
+    const id = sketch.data.entities[0].id;
+    const message = runExpectingFailure(doc, [
+        {
+            op: "editSketch",
+            sketch: sketch.id,
+            actions: [{ action: "movePoint", entity: id, point, to: [10, 5] }],
+        },
+    ]);
+    expect(message).toContain(`point ${point} does not exist on bspline ${id}`);
+    expect(sketch.dataJson).toBe(original);
+});
+
+test("movePoint resolves -1 to the last B-spline point", () => {
+    const doc = newDoc();
+    const result = run(doc, [
+        {
+            op: "sketch",
+            id: "s",
+            entities: [
+                {
+                    type: "bspline",
+                    points: [
+                        [0, 0],
+                        [5, 2],
+                        [10, 0],
+                    ],
+                    name: "curve",
+                },
+            ],
+            actions: [{ action: "movePoint", entity: "curve", point: -1, to: [12, 3] }],
+        },
+    ]);
+    expect(sketchOf(doc, result, "s").data.entities[0].params).toEqual([0, 0, 5, 2, 12, 3]);
+});
+
 test("associative offset loft follows edits and retains geometry with warnings live and after reopening", async () => {
     const doc = newDoc();
     const variables = (gap: number) => [
