@@ -53,6 +53,11 @@ export abstract class ShapeNode extends GeometryNode {
         return "icon-shape";
     }
 
+    /** A raw kernel mesh cannot replace a node's custom mesh generation or styling. */
+    get supportsCoarseDisplayMesh(): boolean {
+        return this.createMesh === ShapeNode.prototype.createMesh;
+    }
+
     protected setShape(shape: Result<IShape>) {
         if (this._shape.isOk && shape.isOk && this._shape.value.isEqual(shape.value)) {
             return;

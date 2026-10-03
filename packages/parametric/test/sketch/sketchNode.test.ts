@@ -67,6 +67,7 @@ describe("SketchNode", () => {
     });
 
     afterEach(() => {
+        rs.restoreAllMocks();
         restoreFactory?.();
         restoreFactory = undefined;
     });
@@ -419,6 +420,13 @@ describe("SketchNode", () => {
         };
         const node = new SketchNode({ document: doc, plane, data: square });
 
+        const buildFace = rs.spyOn(globalThis.shapeFactory, "face");
+        expect(node.displayMesh.faces).toBeUndefined();
+        expect(node.displayMesh.edges!.lineWidth).toBe(2);
+        expect(node.boundingBox()?.max.x).toBe(1);
+        expect(buildFace).not.toHaveBeenCalled();
+        expect(node.hasDeferredMesh).toBe(true);
+
         // Profile faces are shown by default so they stay pickable outside sketch editing.
         expect(node.showProfileFaces).toBe(true);
         expect(node.mesh.faces).toBeDefined();
@@ -426,12 +434,20 @@ describe("SketchNode", () => {
         expect(node.mesh.faces!.range[0].shape).toBe(face);
         expect(node.mesh.faces!.opacity).toBe(SKETCH_PROFILE_OPACITY);
         expect(node.mesh.edges!.lineWidth).toBe(2);
+        expect(buildFace).toHaveBeenCalledTimes(1);
+        expect(node.hasDeferredMesh).toBe(false);
+        expect(node.displayMesh).toBe(node.mesh);
+        buildFace.mockRestore();
 
         node.setShowProfileFaces(false);
+        expect(node.hasDeferredMesh).toBe(false);
+        expect(node.supportsCoarseDisplayMesh).toBe(false);
         expect(node.mesh.faces).toBeUndefined();
         expect(node.mesh.edges!.lineWidth).toBe(2);
 
         node.setShowProfileFaces(true);
+        expect(node.displayMesh.faces).toBeUndefined();
+        expect(node.hasDeferredMesh).toBe(true);
         expect(node.mesh.faces).toBeDefined();
         expect(node.mesh.faces!.range.length).toBe(1);
     });

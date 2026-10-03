@@ -86,10 +86,21 @@ export abstract class GeometryNode extends VisualNode {
         return this._mesh as any;
     }
 
+    /** Runtime-only mesh for passive display and fitting, before explicit picking/export. */
+    get displayMesh(): IShapeMeshData {
+        return this.mesh;
+    }
+
+    /** Whether passive display omits geometry that explicit mesh demand must build. */
+    get hasDeferredMesh(): boolean {
+        return false;
+    }
+
     override boundingBox(): BoundingBox | undefined {
-        let points = this.mesh.faces?.position;
+        const mesh = this.displayMesh;
+        let points = mesh.faces?.position;
         if (!points || points.length === 0) {
-            points = this.mesh.edges?.position;
+            points = mesh.edges?.position;
         }
 
         if (!points || points.length === 0) {

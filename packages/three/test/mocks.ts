@@ -60,6 +60,8 @@ export function createThreeMockVisualContext(visualMap?: Map<VisualNode, Mesh>):
             return new MeshBasicMaterial();
         },
         addNode() {},
+        queueMeshRefinement() {},
+        removeMeshRefinement() {},
         removeNode() {},
         dispose() {},
         getNode() {
@@ -203,6 +205,9 @@ export function createTestGeometryNode(
         },
         materialId: overrides.materialId ?? "mat-1",
         name: "test-geo",
+        get displayMesh() {
+            return (this as GeometryNode).mesh;
+        },
         mesh: {
             edges: hasEdges
                 ? ({

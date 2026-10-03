@@ -17,6 +17,7 @@ import {
     type IVisualContext,
     type IVisualObject,
     isDisposable,
+    Logger,
     type Material,
     type Matrix4,
     MeshDataUtils,
@@ -34,6 +35,7 @@ import {
     type ShapeType,
     ShapeTypes,
     Texture,
+    UserActivity,
     XY,
     XYZ,
 } from "@spicy3d/core";
@@ -64,6 +66,63 @@ import { ThreeHelper } from "./threeHelper";
 import { GroupVisualObject, ThreeComponentObject, ThreeMeshObject } from "./threeVisualObject";
 
 export class ThreeVisualContext implements IVisualContext {
+    /** Large batches start at coarser display quality; explicit demand always refines. */
+    useCoarseDisplayMesh = false;
+    private readonly meshRefinements = new Set<ThreeGeometry>();
+    private cancelRefinement?: () => void;
+
+    queueMeshRefinement(geometry: ThreeGeometry): void {
+        this.meshRefinements.add(geometry);
+        this.scheduleMeshRefinement();
+    }
+
+    removeMeshRefinement(geometry: ThreeGeometry): void {
+        this.meshRefinements.delete(geometry);
+        if (this.meshRefinements.size === 0) {
+            this.cancelRefinement?.();
+            this.cancelRefinement = undefined;
+        }
+    }
+
+    private scheduleMeshRefinement(): void {
+        if (this.cancelRefinement || this.meshRefinements.size === 0) return;
+        const refine = () => {
+            this.cancelRefinement = undefined;
+            if (UserActivity.current.isBusy(this.visual.document.application)) {
+                const timer = setTimeout(() => {
+                    this.cancelRefinement = undefined;
+                    this.scheduleMeshRefinement();
+                }, 100);
+                this.cancelRefinement = () => clearTimeout(timer);
+                return;
+            }
+            const geometry = this.meshRefinements.values().next().value;
+            if (geometry) {
+                this.meshRefinements.delete(geometry);
+                if (
+                    geometry.visible &&
+                    geometry.geometryNode.visible &&
+                    geometry.geometryNode.parentVisible
+                ) {
+                    try {
+                        geometry.buildMeshes();
+                        this.refreshAnalysisAppearance();
+                        this.visual.update();
+                    } catch {
+                        Logger.warn("Display mesh refinement failed; keeping the first-pass display");
+                    }
+                }
+            }
+            this.scheduleMeshRefinement();
+        };
+        if (typeof globalThis.requestIdleCallback === "function") {
+            const handle = globalThis.requestIdleCallback(refine);
+            this.cancelRefinement = () => globalThis.cancelIdleCallback(handle);
+        } else {
+            const timer = setTimeout(refine, 50);
+            this.cancelRefinement = () => clearTimeout(timer);
+        }
+    }
     private readonly analysisClips = new Map<string, { plane: Plane; token: symbol }>();
     private readonly priorClips = new WeakMap<object, ThreePlane[]>();
     private readonly appearanceLeases = new Map<
@@ -172,6 +231,9 @@ export class ThreeVisualContext implements IVisualContext {
     private readonly handleNodesLoaded = async (root: INode): Promise<void> => {
         const nodes: INode[] = [];
         NodeUtils.nodeOrChildrenAppendToNodes(nodes, root);
+        const coarseInitialBatch =
+            nodes.filter((node) => node instanceof GeometryNode && node.visible && node.parentVisible)
+                .length >= 100;
         const document = this.visual.document;
         const scope = DocumentMutations.captureScope(document);
         // Distinct from any body's feature progress, which can run concurrently.
@@ -185,7 +247,7 @@ export class ThreeVisualContext implements IVisualContext {
                 // Yield before the first mesh too, so the loading UI can paint.
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
                 if (this.disposed) return;
-                const add = () => this.addNode([nodes[index]]);
+                const add = () => this.addNode([nodes[index]], coarseInitialBatch);
                 if (scope) scope.run(add);
                 else add();
             }
@@ -208,6 +270,9 @@ export class ThreeVisualContext implements IVisualContext {
 
     dispose() {
         this.disposed = true;
+        this.cancelRefinement?.();
+        this.cancelRefinement = undefined;
+        this.meshRefinements.clear();
         this.analysisClips.clear();
         this.applyAnalysisClip();
         this.appearanceLeases.clear();
@@ -530,12 +595,18 @@ export class ThreeVisualContext implements IVisualContext {
         ThreeGeometry.buildMeshesIn(visual, true);
     }
 
-    addNode(nodes: INode[]) {
-        nodes.forEach((node) => {
-            if (!this._NodeVisualMap.has(node)) {
-                this.displayNode(node);
-            }
-        });
+    addNode(nodes: INode[], coarseInitialBatch = false) {
+        const additions = [...new Set(nodes)].filter((node) => !this._NodeVisualMap.has(node));
+        const previous = this.useCoarseDisplayMesh;
+        this.useCoarseDisplayMesh =
+            coarseInitialBatch ||
+            additions.filter((node) => node instanceof GeometryNode && node.visible && node.parentVisible)
+                .length >= 100;
+        try {
+            additions.forEach((node) => this.displayNode(node));
+        } finally {
+            this.useCoarseDisplayMesh = previous;
+        }
         if (this.appearanceLeases.size) this.refreshAnalysisAppearance();
     }
 

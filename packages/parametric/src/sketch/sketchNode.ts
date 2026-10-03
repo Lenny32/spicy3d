@@ -329,6 +329,17 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         this.emitPropertyChanged("mesh", oldMesh!);
     }
 
+    override get hasDeferredMesh(): boolean {
+        return this._showProfileFaces && this._mesh === undefined;
+    }
+
+    override get displayMesh(): IShapeMeshData {
+        if (!this.hasDeferredMesh) return this.mesh;
+        const mesh = super.createMesh();
+        if (mesh.edges !== undefined) mesh.edges.lineWidth = SKETCH_EDGE_LINE_WIDTH;
+        return mesh;
+    }
+
     protected override createMesh(): IShapeMeshData {
         const mesh = this.sketchMesh();
         if (mesh.edges !== undefined) mesh.edges.lineWidth = SKETCH_EDGE_LINE_WIDTH;
