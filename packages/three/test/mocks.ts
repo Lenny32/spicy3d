@@ -203,6 +203,9 @@ export function createTestGeometryNode(
         },
         materialId: overrides.materialId ?? "mat-1",
         name: "test-geo",
+        get displayMesh() {
+            return (this as GeometryNode).mesh;
+        },
         mesh: {
             edges: hasEdges
                 ? ({

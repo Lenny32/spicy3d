@@ -55,6 +55,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     private _vertexs?: Points;
     private _renderOnTop = false;
     private _meshesDirty = true;
+    private _displayOnly = false;
     private _buildingMeshes = false;
     private _disposed = false;
     private _temporaryFaces?: MeshLambertMaterial;
@@ -120,7 +121,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     }
 
     box() {
-        this.buildMeshes();
+        this.buildMeshes(false);
         return (
             this._faces?.geometry.boundingBox ??
             this._edges?.geometry.boundingBox ??
@@ -150,21 +151,27 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
 
     /** Passive rendering never demands geometry from hidden/consumed nodes. */
     buildVisibleMeshes(): void {
-        if (this.visible && this.geometryNode.visible && this.geometryNode.parentVisible) this.buildMeshes();
+        if (this.visible && this.geometryNode.visible && this.geometryNode.parentVisible)
+            this.buildMeshes(false);
     }
 
     /** Explicit demand (export, selected fitting, highlighting), independent of visibility. */
-    buildMeshes(): void {
-        if (this._disposed || !this._meshesDirty || this._buildingMeshes) return;
+    buildMeshes(includeDeferred = true): void {
+        if (
+            this._disposed ||
+            (!this._meshesDirty && !(includeDeferred && this._displayOnly)) ||
+            this._buildingMeshes
+        )
+            return;
         this._buildingMeshes = true;
         try {
-            this.generateMeshes();
+            this.generateMeshes(includeDeferred);
         } finally {
             this._buildingMeshes = false;
         }
     }
 
-    private generateMeshes(): void {
+    private generateMeshes(includeDeferred: boolean): void {
         // Read first so a failed mesh query does not discard the last displayed result.
         if (PerformanceTrace.enabled && this.geometryNode instanceof ShapeNode) {
             const shape = this.geometryNode.resolvedShape;
@@ -176,7 +183,8 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
                 });
             }
         }
-        const mesh = this.geometryNode.mesh;
+        const displayOnly = !includeDeferred && this.geometryNode.hasDeferredMesh;
+        const mesh = includeDeferred ? this.geometryNode.mesh : this.geometryNode.displayMesh;
         const vertexs = mesh?.vertexs;
         const faces = mesh?.faces;
         const edges = mesh?.edges;
@@ -185,6 +193,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
         if (faces?.position.length) this.initFaces(faces);
         if (edges?.position.length) this.initEdges(edges);
         this._meshesDirty = false;
+        this._displayOnly = displayOnly;
         if (this.locked) {
             this.locked = false;
             this.locked = true;

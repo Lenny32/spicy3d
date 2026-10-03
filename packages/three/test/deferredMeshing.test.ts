@@ -43,6 +43,16 @@ class CountingGeometry extends GeometryNode {
     }
 }
 
+class DeferredProfileGeometry extends CountingGeometry {
+    override get hasDeferredMesh(): boolean {
+        return this._mesh === undefined;
+    }
+
+    override get displayMesh(): IShapeMeshData {
+        return this._mesh ?? { ...this.data, faces: undefined };
+    }
+}
+
 /** Same child render policy as a parametric body's consumed tools, without a kernel. */
 class ConsumingBody extends CountingGeometry implements INodeLinkedList {
     private readonly childrenList: NodeChildList = new NodeChildList(this, () => false);
@@ -104,6 +114,34 @@ describe("deferred geometry", () => {
         expect(result).toBeInstanceOf(ThreeGeometry);
         return result as ThreeGeometry;
     }
+
+    test("profile faces stay deferred during load and fitting, then become raycastable on demand", () => {
+        const profile = new DeferredProfileGeometry({ document: doc, name: "profile" });
+        doc.modelManager.rootNode.add(profile);
+        const geo = visual(profile);
+        expect(geo.edges()).toBeDefined();
+        expect(geo.faces()).toBeUndefined();
+        expect(geo.boundingBox()?.max.x).toBe(1);
+        expect(profile.boundingBox()?.max.x).toBe(1);
+        context.refreshAnalysisAppearance();
+        expect(profile.builds).toBe(0);
+
+        const faces = geo.subShapeVisual(ShapeTypes.face);
+        const ray = new Raycaster(new Vector3(0.2, 0.2, 1), new Vector3(0, 0, -1));
+        ray.layers.enableAll();
+        expect(ray.intersectObjects(faces, false)).toHaveLength(1);
+        expect(profile.builds).toBe(1);
+        geo.buildVisibleMeshes();
+        geo.subShapeVisual(ShapeTypes.face);
+        expect(profile.builds).toBe(1);
+
+        profile.invalidate("mesh");
+        expect(geo.faces()).toBeUndefined();
+        expect(profile.builds).toBe(1);
+        geo.buildMeshes();
+        expect(ray.intersectObjects(geo.subShapeVisual(ShapeTypes.face), false)).toHaveLength(1);
+        expect(profile.builds).toBe(2);
+    });
 
     test("load builds only visible geometry, including a visible body but not its consumed tools", () => {
         const hidden = node("hidden");
