@@ -2904,12 +2904,13 @@ public:
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
         std::string detail;
+        bool bsplineInput = false;
         // Reuse the failed analyzer rather than running another offset or exact check.
         // Indices are zero-based and output faces need not correspond to input faces.
         try {
             NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outputFaces;
             TopExp::MapShapes(thickenedShape, TopAbs_FACE, outputFaces);
-            for (int i = 1; i <= std::min(outputFaces.Extent(), 64); ++i) {
+            for (int i = 1; i <= outputFaces.Extent(); ++i) {
                 if (!exact.IsValid(outputFaces.FindKey(i))) {
                     detail += "; exact validation failed on output face index " + std::to_string(i - 1);
                     break;
@@ -2930,6 +2931,7 @@ public:
                 }
             }
             if (!surface.IsNull()) {
+                bsplineInput = true;
                 detail += "; input B-spline face index " + std::to_string(densest - 1)
                     + " has " + std::to_string(surface->NbUKnots()) + " distinct U knots and "
                     + std::to_string(surface->NbVKnots()) + " distinct V knots (degrees "
@@ -2940,13 +2942,16 @@ public:
         } catch (const Standard_Failure&) {
             // A failed diagnostic must preserve the original validation error.
         }
+        // The loft advice only fits B-spline inputs (the tolerant envelope never reaches here with one).
         return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
                "(exact BRepCheck_Analyzer)"
             + detail
-            + "; for a loft, try compatible sections with the same B-spline degree, knots and multiplicities "
-              "(for example, control-point sections with one shared clamped knot vector). "
-              "A solid loft with open end faces may also help; neither workaround is guaranteed. "
-              "Otherwise change the thickness or smooth the sections";
+            + (bsplineInput
+                    ? "; for a loft, try compatible sections with the same B-spline degree, knots and multiplicities "
+                      "(for example, control-point sections with one shared clamped knot vector). "
+                      "A solid loft with open end faces may also help; neither workaround is guaranteed. "
+                      "Otherwise change the thickness or smooth the sections"
+                    : "; change the thickness or the input geometry");
     }
 
     static const char* offsetErrorName(BRepOffset_Error error)
