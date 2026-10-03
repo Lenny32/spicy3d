@@ -19,6 +19,7 @@ export * from "./documentFormat";
 export * from "./documentManifest";
 export * from "./documentMutations";
 export * from "./documentRebuilds";
+export * from "./exportRebuilds";
 export * from "./documentTransfer";
 export * from "./editor";
 export * from "./editSessions";

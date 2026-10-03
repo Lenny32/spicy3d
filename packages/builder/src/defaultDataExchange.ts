@@ -2,9 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DataExport,
     type DataExportError,
     type DataExportOptions,
-    DocumentRebuilds,
+    awaitExportRebuilds,
     EditableShapeNode,
     type ExportUnitHandling,
     exportLengthUnit,
@@ -149,7 +150,7 @@ export class DefaultDataExchange implements IDataExchange {
     ): Promise<BlobPart[] | undefined> {
         if (nodes.length === 0) return undefined;
         const result = await this.exportResult(type, nodes, options);
-        if (result.isOk) return result.value;
+        if (result.isOk) return result.value.data;
         if (result.error.kind === "no-geometry")
             PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
         else PubSub.default.pub("showToast", "error.default:{0}", result.error.message);
@@ -160,7 +161,7 @@ export class DefaultDataExchange implements IDataExchange {
         type: string,
         nodes: VisualNode[],
         options?: DataExportOptions,
-    ): Promise<Result<BlobPart[], DataExportError>> {
+    ): Promise<Result<DataExport, DataExportError>> {
         const failed = (message: string) => Result.err<DataExportError>({ kind: "failed", message });
         if (nodes.length === 0)
             return Result.err({ kind: "no-geometry", message: "No nodes to export", nodes: [] });
@@ -174,9 +175,10 @@ export class DefaultDataExchange implements IDataExchange {
         const unit = exportLengthUnit(this.exportUnitHandling(type), options?.lengthUnit);
         // Mesh formats and BREP have no unit field: the numbers themselves are converted.
         const scale = fromMillimetres(1, unit);
-        const rebuilt = await this.awaitRebuilds(nodes, options?.signal);
+        const rebuilt = await awaitExportRebuilds(nodes, options?.signal);
         if (!rebuilt.isOk) return Result.err(rebuilt.error);
         let shapeResult: Result<BlobPart> | undefined;
+        let skipped: readonly string[] = [];
         if (type === ".ply") {
             shapeResult = document.visual.meshExporter.exportToPly(nodes, true, { scale });
         } else if (type === ".ply binary") {
@@ -187,57 +189,28 @@ export class DefaultDataExchange implements IDataExchange {
             // STEP/IGES writers convert and record the unit themselves; the rest scale here.
             const shapes = this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
             if (!shapes.isOk) return Result.err(shapes.error);
+            skipped = shapes.value.skipped;
             // STL goes through the headless OCCT-mesh converter (not the Three.js
             // visual exporter), so the same path works in the browser and the MCP server.
-            if (type === ".stl") shapeResult = this.exportStl(document, shapes.value, false, options, scale);
+            if (type === ".stl")
+                shapeResult = this.exportStl(document, shapes.value.shapes, false, options, scale);
             if (type === ".stl binary")
-                shapeResult = this.exportStl(document, shapes.value, true, options, scale);
-            if (type === ".step") shapeResult = this.exportStep(document, shapes.value, unit);
-            if (type === ".iges") shapeResult = this.exportIges(document, shapes.value, unit);
-            if (type === ".brep") shapeResult = this.exportBrep(document, shapes.value);
+                shapeResult = this.exportStl(document, shapes.value.shapes, true, options, scale);
+            if (type === ".step") shapeResult = this.exportStep(document, shapes.value.shapes, unit);
+            if (type === ".iges") shapeResult = this.exportIges(document, shapes.value.shapes, unit);
+            if (type === ".brep") shapeResult = this.exportBrep(document, shapes.value.shapes);
         }
 
         if (!shapeResult) return failed(`Unsupported export format "${type}"`);
-        return shapeResult.isOk ? Result.ok([shapeResult.value]) : failed(String(shapeResult.error));
+        return shapeResult.isOk
+            ? Result.ok({ data: [shapeResult.value], skipped })
+            : failed(String(shapeResult.error));
     }
 
-    /**
-     * Hidden bodies may never have been evaluated. Demand every selected shape before
-     * awaiting: a pending getter returns last-good (or an initial error), not export data.
-     */
-    private async awaitRebuilds(
+    private getExportShapes(
         nodes: VisualNode[],
-        signal?: AbortSignal,
-    ): Promise<Result<void, DataExportError>> {
-        for (const node of nodes) if (node instanceof ShapeNode) void node.shape;
-        const documents = [...new Set(nodes.map((node) => node.document))];
-        const settled = Promise.all(documents.map((document) => DocumentRebuilds.settled(document)));
-        if (signal) {
-            let stop!: () => void;
-            const aborted = new Promise<void>((resolve) => {
-                stop = resolve;
-            });
-            const onAbort = () => stop();
-            if (signal.aborted) stop();
-            else signal.addEventListener("abort", onAbort, { once: true });
-            try {
-                await Promise.race([settled, aborted]);
-            } finally {
-                signal.removeEventListener("abort", onAbort);
-            }
-        } else {
-            await settled;
-        }
-        const pending = documents.filter((document) => DocumentRebuilds.pending(document));
-        if (pending.length === 0) return Result.ok(undefined);
-        const features = pending.flatMap((document) => DocumentRebuilds.status(document).featureIndexes);
-        return Result.err({
-            kind: "rebuild-pending",
-            message: `the model is still rebuilding${features.length ? ` (at feature ${features.join(", ")})` : ""}`,
-        });
-    }
-
-    private getExportShapes(nodes: VisualNode[], scale: number): Result<IShape[], DataExportError> {
+        scale: number,
+    ): Result<{ shapes: IShape[]; skipped: string[] }, DataExportError> {
         const selected = nodes.filter((node): node is ShapeNode => node instanceof ShapeNode);
         // Do not use the earlier getter results or start another lazy evaluation here.
         const shapes: IShape[] = [];
@@ -247,7 +220,7 @@ export class DefaultDataExchange implements IDataExchange {
             if (shape) shapes.push(this.scaled(shape.transformedMul(node.worldTransform()), scale));
             else missing.push(node.id);
         }
-        if (shapes.length) return Result.ok(shapes);
+        if (shapes.length) return Result.ok({ shapes, skipped: missing });
         return Result.err({
             kind: "no-geometry",
             message: selected.length

@@ -22,6 +22,8 @@ export interface ToolCallContext {
     caller?: string;
     /** MCP supplies this only to the actual built-in background-job tools. */
     scheduleMutation?: (task: () => Promise<void>) => Promise<void>;
+    /** `performance.now()` when the request arrived, before it waited in the page's tool queue. */
+    receivedAt?: number;
 }
 
 export interface ImagePart {

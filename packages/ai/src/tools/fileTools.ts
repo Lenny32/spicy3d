@@ -4,6 +4,7 @@
 import {
     type DataExportError,
     type DataExportOptions,
+    awaitExportRebuilds,
     DocumentRebuilds,
     download,
     I18n,
@@ -77,15 +78,29 @@ function resolveFilename(visuals: VisualNode[], format: string, filename: unknow
     return name;
 }
 
-/** The call's signal, also aborted after `EXPORT_REBUILD_WAIT_MS`; `dispose` clears the timer. */
-function rebuildWait(signal?: AbortSignal): { signal: AbortSignal; dispose(): void } {
+interface RebuildWait {
+    /** Aborted by the call's signal or once the budget is spent. */
+    readonly signal: AbortSignal;
+    /** The caller went away: no retry advice is owed. */
+    readonly cancelled: () => boolean;
+    dispose(): void;
+}
+
+/**
+ * The budget counts from `receivedAt`: time spent behind earlier calls in the page's tool queue
+ * shares the relay's deadline. The timer cannot fire during a synchronous kernel step, so the
+ * wait can run over by the length of one such step.
+ */
+function rebuildWait(signal?: AbortSignal, receivedAt?: number): RebuildWait {
     const controller = new AbortController();
     const abort = () => controller.abort();
-    const timer = setTimeout(abort, EXPORT_REBUILD_WAIT_MS);
+    const queued = receivedAt === undefined ? 0 : performance.now() - receivedAt;
+    const timer = setTimeout(abort, Math.max(0, EXPORT_REBUILD_WAIT_MS - queued));
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     return {
         signal: controller.signal,
+        cancelled: () => signal?.aborted === true,
         dispose: () => {
             clearTimeout(timer);
             signal?.removeEventListener("abort", abort);
@@ -93,7 +108,7 @@ function rebuildWait(signal?: AbortSignal): { signal: AbortSignal; dispose(): vo
     };
 }
 
-type ExportOutcome = { data: BlobPart[] } | { error: DataExportError };
+type ExportOutcome = { data: BlobPart[]; skipped: readonly string[] } | { error: DataExportError };
 
 async function exportNodes(
     app: IApplication,
@@ -103,24 +118,32 @@ async function exportNodes(
 ): Promise<ExportOutcome> {
     if (app.dataExchange.exportResult) {
         const result = await app.dataExchange.exportResult(format, nodes, options);
-        return result.isOk ? { data: result.value } : { error: result.error };
+        return result.isOk ? result.value : { error: result.error };
     }
     const data = await app.dataExchange.export(format, nodes, options);
-    return data ? { data } : { error: { kind: "failed", message: "no file was produced" } };
+    return data ? { data, skipped: [] } : { error: { kind: "failed", message: "no file was produced" } };
 }
 
-function exportError(document: IDocument, error: DataExportError): Record<string, unknown> {
+function exportErrorMessage(error: DataExportError, wait: RebuildWait): string {
     if (error.kind === "rebuild-pending")
-        return {
-            error: `Rebuild in progress, nothing was exported (${error.message}); retry export_nodes once get_rebuild_status reports pending 0`,
-            rebuild: DocumentRebuilds.status(document),
-        };
+        return wait.cancelled()
+            ? `Export cancelled while the model was rebuilding (${error.message})`
+            : `Rebuild in progress, nothing was exported (${error.message}); retry export_nodes once get_rebuild_status reports pending 0`;
     if (error.kind === "no-geometry")
-        return {
-            error: `Export failed: ${error.message}; check the nodes' rebuild errors`,
-            nodes: error.nodes,
-        };
-    return { error: `Export failed: ${error.message}` };
+        return `Export failed: ${error.message}; check the nodes' rebuild errors`;
+    return `Export failed: ${error.message}`;
+}
+
+function exportError(
+    document: IDocument,
+    error: DataExportError,
+    wait: RebuildWait,
+): Record<string, unknown> {
+    const message = exportErrorMessage(error, wait);
+    if (error.kind === "rebuild-pending")
+        return { error: message, rebuild: DocumentRebuilds.status(document) };
+    if (error.kind === "no-geometry") return { error: message, nodes: error.nodes };
+    return { error: message };
 }
 
 async function handleExportNodes(
@@ -185,7 +208,7 @@ async function handleExportNodes(
             delivery,
             maxBytes,
             options,
-            signal,
+            rebuildWait(signal, context?.receivedAt),
             context?.caller,
         );
 
@@ -194,23 +217,28 @@ async function handleExportNodes(
     const visuals = nodes.filter((n): n is VisualNode => n instanceof VisualNode);
     if (visuals.length === 0) return JSON.stringify({ error: "no exportable nodes" });
 
-    const wait = rebuildWait(signal);
+    const wait = rebuildWait(signal, context?.receivedAt);
     let outcome: ExportOutcome;
     try {
         outcome = await exportNodes(app, format, visuals, { ...options, signal: wait.signal });
     } finally {
         wait.dispose();
     }
-    if ("error" in outcome) return JSON.stringify(exportError(doc, outcome.error));
-    const data = outcome.data;
+    if ("error" in outcome) return JSON.stringify(exportError(doc, outcome.error, wait));
 
     const filename = resolveFilename(visuals, format, args["filename"]);
+    const skipped = [...outcome.skipped];
     return deliverExport(
-        data,
+        outcome.data,
         {
             filename,
             mimeType: exportMimeType(format),
-            nodes: visuals.map((node) => node.id),
+            nodes: visuals.map((node) => node.id).filter((id) => !skipped.includes(id)),
+            ...(skipped.length > 0 && {
+                skipped,
+                warning:
+                    "Nodes without geometry after their rebuild were left out; check their rebuild errors",
+            }),
         },
         delivery,
         maxBytes,
@@ -223,6 +251,8 @@ interface ExportMetadata {
     mimeType: string;
     nodes: string[];
     outputs?: BatchExportOutput[];
+    skipped?: string[];
+    warning?: string;
 }
 
 interface BatchExportOutput {
@@ -292,7 +322,25 @@ async function handleSeparateExport(
     delivery: "download" | "base64" | "chunks",
     maxBytes: number,
     options: DataExportOptions,
-    signal?: AbortSignal,
+    wait: RebuildWait,
+    caller?: string,
+): Promise<string> {
+    try {
+        return await exportSeparately(app, document, args, format, delivery, maxBytes, options, wait, caller);
+    } finally {
+        wait.dispose();
+    }
+}
+
+async function exportSeparately(
+    app: IApplication,
+    document: IDocument,
+    args: Record<string, unknown>,
+    format: string,
+    delivery: "download" | "base64" | "chunks",
+    maxBytes: number,
+    options: DataExportOptions,
+    wait: RebuildWait,
     caller?: string,
 ): Promise<string> {
     const ids = args["ids"];
@@ -313,62 +361,59 @@ async function handleSeparateExport(
     const names = new Set<string>();
     const exported: string[] = [];
     let accumulatedBytes = 0;
-    // One wait for the whole batch: a later node must not wait EXPORT_REBUILD_WAIT_MS again.
-    const wait = rebuildWait(signal);
-    try {
-        for (const id of requested) {
-            const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
-            const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
-            outputs.push(output);
-            if (!node || !(node instanceof VisualNode)) {
-                output.error = node ? "Node has no exportable visual geometry" : "Node not found";
+    // Rebuild every requested node up front: a body evaluated only at its turn would find the
+    // budget spent by earlier writers and throw the finished outputs away.
+    const visuals = requested
+        .map((id) => document.modelManager.findNodes((candidate) => candidate.id === id)[0])
+        .filter((node): node is VisualNode => node instanceof VisualNode);
+    const rebuilt = await awaitExportRebuilds(visuals, wait.signal);
+    if (!rebuilt.isOk) return JSON.stringify(exportError(document, rebuilt.error, wait));
+    for (const id of requested) {
+        const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
+        const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
+        outputs.push(output);
+        if (!node || !(node instanceof VisualNode)) {
+            output.error = node ? "Node has no exportable visual geometry" : "Node not found";
+            continue;
+        }
+        const safeName =
+            Array.from(node.name)
+                .map((character) =>
+                    character === "/" || character === "\\" || character.charCodeAt(0) < 32 ? "_" : character,
+                )
+                .join("") || "model";
+        const suffix = format.replace(" binary", "");
+        const base = safeName.toLowerCase().endsWith(suffix) ? safeName.slice(0, -suffix.length) : safeName;
+        let filename = `${base}${suffix}`;
+        let counter = 2;
+        while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
+        output.filename = filename;
+        try {
+            const outcome = await exportNodes(app, format, [node], { ...options, signal: wait.signal });
+            if ("error" in outcome) {
+                // A rebuild started after the batch wait: stop instead of exporting stale geometry.
+                if (outcome.error.kind === "rebuild-pending")
+                    return JSON.stringify({ ...exportError(document, outcome.error, wait), outputs });
+                output.error = exportErrorMessage(outcome.error, wait);
                 continue;
             }
-            const safeName =
-                Array.from(node.name)
-                    .map((character) =>
-                        character === "/" || character === "\\" || character.charCodeAt(0) < 32
-                            ? "_"
-                            : character,
-                    )
-                    .join("") || "model";
-            const suffix = format.replace(" binary", "");
-            const base = safeName.toLowerCase().endsWith(suffix)
-                ? safeName.slice(0, -suffix.length)
-                : safeName;
-            let filename = `${base}${suffix}`;
-            let counter = 2;
-            while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
-            output.filename = filename;
-            try {
-                const outcome = await exportNodes(app, format, [node], { ...options, signal: wait.signal });
-                if ("error" in outcome) {
-                    // Every later node waits for the same rebuilds: stop with nothing exported.
-                    if (outcome.error.kind === "rebuild-pending")
-                        return JSON.stringify({ ...exportError(document, outcome.error), outputs });
-                    output.error = exportError(document, outcome.error)["error"] as string;
-                    continue;
-                }
-                const blob = new Blob(outcome.data);
-                accumulatedBytes += blob.size;
-                if (accumulatedBytes > maxBytes) {
-                    return JSON.stringify({
-                        error: "Separate export exceeds maxBytes before archiving",
-                        bytes: accumulatedBytes,
-                        maxBytes,
-                        outputs,
-                    });
-                }
-                zip.file(filename, await blob.arrayBuffer());
-                names.add(filename.toLowerCase());
-                output.bytes = blob.size;
-                exported.push(id);
-            } catch {
-                output.error = "Export failed";
+            const blob = new Blob(outcome.data);
+            accumulatedBytes += blob.size;
+            if (accumulatedBytes > maxBytes) {
+                return JSON.stringify({
+                    error: "Separate export exceeds maxBytes before archiving",
+                    bytes: accumulatedBytes,
+                    maxBytes,
+                    outputs,
+                });
             }
+            zip.file(filename, await blob.arrayBuffer());
+            names.add(filename.toLowerCase());
+            output.bytes = blob.size;
+            exported.push(id);
+        } catch {
+            output.error = "Export failed";
         }
-    } finally {
-        wait.dispose();
     }
     if (exported.length === 0) return JSON.stringify({ error: "No batch outputs exported", outputs });
     let filename = (args["filename"] as string | undefined)?.trim() || "models.zip";
@@ -424,7 +469,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes. Waits up to 60 s for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes. Waits about 60 s from the request (queue time included; a long synchronous kernel step can extend it) for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0. Merged exports list nodes left out for lack of geometry in skipped.",
             parameters: {
                 type: "object",
                 properties: {

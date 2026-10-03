@@ -183,4 +183,17 @@ describe("DefaultDataExchange scheduled kernel export", () => {
         });
         expect(converter.convertToSTEP).not.toHaveBeenCalled();
     });
+
+    test("a merged export lists the bodies it left out for lack of geometry", async () => {
+        const good = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features()) });
+        const failed = new ParametricBodyNode({ document, featuresJson: JSON.stringify(features(0, true)) });
+        document.modelManager.addNode(good);
+        document.modelManager.addNode(failed);
+
+        const result = await new DefaultDataExchange().exportResult(".step", [good, failed]);
+
+        expect(result.isOk).toBe(true);
+        expect(result.value).toEqual({ data: ["step-data"], skipped: [failed.id] });
+        expect(converter.convertToSTEP.mock.calls[0][0]).toEqual([outputs[outputs.length - 1].placed]);
+    });
 });

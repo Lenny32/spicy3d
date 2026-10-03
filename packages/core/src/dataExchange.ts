@@ -42,6 +42,12 @@ export interface DataExportOptions {
  * rebuilding (retry later), `no-geometry` = none of the nodes has a shape after its rebuild
  * (`nodes` lists them), `failed` = the writer or kernel refused (`message` is its error).
  */
+/** A written file; `skipped` = selected shape nodes left out because they have no geometry. */
+export interface DataExport {
+    readonly data: BlobPart[];
+    readonly skipped: readonly string[];
+}
+
 export type DataExportError =
     | { readonly kind: "rebuild-pending"; readonly message: string }
     | { readonly kind: "no-geometry"; readonly message: string; readonly nodes: readonly string[] }
@@ -76,7 +82,7 @@ export interface IDataExchange {
         type: string,
         nodes: VisualNode[],
         options?: DataExportOptions,
-    ): Promise<Result<BlobPart[], DataExportError>>;
+    ): Promise<Result<DataExport, DataExportError>>;
 }
 
 /** The unit an export of `handling` actually writes, given the one asked for. */
