@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    DocumentMutations,
     FolderNode,
     Id,
     type INode,
@@ -317,6 +318,62 @@ describe("ModelManager", () => {
             expect(modelManager.components).toHaveLength(0);
             expect(modelManager.materials).toHaveLength(0);
             expect(modelManager.rootNode).not.toBeNull();
+        });
+
+        test("awaits initial visual observers while ordinary notifications stay synchronous", async () => {
+            const release = Promise.withResolvers<void>();
+            const rootId = Id.generate();
+            const childId = Id.generate();
+            const changes = rs.fn((_records: NodeRecord[]) => {});
+            const roots: string[] = [];
+            const initialized = rs.fn(async (root: INode) => {
+                roots.push(root.id);
+                roots.push(modelManager.findNode((node) => node.id === childId)!.id);
+                await release.promise;
+            });
+            modelManager.addNodeObserver(changes, initialized);
+            let finished = false;
+            const loading = modelManager
+                .deserialize({
+                    components: [],
+                    materials: [],
+                    nodes: [
+                        { [InternalClassName]: "FolderNode", name: "root", id: rootId },
+                        { [InternalClassName]: "FolderNode", name: "child", id: childId, parentId: rootId },
+                    ],
+                })
+                .then(() => {
+                    finished = true;
+                });
+            await Promise.resolve();
+            expect(roots).toEqual([rootId, childId]);
+            expect(finished).toBe(false);
+            expect(() => DocumentMutations.assertWritable(doc)).toThrow("wait for it to finish");
+            expect(changes).toHaveBeenCalledTimes(0);
+            release.resolve();
+            await loading;
+            expect(finished).toBe(true);
+            expect(DocumentMutations.isHeld(doc)).toBe(false);
+            modelManager.notifyNodeChanged([{ action: "add", node: modelManager.rootNode }]);
+            expect(changes).toHaveBeenCalledTimes(1);
+            expect(initialized).toHaveBeenCalledTimes(1);
+            modelManager.removeNodeObserver(changes);
+            expect(modelManager["_nodesLoadedObservers"].size).toBe(0);
+        });
+
+        test("a failed visual load releases its mutation hold", async () => {
+            const changes = rs.fn((_records: NodeRecord[]) => {});
+            modelManager.addNodeObserver(changes, async () => {
+                throw new Error("visual failed");
+            });
+            await expect(
+                modelManager.deserialize({
+                    components: [],
+                    materials: [],
+                    nodes: [{ [InternalClassName]: "FolderNode", name: "root", id: Id.generate() }],
+                }),
+            ).rejects.toThrow("visual failed");
+            expect(DocumentMutations.isHeld(doc)).toBe(false);
         });
 
         test("notifies once with the fully attached root after deserialize", async () => {
