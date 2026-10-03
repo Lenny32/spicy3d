@@ -118,6 +118,20 @@ if (${EMSCRIPTEN})
         --emit-tsd "${TARGET}.d.ts"
     )
 
+    option(SPICY_KERNEL_TESTS "Build standalone OCCT kernel regression tests" OFF)
+    if (SPICY_KERNEL_TESTS)
+        enable_testing()
+        add_executable(loft-thicken-test test/loftThicken.cpp)
+        target_include_directories(loft-thicken-test PRIVATE src ${OcctIncludeDirs})
+        target_link_libraries(loft-thicken-test PRIVATE occt)
+        target_compile_options(loft-thicken-test PRIVATE -Oz -flto -fwasm-exceptions)
+        target_link_options(loft-thicken-test PRIVATE -Oz -flto -fwasm-exceptions
+            -sWASM_LEGACY_EXCEPTIONS=1 -sENVIRONMENT=node -sSTACK_SIZE=16MB -sALLOW_MEMORY_GROWTH=1)
+        set_target_properties(loft-thicken-test PROPERTIES SUFFIX ".cjs")
+        add_test(NAME loft-thicken-seam COMMAND node $<TARGET_FILE:loft-thicken-test> seam)
+        add_test(NAME loft-thicken-degenerate COMMAND node $<TARGET_FILE:loft-thicken-test> degenerate)
+    endif()
+
     install(TARGETS ${TARGET} DESTINATION ${CMAKE_INSTALL_PREFIX})
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}.wasm DESTINATION ${CMAKE_INSTALL_PREFIX})
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}.d.ts DESTINATION ${CMAKE_INSTALL_PREFIX})

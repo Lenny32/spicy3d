@@ -20,6 +20,18 @@ npm run build:wasm
 
 After the compilation is completed, the target will be copied to the **packages/wasm/lib** directory.
 
+### Kernel regression tests
+
+The standalone OCCT tests call the loft thickening recovery helper directly, so a successful
+normal offset cannot hide a regression in the retry. After setting up the WASM toolchain, run
+these commands from `cpp/`:
+
+```bash
+cmake --preset release -DSPICY_KERNEL_TESTS=ON
+cmake --build build/target/release --target loft-thicken-test
+ctest --test-dir build/target/release --output-on-failure
+```
+
 ### C++ exceptions
 
 OCCT reports failures by throwing `Standard_Failure` subclasses. The Release build uses native
