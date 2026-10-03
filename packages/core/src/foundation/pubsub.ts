@@ -72,6 +72,8 @@ export interface PubSubEventMap {
         progress: { completed: number; total: number } | undefined,
     ) => void;
     toggleChatPanel: () => void;
+    /** Open (or close) the session error list in the viewport's bottom-left corner. */
+    toggleErrorPanel: () => void;
     viewClosed: (view: IView) => void;
     viewCursor: (cursor: CursorType) => void;
     visibleChanged: (model: INode) => void;

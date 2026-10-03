@@ -5,6 +5,7 @@ import {
     type CommandKeys,
     Config,
     debounce,
+    ErrorLog,
     I18n,
     type IApplication,
     type IWindow,
@@ -89,6 +90,7 @@ export class MainWindow extends HTMLElement implements IWindow {
         const displayHome = debounce(this.displayHome, 100);
         PubSub.default.sub("showToast", Toast.info);
         PubSub.default.sub("showActionToast", Toast.action);
+        ErrorLog.install();
         PubSub.default.sub("displayError", Toast.error);
         PubSub.default.sub("showDialog", showDialog);
         PubSub.default.sub("showAnalysisPanel", showAnalysisPanel);
