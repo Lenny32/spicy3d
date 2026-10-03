@@ -192,6 +192,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
             this.context.useCoarseDisplayMesh &&
             !this.geometryNode.hasDeferredMesh &&
             this.geometryNode instanceof ShapeNode &&
+            this.geometryNode.supportsCoarseDisplayMesh &&
             this.geometryNode.faceMaterialPair.length === 0
                 ? (
                       this.geometryNode.shape.unchecked() as

@@ -12,6 +12,7 @@ import {
     type IShapeMeshData,
     Matrix4,
     NodeChildList,
+    Result,
     ShapeTypes,
     UserActivity,
     VisualStates,
@@ -19,11 +20,12 @@ import {
 import { createMockSelection, createMockVisual, TestDocument } from "@spicy3d/core/test-utils";
 import { MeshLambertMaterial, Raycaster, Scene, Vector3 } from "three";
 import { CameraController } from "../src/cameraController";
+import { Constants } from "../src/constants";
 import { selectedEdgeMaterial } from "../src/materials";
 import { ThreeMeshExporter } from "../src/meshExporter";
 import { ThreeGeometry } from "../src/threeGeometry";
 import { ThreeHighlighter } from "../src/threeHighlighter";
-import type { ThreeView } from "../src/threeView";
+import { ThreeView } from "../src/threeView";
 import { ThreeVisualContext } from "../src/threeVisualContext";
 import { createTestGeometryNode } from "./mocks";
 
@@ -53,6 +55,15 @@ class DeferredProfileGeometry extends CountingGeometry {
 
     override get displayMesh(): IShapeMeshData {
         return this._mesh ?? { ...this.data, faces: undefined };
+    }
+}
+
+/** Like a sketch in an editing session: custom mesh styling, no deferred profile faces. */
+class StyledShapeNode extends EditableShapeNode {
+    protected override createMesh(): IShapeMeshData {
+        const mesh = super.createMesh();
+        if (mesh.edges) mesh.edges.lineWidth = 2;
+        return mesh;
     }
 }
 
@@ -120,7 +131,7 @@ describe("deferred geometry", () => {
         return result as ThreeGeometry;
     }
 
-    function progressiveNode() {
+    function progressiveNode(nodeClass = EditableShapeNode) {
         const data = createTestGeometryNode().mesh;
         const fine = { ...data, faces: { ...data.faces!, index: new Uint32Array([0, 1, 2, 0, 1, 2]) } };
         const fullMesh = rs.fn(() => fine);
@@ -131,10 +142,11 @@ describe("deferred geometry", () => {
                 return fullMesh();
             },
             createCoarseDisplayMesh: coarse,
+            isEqual: () => false,
             dispose() {},
         } as unknown as IShape;
-        const node = new EditableShapeNode({ document: doc, name: "progressive", shape });
-        return { node, fullMesh, coarse, disposeCoarse };
+        const node = new nodeClass({ document: doc, name: "progressive", shape });
+        return { node, shape, fullMesh, coarse, disposeCoarse };
     }
 
     function idleQueue() {
@@ -196,6 +208,75 @@ describe("deferred geometry", () => {
         idle.runNext();
         expect(first.fullMesh).toHaveBeenCalledTimes(1);
         expect(shapes[1].fullMesh).toHaveBeenCalledTimes(1);
+    });
+
+    test("custom mesh styling stays full quality inside a large initial batch", () => {
+        idleQueue();
+        const shapes = Array.from({ length: 100 }, () => progressiveNode());
+        const styled = progressiveNode(StyledShapeNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node), styled.node);
+        const geo = context.getVisual(styled.node) as ThreeGeometry;
+        expect(styled.node.hasDeferredMesh).toBe(false);
+        expect(styled.node.supportsCoarseDisplayMesh).toBe(false);
+        expect(styled.coarse).not.toHaveBeenCalled();
+        expect(styled.fullMesh).toHaveBeenCalledTimes(1);
+        expect(geo.edges()?.material.linewidth).toBe(2);
+        expect(geo.faces()?.geometry.index?.count).toBe(6);
+
+        const replacement = progressiveNode();
+        styled.node.shape = Result.ok(replacement.shape);
+        expect(replacement.coarse).not.toHaveBeenCalled();
+        expect(replacement.fullMesh).toHaveBeenCalledTimes(1);
+        expect(geo.edges()?.material.linewidth).toBe(2);
+    });
+
+    test("large initial batches do not enable coarse meshing for subsequent edits or additions", () => {
+        idleQueue();
+        const shapes = Array.from({ length: 100 }, () => progressiveNode());
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        expect(shapes[0].coarse).toHaveBeenCalledTimes(1);
+        expect(context.useCoarseDisplayMesh).toBe(false);
+        const replacement = progressiveNode();
+        shapes[0].node.shape = Result.ok(replacement.shape);
+        expect(replacement.coarse).not.toHaveBeenCalled();
+        expect(replacement.fullMesh).toHaveBeenCalledTimes(1);
+        expect((context.getVisual(shapes[0].node) as ThreeGeometry).faces()?.geometry.index?.count).toBe(6);
+
+        const addition = progressiveNode();
+        doc.modelManager.rootNode.add(addition.node);
+        expect(addition.coarse).not.toHaveBeenCalled();
+        expect(addition.fullMesh).toHaveBeenCalledTimes(1);
+    });
+
+    test("adding shapes individually never enables a coarse initial batch", () => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: 101 }, () => progressiveNode());
+        for (const item of shapes) doc.modelManager.rootNode.add(item.node);
+        expect(shapes.map((item) => item.coarse.mock.calls.length)).toEqual(Array(101).fill(0));
+        expect(shapes.map((item) => item.fullMesh.mock.calls.length)).toEqual(Array(101).fill(1));
+        expect(idle.callbacks.size).toBe(0);
+        expect(context.useCoarseDisplayMesh).toBe(false);
+    });
+
+    test("node hover raycasts the displayed meshes without refining bodies or generating profiles", () => {
+        idleQueue();
+        const shapes = Array.from({ length: 100 }, () => progressiveNode());
+        const profile = new DeferredProfileGeometry({ document: doc, name: "profile" });
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node), profile);
+        const ray = new Raycaster(new Vector3(0.2, 0.2, 1), new Vector3(0, 0, -1));
+        ray.layers.set(Constants.Layers.Solid);
+        const view = Object.create(ThreeView.prototype) as ThreeView;
+        Object.assign(view, {
+            document: doc,
+            content: context,
+            initRaycaster: () => ray,
+        });
+        const hits = view.detectVisual(0, 0);
+        expect(hits).toHaveLength(100);
+        expect(hits).toContain(context.getVisual(shapes[0].node));
+        expect(shapes.map((item) => item.fullMesh.mock.calls.length)).toEqual(Array(100).fill(0));
+        expect(profile.builds).toBe(0);
+        expect(visual(profile).faces()).toBeUndefined();
     });
 
     test("idle refinement waits while busy and cancels pending work on disposal", () => {

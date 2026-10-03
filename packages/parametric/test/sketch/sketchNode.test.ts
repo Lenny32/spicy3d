@@ -440,6 +440,8 @@ describe("SketchNode", () => {
         buildFace.mockRestore();
 
         node.setShowProfileFaces(false);
+        expect(node.hasDeferredMesh).toBe(false);
+        expect(node.supportsCoarseDisplayMesh).toBe(false);
         expect(node.mesh.faces).toBeUndefined();
         expect(node.mesh.edges!.lineWidth).toBe(2);
 

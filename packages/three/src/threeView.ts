@@ -1042,7 +1042,7 @@ export class ThreeView extends Observable implements IView {
         this.document.visual.context.visuals().forEach((x) => {
             if (!x.visible) return;
             if (x instanceof ThreeVisualObject && x.node.visible && x.node.parentVisible) {
-                if (x instanceof ThreeGeometry) x.buildMeshes();
+                if (x instanceof ThreeGeometry) x.buildVisibleMeshes();
                 visuals.push(...x.wholeVisual());
             } else if (x instanceof ThreeRefSegmentAnnotation) {
                 visuals.push(...x.wholeVisual());

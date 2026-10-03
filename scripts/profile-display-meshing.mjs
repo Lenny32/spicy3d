@@ -162,7 +162,16 @@ try {
                 if (!shape.isOk) throw new Error("Benchmark sphere could not be built");
                 nodes.push(new core.EditableShapeNode({ document, name: `sphere${i}`, shape: shape.value }));
             }
-            document.modelManager.rootNode.add(...nodes);
+            const sketch = core.Serializer.deserializeInstance({
+                __cla$$__: "SketchNode",
+                document,
+                plane: core.Plane.XY,
+                data: { entities: [{ id: 1, type: "circle", params: [0, 0, 1] }], constraints: [] },
+            });
+            sketch.setShowProfileFaces(false);
+            document.modelManager.rootNode.add(...nodes, sketch);
+            if (document.visual.context.getVisual(sketch).edges().material.linewidth !== 2)
+                throw new Error("Editing sketch lost its mesh styling in the large batch");
             if (!(await document.save()).isOk) throw new Error("Progressive document could not be saved");
             const id = document.id;
             await document.close();
@@ -172,6 +181,9 @@ try {
                 .filter((node) => node instanceof core.EditableShapeNode);
             const canonicalCount = () => bodies.filter((node) => node.shape.value._mesh !== undefined).length;
             const initialCanonical = canonicalCount();
+            const view = app.views.find((view) => view.document === opened);
+            view.detectVisual(0, 0);
+            const afterNodeHover = canonicalCount();
             opened.visual.context.getVisual(bodies[0]).subShapeVisual(core.ShapeTypes.face);
             const afterPicking = canonicalCount();
             const [handle, callback] = callbacks.entries().next().value;
@@ -180,9 +192,15 @@ try {
             const afterIdle = canonicalCount();
             await opened.close();
             const pendingAfterClose = callbacks.size;
-            if (initialCanonical !== 0 || afterPicking !== 1 || afterIdle !== 2 || pendingAfterClose !== 0)
+            if (
+                initialCanonical !== 0 ||
+                afterNodeHover !== 0 ||
+                afterPicking !== 1 ||
+                afterIdle !== 2 ||
+                pendingAfterClose !== 0
+            )
                 throw new Error("Progressive display did not defer/refine/cancel correctly");
-            return { initialCanonical, afterPicking, afterIdle, pendingAfterClose };
+            return { initialCanonical, afterNodeHover, afterPicking, afterIdle, pendingAfterClose };
         } finally {
             globalThis.requestIdleCallback = originalIdle;
             globalThis.cancelIdleCallback = originalCancel;

@@ -564,18 +564,16 @@ export class ThreeVisualContext implements IVisualContext {
     }
 
     addNode(nodes: INode[]) {
-        if (!this.useCoarseDisplayMesh && this._NodeVisualMap.size + nodes.length >= 100) {
-            const geometries = new Set([...this._NodeVisualMap.keys(), ...nodes]);
-            this.useCoarseDisplayMesh =
-                [...geometries].filter(
-                    (node) => node instanceof GeometryNode && node.visible && node.parentVisible,
-                ).length >= 100;
+        const additions = [...new Set(nodes)].filter((node) => !this._NodeVisualMap.has(node));
+        const previous = this.useCoarseDisplayMesh;
+        this.useCoarseDisplayMesh =
+            additions.filter((node) => node instanceof GeometryNode && node.visible && node.parentVisible)
+                .length >= 100;
+        try {
+            additions.forEach((node) => this.displayNode(node));
+        } finally {
+            this.useCoarseDisplayMesh = previous;
         }
-        nodes.forEach((node) => {
-            if (!this._NodeVisualMap.has(node)) {
-                this.displayNode(node);
-            }
-        });
         if (this.appearanceLeases.size) this.refreshAnalysisAppearance();
     }
 
