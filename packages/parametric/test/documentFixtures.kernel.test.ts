@@ -59,11 +59,29 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
             (n) => n instanceof ConstructionNode,
         ) as ConstructionNode[];
         expect(bodies.length + sketches.length + constructions.length).toBeGreaterThan(0);
+        // Frozen legacy fixtures include a square-to-circle skin whose thickened
+        // corners cross. Loading/saving remains lossless; that wall is now refused.
+        const hasCrossingWall = [
+            "v2/parametric5-thicken.json",
+            "v2/parametric15-tolerant-thicken.json",
+        ].includes(fixture.name);
+        if (hasCrossingWall) expect(bodies.map((body) => body.id)).toContain("body-wall");
         for (const body of bodies) {
             void body.shape;
-            expect(await body.whenRebuilt()).toBe(true);
-            expect(body.shape.isOk).toBe(true);
-            expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+            const rebuilt = await body.whenRebuilt();
+            if (hasCrossingWall && body.id === "body-wall") {
+                expect(rebuilt).toBe(false);
+                const errors = body.featureItems().filter((item) => item.error);
+                expect(errors).toHaveLength(1);
+                expect(errors[0].id).toBe("feature-wall");
+                expect(errors[0].error).toContain("Thicken result intersects itself");
+                expect(errors[0].error).toMatch(/output face indices \(zero-based\): \d/);
+                expect(errors[0].error).toContain("approximate faulty region center xyz (mm)");
+            } else {
+                expect(rebuilt).toBe(true);
+                expect(body.shape.isOk).toBe(true);
+                expect(body.featureItems().filter((item) => item.error)).toEqual([]);
+            }
         }
         for (const sketch of sketches) expect(sketch.shape.isOk).toBe(true);
         for (const construction of constructions) {

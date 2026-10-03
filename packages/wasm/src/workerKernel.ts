@@ -76,8 +76,11 @@ export class WorkerKernel {
                 return this.cornerSetbackReplica(request.args);
             case "checkSelfIntersectionReplica": {
                 const check = (
-                    m.Shape as unknown as { checkSelfIntersection?: (shape: TopoDS_Shape) => boolean }
-                ).checkSelfIntersection;
+                    m.Shape as unknown as {
+                        checkSelfIntersection?: (shape: TopoDS_Shape) => boolean;
+                        selfIntersectionDetails?: (shape: TopoDS_Shape) => string;
+                    }
+                )[request.args.details ? "selfIntersectionDetails" : "checkSelfIntersection"];
                 if (typeof check !== "function")
                     return {
                         ok: false,
@@ -101,7 +104,7 @@ export class WorkerKernel {
                             ok: true,
                             value: this.measure(
                                 "worker.kernel.operation",
-                                () => Boolean(check.call(m.Shape, shape)),
+                                () => check(shape),
                                 "checkSelfIntersection",
                             ),
                         };
@@ -600,6 +603,19 @@ export class WorkerKernel {
                                     ok: false,
                                     error: { code: "invalid", message: "Thick solid result is not a solid" },
                                 };
+                        }
+                        if (thicken) {
+                            const details = (
+                                m.Shape as unknown as {
+                                    selfIntersectionDetails?: (shape: TopoDS_Shape) => string;
+                                }
+                            ).selfIntersectionDetails;
+                            if (typeof details !== "function")
+                                return this.geometryFailure(
+                                    "Thicken requires self-intersection details; update the kernel build",
+                                );
+                            const diagnostic = details(shape);
+                            if (diagnostic) return this.geometryFailure(`Thicken result: ${diagnostic}`);
                         }
                         return { ok: true, value: this.exportReplica(shape) };
                     },

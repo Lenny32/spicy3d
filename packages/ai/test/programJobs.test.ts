@@ -34,6 +34,9 @@ function setup() {
             checkSelfIntersection: () => {
                 throw new Error("Check must not run on the main kernel");
             },
+            selfIntersectionDetails: () => {
+                throw new Error("Details must not run on the main kernel");
+            },
         });
     let settle!: () => void;
     let entered!: () => void;
@@ -63,6 +66,21 @@ function setup() {
                 box: () => Result.ok(shape()),
                 boundedOperations: {
                     shapeOperation,
+                    selfIntersectionDetails: (target: IShape, signal?: AbortSignal) => {
+                        const task = shapeOperation(
+                            { method: "selfIntersectionDetails", shape: target },
+                            signal,
+                        );
+                        return {
+                            ...task,
+                            take: () =>
+                                answer.isOk
+                                    ? Result.ok(
+                                          "output face indices (zero-based): 1 3; approximate faulty region center xyz (mm): (2, 4, 6)",
+                                      )
+                                    : Result.err(answer.error),
+                        };
+                    },
                     shapeQuery: (request: unknown, signal?: AbortSignal) => {
                         const task = shapeOperation(request, signal);
                         return {
@@ -427,4 +445,22 @@ test("recovery cancels queued jobs behind its FIFO slot without awaiting them", 
         state: "cancelled",
         error: "main kernel recovery",
     });
+});
+
+test("a completed self-intersection details job returns the diagnostic without a main-thread query", async () => {
+    const { entry, settle, shapeOperation } = setup();
+    const { call } = await connect();
+    const started = await call("start_program_job", {
+        ops: [boxOp, { id: "details", method: "shape.selfIntersectionDetails", target: "source" }],
+    });
+    await entry;
+    expect(shapeOperation).toHaveBeenCalledWith(
+        { method: "selfIntersectionDetails", shape: expect.any(MockShape) },
+        expect.any(AbortSignal),
+    );
+    settle();
+    const done = await terminal(call, started.jobId);
+    expect(done.state).toBe("completed");
+    expect(done.result.results.details).toContain("output face indices (zero-based): 1 3");
+    expect(done.result.results.details).toContain("(2, 4, 6)");
 });

@@ -554,6 +554,21 @@ export class OccShape implements IShape, IInspectionPrecheck {
         }
     }
 
+    selfIntersectionDetails(): Result<string> {
+        const binding = (
+            wasm.Shape as unknown as {
+                selfIntersectionDetails?: (shape: TopoDS_Shape) => string;
+            }
+        ).selfIntersectionDetails;
+        if (typeof binding !== "function")
+            return Result.err("Self-intersection details are not available in this kernel build");
+        try {
+            return Result.ok(binding(this.shape));
+        } catch (error) {
+            return Result.err(error instanceof Error ? error.message : String(error));
+        }
+    }
+
     checkFaces(): { index: number; isValid: boolean; status: string[] }[] {
         const vec = wasm.Shape.checkFaces(this.shape);
         const results: { index: number; isValid: boolean; status: string[] }[] = [];

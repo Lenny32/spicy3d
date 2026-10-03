@@ -335,3 +335,54 @@ test("rollback replica meshing retains render buffers and local picking but rele
         hybrid.dispose();
     }
 });
+
+test("self-intersection details travel through the bounded replica worker", async () => {
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const box = createBox(new ShapeFactory());
+    try {
+        const task = hybrid.selfIntersectionDetails(box);
+        await task.ready;
+        expect(unwrapOk(task.take())).toBe("");
+        const request = transport.requests.find(
+            (entry) => entry.type === "request" && entry.operation === "checkSelfIntersectionReplica",
+        );
+        expect(request).toMatchObject({ args: { details: true } });
+    } finally {
+        hybrid.dispose();
+        box.dispose();
+    }
+});
+
+test("bounded thicken rejects topologically valid output that intersects itself", async () => {
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const box = createBox(new ShapeFactory());
+    const details = rs
+        .spyOn(wasm.Shape, "selfIntersectionDetails")
+        .mockReturnValue(
+            "Shape intersects itself; output face indices (zero-based): 1 3; approximate faulty region center xyz (mm): (2, 4, 6)",
+        );
+    try {
+        const task = hybrid.shapeOperation({
+            method: "makeThickSolidByJoin",
+            shape: box,
+            closingFaces: [],
+            thickness: -1,
+            joinType: "arc",
+            mode: "skin",
+            intersection: false,
+        });
+        await task.ready;
+        const result = task.take();
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("Thicken result: Shape intersects itself");
+        expect(result.error).toContain("1 3");
+        expect(result.error).toContain("(2, 4, 6)");
+        expect(details).toHaveBeenCalledTimes(1);
+    } finally {
+        details.mockRestore();
+        hybrid.dispose();
+        box.dispose();
+    }
+});

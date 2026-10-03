@@ -423,6 +423,7 @@ export type BoundedShapeRequest =
 export type BoundedShapeQuery = { method: "checkSelfIntersection"; shape: IShape };
 
 export interface IBoundedShapeFactory {
+    selfIntersectionDetails?(shape: IShape, signal?: AbortSignal): IAsyncShapeOperation<string>;
     shapeQuery(request: BoundedShapeQuery, signal?: AbortSignal): IAsyncShapeOperation<boolean>;
     shapeOperation(request: BoundedShapeRequest, signal?: AbortSignal): IAsyncShapeOperation<IShape>;
 }
