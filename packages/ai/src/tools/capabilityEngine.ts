@@ -660,7 +660,7 @@ function coerceRefParam(
         case "ref":
             return resolveShape(v, doc, localRefs, consumed);
         case "refArray":
-            return (v as unknown[]).map((r) => resolveShape(r, doc, localRefs, consumed));
+            return coerceRefArray(p, v, doc, localRefs, consumed);
         case "curveRef":
         case "surfaceRef": {
             const entry = resolveRefEntry(v, doc, localRefs, consumed);
@@ -676,6 +676,53 @@ function coerceRefParam(
             if (typeof v === "string") return resolveShape(v, doc, localRefs, consumed);
             return coercePlane(p.name, v);
         }
+    }
+}
+
+/** The JSON type of an argument, for errors that must not echo the payload itself. */
+function typeOfArg(v: unknown): string {
+    if (v === null) return "null";
+    return Array.isArray(v) ? "array" : typeof v;
+}
+
+/**
+ * A refArray arg: an array of shape ref strings, resolved in order. A scalar ref is rejected
+ * rather than wrapped — the declared contract is an array — and a failing member is named by
+ * its index so the model can tell which operand to fix.
+ */
+function coerceRefArray(
+    p: ShapeCapabilityParam,
+    v: unknown,
+    doc: IDocument,
+    localRefs: Map<string, LocalRef>,
+    consumed: Set<string>,
+): IShape[] {
+    if (!Array.isArray(v)) {
+        const hint = typeof v === "string" ? ` (wrap a single ref in an array: ["ref"])` : "";
+        throw new Error(`${p.name} must be an array of shape refs, got ${typeOfArg(v)}${hint}`);
+    }
+    return v.map((r, i) => {
+        if (typeof r !== "string") {
+            throw new Error(`${p.name}[${i}] must be a shape ref string, got ${typeOfArg(r)}`);
+        }
+        try {
+            return resolveShape(r, doc, localRefs, consumed);
+        } catch (e) {
+            throw new Error(`${p.name}[${i}]: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    });
+}
+
+/** refArray params that take operands, so an empty list is a malformed call, not a no-op. */
+const NON_EMPTY_REF_ARRAYS: Record<string, readonly string[]> = {
+    booleanCommon: ["shape1", "shape2"],
+    booleanCut: ["shape1", "shape2"],
+    booleanFuse: ["shape1", "shape2"],
+};
+
+function checkNonEmptyRefArray(method: string, p: ShapeCapabilityParam, v: unknown): void {
+    if (Array.isArray(v) && v.length === 0 && NON_EMPTY_REF_ARRAYS[method]?.includes(p.name)) {
+        throw new Error(`${p.name} must list at least one shape ref, got an empty array`);
     }
 }
 
@@ -1394,7 +1441,11 @@ async function runShapeOp(
 ): Promise<void> {
     const consumed = new Set<string>();
     const params = owner.run(() => {
-        const values = cap.params.map((p) => coerce(p, op.args?.[p.name], doc, localRefs, consumed, numeric));
+        const values = cap.params.map((p) => {
+            const v = op.args?.[p.name];
+            checkNonEmptyRefArray(cap.method, p, v);
+            return coerce(p, v, doc, localRefs, consumed, numeric);
+        });
         closeProfileParam(cap, op, values, factory);
         return values;
     });

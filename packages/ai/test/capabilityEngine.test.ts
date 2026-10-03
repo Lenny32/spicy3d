@@ -1839,6 +1839,149 @@ describe("capabilityEngine", () => {
         });
     });
 
+    // refArray args are validated in the shared coercion, before any ref resolves or the kernel runs.
+    describe("refArray arguments", () => {
+        const solid = (label: string) =>
+            Result.ok({ label, shapeType: ShapeTypes.solid } as unknown as IShape);
+
+        function setup() {
+            const doc = new TestDocument();
+            (doc as { selection: unknown }).selection = {
+                clearSelection: () => {},
+                getSelectedNodes: () => [],
+            };
+            const booleans = {
+                booleanCommon: rs.fn((_a: IShape[], _b: IShape[]) => solid("common")),
+                booleanCut: rs.fn((_a: IShape[], _b: IShape[]) => solid("cut")),
+                booleanFuse: rs.fn((_a: IShape[], _b: IShape[], _simplify?: boolean) => solid("fuse")),
+            };
+            let count = 0;
+            const factory = { box: rs.fn(() => solid(`box${count++}`)), ...booleans };
+            const app = createMockApplication({ shapeProvider: { factory } as any });
+            (app as any).activeView = { document: doc };
+            rs.stubGlobal("app", app);
+            return { doc, factory, booleans };
+        }
+
+        async function run(ops: Record<string, unknown>[]) {
+            const tool = buildCapabilityTools()[0];
+            return JSON.parse((await tool.handler({ ops })) as string);
+        }
+
+        const boxes = [
+            { id: "a", method: "box", args: { dx: 1, dy: 1, dz: 1 } },
+            { id: "b", method: "box", args: { dx: 2, dy: 2, dz: 2 } },
+        ];
+        const methods = ["booleanCommon", "booleanCut", "booleanFuse"] as const;
+
+        afterEach(() => {
+            rs.unstubAllGlobals();
+        });
+
+        test.each(
+            methods.flatMap((method) => [
+                { method, shape1: "a", expected: "shape1 must be an array of shape refs, got string" },
+                { method, shape1: null, expected: "shape1 must be an array of shape refs, got null" },
+                {
+                    method,
+                    shape1: { ref: "a" },
+                    expected: "shape1 must be an array of shape refs, got object",
+                },
+                {
+                    method,
+                    shape1: [],
+                    expected: "shape1 must list at least one shape ref, got an empty array",
+                },
+                { method, shape1: ["a", 7], expected: "shape1[1] must be a shape ref string, got number" },
+                {
+                    method,
+                    shape1: [{ ref: "a" }],
+                    expected: "shape1[0] must be a shape ref string, got object",
+                },
+            ]),
+        )("$method rejects shape1 = $shape1 naming the op and parameter", async ({
+            method,
+            shape1,
+            expected,
+        }) => {
+            const { booleans } = setup();
+            await expect(
+                run([...boxes, { id: "r", method, args: { shape1, shape2: ["b"] } }]),
+            ).rejects.toThrow(`op "${method}" (id "r") failed: ${expected}`);
+            expect(booleans[method].mock.calls.length).toBe(0);
+        });
+
+        test("a scalar string ref suggests the array form without echoing the payload", async () => {
+            setup();
+            const secret = "not-a-ref-but-some-long-user-payload";
+            const error = await run([
+                ...boxes,
+                { method: "booleanCommon", args: { shape1: secret, shape2: ["b"] } },
+            ])
+                .then(() => undefined)
+                .catch((e: Error) => e);
+            expect(error).toBeInstanceOf(Error);
+            expect(error!.message).toContain('wrap a single ref in an array: ["ref"]');
+            expect(error!.message).not.toContain(secret);
+        });
+
+        test.each(methods)("%s reports a missing required array before resolving refs", async (method) => {
+            const { booleans } = setup();
+            await expect(run([...boxes, { id: "r", method, args: { shape1: ["a"] } }])).rejects.toThrow(
+                `op "${method}" (id "r") failed: ai.error.missingParam`,
+            );
+            expect(booleans[method].mock.calls.length).toBe(0);
+        });
+
+        test.each(methods)("%s names the index of an unknown ref member", async (method) => {
+            const { booleans } = setup();
+            await expect(
+                run([...boxes, { id: "r", method, args: { shape1: ["a"], shape2: ["b", "zz"] } }]),
+            ).rejects.toThrow(`op "${method}" (id "r") failed: shape2[1]: ai.error.unknownRef`);
+            expect(booleans[method].mock.calls.length).toBe(0);
+        });
+
+        test.each(methods)("%s accepts one-element arrays", async (method) => {
+            const { booleans } = setup();
+            const extra = method === "booleanFuse" ? { simplifyShape: false } : {};
+            const result = await run([
+                ...boxes,
+                { id: "r", method, args: { shape1: ["a"], shape2: ["b"], ...extra } },
+            ]);
+            expect(booleans[method].mock.calls.length).toBe(1);
+            const [left, right] = booleans[method].mock.calls[0];
+            expect(left.map((s) => (s as unknown as { label: string }).label)).toEqual(["box0"]);
+            expect(right.map((s) => (s as unknown as { label: string }).label)).toEqual(["box1"]);
+            expect(result.created.map((c: { id: string }) => c.id)).toEqual(["a", "b", "r"]);
+        });
+
+        test("a malformed boolean after valid creation rolls back, and the next valid program runs", async () => {
+            const { doc, booleans } = setup();
+            const before = doc.modelManager.findNodes().map((n) => n.id);
+            const undoBefore = doc.history.undoCount();
+
+            await expect(
+                run([...boxes, { id: "r", method: "booleanCommon", args: { shape1: ["a"], shape2: "b" } }]),
+            ).rejects.toThrow('op "booleanCommon" (id "r") failed: shape2 must be an array of shape refs');
+
+            expect(booleans.booleanCommon.mock.calls.length).toBe(0);
+            expect(doc.modelManager.findNodes().map((n) => n.id)).toEqual(before);
+            expect(doc.history.undoCount()).toBe(undoBefore);
+            // The rolled-back boxes' refs are gone with them.
+            await expect(run([{ id: "v", method: "shape.shapeType", target: "a" }])).rejects.toThrow(
+                "ai.error.unknownRef",
+            );
+
+            const result = await run([
+                ...boxes,
+                { id: "r", method: "booleanCommon", args: { shape1: ["a"], shape2: ["b"] } },
+            ]);
+            expect(booleans.booleanCommon.mock.calls.length).toBe(1);
+            expect(result.created.map((c: { id: string }) => c.id)).toEqual(["a", "b", "r"]);
+            expect(doc.history.undoCount()).toBe(undoBefore + 1);
+        });
+    });
+
     // Ops are synchronous: a cancellation is seen between ops, never inside one.
     describe("cancellation and slow ops", () => {
         function setup(factory: Record<string, unknown>) {
