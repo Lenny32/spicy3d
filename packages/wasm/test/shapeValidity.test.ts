@@ -310,7 +310,9 @@ describe("checkSelfIntersection is feature-detected on the kernel build", () => 
 
     test("the committed binary has the binding: a box has no self-intersection", () => {
         expect(typeof shapeClass().checkSelfIntersection).toBe("function");
-        expect(unwrapOk(occBox().checkSelfIntersection())).toBe(true);
+        const box = occBox();
+        expect(unwrapOk(box.checkSelfIntersection())).toBe(true);
+        expect(unwrapOk(box.selfIntersectionDetails())).toBe("");
     });
 
     test("the committed binary's binding finds a prism of a self-crossing (bow-tie) outline", () => {
@@ -328,6 +330,9 @@ describe("checkSelfIntersection is feature-detected on the kernel build", () => 
         const face = keep(unwrapOk(factory.face([bowTie])));
         const prism = keep(unwrapOk(factory.prism(face, new XYZ(0, 0, 5)))) as unknown as OccShape;
         expect(unwrapOk(prism.checkSelfIntersection())).toBe(false);
+        const details = unwrapOk(prism.selfIntersectionDetails());
+        expect(details).toMatch(/output face indices \(zero-based\): \d/);
+        expect(details).toContain("approximate faulty region center xyz (mm)");
     });
 
     test.each([true, false])("a present binding answers %s", (answer) => {

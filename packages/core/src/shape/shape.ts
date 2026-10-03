@@ -82,6 +82,10 @@ export interface IShape extends IDisposable {
      * build has no such check.
      */
     checkSelfIntersection?(): Result<boolean>;
+    /** Empty when clean; otherwise output face indices and approximate faulty region xyz (mm).
+     * An error means the check could not complete. Use the bounded worker for expensive shapes.
+     */
+    selfIntersectionDetails?(): Result<string>;
     /** @unit length tolerance */
     fixShape(tolerance: number): IShape;
     /** @unit length tolerance */

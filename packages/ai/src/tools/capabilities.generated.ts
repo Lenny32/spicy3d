@@ -674,6 +674,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "shape.selfIntersectionDetails",
+        name: "selfIntersectionDetails",
+        owner: "shape",
+        family: "shape",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "shape.fixShape",
         name: "fixShape",
         owner: "shape",
@@ -2152,6 +2160,7 @@ shape.* (target must be a shape):
   shape.checkShape(target) -> boolean
   shape.checkFaces(target) -> { index: number; isValid: boolean; status: string[]; }[]
   shape.checkSelfIntersection(target) -> Result<boolean, string>
+  shape.selfIntersectionDetails(target) -> Result<string, string>
   shape.fixShape(target, tolerance: length) -> shape ref (registered under the op id)
   shape.fixSmallFace(target, tolerance: length) -> shape ref (registered under the op id)
   shape.fixSolid(target, tolerance: length) -> shape ref (registered under the op id)

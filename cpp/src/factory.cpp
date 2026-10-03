@@ -870,9 +870,9 @@ static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& 
             return fail("Projected cap face is invalid");
         // A solid cap can be reversed relative to the projection plane. MakeFace normalizes
         // its outer wire but not the added holes; orient every wire in the planar footprint.
-        ShapeFix_Face fix(makeFace.Face());
-        fix.FixOrientation();
-        TopoDS_Face projectedFace = fix.Face();
+        ShapeFix_Face projectedFaceFixer(makeFace.Face());
+        projectedFaceFixer.FixOrientation();
+        TopoDS_Face projectedFace = projectedFaceFixer.Face();
         if (!BRepCheck_Analyzer(projectedFace).IsValid())
             return fail("Projected cap face is invalid");
         GProp_GProps area;

@@ -5,6 +5,7 @@
 #include <emscripten/val.h>
 
 #include <BOPAlgo_ArgumentAnalyzer.hxx>
+#include <BOPAlgo_CheckResult.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -52,6 +53,8 @@
 #include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
+#include <sstream>
+#include <stdexcept>
 
 #include "faceValidation.hpp"
 #include "guard.hpp"
@@ -139,6 +142,64 @@ class Shape {
                 return false;
         }
         return hasSolid || testOne(shape);
+    }
+
+    // Empty = proven clean. Coordinates describe the faulty region's bounding-box
+    // center, not an exact intersection point. Face indices belong to the queried output.
+    static std::string selfIntersectionDiagnostic(const TopoDS_Shape& shape)
+    {
+        if (shape.IsNull())
+            throw std::runtime_error("Self-intersection check requires a non-null shape");
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+        TopExp::MapShapes(shape, TopAbs_FACE, faces);
+        auto testOne = [&](const TopoDS_Shape& part) -> std::string {
+            BOPAlgo_ArgumentAnalyzer analyzer;
+            analyzer.SetShape1(part);
+            analyzer.SelfInterMode() = true;
+            analyzer.StopOnFirstFaulty() = true;
+            analyzer.Perform();
+            if (!analyzer.HasFaulty())
+                return "";
+            for (const auto& fault : analyzer.GetCheckResult()) {
+                if (fault.GetCheckStatus() != BOPAlgo_SelfIntersect)
+                    throw std::runtime_error("Self-intersection check could not complete (result unknown)");
+            }
+            const auto& faulty = analyzer.GetCheckResult().First().GetFaultyShapes1();
+            std::ostringstream message;
+            message << "Shape intersects itself; output face indices (zero-based):";
+            bool located = false;
+            for (int i = 1; i <= faces.Extent(); ++i) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> members;
+                TopExp::MapShapes(faces.FindKey(i), members);
+                for (const auto& subshape : faulty) {
+                    if (members.Contains(subshape)) {
+                        message << " " << i - 1;
+                        located = true;
+                        break;
+                    }
+                }
+            }
+            if (!located)
+                message << " unavailable";
+            Bnd_Box region;
+            for (const auto& subshape : faulty)
+                BRepBndLib::Add(subshape, region, false);
+            if (!region.IsVoid() && !region.IsOpen()) {
+                double x0, y0, z0, x1, y1, z1;
+                region.Get(x0, y0, z0, x1, y1, z1);
+                message << "; approximate faulty region center xyz (mm): ("
+                        << (x0 + x1) / 2 << ", " << (y0 + y1) / 2 << ", " << (z0 + z1) / 2 << ")";
+            }
+            return message.str();
+        };
+        bool hasSolid = false;
+        for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) {
+            hasSolid = true;
+            const auto diagnostic = testOne(it.Current());
+            if (!diagnostic.empty())
+                return diagnostic;
+        }
+        return hasSolid ? "" : testOne(shape);
     }
 
     // The self-interference test of an inspection input: skipped (true) above the face limit.
@@ -430,6 +491,11 @@ public:
 
     // True when `shape` has no self-intersection (see selfIntersectionFree). Not bounded:
     // pairwise face intersection, expensive on shapes with many faces.
+    static std::string selfIntersectionDetails(const TopoDS_Shape& shape)
+    {
+        return selfIntersectionDiagnostic(shape);
+    }
+
     static bool checkSelfIntersection(const TopoDS_Shape& shape)
     {
         return selfIntersectionFree(shape);
@@ -914,6 +980,7 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("splitShapes", guardedEntry<&Shape::splitShapes>("Shape.splitShapes"))
         .class_function("check", guardedEntry<&Shape::check>("Shape.check"))
         .class_function("checkFaces", guardedEntry<&Shape::checkFaces>("Shape.checkFaces"))
+        .class_function("selfIntersectionDetails", guardedEntry<&Shape::selfIntersectionDetails>("Shape.selfIntersectionDetails"))
         .class_function("checkSelfIntersection", guardedEntry<&Shape::checkSelfIntersection>("Shape.checkSelfIntersection"))
         .class_function("hlr", guardedEntry<&Shape::hlr>("Shape.hlr"))
         .class_function("shellSewing", guardedEntry<&Shape::shellSewing>("Shape.shellSewing"))

@@ -418,3 +418,36 @@ test("sketch extrude combines offload with the same ordered stable ids as a sync
     }
     expect(requests()).toHaveLength(12);
 });
+
+test("thicken diagnostics stop the rebuild before a downstream outline common", async () => {
+    factory = new ShapeFactory(hybrid, hybrid);
+    rs.stubGlobal("shapeFactory", factory);
+    const { body } = model(1);
+    await DocumentRebuilds.settled(document);
+    expect(body.shape.isOk).toBe(true);
+    const previous = body.shape.value;
+    const base = body.features[0];
+    expect(base.type).toBe("extrude");
+    if (base.type !== "extrude") throw new Error("Expected extrude base feature");
+    const diagnostic = rs
+        .spyOn(wasm.Shape, "selfIntersectionDetails")
+        .mockReturnValue(
+            "Shape intersects itself; output face indices (zero-based): 2 4; approximate faulty region center xyz (mm): (3, 5, 7)",
+        );
+    const common = rs.spyOn(factory, "booleanCommonTracked");
+    body.setFeaturesEmitShapeChanged([
+        base,
+        { id: "wall", type: "thicken", thickness: -1 },
+        { ...base, id: "outline", operation: "common" },
+    ]);
+    void body.shape;
+    await DocumentRebuilds.settled(document);
+    const items = body.featureItems();
+    expect(await body.whenRebuilt()).toBe(false);
+    expect(body.shape.value).toBe(previous);
+    expect(items[1].error).toContain("Thicken result intersects itself");
+    expect(items[1].error).toContain("output face indices (zero-based): 2 4");
+    expect(items[1].error).toContain("(3, 5, 7)");
+    expect(diagnostic).toHaveBeenCalledTimes(1);
+    expect(common).not.toHaveBeenCalled();
+});

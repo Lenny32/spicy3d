@@ -926,6 +926,7 @@ interface EmbindModule {
     sectionSS(_0: TopoDS_Shape, _1: TopoDS_Shape): TopoDS_Shape;
     isClosed(_0: TopoDS_Shape): boolean;
     check(_0: TopoDS_Shape): boolean;
+    selfIntersectionDetails(_0: TopoDS_Shape): string;
     checkSelfIntersection(_0: TopoDS_Shape): boolean;
     hlr(_0: TopoDS_Shape, _1: gp_Pnt, _2: gp_Dir, _3: gp_Dir): TopoDS_Shape;
     shellSewing(_0: TopoDS_Shape, _1: number): TopoDS_Shape;

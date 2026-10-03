@@ -343,7 +343,7 @@ test("bounded fuse applies requested simplification before exporting its replica
     }
 });
 
-test("bounded simple thickening repairs the existing open-shell result orientation", async () => {
+test("bounded simple thickening refuses a topologically valid wall with crossing faces", async () => {
     const factory = new ShapeFactory();
     const box = keep(createBox(factory));
     const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
@@ -354,13 +354,43 @@ test("bounded simple thickening repairs the existing open-shell result orientati
     try {
         const task = hybrid.shapeOperation({ method: "makeThickSolidBySimple", shape: shell, thickness: 1 });
         await task.ready;
-        const result = keep(unwrapOk(task.take()));
-        const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1)));
-        expect(result.checkShape()).toBe(true);
+        const result = task.take();
+        const baseline = keep(unwrapOk(factory.makeThickSolidBySimple(shell, 1))) as OccShape;
         expect(baseline.checkShape()).toBe(true);
-        expect(baseline.volume()).toBeGreaterThan(0);
-        expect(result.volume()).toBeCloseTo(baseline.volume(), 7);
+        expect(unwrapOk(baseline.checkSelfIntersection())).toBe(false);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain("Thicken result: Shape intersects itself");
+        expect(result.error).toMatch(/output face indices \(zero-based\): \d/);
+        expect(result.error).toContain("approximate faulty region center xyz (mm)");
+        expect(shell.checkShape()).toBe(true);
     } finally {
+        hybrid.dispose();
+    }
+});
+
+test("bounded thickening reports a self-intersection analyzer failure instead of a generic worker error", async () => {
+    const factory = new ShapeFactory();
+    const box = keep(createBox(factory));
+    const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const shell = keep(unwrapOk(factory.shell(faces.slice(0, 5))));
+    const transport = new NativeWorkerTransport();
+    const hybrid = new HybridShapeFactory(() => transport.client);
+    const details = rs.spyOn(wasm.Shape, "selfIntersectionDetails").mockImplementation(() => {
+        throw new Error("Self-intersection check could not complete (result unknown)");
+    });
+    try {
+        const task = hybrid.shapeOperation({ method: "makeThickSolidBySimple", shape: shell, thickness: 1 });
+        await task.ready;
+        const result = task.take();
+        expect(details).toHaveBeenCalledTimes(1);
+        expect(result.isOk).toBe(false);
+        expect(result.error).toContain(
+            "Thicken result: Self-intersection check could not complete (result unknown)",
+        );
+        expect(result.error).not.toContain("Worker operation failed");
+    } finally {
+        details.mockRestore();
         hybrid.dispose();
     }
 });
