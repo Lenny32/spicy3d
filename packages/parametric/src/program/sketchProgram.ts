@@ -74,6 +74,7 @@ export type SketchEntityKey = number | string;
 
 export interface SketchPointSpec {
     entity: SketchEntityKey;
+    /** Zero-based point index; -1 resolves to the entity's last point before storage. */
     point: number;
 }
 
@@ -965,19 +966,17 @@ export class SketchSession {
 
     private pointRef(spec: SketchPointSpec): SketchPointRef {
         const entityId = this.entityId(spec?.entity);
-        const pointIndex = spec.point ?? 0;
+        const requestedIndex = spec.point ?? 0;
         const entity = isDatumEntityId(entityId)
             ? { type: entityId === SKETCH_ORIGIN_ID ? ("point" as const) : ("line" as const), params: [] }
             : (this.solver.entity(entityId) ??
               this.solver.externalEntitiesData().find((e) => e.id === entityId));
         if (entity === undefined) throw new Error(`unknown sketch entity ${entityId}`);
         const { type } = entity;
-        if (
-            !Number.isInteger(pointIndex) ||
-            pointIndex < 0 ||
-            pointIndex >= entityPointCount(type, entity.params)
-        ) {
-            throw new Error(`point ${pointIndex} does not exist on ${type} ${entityId}`);
+        const pointCount = entityPointCount(type, entity.params);
+        const pointIndex = requestedIndex === -1 ? pointCount - 1 : requestedIndex;
+        if (!Number.isInteger(pointIndex) || pointIndex < 0 || pointIndex >= pointCount) {
+            throw new Error(`point ${requestedIndex} does not exist on ${type} ${entityId}`);
         }
         return { entityId, pointIndex };
     }

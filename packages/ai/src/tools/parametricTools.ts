@@ -40,7 +40,7 @@ const POINT_REF_SCHEMA = {
             description:
                 'Entity id (number), a name given earlier in this call, or "origin" / "xAxis" / "yAxis"',
         },
-        point: { type: "number", description: "Point index within the entity" },
+        point: { type: "number", description: "Zero-based point index within the entity; -1 = last point" },
     },
     required: ["entity", "point"],
 };
@@ -195,7 +195,7 @@ const ACTION_SCHEMA = {
             description: "One positive finite rational weight per pole, default one",
         },
         periodic: { type: "boolean", description: "setBSpline: periodic closure" },
-        point: { type: "number", description: "movePoint: point index" },
+        point: { type: "number", description: "movePoint: zero-based point index; -1 = last point" },
         to: { description: "movePoint: target [u, v]; extend: the boundary entity" },
         at: {
             type: "array",
