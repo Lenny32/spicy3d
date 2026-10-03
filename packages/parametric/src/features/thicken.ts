@@ -23,6 +23,7 @@ import {
     trackedIds,
 } from "./feature";
 import { completeEdgeHistory, completeFaceHistory } from "./historyCompletion";
+import { prepareValidatedFeature, validateSelfIntersection } from "./selfIntersectionValidation";
 import { matchSourceFaceIndexes } from "./sourceFaceMatcher";
 
 /**
@@ -78,7 +79,15 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
             : { ...feature, openFaces: resolvedProfiles },
 
     prepareAsync(feature, context) {
-        if (!feature.tolerant) return undefined;
+        if (!feature.tolerant) {
+            // Without diagnostic support the step runs on the main thread, as in a synchronous rebuild.
+            if (!shapeFactory.boundedOperations?.selfIntersectionDetails) return undefined;
+            return prepareValidatedFeature(
+                (preparedContext) => thickenHandler.evaluate(feature, preparedContext),
+                context,
+                true,
+            );
+        }
         const failed = (message: string): IAsyncShapeOperation<IShape> => ({
             ready: Promise.resolve(),
             canFallback: false,
@@ -146,6 +155,16 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
         if (!result.isOk) return result;
         const oriented = rightSideOut(result.value);
         if (!oriented.isOk) return oriented;
+        const clean = validateSelfIntersection(
+            oriented.value,
+            context.warn,
+            context.deferSelfIntersection,
+            "Thicken result intersects itself",
+        );
+        if (!clean.isOk) {
+            oriented.value.dispose();
+            return Result.err(clean.error);
+        }
         if (context.tracking !== undefined) trackThicken(feature.id, input, oriented.value, context.tracking);
         return oriented;
     },

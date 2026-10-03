@@ -1108,7 +1108,8 @@ async function runOps(
                 () => runOp(op, doc, factory, localRefs, created, removed, results, numeric, owner, signal),
                 (factory as IShapeFactory).boundedOperations !== undefined &&
                     (boundedRequest(op.method, []) !== undefined ||
-                        op.method === "shape.checkSelfIntersection"),
+                        op.method === "shape.checkSelfIntersection" ||
+                        op.method === "shape.selfIntersectionDetails"),
             );
             if (Object.keys(numeric.resolved).length) {
                 output.resolved[op.id ?? `ops[${index}]`] = numeric.resolved;
@@ -1239,7 +1240,10 @@ async function runOp(
         return;
     }
     const cap = shapeCapabilities.find((c) => c.method === op.method);
-    if (!cap && op.method === "shape.checkSelfIntersection") {
+    if (
+        !cap &&
+        (op.method === "shape.checkSelfIntersection" || op.method === "shape.selfIntersectionDetails")
+    ) {
         if (!op.id) throw new Error(`query op "${op.method}" requires an id to report its result`);
         if (op.target === undefined) throw new Error(`query op "${op.method}" requires a target`);
         const bounded = (factory as IShapeFactory).boundedOperations;
@@ -1248,6 +1252,11 @@ async function runOp(
         const query = queryCapabilities.find((c) => c.method === op.method)!;
         const pending = owner.run(() => {
             const entry = resolveQueryTarget(query, op.target, doc, localRefs);
+            if (op.method === "shape.selfIntersectionDetails") {
+                if (!bounded.selfIntersectionDetails)
+                    throw new Error("Self-intersection details are not available in this kernel build");
+                return bounded.selfIntersectionDetails(entry.value as IShape, signal);
+            }
             return bounded.shapeQuery(
                 { method: "checkSelfIntersection", shape: entry.value as IShape },
                 signal,

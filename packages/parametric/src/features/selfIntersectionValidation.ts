@@ -32,9 +32,10 @@ export function validateSelfIntersection(
 export function prepareValidatedFeature(
     evaluate: (context: FeatureContext) => Result<IShape>,
     context: FeatureContext,
+    strict = false,
 ): IAsyncShapeOperation<IShape> {
-    const checks: IAsyncShapeOperation<boolean>[] = [];
-    const failures = new Map<IAsyncShapeOperation<boolean>, string>();
+    const checks: IAsyncShapeOperation<boolean | string>[] = [];
+    const failures = new Map<IAsyncShapeOperation<boolean | string>, string>();
     let result: Result<IShape>;
     try {
         result = evaluate({
@@ -45,7 +46,10 @@ export function prepareValidatedFeature(
                           const bounded = shapeFactory.boundedOperations;
                           if (!bounded?.shapeQuery)
                               throw new Error("Self-intersection validation requires a bounded worker");
-                          const check = bounded.shapeQuery({ method: "checkSelfIntersection", shape });
+                          const check =
+                              strict && bounded.selfIntersectionDetails
+                                  ? bounded.selfIntersectionDetails(shape)
+                                  : bounded.shapeQuery({ method: "checkSelfIntersection", shape });
                           checks.push(check);
                           failures.set(check, failure ?? "Shape intersects itself");
                       } catch (error) {
@@ -89,7 +93,7 @@ export function prepareValidatedFeature(
                 const clean = check.take();
                 if (!clean.isOk) {
                     // Cancellation belongs to the superseded run, never to its cache.
-                    if (check.cancelled) {
+                    if (check.cancelled || strict) {
                         disposeOutput();
                         return Result.err(clean.error);
                     }
@@ -99,9 +103,13 @@ export function prepareValidatedFeature(
                             ? I18n.translate("warning.selfIntersection.timeout{0}", timeout[1])
                             : I18n.translate("warning.selfIntersection.unknown"),
                     );
-                } else if (!clean.value) {
+                } else if (typeof clean.value === "string" ? clean.value.length > 0 : !clean.value) {
                     disposeOutput();
-                    return Result.err(failures.get(check) ?? "Shape intersects itself");
+                    return Result.err(
+                        typeof clean.value === "string"
+                            ? `${failures.get(check) ?? "Shape intersects itself"}: ${clean.value}`
+                            : (failures.get(check) ?? "Shape intersects itself"),
+                    );
                 }
             }
             return result;

@@ -21,7 +21,7 @@ import "./sketch/setup";
 // Every document of the merge fixture corpus (packages/core/test/fixtures/merge) loads into a real
 // document and saves back unchanged, and every body and sketch of base / ours / theirs rebuilds —
 // they are states the app could have saved. In `expected`, only the nodes a dangling-ref or a
-// rebuild-failure conflict points at may fail (that is what the conflict reports).
+// rebuild-failure conflict points at may fail, plus the diagnosed historical crossing wall below.
 
 const WASM_BINARY = readFileSync(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../wasm/lib/spicy-wasm.wasm"),
@@ -82,6 +82,20 @@ describe.each(cases)("merge fixture %s", (_name, fixture, file) => {
         ) as (INode & { shape: { isOk: boolean } })[];
         expect(parts.length).toBeGreaterThan(0);
         const failing = parts.filter((n) => !n.shape.isOk).map((n) => n.id);
+        // This unchanged historical fixture has a crossing square-to-circle offset.
+        // Rebuild must diagnose the wall, while serialization preserves every input.
+        if (fixture.name === "thicken-tolerant-vs-thickness") {
+            const wall = doc.modelManager.findNodes((node) => node.id === "body-wall")[0];
+            expect(wall).toBeInstanceOf(ParametricBodyNode);
+            const errors = (wall as ParametricBodyNode).featureItems().filter((item) => item.error);
+            expect(errors).toHaveLength(1);
+            expect(errors[0].id).toBe("feature-wall");
+            expect(errors[0].error).toContain("Thicken result intersects itself");
+            expect(errors[0].error).toMatch(/output face indices \(zero-based\): \d/);
+            expect(errors[0].error).toContain("approximate faulty region center xyz (mm)");
+            expect(failing).toContain("body-wall");
+            expectedFailures.add("body-wall");
+        }
         expect(failing.filter((id) => !expectedFailures.has(id))).toEqual([]);
 
         expect(doc.modelManager.serialize()).toEqual(data["models"]);
