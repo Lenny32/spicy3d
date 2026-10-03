@@ -58,9 +58,12 @@ test("resumed authority never leaks across awaits and cannot revive after releas
             }),
         ).toThrow("callback failed");
         expect(() => (document.modelManager.rootNode.name = "after exception")).toThrow("modeling program");
+        expect(captured.released).toBe(false);
         owner.release();
+        expect(captured.released).toBe(true);
         const replacement = DocumentMutations.hold(document);
         try {
+            expect(replacement.released).toBe(false);
             expect(() => captured.run(() => (document.modelManager.rootNode.name = "stale"))).toThrow(
                 "released",
             );

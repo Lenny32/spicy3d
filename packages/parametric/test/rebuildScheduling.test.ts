@@ -556,3 +556,85 @@ test("batched edits of two producers rebuild their shared consumer once", () => 
     expect(calls.map((call) => call.id)).toEqual(["left", "right", "f3", "f4", "f5"]);
     expect(consumer.timelineStateAt(3)?.shape).toBe(prefix);
 });
+
+/** Starts an edit's rebuild under a program's scope, then releases it before the job finishes. */
+function orphanRebuild(node: ParametricBodyNode): void {
+    const scope = DocumentMutations.hold(document);
+    scope.run(() => edit(node, 0, { revision: 1 }));
+    expect(node.isRebuilding).toBe(true);
+    scope.release();
+}
+
+test("a rebuild outliving its mutation scope finishes unowned once the document is free", async () => {
+    const node = body(16);
+    const full = warm(node);
+    orphanRebuild(node);
+    await DocumentRebuilds.settled(document);
+    expect(node.isRebuilding).toBe(false);
+    expect(DocumentRebuilds.pending(document)).toBe(false);
+    expect(AutosaveHolds.isHeld).toBe(false);
+    expect(await node.whenRebuilt()).toBe(true);
+    expect(node.shape.value).not.toBe(full);
+    expect(node.shape.value).toBe(shapes.at(-1));
+    expect(calls.filter((call) => call.id === "f0").at(-1)?.revision).toBe(1);
+});
+
+test("a rebuild outliving its mutation scope publishes nothing while a new owner holds the document", async () => {
+    const node = body(16);
+    const full = warm(node);
+    orphanRebuild(node);
+    const next = DocumentMutations.hold(document);
+    try {
+        await DocumentRebuilds.settled(document);
+        expect(node.isRebuilding).toBe(false);
+        expect(DocumentRebuilds.pending(document)).toBe(false);
+        expect(AutosaveHolds.isHeld).toBe(false);
+        expect(await node.whenRebuilt()).toBe(false);
+        expect(node.shape.value).toBe(full);
+    } finally {
+        next.release();
+    }
+});
+
+test.each([
+    "free",
+    "held by a new owner",
+])("a rejected worker step after its scope was released keeps the original failure: document %s", async (state) => {
+    const gate = Promise.withResolvers<void>();
+    const prepare = rs.fn(() => ({
+        ready: gate.promise,
+        canFallback: false,
+        cancel: () => {},
+        take: () => Result.ok<IShape>(shape("worker")),
+    }));
+    registerFeature("test-worker-step", {
+        display: "body.parametricBody",
+        nodeIds: () => [],
+        parameters: () => [],
+        setParameter: (feature: Step) => feature,
+        evaluate: () => Result.ok(shape("worker")),
+        prepareAsync: prepare,
+    });
+    const features = steps(16);
+    features[5] = { id: "worker", type: "test-worker-step" };
+    const node = body(16, features);
+    const scope = DocumentMutations.hold(document);
+    scope.run(() => void node.shape);
+    await rs.waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    expect(node.isRebuilding).toBe(true);
+    scope.release();
+    const next = state === "free" ? undefined : DocumentMutations.hold(document);
+    try {
+        gate.reject(new Error("worker crashed"));
+        await DocumentRebuilds.settled(document);
+        expect(node.isRebuilding).toBe(false);
+        expect(DocumentRebuilds.pending(document)).toBe(false);
+        expect(AutosaveHolds.isHeld).toBe(false);
+        expect(await node.whenRebuilt()).toBe(false);
+        const items = node.featureItems();
+        expect(items[5].error).toContain("worker crashed");
+        expect(items.filter((item) => item.error)).toHaveLength(1);
+    } finally {
+        next?.release();
+    }
+});

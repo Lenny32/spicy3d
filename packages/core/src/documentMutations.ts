@@ -8,6 +8,8 @@ export interface IDocumentMutationScope {
     /** Authority applies only to this synchronous turn, never across an await. */
     run<T>(action: () => T): T;
     release(): void;
+    /** Work started under the scope can outlive it; such callbacks must check before `run`. */
+    readonly released: boolean;
 }
 
 /** Runtime-only ownership while an atomic mutation yields to a worker. */
@@ -53,6 +55,9 @@ export class DocumentMutations {
                     if (previous === undefined) DocumentMutations.active.delete(document);
                     else DocumentMutations.active.set(document, previous);
                 }
+            },
+            get released() {
+                return released;
             },
             release: () => {
                 if (released) return;
