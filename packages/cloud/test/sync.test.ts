@@ -191,6 +191,134 @@ describe("local first", () => {
     });
 });
 
+describe("cached cloud open", () => {
+    test("a warm load reads no network and a cold load reads its manifest once", async () => {
+        const a = await device();
+        await a.create("doc-1", { w: "10" });
+        await a.engine.settle();
+        server.requests.length = 0;
+
+        const warm = await a.repository.load("doc-1");
+        expect(warm.isOk).toBe(true);
+        expect(valuesOf(warm.value.data)).toEqual({ w: "10" });
+        expect(warm.value.version).toBe(head().id);
+        expect(server.calls).toEqual([]);
+
+        const b = await device();
+        await b.engine.settle();
+        const read = rs.spyOn(b.cache, "get");
+        const cold = await b.repository.load("doc-1");
+        expect(cold.isOk).toBe(true);
+        expect(valuesOf(cold.value.data)).toEqual({ w: "10" });
+        expect(read.mock.calls.filter(([sha]) => sha === head().manifestSha256)).toHaveLength(1);
+        expect((await b.store.get("doc-1"))?.baseVersion?.id).toBe(head().id);
+    });
+
+    test.each(["manifest", "blob"])("a missing cached %s falls back to the head", async (missing) => {
+        const a = await device();
+        const brep = `CASCADE Topology V3\n${"0 1 2\n".repeat(2000)}`;
+        await a.create("doc-1", { w: "10" }, [{ __cla$$__: "OccShape", shape: brep, id: "shape-1" }]);
+        await a.engine.settle();
+        const base = (await a.store.get("doc-1"))?.baseVersion;
+        expect(base).toBeDefined();
+        const cache = a.cache as MemoryBlobCache;
+        if (missing === "manifest") cache.entries.delete(base!.manifestSha256);
+        else {
+            expect(base!.blobs.length).toBeGreaterThan(0);
+            cache.entries.delete(base!.blobs[0]);
+        }
+        server.requests.length = 0;
+        const loaded = await a.repository.load("doc-1");
+        expect(loaded.isOk).toBe(true);
+        expect(valuesOf(loaded.value.data)).toEqual({ w: "10" });
+        expect(loaded.value.data["models"].nodes[0].shape).toBe(brep);
+        expect(server.calls).toContain("GET /api/documents/doc-1");
+    });
+
+    test.each([false, true])("a stale cache refreshes safely after opening (edited: %s)", async (edited) => {
+        const a = await device();
+        const original = await a.create("doc-1", { w: "10", h: "5" });
+        await original.close();
+        await a.engine.settle();
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "99", h: "5" }));
+        await a.engine.settle();
+        const cached = await a.repository.load("doc-1");
+        expect(cached.isOk).toBe(true);
+        expect(valuesOf(cached.value.data)).toEqual({ w: "10", h: "5" });
+
+        const reopened = (await a.app.openDocument("doc-1", a.repository)) as unknown as SyncDoc;
+        expect(reopened).not.toBeUndefined();
+        if (edited) reopened.edit("h", "42");
+        await until(() => reopened.values["w"] === "99", "cache revalidated");
+        expect(reopened.values).toEqual({ w: "99", h: edited ? "42" : "5" });
+        expect(reopened.isDirty).toBe(edited);
+        expect(reopened.version).toBe(head().id);
+        expect(reopened.replaced).toEqual([edited ? "merge" : "remote update"]);
+    });
+
+    test("a cached read-only opening refreshes without pushing or taking the editor's lock", async () => {
+        const a = await device();
+        const original = await a.create("doc-1", { w: "10" });
+        await original.close();
+        await a.engine.settle();
+        const locks = new SharedLocks();
+        locks.held.add("spicy3d.document.doc-1");
+        const viewer = await device(undefined, {
+            cache: a.cache,
+            store: a.store,
+            locks: new EditLocks(locks, undefined),
+        });
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "99" }));
+        await viewer.engine.settle();
+        const cached = await viewer.repository.load("doc-1");
+        expect(cached.isOk).toBe(true);
+        expect(valuesOf(cached.value.data)).toEqual({ w: "10" });
+        server.requests.length = 0;
+        const shown = await viewer.open("doc-1");
+        await until(() => shown.values["w"] === "99", "read-only cache refreshed");
+        expect(viewer.documents.locks.isReadOnly("doc-1")).toBe(true);
+        expect(locks.held.has("spicy3d.document.doc-1")).toBe(true);
+        expect(shown.isDirty).toBe(false);
+        expect(shown.version).toBe(head().id);
+        expect(server.requests.filter((r) => r.method !== "GET")).toEqual([]);
+        expect((await viewer.store.get("doc-1"))?.baseVersion?.id).toBe(original.version);
+    });
+
+    test("metadata-only renames refresh a cached clean document", async () => {
+        const a = await device();
+        const original = await a.create("doc-1", { w: "10" });
+        await original.close();
+        await a.engine.settle();
+        docs.documents.get("doc-1")!.name = "Renamed elsewhere";
+        const reopened = await a.open("doc-1");
+        await until(() => reopened.name === "Renamed elsewhere", "rename refreshed");
+        expect(reopened.values).toEqual({ w: "10" });
+        expect(reopened.isDirty).toBe(false);
+        expect(reopened.version).toBe(head().id);
+        expect((await a.store.get("doc-1"))?.name).toBe("Renamed elsewhere");
+    });
+
+    test("Open latest and Restore bypass the stale cache", async () => {
+        const a = await device();
+        const original = await a.create("doc-1", { w: "10" });
+        const first = head();
+        await original.close();
+        await a.engine.settle();
+        await docs.saveContentElsewhere("doc-1", documentData("doc-1", { w: "99" }));
+        await a.engine.settle();
+        await a.engine.discardLocal("doc-1");
+        const latest = await a.repository.load("doc-1");
+        expect(latest.isOk).toBe(true);
+        expect(valuesOf(latest.value.data)).toEqual({ w: "99" });
+        const restored = await a.repository.restoreVersion("doc-1", first);
+        expect(restored.isOk).toBe(true);
+        const loaded = await a.repository.load("doc-1");
+        expect(loaded.isOk).toBe(true);
+        expect(valuesOf(loaded.value.data)).toEqual({ w: "10" });
+        expect(loaded.value.version).toBe(restored.value.version.id);
+    });
+});
+
 describe("pull", () => {
     test("an update from device B appears on clean A within ~2 s, in place, with a toast", async () => {
         const a = await device();
