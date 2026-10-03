@@ -2,7 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import type { IDocument } from "../document";
-import { Id, PubSub, Result } from "../foundation";
+import { Id, type NodeRecord, PubSub, Result } from "../foundation";
 import type { I18nKeys } from "../i18n";
 import { BoundingBox, Matrix4, XYZ } from "../math";
 import { GeometryNode, type INode, type INodeReferences } from "../model";
@@ -250,9 +250,17 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
             this.notifyGeometryChanged();
     };
 
-    private readonly handleTreeChanged = () => {
+    /**
+     * Only a tree change that can move or break the geometry notifies: this node or a watched
+     * node (a source, an ancestor) moved, added or removed, or a source appearing or vanishing
+     * with a subtree. Notifying on every change made each sketch on this plane — and each body
+     * reading such a sketch — re-derive whenever an unrelated node was added (issue #164).
+     */
+    private readonly handleTreeChanged = (records: NodeRecord[]) => {
+        const watched = new Map(this._watched);
         this.syncWatches();
-        this.notifyGeometryChanged();
+        const touched = records.some((record) => record.node === this || watched.has(record.node.id));
+        if (touched || !sameWatches(watched, this._watched)) this.notifyGeometryChanged();
     };
 
     private readonly handleOwnTransform = (property: keyof this) => {
@@ -376,6 +384,12 @@ export class ConstructionNode extends GeometryNode implements INodeReferences {
             },
         };
     }
+}
+
+function sameWatches(a: ReadonlyMap<string, INode>, b: ReadonlyMap<string, INode>): boolean {
+    if (a.size !== b.size) return false;
+    for (const [id, node] of a) if (b.get(id) !== node) return false;
+    return true;
 }
 
 function transformGeometry(geometry: ConstructionGeometry, matrix: Matrix4): ConstructionGeometry {

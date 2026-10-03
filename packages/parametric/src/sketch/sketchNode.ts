@@ -605,10 +605,24 @@ export class SketchNode extends ParameterShapeNode implements INodeReferences {
         });
     };
 
+    /**
+     * Any node entering or leaving the tree can break or restore the construction plane (its
+     * datum, or a datum upstream of it). Only an actual change is reported: notifying on every
+     * tree change made each body reading a construction-plane sketch rebuild — and drop the
+     * sketch's profile cache — whenever an unrelated node was added (issue #164).
+     */
     private readonly handleConstructionTreeChanged = () => {
         if (this.constructionPlaneRef === undefined) return;
+        const watched = this._planeRefNode;
+        const error = this._constructionPlaneError;
         this.syncPlaneRefWatch();
-        this.handlePlaneRefNodeChanged("geometry");
+        this.withoutHistory(() => {
+            if (this.followPlaneRef()) {
+                this.setShape(this.generateShape());
+            } else if (this._planeRefNode !== watched || this._constructionPlaneError !== error) {
+                this.emitPropertyChanged("shape", this._shape);
+            }
+        });
     };
 
     /**

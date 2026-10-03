@@ -322,6 +322,41 @@ describe("persistent construction objects", () => {
         doc.modelManager.addNode(new GroupNode({ document: doc, name: "Later change" }));
         expect(redrawn).toEqual([]);
     });
+
+    test("an unrelated node entering or leaving the tree does not re-notify the geometry", () => {
+        const { doc, add } = setup();
+        const source = add(offset(5));
+        const dependent = add({ kind: "plane-offset", source: datum(source), distance: 3 });
+        expect(planeZ(dependent)).toBe(8);
+        const changed = rs.fn((property: string) => property);
+        source.onPropertyChanged(changed);
+        dependent.onPropertyChanged(changed);
+        const unrelated = new GroupNode({ document: doc, name: "Unrelated" });
+        doc.modelManager.addNode(unrelated);
+        add(offset(40), "Unrelated datum");
+        unrelated.parent!.remove(unrelated);
+        expect(changed.mock.calls.map(([property]) => property)).not.toContain("geometry");
+        expect(planeZ(dependent)).toBe(8);
+    });
+
+    test("a source leaving and re-entering the tree inside a group still notifies dependents", () => {
+        const { doc, add } = setup();
+        const group = new GroupNode({ document: doc, name: "Group" });
+        doc.modelManager.addNode(group);
+        const source = add(offset(5));
+        source.parent!.move(source, group);
+        const dependent = add({ kind: "plane-offset", source: datum(source), distance: 3 });
+        expect(planeZ(dependent)).toBe(8);
+        const changed = rs.fn((property: string) => property);
+        dependent.onPropertyChanged(changed);
+        Transaction.execute(doc, "Delete group", () => group.parent!.remove(group));
+        expect(changed.mock.calls.map(([property]) => property)).toContain("geometry");
+        expect(dependent.geometry.isOk).toBe(false);
+        changed.mockClear();
+        doc.history.undo();
+        expect(changed.mock.calls.map(([property]) => property)).toContain("geometry");
+        expect(planeZ(dependent)).toBe(8);
+    });
 });
 
 describe("construction parameters driven by variables", () => {
