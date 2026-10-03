@@ -47,6 +47,7 @@ import type { FilletFeatureData } from "../../src/features/feature";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import {
     type EdgesReport,
+    type FacesReport,
     type ParametricOp,
     type ProgramRunOptions,
     runParametricProgram,
@@ -2851,4 +2852,185 @@ test("a geometry query between sketch edits observes that position in the progra
         PerformanceTrace.disable();
         doc.dispose();
     }
+});
+
+describe("persistent face selections for extrusion (issue #146)", () => {
+    test("the MCP tool returns JSON face references usable by a later call", async () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        rs.stubGlobal("app", app);
+        try {
+            const tool = buildParametricTools()[0];
+            const response = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [
+                        {
+                            op: "faces",
+                            body: body.id,
+                            selector: { containsPoint: { x: 1, y: 1, z: 20 } },
+                            expectedCount: 1,
+                        },
+                    ],
+                })) as string,
+            );
+            expect(response.results.faces.selection).toMatchObject({ status: "matched", count: 1 });
+            const reference = response.results.faces.faces[0].reference;
+            const created = JSON.parse(
+                (await tool.handler({
+                    responseMode: "compact",
+                    ops: [
+                        { op: "sketch", id: "profile", entities: rect(5, 5, 10, 10) },
+                        { op: "extrude", id: "boss", sketch: "profile", depth: 3, startFace: reference },
+                    ],
+                })) as string,
+            );
+            expect(created.bodies[0].status).toBe("ok");
+            const boss = createdBody(doc, created, "boss");
+            expect(boss.shape.value.volume()).toBeCloseTo(75, 5);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
+
+    test("one reference survives successive annular cuts, rebuild and undo", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const query = run(doc, [
+            {
+                op: "faces",
+                body: body.id,
+                selector: { containsPoint: { x: 1, y: 1, z: 0 } },
+                expectedCount: 1,
+            },
+        ]);
+        const report = query.results["faces"] as FacesReport;
+        expect(report.selection.status).toBe("matched");
+        expect(report.faces).toHaveLength(1);
+        const reference = JSON.parse(JSON.stringify(report.faces[0].reference));
+        expect(reference.nodeId).toBe(body.id);
+        expect(reference.faceId.length).toBeGreaterThan(0);
+        for (const x of [10, 25]) {
+            run(doc, [
+                {
+                    op: "sketch",
+                    id: `ring${x}`,
+                    entities: [
+                        { type: "circle", params: [x, 15, 3] },
+                        { type: "circle", params: [x, 15, 2] },
+                    ],
+                },
+                {
+                    op: "extrude",
+                    id: `cut${x}`,
+                    body: body.id,
+                    operation: "cut",
+                    sketch: `ring${x}`,
+                    startOffset: 30,
+                    depth: -25,
+                    extent: { type: "toObject", face: reference, offset: -2 },
+                },
+            ]);
+            expectClean(body);
+        }
+        expect(body.shape.value.volume()).toBeCloseTo(24000 - 2 * Math.PI * 5 * 18, 3);
+        run(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: body.features[0].id,
+                action: "setParameter",
+                key: "depth",
+                value: 25,
+            },
+        ]);
+        expectClean(body);
+        expect(body.shape.value.volume()).toBeCloseTo(30000 - 2 * Math.PI * 5 * 23, 3);
+        doc.history.undo();
+        expectClean(body);
+        expect(body.shape.value.volume()).toBeCloseTo(24000 - 2 * Math.PI * 5 * 18, 3);
+    });
+
+    test("selectors intersect origins and points, retain largest ties, and capture existing start refs", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const largest = run(doc, [
+            { op: "faces", body: body.id, selector: { largest: true }, expectedCount: 1 },
+        ]).results["faces"] as FacesReport;
+        expect(largest.selection).toMatchObject({ status: "ambiguous", count: 2 });
+        const selected = run(doc, [
+            {
+                op: "faces",
+                body: body.id,
+                index: 1,
+                selector: {
+                    featureIds: [body.features[0].id],
+                    containsPoint: { x: 1, y: 1, z: 20 },
+                    largest: true,
+                },
+                expectedCount: 1,
+            },
+        ]).results["faces"] as FacesReport;
+        expect(selected.selection).toMatchObject({ status: "matched", count: 1 });
+        const result = run(doc, [
+            { op: "sketch", id: "boss-profile", entities: rect(5, 5, 10, 10) },
+            {
+                op: "extrude",
+                id: "boss",
+                sketch: "boss-profile",
+                depth: 3,
+                startFace: {
+                    nodeId: body.id,
+                    selector: { faceIds: [selected.faces[0].reference.faceId], largest: true },
+                },
+            },
+        ]);
+        const boss = createdBody(doc, result, "boss");
+        expectClean(boss);
+        expect(extent(boss)).toEqual([5, 5, 20, 10, 10, 23]);
+        expect(boss.features[0]).toMatchObject({
+            startFace: { nodeId: body.id, face: { id: selected.faces[0].reference.faceId } },
+        });
+        expect(JSON.stringify(boss.features)).not.toContain("selector");
+        expect(JSON.stringify(boss.features)).not.toContain("faceIndex");
+    });
+
+    test("missing, ambiguous and invalid picks roll back the entire program", () => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        for (const pick of [
+            { nodeId: body.id, faceId: "missing" },
+            { nodeId: body.id, selector: { largest: true } },
+            { nodeId: body.id, faceIndex: 0.5 },
+            { nodeId: body.id, faceIndex: 0, faceId: "mixed" },
+        ]) {
+            const before = nodeIds(doc);
+            expect(() =>
+                run(doc, [
+                    { op: "sketch", id: "s", entities: rect(5, 5, 10, 10) },
+                    { op: "extrude", id: "e", sketch: "s", depth: 3, startFace: pick },
+                ]),
+            ).toThrow(/empty|ambiguous|out of range|exactly one/);
+            expect(nodeIds(doc)).toEqual(before);
+            expect(body.features).toHaveLength(1);
+        }
+        for (const selector of [
+            { tolerance: 0 },
+            { featureIds: [] },
+            { faceIds: [] },
+            { containsPoint: { x: NaN, y: 0, z: 0 } },
+            JSON.parse('{"largset":true}'),
+        ])
+            expect(() => run(doc, [{ op: "faces", body: body.id, selector }])).toThrow(
+                /positive|non-empty|finite|unknown/,
+            );
+        expect(() =>
+            run(doc, [
+                { op: "faces", body: body.id, index: 0, selector: { featureIds: [body.features[0].id] } },
+            ]),
+        ).toThrow(/no input shape/);
+    });
 });

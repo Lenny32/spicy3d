@@ -117,6 +117,19 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   changes the loft inputs/options as one undo step. guided:null clears both paths and restores
   ordinary lofting; replacing the guided group must supply both spine and boundary.
 - { op: "edges", body, id?, index?, edgeIndexes?, selector?, expectedCount? } queries persistent body-local edge references. Omit indexes for all edges.
+- { op: "faces", body, id?, index?, selector?, expectedCount? } queries faces at the final shape or entering a feature index.
+  selector predicates intersect: faceIds:[tracked ids], featureIds:[actual feature ids, from features],
+  containsPoint:{x,y,z} (point on the trimmed face, body-local mm), largest:true, tolerance (default 1e-6 mm).
+  Feature origins include surviving split/merged descendants. largest applies after the other filters;
+  equal-area ties remain ambiguous. Reports contain index, area and reference:{nodeId,faceId}.
+  Reuse reference directly in extent.face, secondExtent.face or startFace across calls and added bosses.
+  These picks also accept {nodeId,selector:{...}} or the existing {nodeId,faceIndex}; exactly one mode.
+  Extrusion requires one match; missing ids and split-id ambiguity fail rather than picking by order.
+  A selector runs once during authoring; the resulting feature follows the existing tracked face reference.
+  Example: {op:"faces",body:"shell",selector:{featureIds:["<shell-feature-id>"],largest:true},expectedCount:1}.
+  Copy results.faces.faces[0].reference into a later {type:"toObject",face:reference,offset:"boss_embed"}.
+  Re-query or add containsPoint if that tracked id has split into multiple faces.
+
 - { op: "faceSweep", id, body, section:{sketchId,profileIndex?}, path:{nodeId,edgeIndexes:[...]}, support:{nodeId,faceIndex}, operation:"join"|"cut", roundCorner? }
   Adds an editable rib or groove to the EXISTING body. One hole-free profile must be authored at
   the path start, perpendicular to its tangent; this operation does not relocate a misplaced profile.

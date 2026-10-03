@@ -865,15 +865,22 @@ static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& 
                 return fail("Projected cap inner wire is invalid");
             makeFace.Add(inner);
         }
-        if (!makeFace.IsDone() || !BRepCheck_Analyzer(makeFace.Face()).IsValid())
+        if (!makeFace.IsDone())
+            return fail("Projected cap face is invalid");
+        // A solid cap can be reversed relative to the projection plane. MakeFace normalizes
+        // its outer wire but not the added holes; orient every wire in the planar footprint.
+        ShapeFix_Face fix(makeFace.Face());
+        fix.FixOrientation();
+        TopoDS_Face projectedFace = fix.Face();
+        if (!BRepCheck_Analyzer(projectedFace).IsValid())
             return fail("Projected cap face is invalid");
         GProp_GProps area;
-        BRepGProp::SurfaceProperties(makeFace.Face(), area);
+        BRepGProp::SurfaceProperties(projectedFace, area);
         piecesArea += std::abs(area.Mass());
         if (shadow.IsNull())
-            shadow = makeFace.Face();
+            shadow = projectedFace;
         else {
-            BRepAlgoAPI_Fuse merge(shadow, makeFace.Face());
+            BRepAlgoAPI_Fuse merge(shadow, projectedFace);
             merge.SetNonDestructive(true);
             merge.Build();
             if (!merge.IsDone() || merge.HasErrors())
