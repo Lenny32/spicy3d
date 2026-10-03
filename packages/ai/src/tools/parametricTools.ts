@@ -733,7 +733,9 @@ export async function runParametric(
                     node instanceof parametric.ParametricBodyNode &&
                     node.features.some((feature) => feature.type === "thicken" && feature.tolerant === true),
             );
-    if (capturedDocument || needsAsyncRebuild) {
+    // Sketch edits can invalidate long boolean chains. Keep the ordinary tool call pending
+    // while the existing background replay yields, just as a parametric job does.
+    if (capturedDocument || kinds.has("editSketch") || needsAsyncRebuild) {
         const assertIdle = () => {
             if (globalThis.app.executingCommand || Transaction.isActive(document))
                 throw new Error(

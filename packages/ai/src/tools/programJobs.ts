@@ -246,7 +246,7 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
         {
             name: "get_rebuild_status",
             description:
-                "Read runtime background parametric rebuild status for the active document without geometry reads or queue waits. Returns pending job count and last yielded feature indexes where known; does not invent a percentage or start a rebuild. For a cancellable sketch-edit batch use start_parametric_job; run_parametric waits synchronously.",
+                "Read runtime background parametric rebuild status for the active document without geometry reads or queue waits. Returns pending job count and last yielded feature indexes where known; does not invent a percentage or start a rebuild. For a cancellable sketch-edit batch use start_parametric_job; run_parametric waits for completion and yields during sketch rebuilds.",
             parameters: { type: "object", properties: {} },
             handler: async () => {
                 const document = getDocument();

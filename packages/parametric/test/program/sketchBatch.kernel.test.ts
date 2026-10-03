@@ -181,21 +181,47 @@ test("sub-tolerance edits are compared to the built geometry rather than accumul
     expect(calls).toEqual([60, 61, 62, 63, 64]);
 });
 
-test("a parametric job holds reads and mutation ownership until its batched rebuild completes", async () => {
+test.each([
+    "run_parametric",
+    "job",
+])("%s holds reads and mutation ownership until its batched rebuild completes", async (mode) => {
     const app = document.application;
     app.activeView = createMockView({ document });
     rs.stubGlobal("app", app);
+    const history = document.history.undoCount();
     const running = runParametric(
         { ops: [move(sketches[0], 1), move(sketches[1], 2)] },
         undefined,
         undefined,
-        document,
+        mode === "job" ? document : undefined,
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(DocumentMutations.isHeld(document)).toBe(true);
     expect(hasDocumentReadSnapshot()).toBe(true);
+    expect(DocumentRebuilds.status(document).pending).toBe(1);
+    expect(calls.length).toBeLessThan(5);
     await running;
     expect(calls).toEqual([60, 61, 62, 63, 64]);
+    expect(document.history.undoCount()).toBe(history + 1);
+    expect(DocumentMutations.isHeld(document)).toBe(false);
+    expect(hasDocumentReadSnapshot()).toBe(false);
+});
+
+test("cancelling an ordinary run_parametric during replay restores its sketch edits", async () => {
+    const app = document.application;
+    app.activeView = createMockView({ document });
+    rs.stubGlobal("app", app);
+    const original = sketches.map((sketch) => sketch.dataJson);
+    const history = document.history.undoCount();
+    const controller = new AbortController();
+    const running = runParametric({ ops: [move(sketches[0], 1), move(sketches[1], 2)] }, controller.signal);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(DocumentRebuilds.status(document).pending).toBe(1);
+    controller.abort();
+    await expect(running).rejects.toThrow(/cancelled/);
+    expect(sketches.map((sketch) => sketch.dataJson)).toEqual(original);
+    expect(document.history.undoCount()).toBe(history);
+    expect(DocumentRebuilds.status(document).pending).toBe(0);
     expect(DocumentMutations.isHeld(document)).toBe(false);
     expect(hasDocumentReadSnapshot()).toBe(false);
 });
