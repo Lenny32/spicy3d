@@ -397,8 +397,7 @@ const mouseSkirtSections = JSON.parse(
 
 const INCONSISTENT_OFFSET_ERROR =
     "Failed to create thick solid: offset edge curves are inconsistent with their surfaces " +
-    "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the " +
-    "thickness or the sections";
+    "(exact BRepCheck_Analyzer)";
 
 /** The issue's skirt: a ruled loft between two periodic bsplines, z = 0 to 10. */
 function mouseSkirt(doc: TestDocument, solid = false): ParametricBodyNode {
@@ -471,7 +470,13 @@ describe("periodic ruled loft thickening (issue #126)", () => {
 
         thicken(body, { thickness });
 
-        expect(errorOf(body, "t1")).toBe(`thicken step "t1": ${INCONSISTENT_OFFSET_ERROR}`);
+        expect(errorOf(body, "t1")).toContain(`thicken step "t1": ${INCONSISTENT_OFFSET_ERROR}`);
+        expect(errorOf(body, "t1")).toMatch(/exact validation failed on output face index \d+/);
+        expect(errorOf(body, "t1")).toMatch(
+            /input B-spline face index \d+ has \d+ distinct U knots and \d+ distinct V knots/,
+        );
+        expect(errorOf(body, "t1")).toContain("same B-spline degree, knots and multiplicities");
+        expect(errorOf(body, "t1")).toContain("knot counts alone do not establish the cause");
         expect(body.featureItems().find((item) => item.id === "loft")?.error).toBeUndefined();
         // The feature thickens a copy: the cached loft keeps its p-curves and tolerances.
         expect(converter.convertToBrep(skin).value).toBe(before.value);
@@ -479,7 +484,7 @@ describe("periodic ruled loft thickening (issue #126)", () => {
         const probe = skin.clone();
         try {
             const probeBefore = converter.convertToBrep(probe).value;
-            expect(shapeFactory.makeThickSolidBySimple(probe, thickness).error).toBe(
+            expect(shapeFactory.makeThickSolidBySimple(probe, thickness).error).toContain(
                 INCONSISTENT_OFFSET_ERROR,
             );
             expect(converter.convertToBrep(probe).value).not.toBe(probeBefore);
