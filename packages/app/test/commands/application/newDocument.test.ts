@@ -1,7 +1,8 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { describe, expect, test } from "@rstest/core";
+import { describe, expect, rs, test } from "@rstest/core";
+import { I18n, type I18nKeys } from "@spicy3d/core";
 import { createMockApplication } from "@spicy3d/core/test-utils";
 import { NewDocument } from "../../../src/commands/application/newDocument";
 
@@ -18,17 +19,30 @@ describe("NewDocument", () => {
         expect(data.isApplicationCommand).toBe(true);
     });
 
-    test("should call app.newDocument with incrementing name", async () => {
+    test("names new documents with the localized Untitled N, counting up", async () => {
         const app = createMockApplication();
-        let newDocName = "";
+        const names: string[] = [];
         app.newDocument = async (name: string) => {
-            newDocName = name;
+            names.push(name);
             return {} as any;
         };
+        // The test locale echoes keys, so the placeholder is filled in here.
+        const translate = rs
+            .spyOn(I18n, "translate")
+            .mockImplementation((key: I18nKeys, ...args: any[]) => `${key} ${args.join(" ")}`);
 
-        const cmd = new NewDocument();
-        await cmd.execute(app);
+        try {
+            const cmd = new NewDocument();
+            await cmd.execute(app);
+            await cmd.execute(app);
+        } finally {
+            translate.mockRestore();
+        }
 
-        expect(newDocName).toContain("undefined");
+        expect(names).toHaveLength(2);
+        const [first, second] = names.map((name) => /^document\.untitled (\d+)$/.exec(name));
+        expect(first).not.toBeNull();
+        expect(second).not.toBeNull();
+        expect(Number(second![1])).toBe(Number(first![1]) + 1);
     });
 });

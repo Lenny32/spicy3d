@@ -584,6 +584,20 @@ describe("Tree", () => {
             expect(fixture.model1.name).toBe("Bracket");
         });
 
+        // The root's name is the document's (ModelManager copies it): renaming the row goes
+        // through the root node in a transaction, so it is undoable and dirties the document.
+        test("renaming the document's own row renames the root node", () => {
+            withSelectionHandler();
+            rightClick(fixture.root);
+
+            menuItems()[0].click();
+
+            const [, box, confirm] = showDialogMock.mock.calls[0];
+            (box as HTMLInputElement).value = " Mouse side ";
+            confirm!();
+            expect(fixture.root.name).toBe("Mouse side");
+        });
+
         test("the document's own row cannot be deleted", () => {
             withSelectionHandler();
             rightClick(fixture.root);

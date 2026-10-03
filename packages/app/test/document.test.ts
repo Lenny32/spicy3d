@@ -378,6 +378,20 @@ describe("Document", () => {
             expect(document.isDirty).toBe(false);
         });
 
+        // How the project tree and the agent's rename_document rename a document: the setter
+        // renames the root inside the transaction, which is what history records.
+        test("renaming the document in a transaction makes it dirty and undoes as one step", () => {
+            Transaction.execute(document, "rename", () => {
+                document.name = "Mouse side";
+            });
+
+            expect(document.modelManager.rootNode.name).toBe("Mouse side");
+            expect(document.isDirty).toBe(true);
+            document.history.undo();
+            expect(document.name).toBe("test-document");
+            expect(document.isDirty).toBe(false);
+        });
+
         test("undoing back to the saved point makes it clean, redoing makes it dirty", async () => {
             edit("saved");
             await document.save();

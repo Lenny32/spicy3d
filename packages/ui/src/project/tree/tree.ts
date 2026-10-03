@@ -324,10 +324,8 @@ export class Tree extends HTMLElement {
         showDialog("common.rename", box, () => {
             const name = box.value.trim();
             if (name === "" || name === node.name) return;
-            if (node === this.document.modelManager.rootNode) {
-                this.document.name = name;
-                return;
-            }
+            // The root's name is the document's (ModelManager keeps them in step), so renaming the
+            // root is one undo step too and marks the document dirty, which is what saves it.
             Transaction.execute(this.document, "rename", () => {
                 node.name = name;
             });

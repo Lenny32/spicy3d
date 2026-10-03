@@ -797,6 +797,7 @@ export default {
         "dialog.title.enterValue": "Enter Value",
         "dialog.title.unsavedChanges": "Unsaved Changes",
         "document.file.description": "Spicy3D Document",
+        "document.untitled": "Untitled {0}",
         "dialog.checkShape.valid": "Valid",
         "dialog.checkShape.invalid": "Invalid",
         "dialog.checkShape.overallValid": "Overall shape is valid.",

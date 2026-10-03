@@ -41,7 +41,17 @@ function summarizeNode(node: INode) {
 /** Once the geometry kernel crashed: `kernel: "crashed"` and the error every kernel tool returns. */
 function documentSummary(doc: IDocument) {
     const nodes = doc.modelManager.findNodes(() => true).map(summarizeNode);
-    return { hasActiveDocument: true, name: doc.name, nodeCount: nodes.length, nodes, ...kernelStateInfo() };
+    // The root is not among the nodes, yet it is the parentId of every top-level one: named
+    // here so that id resolves (get/set_node_properties take it; its name is the document's).
+    const rootId = (doc.modelManager.rootNode as INode | undefined)?.id;
+    return {
+        hasActiveDocument: true,
+        name: doc.name,
+        ...(rootId !== undefined ? { rootId } : {}),
+        nodeCount: nodes.length,
+        nodes,
+        ...kernelStateInfo(),
+    };
 }
 
 async function readDocumentState(): Promise<string> {
@@ -73,7 +83,7 @@ export function buildReadTools(): Tool[] {
         {
             name: "get_document_state",
             description:
-                "Read the current document: whether there is an active document, its name, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it. A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until recover_kernel succeeds or the user reloads the page. Successful recovery preserves committed edits but clears undo/redo.",
+                "Read the current document: whether there is an active document, its name, rootId, node count, and each node's id/type/name/parentId. Nodes of type FolderNode are the groups; a node's parentId is the folder holding it, and top-level nodes have rootId, the document root (its name is the document's name: rename_document changes it). A kernel field (crashed, with kernelError) means the geometry kernel is gone: modeling tools fail until recover_kernel succeeds or the user reloads the page. Successful recovery preserves committed edits but clears undo/redo.",
             parameters: { type: "object", properties: {} },
             handler: readDocumentState,
         },

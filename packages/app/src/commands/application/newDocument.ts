@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { command, type IApplication, type ICommand } from "@spicy3d/core";
+import { command, I18n, type IApplication, type ICommand } from "@spicy3d/core";
 
 let count = 1;
 
@@ -12,6 +12,6 @@ let count = 1;
 })
 export class NewDocument implements ICommand {
     async execute(app: IApplication): Promise<void> {
-        await app.newDocument(`undefined ${count++}`);
+        await app.newDocument(I18n.translate("document.untitled", count++));
     }
 }

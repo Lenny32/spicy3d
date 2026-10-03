@@ -799,6 +799,7 @@ export const I18N_KEYS = [
     "dialog.title.enterValue",
     "dialog.title.unsavedChanges",
     "document.file.description",
+    "document.untitled",
     "dialog.checkShape.valid",
     "dialog.checkShape.invalid",
     "dialog.checkShape.overallValid",

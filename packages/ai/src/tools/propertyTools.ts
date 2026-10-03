@@ -16,7 +16,15 @@ import {
     XYZ,
 } from "@spicy3d/core";
 import type { Tool } from "../llm/types";
-import { findNode, requireDocument, requireNode } from "./documentContext";
+import {
+    findNodeOrRoot,
+    isDocumentRoot,
+    parseDocumentName,
+    renameDocument,
+    renameRefusal,
+    requireDocument,
+    requireNode,
+} from "./documentContext";
 
 /**
  * Property kinds as the model sees them. Mirrors what the property panel can render: the panel
@@ -151,9 +159,13 @@ function describeNode(node: INode, doc: IDocument) {
         name: node.name,
         ...(display ? { display: I18n.translate(display.call(node)) } : {}),
         ...(isConsumedTool(node) ? { note: consumedToolNote(node) } : {}),
+        ...(isDocumentRoot(doc, node) ? { note: ROOT_NOTE } : {}),
         properties,
     };
 }
+
+const ROOT_NOTE =
+    "this is the document root (the component holding every top-level node); its name is the document's name, so renaming it renames the document";
 
 /**
  * A tool node the app consumed into a body (a boolean operand, a sketch a feature builds on)
@@ -168,7 +180,7 @@ function getNodePropertiesTool(): Tool {
     return {
         name: "get_node_properties",
         description:
-            "Read the editable properties of nodes — the same rows the property panel shows: the node name, the material, and the parameters of the shape (a box's length/width/height, a circle's radius, …). Defaults to the selected nodes. Use it to answer what a node's dimensions currently are, or before set_node_properties to see the writable names.",
+            "Read the editable properties of nodes — the same rows the property panel shows: the node name, the material, and the parameters of the shape (a box's length/width/height, a circle's radius, …). Defaults to the selected nodes. The document root (get_document_state's rootId) is readable too. Use it to answer what a node's dimensions currently are, or before set_node_properties to see the writable names.",
         parameters: {
             type: "object",
             properties: {
@@ -196,7 +208,7 @@ const getNodePropertiesHandler: Tool["handler"] = async (args) => {
     }
 
     const nodes = ids.map((id) => {
-        const node = findNode(doc, id);
+        const node = findNodeOrRoot(doc, id);
         return node === undefined ? { id, error: "node not found" } : describeNode(node, doc);
     });
     return JSON.stringify({ nodes });
@@ -206,7 +218,7 @@ function setNodePropertiesTool(): Tool {
     return {
         name: "set_node_properties",
         description:
-            "Change a node's properties — what the property panel edits, and the panel updates to show it. Typical: a node's name, or a shape parameter (a box's dx/dy/dz, a circle's radius/center, a location). This keeps the node and its identity, unlike deleting and re-creating it. Read the writable names with get_node_properties first; appearance (color, opacity, texture) is set_material's job.",
+            "Change a node's properties — what the property panel edits, and the panel updates to show it. Typical: a node's name, or a shape parameter (a box's dx/dy/dz, a circle's radius/center, a location). This keeps the node and its identity, unlike deleting and re-creating it. On the document root (get_document_state's rootId) only name is writable, and it renames the document. Read the writable names with get_node_properties first; appearance (color, opacity, texture) is set_material's job.",
         parameters: {
             type: "object",
             properties: {
@@ -294,10 +306,38 @@ function applyUpdates(doc: IDocument, node: INode, updates: Map<string, unknown>
     PubSub.default.pub("showProperties", doc, doc.selection.getSelectedNodes());
 }
 
+/** The root's only writable property is its name, which is the document's: a document rename. */
+function setRootProperties(doc: IDocument, root: INode, requested: Record<string, unknown>): string {
+    const names = Object.keys(requested);
+    if (names.length === 0) return JSON.stringify({ error: "no properties given", available: ["name"] });
+    const other = names.find((name) => name !== "name");
+    if (other !== undefined) {
+        return JSON.stringify({
+            error: `"${other}" cannot be set on the document root — only its name (the document's name)`,
+            available: ["name"],
+        });
+    }
+    const parsed = parseDocumentName(requested["name"]);
+    if ("error" in parsed) return JSON.stringify(parsed);
+    const refusal = renameRefusal(doc);
+    if (refusal !== undefined) return JSON.stringify({ error: refusal });
+    renameDocument(doc, parsed.name);
+    PubSub.default.pub("showProperties", doc, doc.selection.getSelectedNodes());
+    return JSON.stringify({
+        id: root.id,
+        updated: describeNode(root, doc).properties.filter((p) => p.name === "name"),
+        document: { name: doc.name },
+    });
+}
+
 const setNodePropertiesHandler: Tool["handler"] = async (args) => {
     const doc = requireDocument();
     if (typeof doc === "string") return doc;
     const id = args["id"] as string;
+    const root = doc.modelManager.rootNode as INode | undefined;
+    if (root !== undefined && root.id === id) {
+        return setRootProperties(doc, root, (args["properties"] ?? {}) as Record<string, unknown>);
+    }
     const node = requireNode(doc, id);
     if (typeof node === "string") return node;
     // Writing here would look like it worked and change nothing, which is worse than refusing:

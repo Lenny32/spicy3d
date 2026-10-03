@@ -505,12 +505,12 @@ export class BrowserActions implements IBrowserActions {
         if (!this.editable || !name || entry.originMember !== undefined || (!entry.node && !entry.view))
             return false;
         const doc = this.model.document;
-        if (entry.node === doc.modelManager.rootNode) doc.name = name;
-        else
-            Transaction.execute(doc, "rename", () => {
-                if (entry.node) entry.node.name = name;
-                else entry.view!.name = name;
-            });
+        // The root's name is the document's (ModelManager keeps them in step): one undo step like
+        // any rename, and the document turns dirty, which is what saves the new name.
+        Transaction.execute(doc, "rename", () => {
+            if (entry.node) entry.node.name = name;
+            else entry.view!.name = name;
+        });
         return true;
     }
     setVisible(entries: BrowserEntry[], visible: boolean): boolean {
