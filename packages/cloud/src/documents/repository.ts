@@ -147,6 +147,8 @@ export interface LoadedHead {
     name: string;
     head: CloudVersion;
     data: Serialized;
+    /** Blob references from the manifest already parsed while loading. */
+    blobs: string[];
 }
 
 /**
@@ -155,7 +157,7 @@ export interface LoadedHead {
  */
 export interface IRepositorySync {
     save(request: SaveRequest): Promise<Result<SaveOutcome, DocumentRepositoryError>>;
-    load(id: string): Promise<Result<LoadedDocument, DocumentRepositoryError>>;
+    load(id: string, useCache?: boolean): Promise<Result<LoadedDocument, DocumentRepositoryError>>;
     /** The documents this device has copies of (the listing while offline), matching `search`. */
     offlineList(search?: string): Promise<DocumentMeta[]>;
     /** Marks the listed documents that have changes this device hasn't pushed. */
@@ -273,6 +275,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
     private readonly states = new Map<string, CloudSaveState>();
     private readonly conflicts = new Map<string, SaveConflict>();
     private readonly stateListeners = new Set<(id: string, state: CloudSaveState) => void>();
+    private readonly freshHeads = new Set<string>();
     /** The server's name of each document seen, to rename (metadata only) when the app's differs. */
     private readonly serverNames = new Map<string, string>();
     private readonly thumbnailShas = new Map<string, string>();
@@ -438,11 +441,17 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
         // A reload (open latest, taking over from another tab) starts from a clean state.
         this.resetState(id);
-        if (this.syncEngine) return this.syncEngine.load(id);
+        const useCache = !this.freshHeads.delete(id);
+        if (this.syncEngine) return this.syncEngine.load(id, useCache);
         const loaded = await this.loadHead(id);
         return loaded.isOk
             ? Result.ok({ data: loaded.value.data, version: loaded.value.head.id })
             : Result.err(loaded.error);
+    }
+
+    /** An explicit restore or "Open latest" must read the head on its next opening. */
+    loadFreshOnNextOpen(id: string): void {
+        this.freshHeads.add(id);
     }
 
     /** The head of a document and its content (named as the server names the document). */
@@ -451,10 +460,12 @@ export class CloudDocumentRepository implements IDocumentRepository {
         if (!head.isOk) return Result.err(head.error);
         const { version, name } = head.value;
         if (!version) return Result.err({ kind: "notFound", id });
-        const data = await this.content(version);
+        const manifest = await this.manifestOf(version);
+        if (!manifest.isOk) return Result.err(manifest.error);
+        const data = await this.assemble(manifest.value.manifest);
         // Renames are metadata only: the server's name is the document's name.
         return data.isOk
-            ? Result.ok({ name, head: version, data: { ...data.value, name } })
+            ? Result.ok({ name, head: version, data: { ...data.value, name }, blobs: manifest.value.blobs })
             : Result.err(data.error);
     }
 
@@ -484,12 +495,15 @@ export class CloudDocumentRepository implements IDocumentRepository {
         }
     }
 
-    /** A manifest assembled with its blobs (from the cache, else the server). */
-    async assemble(manifest: unknown): Promise<Result<Serialized, DocumentRepositoryError>> {
+    /** A manifest assembled with its blobs; `cachedOnly` refuses misses without a network request. */
+    async assemble(
+        manifest: unknown,
+        cachedOnly = false,
+    ): Promise<Result<Serialized, DocumentRepositoryError>> {
         try {
             const blobs = new Map<string, Uint8Array>();
             await mapLimit(manifestBlobRefs(manifest), TRANSFER_CONCURRENCY, async (sha) => {
-                blobs.set(sha, await this.blob(sha));
+                blobs.set(sha, await this.blob(sha, undefined, cachedOnly));
             });
             const assembled = assembleManifest(manifest, (sha) => blobs.get(sha));
             if (!assembled.isOk) {
@@ -523,9 +537,10 @@ export class CloudDocumentRepository implements IDocumentRepository {
      * A blob from the cache, else from the server (a manifest from its version: `versionId`),
      * checked against its hash and cached. Throws a {@link RepositoryFailure}.
      */
-    private async blob(sha: string, versionId?: string): Promise<Uint8Array> {
+    private async blob(sha: string, versionId?: string, cachedOnly = false): Promise<Uint8Array> {
         const cached = await this.cache.get(sha);
         if (cached) return cached;
+        if (cachedOnly) throw new RepositoryFailure({ kind: "failed", message: "incomplete cached version" });
         const result = await this.account.call((api) =>
             versionId
                 ? api.GET("/api/versions/{versionId}", {
@@ -883,6 +898,17 @@ export class CloudDocumentRepository implements IDocumentRepository {
         return this.content(version);
     }
 
+    /** A complete cached version, without making any network requests; a miss is an error. */
+    async loadCachedVersion(manifestSha256: string): Promise<Result<Serialized, DocumentRepositoryError>> {
+        if (!this.isOwnersSession()) return Result.err({ kind: "unauthorized" });
+        try {
+            const bytes = await this.blob(manifestSha256, undefined, true);
+            return this.assemble(JSON.parse(decoder.decode(bytes)), true);
+        } catch (error) {
+            return Result.err(failureOf(error));
+        }
+    }
+
     /**
      * A version's content by id alone (its manifest hash unknown here, e.g. the base of a save made
      * before the sync knew the document): `GET /api/versions/{id}`, then cached by its hash.
@@ -964,6 +990,7 @@ export class CloudDocumentRepository implements IDocumentRepository {
             );
             if (result.isOk) {
                 if (version.thumbnailSha256) this.thumbnailShas.set(id, version.thumbnailSha256);
+                this.loadFreshOnNextOpen(id);
                 const restored: RestoredVersion = { version: result.value.data };
                 if (onTopOf) restored.onTopOf = onTopOf;
                 return Result.ok(restored);
