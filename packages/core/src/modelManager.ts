@@ -3,6 +3,8 @@
 
 import { BrowserModel } from "./browser";
 import type { IDocument } from "./document";
+import { DocumentMutations } from "./documentMutations";
+import { DocumentRebuilds } from "./documentRebuilds";
 import {
     type CollectionChangedArgs,
     Logger,
@@ -30,6 +32,7 @@ function canonicalJson(value: unknown): string {
 }
 
 export type OnNodeChanged = (records: NodeRecord[]) => void;
+export type OnNodesLoaded = (root: INode) => Promise<void>;
 
 /** The material reference a node carries, if any — both `GeometryNode` and `MeshNode` have one. */
 function materialIdOf(node: INode): string | string[] | undefined {
@@ -167,6 +170,7 @@ export class ModelManager extends Observable {
         return this._browser;
     }
     private readonly _nodeChangedObservers = new Set<OnNodeChanged>();
+    private readonly _nodesLoadedObservers = new Map<OnNodeChanged, OnNodesLoaded>();
     private _deserializing = false;
     /** Records collected while {@link applyContent} runs, dispatched once when it is done. */
     private _batch: NodeRecord[] | undefined;
@@ -243,12 +247,15 @@ export class ModelManager extends Observable {
         return new FolderNode({ document: this.document, name: this.document.name });
     }
 
-    addNodeObserver(observer: OnNodeChanged) {
+    /** An optional initial-load handler may yield; ordinary edits remain synchronous. */
+    addNodeObserver(observer: OnNodeChanged, onLoaded?: OnNodesLoaded) {
         this._nodeChangedObservers.add(observer);
+        if (onLoaded) this._nodesLoadedObservers.set(observer, onLoaded);
     }
 
     removeNodeObserver(observer: OnNodeChanged) {
         this._nodeChangedObservers.delete(observer);
+        this._nodesLoadedObservers.delete(observer);
     }
 
     notifyNodeChanged(records: NodeRecord[]) {
@@ -327,7 +334,35 @@ export class ModelManager extends Observable {
             this._deserializing = false;
             if (PerformanceTrace.enabled) PerformanceTrace.end(span);
         }
-        this.notifyNodeChanged([{ action: "add", node: this.rootNode }]);
+        // The whole graph is reachable before any visual asks for geometry. Keep tree/UI
+        // observers synchronous, but await visual initialization before load resolves.
+        const scope = DocumentMutations.hold(this.document);
+        try {
+            const pending: Promise<void>[] = [];
+            scope.run(() => {
+                for (const observer of this._nodeChangedObservers) {
+                    const onLoaded = this._nodesLoadedObservers.get(observer);
+                    try {
+                        if (onLoaded) pending.push(onLoaded(this.rootNode));
+                        else observer([{ action: "add", node: this.rootNode }]);
+                    } catch (error) {
+                        pending.push(Promise.reject(error));
+                        break;
+                    }
+                }
+            });
+            // Drain every started observer even if one fails; none may outlive its authority.
+            const results = await Promise.allSettled(pending);
+            const failure = results.find((result) => result.status === "rejected");
+            if (failure?.status === "rejected") throw failure.reason;
+        } finally {
+            // Rebuild callbacks captured this scope; keep it alive until they finish.
+            try {
+                await DocumentRebuilds.settled(this.document);
+            } finally {
+                scope.release();
+            }
+        }
     }
 
     /**
@@ -488,6 +523,7 @@ export class ModelManager extends Observable {
         this._browser = undefined;
         super.disposeInternal();
         this._nodeChangedObservers.clear();
+        this._nodesLoadedObservers.clear();
         this.materials.removeCollectionChanged(this.handleMaterialChanged);
         this.components.removeCollectionChanged(this.handleComponentChanged);
         this._rootNode?.removePropertyChanged(this.handleRootNodeNameChanged);
