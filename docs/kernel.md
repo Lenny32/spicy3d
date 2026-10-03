@@ -76,8 +76,10 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
 
 Failed thickening in the main factory and the bounded MCP worker bridge retains the original
 kernel/validation error. Using existing surface D2, face normal and trimmed-domain queries,
-TypeScript samples a 5 × 5 interior UV grid on at most 64 input faces, excluding opening faces
-and points outside the face trim. When a principal curvature in the signed offset direction
+TypeScript samples an interior UV grid on at most 64 input faces, excluding opening faces
+and points outside the face trim: about 1024 samples shared between the faces (5 × 5 to
+32 × 32 per face), then a 5 × 5 grid spanning one coarse cell each way around the sharpest
+sample. When a principal curvature in the signed offset direction
 has radius no greater than the requested thickness, the error names the possible input face
 index (zero-based), position in local shape coordinates (mm), sampled radius and a suggestion
 to reduce absolute thickness below that radius or smooth the region. The parametric thicken
@@ -275,6 +277,41 @@ calls. OCCT has no cooperative cancellation hook in this offline build; stopping
 check requires terminating its worker. Whole guided-loft construction and whole-inspection
 worker contracts remain follow-up work. The deferred/prechecked C++ bindings and rebuilt
 WASM artifacts are committed together.
+
+### Thicken validation before downstream use (#161)
+
+An ordinary (non-tolerant) thicken has the strict worker check whenever the bounded worker
+offers `selfIntersectionDetails`: the scheduler route above, a self-intersection is a feature
+error and an unknown verdict (timeout, cancellation, unavailable worker) fails the step rather
+than accepting it. MCP `run_parametric` (and parametric jobs) now take the asynchronous program
+path for such thickens like tolerant ones (`needsWorkerValidation`): creating one, or any op
+while a body holds one (suppressed included), awaits the bounded rebuild before the program
+checks the body or runs the next op. A wall that fails is reported at its own step and rolled
+back — a downstream common never consumes it and never reports its "empty shape" instead.
+A wall an earlier synchronous evaluation accepted unchecked is cached with the skip warning;
+the asynchronous rebuild never reuses such an entry, so the next MCP call re-validates it.
+
+Where no worker can answer (no bounded worker, explicit synchronous program scopes, nested
+evaluations), the wall is still accepted with the skip warning. A kernel failure of a later
+step in that chain then says so: "its input passed through thicken step …, whose result was not
+checked for self-intersection (synchronous evaluation)". This states what is unknown; it does
+not infer a cause. A failed boolean (an empty result included) names operands that already fail
+`checkShape` or hold a solid of invalid volume, by role (`input N` / `tool N`); with valid
+operands the kernel's own error stays — a genuinely empty common keeps its message.
+`checkShape` remains the topology analyzer only (`BRepCheck_Analyzer`): it does not test
+self-intersection, which needs the pairwise analyzer and its cost.
+
+`selfIntersectionDetails` reports every interfering pair OCCT's self-interference test lists
+(the test enumerates them all, `StopOnFirstFaulty` only ends the later tests), crossing faces
+first. The first four pairs are located: two faces are sectioned, reporting a point on the
+longest intersection curve and the extent of the intersection; other pairs report their closest
+points, and a pair apart by more than `Precision::Confusion()` "overlap(s) within their
+tolerances" with the gap (offset results widen vertex/edge tolerances). A pair that cannot be
+located keeps the approximate bounding-box center, labelled as such. Face indices are those of
+the queried output. The parametric thicken adds the curvature sampling of the input (#121) to a
+self-intersection: the sharpest radius toward the offset side, where, and against |thickness| —
+a collapse when it is at most |thickness|, otherwise a statement that local curvature does not
+explain the crossing (offset walls of separate regions meet). No validation state is saved.
 
 ### Boolean and downstream validity (#119)
 

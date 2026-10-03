@@ -332,7 +332,44 @@ describe("checkSelfIntersection is feature-detected on the kernel build", () => 
         expect(unwrapOk(prism.checkSelfIntersection())).toBe(false);
         const details = unwrapOk(prism.selfIntersectionDetails());
         expect(details).toMatch(/output face indices \(zero-based\): \d/);
-        expect(details).toContain("approximate faulty region center xyz (mm)");
+        // The crossing side faces come first, located on their actual intersection: the
+        // vertical line x = y = 5, not the bounding-box center of the two faces.
+        const crossing =
+            /; face (\d+) x face (\d+) intersect at xyz \(mm\): \(([^)]*)\), intersection extent \(mm\): \(([^)]*)\) to \(([^)]*)\)/.exec(
+                details,
+            );
+        expect(crossing).not.toBeNull();
+        const [x, y, z] = (crossing as RegExpExecArray)[3].split(", ").map(Number);
+        expect([x, y, z]).toEqual([expect.closeTo(5, 6), expect.closeTo(5, 6), expect.closeTo(2.5, 6)]);
+        const low = (crossing as RegExpExecArray)[4].split(", ").map(Number);
+        const high = (crossing as RegExpExecArray)[5].split(", ").map(Number);
+        expect(low).toEqual([expect.closeTo(5, 6), expect.closeTo(5, 6), expect.closeTo(0, 5)]);
+        expect(high).toEqual([expect.closeTo(5, 6), expect.closeTo(5, 6), expect.closeTo(5, 6)]);
+        expect(details).toMatch(/; \d+ intersecting pairs?;/);
+        expect(details).not.toContain("approximate faulty region center");
+    });
+
+    test("sub-shapes interfering only through their tolerances are reported with their gap", () => {
+        // A V-shaped skin thickened face by face: the walls meet at the crease within the
+        // offset's widened vertex and edge tolerances, not along a true crossing.
+        const vee = (z: number) =>
+            keep(
+                unwrapOk(
+                    factory.polygon([
+                        { x: -10, y: 10, z },
+                        { x: 0, y: 0, z },
+                        { x: 10, y: 10, z },
+                    ]),
+                ),
+            );
+        const skin = keep(unwrapOk(factory.loft([vee(0), vee(20)], false, true, "c2")));
+        const wall = keep(unwrapOk(factory.makeThickSolidBySimple(skin, -3))) as unknown as OccShape;
+        expect(wall.checkShape()).toBe(true);
+        const details = unwrapOk(wall.selfIntersectionDetails());
+        expect(details).toMatch(/intersecting pairs?; /);
+        expect(details).toMatch(
+            / overlap within their tolerances near xyz \(mm\): \([^)]*\), gap \d[\d.e-]* mm/,
+        );
     });
 
     test.each([true, false])("a present binding answers %s", (answer) => {

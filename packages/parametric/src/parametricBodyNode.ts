@@ -1174,6 +1174,9 @@ export class ParametricBodyNode
         const timeline: FeatureTimelineState[] = [];
         let committed = false;
         let invalidSuffix = false;
+        // The latest step whose result skipped the self-intersection analysis (synchronous
+        // evaluation): everything after it consumes a solid nobody proved valid.
+        let unvalidated: FeatureData | undefined;
         try {
             for (let index = 0; index < features.length && index < stop; index++) {
                 this._timeline.beginRun(timeline);
@@ -1274,8 +1277,14 @@ export class ParametricBodyNode
                     run.outcome = "failed";
                     run.failure = "feature";
                     run.failedFeatureId = feature.id;
-                    return this.abandonChain(feature, step.error, features);
+                    return this.abandonChain(
+                        feature,
+                        unvalidatedInputNote(feature, step.error, unvalidated),
+                        features,
+                    );
                 }
+                if (this._featureWarnings.get(feature.id)?.includes(SELF_INTERSECTION_SKIPPED))
+                    unvalidated = feature;
                 input = step.value.shape;
                 faceIds = step.value.faceIds;
                 edgeIds = step.value.edgeIds;
@@ -1878,4 +1887,19 @@ export class ParametricBodyNode
         this._timeline.dispose(this.currentShape());
         super.disposeInternal();
     }
+}
+
+/**
+ * A kernel failure downstream of a result nobody checked for self-intersection says so: a
+ * self-intersecting operand makes booleans answer "empty" or "invalid" without naming it.
+ * States what is unknown, never a cause; user validation errors pass unchanged.
+ */
+function unvalidatedInputNote(
+    feature: FeatureData,
+    error: string,
+    unvalidated: FeatureData | undefined,
+): string {
+    if (!unvalidated || !error.startsWith(`${feature.type} step "`)) return error;
+    const name = unvalidated.name ? `"${unvalidated.name}" ` : "";
+    return `${error}; its input passed through ${unvalidated.type} ${name}step "${unvalidated.id}", whose result was not checked for self-intersection (synchronous evaluation) — a self-intersecting operand can cause this`;
 }

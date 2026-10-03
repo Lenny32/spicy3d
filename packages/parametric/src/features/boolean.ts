@@ -302,7 +302,11 @@ export function validateBooleanResult(
     tools: readonly IShape[] = [],
     warn?: (message: string) => void,
 ): Result<IShape> {
-    if (!result.isOk) return result;
+    if (!result.isOk) {
+        // An empty or failed result may come from a broken operand rather than the operation.
+        const defects = operandDefects(inputs, tools);
+        return defects.length ? Result.err(`${result.error}; ${defects.join("; ")}`) : result;
+    }
     const shape = result.value;
     let solids: IShape[] = [];
     let error: string | undefined;
@@ -335,4 +339,39 @@ export function validateBooleanResult(
     if (!error) return result;
     shape.dispose();
     return Result.err(error);
+}
+
+/**
+ * Operands already invalid before the boolean, by role: failed topology checks or a solid
+ * with invalid volume. Cheap checks only — self-intersection needs the bounded worker, so a
+ * self-intersecting operand passing them is not named here (the chain notes unchecked walls).
+ */
+function operandDefects(inputs: readonly IShape[], tools: readonly IShape[]): string[] {
+    const defects: string[] = [];
+    const operands = [
+        ...inputs.map((shape, index) => ({ shape, label: `input ${index}` })),
+        ...tools.map((shape, index) => ({ shape, label: `tool ${index}` })),
+    ];
+    for (const { shape, label } of operands) {
+        let solids: IShape[] = [];
+        try {
+            if (shape.isNull()) continue;
+            if (!shape.checkShape()) {
+                defects.push(`${label} is already invalid (checkShape false)`);
+                continue;
+            }
+            solids = shape.findSubShapes(ShapeTypes.solid);
+            const tolerance = solids.length ? volumeTolerance(shape.volume(), shape.boundingBox()) : 0;
+            const volume = solids
+                .map((solid) => solid.volume())
+                .find((v) => !Number.isFinite(v) || v < -tolerance);
+            if (volume !== undefined)
+                defects.push(`${label} has a solid with invalid volume (${volume} mm³)`);
+        } catch {
+            // A diagnosis must never replace the boolean's own error.
+        } finally {
+            for (const solid of solids) solid.dispose();
+        }
+    }
+    return defects;
 }

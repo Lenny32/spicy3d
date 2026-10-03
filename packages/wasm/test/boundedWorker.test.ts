@@ -361,7 +361,9 @@ test("bounded simple thickening refuses a topologically valid wall with crossing
         expect(result.isOk).toBe(false);
         expect(result.error).toContain("Thicken result: Shape intersects itself");
         expect(result.error).toMatch(/output face indices \(zero-based\): \d/);
-        expect(result.error).toContain("approximate faulty region center xyz (mm)");
+        expect(result.error).toMatch(
+            /intersecting pairs?; .* (intersect at|overlap within their tolerances near) xyz \(mm\): \(/,
+        );
         expect(shell.checkShape()).toBe(true);
     } finally {
         hybrid.dispose();

@@ -1375,6 +1375,9 @@ export class ShapeFactory implements IShapeFactory {
         }
         return result;
     }
+    explainThickenFailure(error: string, shape: IShape, thickness: number, openFaces: IShape[] = []): string {
+        return thickenFailureDiagnostic(error, shape, thickness, openFaces);
+    }
     makeThickSolidBySimple(shape: IShape, thickness: number): Result<IShape> {
         const result = validThickSolid(
             convertShapeResult(

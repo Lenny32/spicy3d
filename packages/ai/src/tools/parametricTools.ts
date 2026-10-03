@@ -720,19 +720,9 @@ export async function runParametric(
         parametric.SketchEditor.exit();
 
     let result: ProgramResult | undefined;
-    const needsAsyncRebuild =
-        ops.some(
-            (op) =>
-                (op as { op?: string; tolerant?: boolean }).op === "thicken" &&
-                (op as { tolerant?: boolean }).tolerant === true,
-        ) ||
-        document.modelManager
-            .findNodes()
-            .some(
-                (node) =>
-                    node instanceof parametric.ParametricBodyNode &&
-                    node.features.some((feature) => feature.type === "thicken" && feature.tolerant === true),
-            );
+    // Worker-validated thickens (tolerant, or checked for self-intersection) must be accepted
+    // before a later op consumes them, which only the asynchronous path awaits.
+    const needsAsyncRebuild = parametric.needsWorkerValidation(document, ops as ParametricOp[]);
     // Sketch edits can invalidate long boolean chains. Keep the ordinary tool call pending
     // while the existing background replay yields, just as a parametric job does.
     if (capturedDocument || kinds.has("editSketch") || needsAsyncRebuild) {

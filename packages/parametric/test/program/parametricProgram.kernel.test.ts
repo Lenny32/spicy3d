@@ -36,6 +36,7 @@ import {
 } from "@spicy3d/core/test-utils";
 import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { createMcpServer, SerialQueue } from "../../../ai/src/mcp/server";
+import { handleRunProgram } from "../../../ai/src/tools/capabilityEngine";
 import { buildParametricTools, runParametric } from "../../../ai/src/tools/parametricTools";
 import { buildParametricJobTools, buildProgramJobTools } from "../../../ai/src/tools/programJobs";
 import { buildReadTools } from "../../../ai/src/tools/readTools";
@@ -812,9 +813,11 @@ describe("thicken", () => {
     });
 
     test.each([
-        "timeout",
-        "cancel",
-    ])("MCP tolerant %s reports the failure and restores the body", async (failure) => {
+        ["timeout", true],
+        ["cancel", true],
+        ["timeout", false],
+        ["cancel", false],
+    ] as const)("MCP %s of a thicken (tolerant: %s) reports the failure and restores the body", async (failure, tolerant) => {
         const doc = newDoc();
         const app = createMockApplication();
         app.activeView = { document: doc } as unknown as typeof app.activeView;
@@ -839,9 +842,10 @@ describe("thicken", () => {
             const before = body.features;
             await expect(
                 runParametric(
-                    { ops: [{ op: "thicken", id: "t1", body: body.id, thickness: -2, tolerant: true }] },
+                    { ops: [{ op: "thicken", id: "t1", body: body.id, thickness: -2, tolerant }] },
                     controller.signal,
                 ),
+                // An unfinished self-intersection check is an unknown verdict, never acceptance.
             ).rejects.toThrow(failure === "cancel" ? /cancelled/i : /op 0 \("thicken"\) failed:.*timed out/i);
             expect(requests).toBe(1);
             expect(body.features).toEqual(before);
@@ -853,6 +857,187 @@ describe("thicken", () => {
             hybrid.dispose();
             rs.unstubAllGlobals();
         }
+    });
+
+    /**
+     * An open V-shaped skin: two planar faces meeting at a crease. Simple thickening offsets
+     * each face on its own, so the walls cross at the crease — topologically valid (checkShape
+     * true, positive volume) yet self-intersecting, the shape of issue #161.
+     */
+    const veeSkin = (): ParametricOp[] => [
+        { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+        ...["s1", "s2"].map(
+            (id): ParametricOp => ({
+                op: "sketch",
+                id,
+                plane: id === "s1" ? "XY" : { construction: "p1" },
+                entities: [
+                    { type: "line", params: [-10, 10, 0, 0] },
+                    { type: "line", params: [0, 0, 10, 10] },
+                ],
+            }),
+        ),
+        { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+    ];
+    /** A smooth open skin whose -3 mm wall is clean. */
+    const smoothSkin = (): ParametricOp[] => [
+        { op: "construct", id: "p1", definition: { kind: "plane-offset", source: "XY", distance: 20 } },
+        ...["s1", "s2"].map(
+            (id): ParametricOp => ({
+                op: "sketch",
+                id,
+                plane: id === "s1" ? "XY" : { construction: "p1" },
+                entities: [
+                    {
+                        type: "bspline",
+                        points: [
+                            [-20, 0],
+                            [-8, 0],
+                            [0, 8],
+                            [8, 0],
+                            [20, 0],
+                        ],
+                    },
+                ],
+            }),
+        ),
+        { op: "loft", id: "skin", sections: ["s1", "s2"], solid: false },
+    ];
+    /** An extrude common trimming `body` with a box prism over [x0, x1] x [y0, y1] x [0, 20]. */
+    const trim = (body: string, x0: number, y0: number, x1: number, y1: number): ParametricOp[] => [
+        { op: "sketch", id: "trim", plane: "XY", entities: rect(x0, y0, x1, y1) },
+        {
+            op: "extrude",
+            id: "trimmed",
+            sketch: "trim",
+            depth: 20,
+            body,
+            operation: "common",
+        } as ParametricOp,
+    ];
+
+    /** Runs `action` with the MCP tool's document and a real bounded worker. */
+    async function withWorker(
+        action: (doc: TestDocument, tool: ReturnType<typeof buildParametricTools>[0]) => Promise<void>,
+        hybrid = new HybridShapeFactory(() => new NativeWorkerTransport().client),
+    ): Promise<void> {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        const factory = new ShapeFactory(undefined, hybrid);
+        // run_program reads the application's factory.
+        (app as unknown as { shapeProvider: { factory: ShapeFactory } }).shapeProvider = { factory };
+        rs.stubGlobal("app", app);
+        rs.stubGlobal("shapeFactory", factory);
+        try {
+            await action(doc, buildParametricTools()[0]);
+            expect(DocumentMutations.isHeld(doc)).toBe(false);
+        } finally {
+            doc.dispose();
+            hybrid.dispose();
+            rs.unstubAllGlobals();
+        }
+    }
+
+    test("MCP rejects a self-intersecting wall before a later op of the same call consumes it (#161)", async () => {
+        await withWorker(async (doc, tool) => {
+            const before = nodeIds(doc);
+            const call = tool.handler({
+                ops: [
+                    ...veeSkin(),
+                    { op: "thicken", id: "wall", body: "skin", thickness: -3 },
+                    ...trim("skin", -12, -2, 12, 12),
+                ],
+            });
+            // The wall itself is named, located and rolled back; the common never runs on it.
+            await expect(call).rejects.toThrow(
+                /op 4 \("thicken"\) failed:.*Thicken result intersects itself/,
+            );
+            await expect(call).rejects.toThrow(/output face indices \(zero-based\): \d.*intersecting pair/);
+            await expect(call).rejects.not.toThrow(/empty shape|checkShape is false/);
+            expect(nodeIds(doc)).toEqual(before);
+            // No rebuild outlives the call (#160: a late job would re-enter the released scope).
+            await DocumentRebuilds.settled(doc);
+            expect(DocumentRebuilds.pending(doc)).toBe(false);
+        });
+    });
+
+    test("MCP validates a wall an earlier synchronous run accepted unchecked before a later call trims it", async () => {
+        await withWorker(async (doc, tool) => {
+            // Synchronous program evaluation never runs the analyzer: the wall is accepted with
+            // the "result unknown" warning and cached that way.
+            const body = createdBody(
+                doc,
+                run(doc, [...veeSkin(), { op: "thicken", id: "wall", body: "skin", thickness: -3 }]),
+                "skin",
+            );
+            expect(body.featureItems()[1].warning).toContain("Self-intersection check skipped");
+            const features = body.features;
+            const call = tool.handler({ ops: trim(body.id, -12, -2, 12, 12) });
+            await expect(call).rejects.toThrow(/Thicken result intersects itself/);
+            await expect(call).rejects.not.toThrow(/empty shape/);
+            expect(body.features).toEqual(features);
+            expect(body.isRebuilding).toBe(false);
+        });
+    });
+
+    test("MCP accepts a clean wall, trims it in a later call, and keeps a genuinely empty common", async () => {
+        await withWorker(async (doc, tool) => {
+            const created = JSON.parse(
+                (await tool.handler({
+                    ops: [...smoothSkin(), { op: "thicken", id: "wall", body: "skin", thickness: -3 }],
+                })) as string,
+            );
+            const body = createdBody(doc, created, "skin");
+            expectClean(body);
+            expect(body.featureItems()[1].warning ?? "").not.toContain("Self-intersection check skipped");
+            const untrimmed = body.shape.value.volume();
+
+            await tool.handler({ ops: trim(body.id, -10, -10, 10, 20) });
+            expectClean(body);
+            expect(body.features.map((feature) => feature.type)).toEqual(["loft", "thicken", "extrude"]);
+            const trimmed = body.shape.value.volume();
+            expect(trimmed).toBeGreaterThan(0);
+            expect(trimmed).toBeLessThan(untrimmed);
+
+            // Disjoint tools: the legitimate empty-result error, blaming no operand.
+            const disjoint = tool.handler({ ops: trim(body.id, 100, 100, 110, 110) });
+            await expect(disjoint).rejects.toThrow(/extrude step "[^"]+": Boolean produced an empty shape$/);
+            await expect(disjoint).rejects.not.toThrow(/intersects itself|already invalid|not checked/);
+            expect(body.shape.value.volume()).toBeCloseTo(trimmed, 6);
+        });
+    });
+
+    test("parametric thicken and run_program agree on rejecting the self-intersecting wall", async () => {
+        await withWorker(async (doc) => {
+            const skin = createdBody(doc, run(doc, veeSkin()), "skin");
+            const program = handleRunProgram({
+                ops: [{ id: "t", method: "makeThickSolidBySimple", args: { shape: skin.id, thickness: -3 } }],
+            });
+            await expect(program).rejects.toThrow(/Thicken result: Shape intersects itself/);
+            await expect(
+                buildParametricTools()[0].handler({
+                    ops: [{ op: "thicken", id: "wall", body: skin.id, thickness: -3 }],
+                }),
+            ).rejects.toThrow(/Thicken result intersects itself: Shape intersects itself/);
+            expect(skin.features.map((feature) => feature.type)).toEqual(["loft"]);
+        });
+    });
+
+    test("without a bounded worker a failure after an unchecked wall says the wall was not checked", () => {
+        const doc = newDoc();
+        const body = createdBody(
+            doc,
+            run(doc, [...veeSkin(), { op: "thicken", id: "wall", body: "skin", thickness: -3 }]),
+            "skin",
+        );
+        expect(body.featureItems()[1].warning).toContain("Self-intersection check skipped");
+        const message = runExpectingFailure(doc, trim(body.id, 100, 100, 110, 110));
+        expect(message).toContain("Boolean produced an empty shape");
+        expect(message).toContain(
+            `its input passed through thicken step "${body.features[1].id}", whose result was not checked for self-intersection`,
+        );
     });
 
     test("shells a body open at the picked face, following the thickness variable", () => {

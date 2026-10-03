@@ -76,7 +76,9 @@ describe.each(loadDocumentFixtures().map((x) => [x.name, x] as const))("fixture 
                 expect(errors[0].id).toBe("feature-wall");
                 expect(errors[0].error).toContain("Thicken result intersects itself");
                 expect(errors[0].error).toMatch(/output face indices \(zero-based\): \d/);
-                expect(errors[0].error).toContain("approximate faulty region center xyz (mm)");
+                expect(errors[0].error).toMatch(
+                    /(intersect at|overlap within their tolerances near) xyz \(mm\): \(/,
+                );
             } else {
                 expect(rebuilt).toBe(true);
                 expect(body.shape.isOk).toBe(true);

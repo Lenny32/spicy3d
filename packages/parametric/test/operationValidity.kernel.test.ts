@@ -183,6 +183,25 @@ test("sync extrude common rejects an invalid positive-volume result", () => {
     expect(body.featureItems()[2].error).toContain('extrude step "common": Boolean result: invalid shape');
 });
 
+test("a failed boolean names the operands already invalid, and only those (#161)", () => {
+    const input = new OccShapeConverter().convertFromBrep(
+        readFileSync(path.resolve(import.meta.dirname, "../../wasm/test/models/simplifySolid.brep"), "utf8"),
+    ).value;
+    const tool = shapeFactory.cylinder(XYZ.unitZ, XYZ.zero, 25, 300).value;
+    try {
+        expect(input.checkShape()).toBe(false);
+        const empty: Result<IShape> = Result.err("Boolean produced an empty shape");
+        expect(validateBooleanResult(empty, [tool], [input]).error).toBe(
+            "Boolean produced an empty shape; tool 0 is already invalid (checkShape false)",
+        );
+        // Valid operands leave the kernel's own verdict alone: an empty common may be genuine.
+        expect(validateBooleanResult(empty, [tool], [tool]).error).toBe("Boolean produced an empty shape");
+    } finally {
+        input.dispose();
+        tool.dispose();
+    }
+});
+
 test.each([
     "cut",
     "fuse",

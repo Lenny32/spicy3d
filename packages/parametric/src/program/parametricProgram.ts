@@ -522,6 +522,32 @@ export interface ProgramRunOptions {
     onOpFinished?: (op: string, milliseconds: number) => void;
 }
 
+/**
+ * Whether `ops` on `document` need the asynchronous program path: a thicken the bounded worker
+ * validates — tolerant ones always, ordinary ones whenever the worker can analyze
+ * self-intersection — is created or already in a body, suppressed ones included (any edit,
+ * unsuppressing too, may rebuild it). Evaluated synchronously in the page, such a wall would
+ * reach the next op unchecked.
+ */
+export function needsWorkerValidation(
+    document: IDocument,
+    ops: readonly { op?: unknown; tolerant?: unknown }[],
+): boolean {
+    const details = shapeFactory.boundedOperations?.selfIntersectionDetails !== undefined;
+    return (
+        ops.some((op) => op.op === "thicken" && (op.tolerant === true || details)) ||
+        document.modelManager
+            .findNodes()
+            .some(
+                (node) =>
+                    node instanceof ParametricBodyNode &&
+                    node.features.some(
+                        (feature) => feature.type === "thicken" && (feature.tolerant === true || details),
+                    ),
+            )
+    );
+}
+
 /** Runs every op in order, returning the result envelope. Throws on the first failure. */
 export function runParametricProgram(
     document: IDocument,
@@ -624,15 +650,8 @@ function* evaluateProgram(
                 while (index < ops.length && ops[index].op === "editSketch");
             });
         } else {
-            // Tolerant steps require the bounded worker, including upstream edits.
-            state.deferValidation =
-                asynchronous &&
-                ((ops[index].op === "thicken" && (ops[index] as ThickenOp).tolerant === true) ||
-                    bodies().some((body) =>
-                        body.features.some(
-                            (feature) => feature.type === "thicken" && feature.tolerant === true,
-                        ),
-                    ));
+            // Worker-validated steps rebuild in the background, upstream edits included.
+            state.deferValidation = asynchronous && needsWorkerValidation(document, [ops[index]]);
             if (state.deferValidation) run();
             else ParametricBodyNode.withSynchronousEvaluation(document, run);
         }

@@ -178,6 +178,11 @@ guide coverage booleans remain synchronous.
   radius is a local estimate, NOT a guaranteed maximum successful thickness. No reported limit
   does not rule out a narrow crease or collisions between distant offset walls. skin/pipe and
   arc/intersection do not provide a self-intersection-trimming envelope mode.
+  Every thicken wall is checked for self-intersection in the bounded worker (30 s) before the next
+  op runs: a crossing wall fails at its thicken op ("Thicken result intersects itself", with the
+  output faces, a point on each crossing and its extent, and the sharpest input curvature radius
+  against |thickness|), and a timeout fails it too (result unknown). Programs containing a thicken
+  therefore await the worker on every op touching that document.
 - { op: "boolean", id, body, operation, tools }   // operation: fuse | cut | common
   "tools" are node ids (or op ids). They are HIDDEN UNDER the body, never deleted — they stop
   rendering but stay reachable from the body's feature list.

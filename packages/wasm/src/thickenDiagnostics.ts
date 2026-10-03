@@ -4,8 +4,14 @@
 import { type IFace, type IShape, type ISurface, ShapeTypes, type XYZ } from "@spicy3d/core";
 import { OccSphericalSurface, OccToroidalSurface } from "./surface";
 
-const SAMPLE_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const MAX_FACES = 64;
+/** Curvature samples over all sampled faces; a face gets a square grid of 5..32 per side. */
+const SAMPLE_BUDGET = 1024;
+const MIN_GRID = 5;
+const MAX_GRID = 32;
+/** Per side of the finer grid around the coarse minimum (spanning one coarse cell each way). */
+const REFINE_GRID = 5;
+const SELF_INTERSECTION = /intersects itself/i;
 const NATIVE_TRAP = /aborted|RuntimeError|unreachable|out of bounds|signature mismatch|crashed/i;
 
 type CurvatureRegion = {
@@ -31,7 +37,7 @@ export function thickenFailureDiagnostic(
     if (
         !Number.isFinite(thickness) ||
         thickness === 0 ||
-        !/offset|thick\s*solid|tolerant/i.test(error) ||
+        !/offset|thick\s*solid|tolerant|intersects itself/i.test(error) ||
         NATIVE_TRAP.test(error)
     ) {
         return error;
@@ -48,9 +54,16 @@ export function thickenFailureDiagnostic(
             }
             return continuityDiagnostic(error, faces.length);
         }
+        const sampledFaces = faces
+            .slice(0, MAX_FACES)
+            .filter((face) => !openingFaces.some((opening) => face.isSame(opening))).length;
+        const grid = Math.max(
+            MIN_GRID,
+            Math.min(MAX_GRID, Math.floor(Math.sqrt(SAMPLE_BUDGET / Math.max(1, sampledFaces)))),
+        );
         for (const [faceIndex, face] of faces.slice(0, MAX_FACES).entries()) {
             if (openingFaces.some((opening) => face.isSame(opening))) continue;
-            const candidate = sampleFace(face, faceIndex, thickness);
+            const candidate = sampleFace(face, faceIndex, thickness, grid);
             if (candidate && (!region || candidate.radius < region.radius)) region = candidate;
         }
     } catch (failure) {
@@ -68,6 +81,14 @@ export function thickenFailureDiagnostic(
         return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled}; reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
     }
     const { point, radius, faceIndex } = region;
+    const at = `input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm`;
+    if (radius > Math.abs(thickness)) {
+        const minimum = `minimum sampled curvature radius toward the offset side ${number(radius)} mm on ${at}, larger than |thickness| ${number(Math.abs(thickness))} mm`;
+        if (SELF_INTERSECTION.test(error))
+            return `${error}; ${minimum}${sampled}: local curvature does not explain the crossing, so offset walls of separate regions likely meet (a narrow neck, closely spaced or folding sections). Reduce |thickness| or widen the region around the reported intersection. Sampling can miss a crease narrower than its grid.`;
+        if (!/BRepOffset_|^Failed to create thick solid$|Tolerant envelope/.test(error)) return error;
+        return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled} (${minimum}); reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
+    }
     const remedy = !region.analytic
         ? "the free-form crease envelope is not supported by tolerant mode"
         : /tolerant/i.test(error)
@@ -78,7 +99,7 @@ export function thickenFailureDiagnostic(
               region.cavityClass
             ? "retry with tolerant mode for supported analytic solids (complete spheres and ring tori)"
             : "tolerant recovery has not been verified for this solid; do not rely on it for this collapse";
-    return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
+    return `${error}; possible offset collapse on ${at}: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
 }
 
 function continuityDiagnostic(error: string, faceCount: number, faceIndex?: number): string {
@@ -123,7 +144,16 @@ function disposeDiagnostic(value: IShape | ISurface): void {
     }
 }
 
-function sampleFace(face: IFace, faceIndex: number, thickness: number): CurvatureRegion | undefined {
+/**
+ * The smallest curvature radius toward the offset side over a `grid` x `grid` sample of the
+ * face's trimmed domain, then a finer grid around that sample (one coarse cell each way).
+ */
+function sampleFace(
+    face: IFace,
+    faceIndex: number,
+    thickness: number,
+    grid: number,
+): CurvatureRegion | undefined {
     let surface: ISurface | undefined;
     let region: CurvatureRegion | undefined;
     let trapped = false;
@@ -135,32 +165,49 @@ function sampleFace(face: IFace, faceIndex: number, thickness: number): Curvatur
         const bounds = trimmed ? trimmed.value : surface.bounds();
         const { u1, u2, v1, v2 } = bounds;
         if (![u1, u2, v1, v2].every(Number.isFinite) || u2 <= u1 || v2 <= v1) return undefined;
-        for (const fu of SAMPLE_FRACTIONS) {
-            for (const fv of SAMPLE_FRACTIONS) {
-                try {
-                    const u = u1 + (u2 - u1) * fu;
-                    const v = v1 + (v2 - v1) * fv;
-                    const d = surface.d2(u, v);
-                    if (!face.containsPoint(d.point, true, 1e-6)) continue;
-                    const [, normal] = face.normal(u, v);
-                    const radius = limitingRadius(d, normal, thickness);
-                    if (radius !== undefined && (!region || radius < region.radius)) {
-                        region = {
-                            faceIndex,
-                            radius,
-                            point: d.point,
-                            analytic: surface.isAnalytic?.() === true,
-                            cavityClass:
-                                surface instanceof OccSphericalSurface ||
-                                (surface instanceof OccToroidalSurface &&
-                                    surface.majorRadius > surface.minorRadius),
-                        };
-                    }
-                } catch (failure) {
-                    if (isNativeTrap(failure)) throw failure;
-                    // D2 can fail at a C0 knot or a degenerate point; other samples still help.
+        const queried = surface;
+        // Written from `sample`; a plain `let` would stay narrowed to undefined after the loops.
+        const minimum: { best?: { u: number; v: number; radius: number; point: XYZ } } = {};
+        const sample = (u: number, v: number) => {
+            try {
+                const d = queried.d2(u, v);
+                if (!face.containsPoint(d.point, true, 1e-6)) return;
+                const [, normal] = face.normal(u, v);
+                const radius = limitingRadius(d, normal, thickness);
+                if (radius !== undefined && (!minimum.best || radius < minimum.best.radius))
+                    minimum.best = { u, v, radius, point: d.point };
+            } catch (failure) {
+                if (isNativeTrap(failure)) throw failure;
+                // D2 can fail at a C0 knot or a degenerate point; other samples still help.
+            }
+        };
+        const du = (u2 - u1) / grid;
+        const dv = (v2 - v1) / grid;
+        for (let i = 0; i < grid; i++) {
+            for (let j = 0; j < grid; j++) sample(u1 + du * (i + 0.5), v1 + dv * (j + 0.5));
+        }
+        const coarse = minimum.best;
+        if (coarse) {
+            for (let i = 0; i < REFINE_GRID; i++) {
+                for (let j = 0; j < REFINE_GRID; j++) {
+                    const u = coarse.u + du * ((2 * i) / (REFINE_GRID - 1) - 1);
+                    const v = coarse.v + dv * ((2 * j) / (REFINE_GRID - 1) - 1);
+                    if (u >= u1 && u <= u2 && v >= v1 && v <= v2 && (u !== coarse.u || v !== coarse.v))
+                        sample(u, v);
                 }
             }
+        }
+        const found = minimum.best;
+        if (found) {
+            region = {
+                faceIndex,
+                radius: found.radius,
+                point: found.point,
+                analytic: surface.isAnalytic?.() === true,
+                cavityClass:
+                    surface instanceof OccSphericalSurface ||
+                    (surface instanceof OccToroidalSurface && surface.majorRadius > surface.minorRadius),
+            };
         }
     } catch (failure) {
         trapped = isNativeTrap(failure);
@@ -172,6 +219,11 @@ function sampleFace(face: IFace, faceIndex: number, thickness: number): Curvatur
     return region;
 }
 
+/**
+ * The radius of the sharpest principal curvature bending toward the offset side (undefined
+ * when the surface bends away from it or is flat there). The offset collapses where it is at
+ * most |thickness| (1 - thickness * curvature = 0).
+ */
 function limitingRadius(d: ReturnType<ISurface["d2"]>, normal: XYZ, thickness: number): number | undefined {
     if (normal.length() < 0.5) return undefined;
     // Eigenvalues of the second fundamental form relative to the first, with the face's
@@ -188,8 +240,6 @@ function limitingRadius(d: ReturnType<ISurface["d2"]>, normal: XYZ, thickness: n
     const gaussian = (l * n - m * m) / determinant;
     const spread = Math.sqrt(Math.max(0, mean * mean - gaussian));
     const directed = Math.max((mean + spread) * Math.sign(thickness), (mean - spread) * Math.sign(thickness));
-    if (!Number.isFinite(directed) || directed <= 0 || directed * Math.abs(thickness) < 1) {
-        return undefined;
-    }
+    if (!Number.isFinite(directed) || directed <= 0) return undefined;
     return 1 / directed;
 }
