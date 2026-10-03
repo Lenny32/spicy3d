@@ -154,6 +154,7 @@ describe("mergeRibbonProfiles", () => {
             "feature.cut",
             "feature.common",
             "modify.move",
+            "modify.referencePlacement",
         ]);
         expect(modify.collapsedItems?.[0]).toBe("feature.variable");
     });
