@@ -40,8 +40,12 @@ inline bool rebuildBoundaryCurves(const TopoDS_Face& face, int segments)
     if (surface.IsNull())
         return false;
     BRep_Builder builder;
-    for (TopExp_Explorer edges(face, TopAbs_EDGE); edges.More(); edges.Next()) {
-        const TopoDS_Edge edge = TopoDS::Edge(edges.Current());
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+    TopExp::MapShapes(face, TopAbs_EDGE, edges);
+    for (int index = 1; index <= edges.Extent(); ++index) {
+        const TopoDS_Edge edge = TopoDS::Edge(edges.FindKey(index));
+        if (BRep_Tool::Degenerated(edge))
+            continue;
         double first, last;
         const auto pcurve = BRep_Tool::CurveOnSurface(edge, face, first, last);
         if (pcurve.IsNull() || !std::isfinite(first) || !std::isfinite(last) || last <= first)
@@ -100,8 +104,14 @@ inline TopoDS_Shape recover(const TopoDS_Shape& input, double thickness)
     sewing.SetMaxTolerance(tolerance);
     sewing.Add(source);
     sewing.Add(offset.Shape());
-    for (TopExp_Explorer boundaries(source, TopAbs_EDGE); boundaries.More(); boundaries.Next()) {
-        const TopoDS_Edge edge = TopoDS::Edge(boundaries.Current());
+    const TopoDS_Face sourceFace = TopoDS::Face(TopExp_Explorer(source, TopAbs_FACE).Current());
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> boundaries;
+    TopExp::MapShapes(sourceFace, TopAbs_EDGE, boundaries);
+    for (int index = 1; index <= boundaries.Extent(); ++index) {
+        const TopoDS_Edge edge = TopoDS::Edge(boundaries.FindKey(index));
+        // Seams already join the skin to itself; collapsed edges bound no wall area.
+        if (BRep_Tool::IsClosed(edge, sourceFace) || BRep_Tool::Degenerated(edge))
+            continue;
         const auto generated = offset.Generated(edge);
         if (generated.Size() != 1 || generated.First().ShapeType() != TopAbs_EDGE)
             return { };
