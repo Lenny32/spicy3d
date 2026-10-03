@@ -2,10 +2,10 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    awaitExportRebuilds,
     type DataExport,
     type DataExportError,
     type DataExportOptions,
-    awaitExportRebuilds,
     EditableShapeNode,
     type ExportUnitHandling,
     exportLengthUnit,

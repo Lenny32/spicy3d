@@ -2,9 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    awaitExportRebuilds,
     type DataExportError,
     type DataExportOptions,
-    awaitExportRebuilds,
     DocumentRebuilds,
     download,
     I18n,
