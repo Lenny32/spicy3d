@@ -312,6 +312,32 @@ const EDGE_SELECTOR_SCHEMA = {
     },
 };
 
+const FACE_SELECTOR_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+        faceIds: { type: "array", minItems: 1, items: { type: "string" } },
+        featureIds: { type: "array", minItems: 1, items: { type: "string" } },
+        containsPoint: XYZ_SCHEMA,
+        largest: { type: "boolean" },
+        tolerance: { type: "number", exclusiveMinimum: 0 },
+    },
+    description:
+        "Faces query or extrusion pick: intersect tracked face ids, feature origins and a body-local point on the trimmed face; largest keeps the largest remaining area (ties stay ambiguous).",
+};
+
+const FACE_PICK_SCHEMA = {
+    type: "object",
+    properties: {
+        nodeId: { type: "string" },
+        faceIndex: { type: "integer", minimum: 0 },
+        faceId: { type: "string" },
+        selector: FACE_SELECTOR_SCHEMA,
+    },
+    required: ["nodeId"],
+    oneOf: [{ required: ["faceIndex"] }, { required: ["faceId"] }, { required: ["selector"] }],
+};
+
 const OPS_SCHEMA = {
     type: "object",
     properties: {
@@ -335,6 +361,7 @@ const OPS_SCHEMA = {
                 "editFeature",
                 "features",
                 "edges",
+                "faces",
                 "editSketch",
                 "sketchInfo",
                 "construct",
@@ -393,16 +420,14 @@ const OPS_SCHEMA = {
         depth: { description: "Extrude distance in mm (a number or an expression)" },
         symmetric: { type: "boolean", description: "Extrude by `depth` in both directions" },
         startFace: {
-            type: "object",
-            properties: { nodeId: { type: "string" }, faceIndex: { type: "integer", minimum: 0 } },
-            required: ["nodeId", "faceIndex"],
+            ...FACE_PICK_SCHEMA,
             description:
-                "Associative starting surface, including curved walls. startOffset offsets this surface axially; distance depth separates exact translated caps.",
+                "Associative starting surface, including curved walls. Use a reference returned by faces, or nodeId plus faceIndex/faceId/selector. startOffset offsets this surface axially; distance depth separates exact translated caps.",
         },
         startOffset: { description: "Distance the extrusion starts away from the profile plane" },
         extent: {
             description:
-                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), "next" or {type:"next", offset?} (automatically find the uniformly nearest complete face in an authoring-time candidate body snapshot; curved caps are exact, missing/tied/crossing/piecewise targets fail; no automatic direction reversal), or { type: "toObject", face: { nodeId, faceIndex }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
+                'Extrude only: where it ends. "distance" (default: by `depth`), "throughAll" (through the whole body it cuts/joins; direction = the sign of depth, reversed by itself when nothing lies ahead; needs body + operation), "next" or {type:"next", offset?} (automatically find the uniformly nearest complete face in an authoring-time candidate body snapshot; curved caps are exact, missing/tied/crossing/piecewise targets fail; no automatic direction reversal), or { type: "toObject", face: { nodeId, faceIndex|faceId|selector }, offset? } (up to a face of any node, planar or curved, re-found on every rebuild so it follows the face; offset moves the end along the direction, positive = past the face). With symmetric it applies to both sides unless secondExtent is set.',
         },
         secondExtent: {
             description:
@@ -522,12 +547,12 @@ const OPS_SCHEMA = {
             description:
                 "Extrude/boolean: fuse, cut or common. FaceSweep/editFaceSweep: join or cut into the named body; requires an authored section at the path start and a proven support reference.",
         },
-        selector: EDGE_SELECTOR_SCHEMA,
+        selector: { anyOf: [EDGE_SELECTOR_SCHEMA, FACE_SELECTOR_SCHEMA] },
         expectedCount: {
             type: "integer",
             minimum: 1,
             description:
-                "edges query: require this many candidates; empty/ambiguous selection status explains mismatches without applying an edit.",
+                "edges/faces query: require this many candidates; empty/ambiguous selection status explains mismatches without applying an edit.",
         },
         edgeRefs: {
             type: "array",
@@ -624,7 +649,7 @@ const OPS_SCHEMA = {
             type: "integer",
             minimum: 0,
             description:
-                "fillet/chamfer: insert before this zero-based feature index (omit to append). edges: query the input shape at this index. Edge indexes and references are resolved there. moveTo: the feature's absolute index in the list.",
+                "fillet/chamfer: insert before this zero-based feature index (omit to append). edges/faces: query the input shape at this index. Edge indexes and references are resolved there. moveTo: the feature's absolute index in the list.",
         },
         definition: {
             type: "object",
@@ -648,7 +673,7 @@ export const RUN_PARAMETRIC_PARAMETERS = {
             type: "string",
             enum: ["full", "compact"],
             description:
-                "full (default): every touched body's feature list. compact: only created/edited feature rows, removed ids, feature count and error/warning status. Explicit features/sketchInfo/edges reads remain full.",
+                "full (default): every touched body's feature list. compact: only created/edited feature rows, removed ids, feature count and error/warning status. Explicit features/sketchInfo/edges/faces reads remain full.",
         },
     },
     required: ["ops"],
@@ -659,7 +684,7 @@ export function buildParametricTools(): Tool[] {
         {
             name: "run_parametric",
             description:
-                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body. Consecutive editSketch operations coalesce downstream rebuilds. Use start_parametric_job for long sketch-edit batches with live status and cancellation.",
+                "Build a parametric body — a sketch plus an ordered feature list the user can re-edit later. Same calling shape as run_program: { ops: [...] }, ops run in order, later ops reference earlier ids, and one call is one undo step. The difference: run_program produces throwaway geometry, run_parametric produces a feature tree the user can change a dimension in afterwards, so use it whenever the model should stay editable and run_program for one-off shapes. Ops: sketch, editSketch, sketchInfo, extrude, revolve, loft, editLoft, sweep, editSweep, faceSweep, editFaceSweep, projection, fillet, chamfer, thicken, boolean, editFeature, features, edges, faces, construct, editConstruction, constructionInfo — every sketch tool and construction-geometry tool of the app is available; load_skill parametric-modeling for the full catalog. Nothing is ever deleted: a boolean's tool nodes become hidden children of the body. Consecutive editSketch operations coalesce downstream rebuilds. Use start_parametric_job for long sketch-edit batches with live status and cancellation.",
             parameters: RUN_PARAMETRIC_PARAMETERS,
             handler: (args, signal) => runParametric(args, signal),
         },

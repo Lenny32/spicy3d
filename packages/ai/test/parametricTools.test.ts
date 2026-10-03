@@ -49,6 +49,7 @@ describe("parametricTools", () => {
             "editFeature",
             "features",
             "edges",
+            "faces",
             "editSketch",
             "sketchInfo",
             "construct",
@@ -73,7 +74,7 @@ describe("parametricTools", () => {
 
     test("edge queries advertise origin, adjacency, outline, curve and analytic selectors", () => {
         const properties = (opsSchema() as any).properties;
-        expect(Object.keys(properties.selector.properties)).toEqual([
+        expect(Object.keys(properties.selector.anyOf[0].properties)).toEqual([
             "featureIds",
             "adjoiningFaces",
             "outlineOfFaces",
@@ -81,9 +82,31 @@ describe("parametricTools", () => {
             "geometry",
             "tolerance",
         ]);
-        expect(properties.selector.additionalProperties).toBe(false);
+        expect(properties.selector.anyOf[0].additionalProperties).toBe(false);
         expect(properties.expectedCount.minimum).toBe(1);
-        expect(properties.selector.properties.geometry.properties.elevation.required).toEqual(["value"]);
+        expect(properties.selector.anyOf[0].properties.geometry.properties.elevation.required).toEqual([
+            "value",
+        ]);
+    });
+
+    test("face queries and extrusion picks advertise tracked ids and face predicates", () => {
+        const properties = (opsSchema() as any).properties;
+        const selector = properties.selector.anyOf[1];
+        expect(Object.keys(selector.properties)).toEqual([
+            "faceIds",
+            "featureIds",
+            "containsPoint",
+            "largest",
+            "tolerance",
+        ]);
+        expect(selector.additionalProperties).toBe(false);
+        expect(properties.startFace.properties.selector).toEqual(selector);
+        expect(properties.startFace.required).toEqual(["nodeId"]);
+        expect(properties.startFace.oneOf).toEqual([
+            { required: ["faceIndex"] },
+            { required: ["faceId"] },
+            { required: ["selector"] },
+        ]);
     });
 
     test("corner insertion and historical edge queries advertise a nonnegative integer position", () => {

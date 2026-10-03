@@ -70,6 +70,7 @@ import {
     selectEdgeIndexes,
     validateEdgeSelector,
 } from "./edgeSelectors";
+import { type FaceSelector, selectFaceIndexes } from "./faceSelectors";
 import {
     describeSketch,
     type SketchAction,
@@ -114,7 +115,8 @@ export type ParametricOp =
     | BooleanOp
     | EditFeatureOp
     | FeaturesOp
-    | EdgesOp;
+    | EdgesOp
+    | FacesOp;
 
 export interface SketchOp {
     op: "sketch";
@@ -184,7 +186,7 @@ export interface ExtrudeOp {
     depth: ParameterValue;
     symmetric?: boolean;
     startOffset?: ParameterValue;
-    startFace?: { nodeId: string; faceIndex: number };
+    startFace?: ProgramFaceSelection;
     /** Omit to create a new body; otherwise the body to append the feature to. */
     body?: string;
     operation?: BooleanOperation;
@@ -196,7 +198,7 @@ export interface ExtrudeOp {
 
 /**
  * An extrude extent as a program writes it: `"distance"` / `"throughAll"` (or `{ type }`), or up to a
- * face of a node (`faceIndex` into its current faces, findSubShapes order) moved by `offset` along the
+ * face of a node (current `faceIndex`, tracked `faceId`, or authoring-time selector) moved by `offset` along the
  * extrude direction.
  */
 export type ExtrudeExtentSpec =
@@ -205,7 +207,7 @@ export type ExtrudeExtentSpec =
     | "next"
     | { type: "next"; offset?: ParameterValue }
     | { type: "distance" | "throughAll" }
-    | { type: "toObject"; face: { nodeId: string; faceIndex: number }; offset?: ParameterValue };
+    | { type: "toObject"; face: ProgramFaceSelection; offset?: ParameterValue };
 
 export interface RevolveOp {
     op: "revolve";
@@ -349,6 +351,28 @@ export interface FilletChamferOp {
 export interface PersistentEdgeReference {
     bodyId: string;
     edge: EdgeRef;
+}
+
+/** Authoring-time picks become the existing stored ProfileRef, never a saved selector. */
+export type ProgramFaceSelection = { nodeId: string } & (
+    | { faceIndex: number }
+    | { faceId: string }
+    | { selector: FaceSelector }
+);
+
+export interface FacesOp {
+    op: "faces";
+    id?: string;
+    body: string;
+    index?: number;
+    selector?: FaceSelector;
+    expectedCount?: number;
+}
+
+export interface FacesReport {
+    bodyId: string;
+    selection: { status: "matched" | "empty" | "ambiguous"; count: number; message: string };
+    faces: { index: number; area: number; reference: { nodeId: string; faceId: string } }[];
 }
 
 export interface EdgesOp {
@@ -702,6 +726,9 @@ function runOp(state: State, op: ParametricOp): void {
         case "editFeature":
             runEditFeatureOp(state, op);
             break;
+        case "faces":
+            runFacesOp(state, op);
+            break;
         case "edges":
             runEdgesOp(state, op);
             break;
@@ -1027,36 +1054,53 @@ function resolveExtent(
         );
     }
     const spec = given as Extract<ExtrudeExtentSpec, { type: "toObject" }>;
-    if (typeof spec.face?.faceIndex !== "number") {
-        throw new Error(`"${what}.face" must be { nodeId, faceIndex }`);
-    }
+    if (!spec.face || typeof spec.face.nodeId !== "string")
+        throw new Error(`"${what}.face" requires nodeId and exactly one of faceIndex, faceId or selector`);
+    const pick = spec.face;
+    const modes = ["faceIndex", "faceId", "selector"].filter((key) => key in pick);
+    if (modes.length !== 1) throw new Error("Use exactly one of faceIndex, faceId or selector");
     if (spec.offset !== undefined) ensureUnit(spec.offset, scope, LENGTH_UNITS, `${what}.offset`);
-    const host = resolveNode(state, spec.face?.nodeId, `${what}.face.nodeId`);
-    if (!(host instanceof ShapeNode) || !host.shape.isOk) {
-        throw new Error(`node "${spec.face.nodeId}" has no valid shape to extrude up to`);
-    }
+    const host = resolveNode(state, pick.nodeId, `${what}.face.nodeId`);
+    if (!(host instanceof ShapeNode) || !host.shape.isOk)
+        throw new Error(`node "${pick.nodeId}" has no valid shape to extrude up to`);
     const faces = host.shape.value.findSubShapes(ShapeTypes.face) as IFace[];
-    const local = faces[spec.face.faceIndex];
-    if (local === undefined) {
-        throw new Error(
-            `faceIndex ${spec.face.faceIndex} is out of range on "${spec.face.nodeId}" (0..${faces.length - 1})`,
-        );
-    }
-    // Target faces are captured in world coordinates with their tracked id, like press-pull faces.
-    const transform = host.worldTransform();
-    const isIdentity = transform.equals(Matrix4.identity());
-    const world = isIdentity ? local : (local.transformedMul(transform) as IFace);
     try {
-        const faceId = isBodyTrackingNode(host) ? host.faceIdAt(spec.face.faceIndex) : undefined;
-        const shared = host instanceof ParametricBodyNode && host.faceIdIsShared(faceId);
-        return {
-            type: "toObject",
-            nodeId: host.id,
-            face: captureExtentFaceRef(world, faceId, shared),
-            ...(spec.offset !== undefined ? { offset: spec.offset } : {}),
-        };
+        let selectedIndex: number;
+        if ("faceIndex" in pick) {
+            selectedIndex = pick.faceIndex;
+            if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= faces.length)
+                throw new Error(
+                    `faceIndex ${selectedIndex} is out of range on "${pick.nodeId}" (0..${faces.length - 1})`,
+                );
+        } else {
+            const selector = "faceId" in pick ? { faceIds: [pick.faceId] } : pick.selector;
+            const ids = faces.map((_, i) => (isBodyTrackingNode(host) ? (host.faceIdAt(i) ?? "") : ""));
+            const indexes = selectFaceIndexes(host, faces, ids, selector);
+            if (indexes.length !== 1)
+                throw new Error(
+                    `"${what}.face" selection is ${indexes.length === 0 ? "empty" : "ambiguous"}: expected one face, found ${indexes.length}; refine the selector`,
+                );
+            selectedIndex = indexes[0];
+        }
+        const local = faces[selectedIndex];
+        // Target faces are captured in world coordinates with their tracked id, like press-pull faces.
+        const transform = host.worldTransform();
+        const isIdentity = transform.equals(Matrix4.identity());
+        const world = isIdentity ? local : (local.transformedMul(transform) as IFace);
+        try {
+            const faceId = isBodyTrackingNode(host) ? host.faceIdAt(selectedIndex) : undefined;
+            const shared = host instanceof ParametricBodyNode && host.faceIdIsShared(faceId);
+            return {
+                type: "toObject",
+                nodeId: host.id,
+                face: captureExtentFaceRef(world, faceId, shared),
+                ...(spec.offset !== undefined ? { offset: spec.offset } : {}),
+            };
+        } finally {
+            if (!isIdentity) world.dispose();
+        }
     } finally {
-        if (!isIdentity) world.dispose();
+        for (const face of faces) face.dispose();
     }
 }
 
@@ -1573,6 +1617,45 @@ function persistentEdges(given: PersistentEdgeReference[], body: ParametricBodyN
         if (edge.splitPiece === true) ref.splitPiece = true;
         return ref;
     });
+}
+
+function runFacesOp(state: State, op: FacesOp): void {
+    const body = resolveBody(state, op.body);
+    const input = edgeInputAt(body, op.index);
+    const faces = input.shape.findSubShapes(ShapeTypes.face) as IFace[];
+    try {
+        if (op.expectedCount !== undefined && (!Number.isInteger(op.expectedCount) || op.expectedCount < 1))
+            throw new Error("expectedCount must be a positive integer");
+        const ids =
+            op.index === undefined ? faces.map((_, i) => body.faceIdAt(i) ?? "") : (input.faceIds ?? []);
+        const indexes = selectFaceIndexes(body, faces, ids, op.selector ?? {}, op.index);
+        const count = indexes.length;
+        const status =
+            count === 0
+                ? "empty"
+                : op.expectedCount !== undefined && count !== op.expectedCount
+                  ? "ambiguous"
+                  : "matched";
+        const report: FacesReport = {
+            bodyId: body.id,
+            selection: {
+                status,
+                count,
+                message:
+                    status === "matched"
+                        ? `${count} faces match. Reuse references in extent.face or startFace.`
+                        : `Expected ${op.expectedCount ?? "matching"} faces, found ${count}; refine the selector before extruding.`,
+            },
+            faces: indexes.map((index) => ({
+                index,
+                area: faces[index].area(),
+                reference: { nodeId: body.id, faceId: ids[index] },
+            })),
+        };
+        state.out.results[op.id ?? "faces"] = report;
+    } finally {
+        for (const face of faces) face.dispose();
+    }
 }
 
 function runEdgesOp(state: State, op: EdgesOp): void {
