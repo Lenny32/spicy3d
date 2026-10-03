@@ -10,6 +10,11 @@ import type { ISurface } from "./surface";
 
 export type Orientation = "forward" | "reversed" | "internal" | "external";
 
+/** Optional runtime display capability; the canonical mesh remains at full quality. */
+export interface IProgressiveMeshShape {
+    createCoarseDisplayMesh(deflection: number): (IShapeMeshData & IDisposable) | undefined;
+}
+
 /** Runtime capability for inspection guards, separate from the agent-facing shape query API. */
 export interface IInspectionPrecheck {
     /** Whether this input needs a worker pre-check (kernel binding and inspection face cutoff). */

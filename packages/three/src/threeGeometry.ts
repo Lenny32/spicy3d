@@ -6,6 +6,7 @@ import {
     type EdgeMeshData,
     type FaceMeshData,
     type GeometryNode,
+    type IProgressiveMeshShape,
     type IShape,
     type ISubShape,
     type IVisualGeometry,
@@ -56,6 +57,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     private _renderOnTop = false;
     private _meshesDirty = true;
     private _displayOnly = false;
+    private _coarseMesh = false;
     private _buildingMeshes = false;
     private _disposed = false;
     private _temporaryFaces?: MeshLambertMaterial;
@@ -151,8 +153,10 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
 
     /** Passive rendering never demands geometry from hidden/consumed nodes. */
     buildVisibleMeshes(): void {
-        if (this.visible && this.geometryNode.visible && this.geometryNode.parentVisible)
+        if (this.visible && this.geometryNode.visible && this.geometryNode.parentVisible) {
             this.buildMeshes(false);
+            if (this._coarseMesh) this.context.queueMeshRefinement(this);
+        }
     }
 
     /** Explicit demand (export, selected fitting, highlighting), independent of visibility. */
@@ -183,25 +187,43 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
                 });
             }
         }
-        const displayOnly = !includeDeferred && this.geometryNode.hasDeferredMesh;
-        const mesh = includeDeferred ? this.geometryNode.mesh : this.geometryNode.displayMesh;
-        const vertexs = mesh?.vertexs;
-        const faces = mesh?.faces;
-        const edges = mesh?.edges;
-        this.removeMeshes();
-        if (vertexs?.position.length) this.initVertexs(vertexs);
-        if (faces?.position.length) this.initFaces(faces);
-        if (edges?.position.length) this.initEdges(edges);
-        this._meshesDirty = false;
-        this._displayOnly = displayOnly;
-        if (this.locked) {
-            this.locked = false;
-            this.locked = true;
+        const coarse =
+            !includeDeferred &&
+            this.context.useCoarseDisplayMesh &&
+            !this.geometryNode.hasDeferredMesh &&
+            this.geometryNode instanceof ShapeNode &&
+            this.geometryNode.faceMaterialPair.length === 0
+                ? (
+                      this.geometryNode.shape.unchecked() as
+                          | (IShape & Partial<IProgressiveMeshShape>)
+                          | undefined
+                  )?.createCoarseDisplayMesh?.(0.05)
+                : undefined;
+        const displayOnly = !includeDeferred && (this.geometryNode.hasDeferredMesh || coarse !== undefined);
+        const mesh = coarse ?? (includeDeferred ? this.geometryNode.mesh : this.geometryNode.displayMesh);
+        try {
+            const vertexs = mesh?.vertexs;
+            const faces = mesh?.faces;
+            const edges = mesh?.edges;
+            this.removeMeshes();
+            if (vertexs?.position.length) this.initVertexs(vertexs);
+            if (faces?.position.length) this.initFaces(faces);
+            if (edges?.position.length) this.initEdges(edges);
+            this._meshesDirty = false;
+            this._displayOnly = displayOnly;
+            this._coarseMesh = coarse !== undefined;
+            this.context.removeMeshRefinement(this);
+            if (this.locked) {
+                this.locked = false;
+                this.locked = true;
+            }
+            if (this._faces && this._temporaryFaces) this._faces.material = this._temporaryFaces;
+            if (this._edges && this._temporaryEdges) this._edges.material = this._temporaryEdges;
+            if (this._vertexs && this._temporaryVertexs) this._vertexs.material = this._temporaryVertexs;
+            this.updateWorldMatrix(true, true);
+        } finally {
+            coarse?.dispose();
         }
-        if (this._faces && this._temporaryFaces) this._faces.material = this._temporaryFaces;
-        if (this._edges && this._temporaryEdges) this._edges.material = this._temporaryEdges;
-        if (this._vertexs && this._temporaryVertexs) this._vertexs.material = this._temporaryVertexs;
-        this.updateWorldMatrix(true, true);
     }
 
     static buildMeshesIn(object: Object3D, visibleOnly = false): void {
@@ -218,6 +240,7 @@ export class ThreeGeometry extends ThreeVisualObject implements IVisualGeometry 
     override dispose() {
         if (this._disposed) return;
         this._disposed = true;
+        this.context.removeMeshRefinement(this);
         super.dispose();
         this.geometryNode.removePropertyChanged(this.handleGeometryPropertyChanged);
         this.removeMeshes();

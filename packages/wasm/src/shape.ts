@@ -148,6 +148,14 @@ export class OccShape implements IShape, IInspectionPrecheck {
         return this._mesh;
     }
 
+    createCoarseDisplayMesh(deflection: number): Mesher | undefined {
+        // Worker-provided and already computed canonical meshes need no first pass.
+        if (this._mesh !== undefined) return undefined;
+        if (!Number.isFinite(deflection) || deflection < 0.005)
+            throw new Error("Display deflection must be finite and at least 0.005");
+        return new Mesher(this, true, deflection);
+    }
+
     /** Hybrid prefix replicas retain analytic geometry, not a second native copy of render buffers. */
     useTransientTriangulation(): void {
         this.transientTriangulation = true;
@@ -1154,6 +1162,7 @@ export class Mesher implements IShapeMeshData, IDisposable {
     constructor(
         private shape: OccShape,
         private readonly transientTriangulation = false,
+        private readonly deflection = 0.005,
     ) {}
 
     private mesh() {
@@ -1171,7 +1180,7 @@ export class Mesher implements IShapeMeshData, IDisposable {
                       ...PerformanceTrace.shapeDetails(this.shape),
                   })
                 : undefined;
-            const occMesher = c(new wasm.Mesher(this.shape.shape, 0.005, true));
+            const occMesher = c(new wasm.Mesher(this.shape.shape, this.deflection, true));
             const meshData = c(occMesher.mesh());
             if (PerformanceTrace.enabled) PerformanceTrace.end(span);
             const conversion = PerformanceTrace.enabled

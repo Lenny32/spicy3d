@@ -3,14 +3,17 @@
 
 import { rs } from "@rstest/core";
 import {
+    EditableShapeNode,
     GeometryNode,
     GroupNode,
     type INode,
     type INodeLinkedList,
+    type IShape,
     type IShapeMeshData,
     Matrix4,
     NodeChildList,
     ShapeTypes,
+    UserActivity,
     VisualStates,
 } from "@spicy3d/core";
 import { createMockSelection, createMockVisual, TestDocument } from "@spicy3d/core/test-utils";
@@ -103,6 +106,8 @@ describe("deferred geometry", () => {
         highlighter.clear();
         context.dispose();
         doc.dispose();
+        rs.restoreAllMocks();
+        rs.unstubAllGlobals();
     });
 
     function node(name = "geometry") {
@@ -114,6 +119,160 @@ describe("deferred geometry", () => {
         expect(result).toBeInstanceOf(ThreeGeometry);
         return result as ThreeGeometry;
     }
+
+    function progressiveNode() {
+        const data = createTestGeometryNode().mesh;
+        const fine = { ...data, faces: { ...data.faces!, index: new Uint32Array([0, 1, 2, 0, 1, 2]) } };
+        const fullMesh = rs.fn(() => fine);
+        const disposeCoarse = rs.fn();
+        const coarse = rs.fn((_deflection: number) => ({ ...data, dispose: disposeCoarse }));
+        const shape = {
+            get mesh() {
+                return fullMesh();
+            },
+            createCoarseDisplayMesh: coarse,
+            dispose() {},
+        } as unknown as IShape;
+        const node = new EditableShapeNode({ document: doc, name: "progressive", shape });
+        return { node, fullMesh, coarse, disposeCoarse };
+    }
+
+    function idleQueue() {
+        const callbacks = new Map<number, () => void>();
+        let nextId = 0;
+        rs.stubGlobal("requestIdleCallback", (callback: () => void) => {
+            callbacks.set(++nextId, callback);
+            return nextId;
+        });
+        rs.stubGlobal("cancelIdleCallback", (id: number) => callbacks.delete(id));
+        return {
+            callbacks,
+            runNext() {
+                const next = callbacks.entries().next().value;
+                expect(next).not.toBeUndefined();
+                const [id, callback] = next!;
+                callbacks.delete(id);
+                callback();
+            },
+        };
+    }
+
+    test.each([
+        99, 100,
+    ])("%i visible shapes select first-pass quality and refine one shape per idle turn", (count) => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: count }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        const first = shapes[0];
+        const geo = context.getVisual(first.node) as ThreeGeometry;
+        if (count === 99) {
+            expect(first.coarse).not.toHaveBeenCalled();
+            expect(first.fullMesh).toHaveBeenCalledTimes(1);
+            expect(idle.callbacks.size).toBe(0);
+        } else {
+            expect(first.coarse).toHaveBeenCalledExactlyOnceWith(0.05);
+            expect(first.disposeCoarse).toHaveBeenCalledTimes(1);
+            expect(geo.faces()?.geometry.index?.count).toBe(3);
+            expect(shapes.every((item) => item.fullMesh.mock.calls.length === 0)).toBe(true);
+            expect(idle.callbacks.size).toBe(1);
+            idle.runNext();
+            expect(first.fullMesh).toHaveBeenCalledTimes(1);
+            expect(geo.faces()?.geometry.index?.count).toBe(6);
+            expect(shapes.slice(1).every((item) => item.fullMesh.mock.calls.length === 0)).toBe(true);
+            expect(idle.callbacks.size).toBe(1);
+        }
+    });
+
+    test("picking refines immediately and removes that geometry from the idle queue", () => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: 100 }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        const first = shapes[0];
+        const geo = context.getVisual(first.node) as ThreeGeometry;
+        const faces = geo.subShapeVisual(ShapeTypes.face);
+        expect(faces).toHaveLength(1);
+        expect(geo.faces()?.geometry.index?.count).toBe(6);
+        expect(first.fullMesh).toHaveBeenCalledTimes(1);
+        idle.runNext();
+        expect(first.fullMesh).toHaveBeenCalledTimes(1);
+        expect(shapes[1].fullMesh).toHaveBeenCalledTimes(1);
+    });
+
+    test("idle refinement waits while busy and cancels pending work on disposal", () => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: 100 }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        const busy = rs.spyOn(UserActivity.current, "isBusy").mockReturnValue(true);
+        idle.runNext();
+        expect(shapes[0].fullMesh).not.toHaveBeenCalled();
+        busy.mockReturnValue(false);
+        context.dispose();
+        expect(idle.callbacks.size).toBe(0);
+        expect(shapes.every((item) => item.fullMesh.mock.calls.length === 0)).toBe(true);
+    });
+
+    test("hidden coarse geometry refines only after it is revealed again", () => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: 100 }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        for (const item of shapes.slice(1)) {
+            context.removeMeshRefinement(context.getVisual(item.node) as ThreeGeometry);
+        }
+        const first = shapes[0];
+        first.node.visible = false;
+        idle.runNext();
+        expect(first.fullMesh).not.toHaveBeenCalled();
+        expect(idle.callbacks.size).toBe(0);
+        first.node.visible = true;
+        expect(idle.callbacks.size).toBe(1);
+        idle.runNext();
+        expect(first.fullMesh).toHaveBeenCalledTimes(1);
+    });
+
+    test("idle refinement resumes after the running command finishes", async () => {
+        const idle = idleQueue();
+        const shapes = Array.from({ length: 100 }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        const busy = rs.spyOn(UserActivity.current, "isBusy").mockReturnValue(true);
+        idle.runNext();
+        expect(shapes[0].fullMesh).not.toHaveBeenCalled();
+        busy.mockReturnValue(false);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(idle.callbacks.size).toBe(1);
+        idle.runNext();
+        expect(shapes[0].fullMesh).toHaveBeenCalledTimes(1);
+        expect(shapes[1].fullMesh).not.toHaveBeenCalled();
+    });
+
+    test("export refines coarse geometry immediately, including a hidden selected node", () => {
+        idleQueue();
+        const shapes = Array.from({ length: 100 }, progressiveNode);
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        const first = shapes[0];
+        first.node.visible = false;
+        const output = new ThreeMeshExporter(context).exportToStl([first.node], true);
+        expect(output.isOk).toBe(true);
+        expect((output.value as string).match(/facet normal/g)).toHaveLength(2);
+        expect(first.fullMesh).toHaveBeenCalledTimes(1);
+    });
+
+    test("the timer fallback refines one shape per turn and stops when disposed", () => {
+        rs.stubGlobal("requestIdleCallback", undefined);
+        rs.useFakeTimers();
+        try {
+            const shapes = Array.from({ length: 100 }, progressiveNode);
+            doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+            expect(shapes[0].fullMesh).not.toHaveBeenCalled();
+            rs.advanceTimersByTime(50);
+            expect(shapes[0].fullMesh).toHaveBeenCalledTimes(1);
+            expect(shapes[1].fullMesh).not.toHaveBeenCalled();
+            context.dispose();
+            rs.advanceTimersByTime(500);
+            expect(shapes[1].fullMesh).not.toHaveBeenCalled();
+        } finally {
+            rs.useRealTimers();
+        }
+    });
 
     test("profile faces stay deferred during load and fitting, then become raycastable on demand", () => {
         const profile = new DeferredProfileGeometry({ document: doc, name: "profile" });

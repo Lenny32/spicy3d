@@ -60,6 +60,8 @@ export function createThreeMockVisualContext(visualMap?: Map<VisualNode, Mesh>):
             return new MeshBasicMaterial();
         },
         addNode() {},
+        queueMeshRefinement() {},
+        removeMeshRefinement() {},
         removeNode() {},
         dispose() {},
         getNode() {
