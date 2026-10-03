@@ -31,6 +31,34 @@ test("a sampled inward curvature limit names its face, location, radius and reme
     expect(sphere.checkShape()).toBe(true);
 });
 
+const SELF_INTERSECTION =
+    "Thicken result intersects itself: Shape intersects itself; output face indices (zero-based): 0 1; 1 intersecting pair";
+
+test("a self-intersecting wall over a sharper curvature than its thickness names the collapse", () => {
+    const sphere = keep(createSphere(factory, undefined, 2));
+    const message = thickenFailureDiagnostic(SELF_INTERSECTION, sphere, -3.75);
+    expect(message.startsWith(SELF_INTERSECTION)).toBe(true);
+    expect(message).toContain("possible offset collapse on input face index 0 near (");
+    expect(message).toContain("curvature radius 2 mm <= |thickness| 3.75 mm");
+});
+
+test("a self-intersecting wall over gentler curvature reports the minimum radius against the thickness", () => {
+    const sphere = keep(createSphere(factory, undefined, 2));
+    const message = thickenFailureDiagnostic(SELF_INTERSECTION, sphere, -1);
+    expect(message.startsWith(SELF_INTERSECTION)).toBe(true);
+    expect(message).toContain(
+        "minimum sampled curvature radius toward the offset side 2 mm on input face index 0 near (",
+    );
+    expect(message).toContain("larger than |thickness| 1 mm");
+    expect(message).toContain("local curvature does not explain the crossing");
+    expect(message).not.toContain("possible offset collapse");
+});
+
+test("a self-intersecting planar wall keeps the verdict as it is", () => {
+    const box = keep(createBox(factory));
+    expect(thickenFailureDiagnostic(SELF_INTERSECTION, box, -1)).toBe(SELF_INTERSECTION);
+});
+
 test.each([3.75, -1])("curvature in the safe direction at thickness %s is not blamed", (thickness) => {
     const sphere = keep(createSphere(factory, undefined, 2));
     const message = thickenFailureDiagnostic(ERROR, sphere, thickness);

@@ -82,11 +82,22 @@ const thickenHandler: FeatureHandler<ThickenFeatureData> = {
         if (!feature.tolerant) {
             // Without diagnostic support the step runs on the main thread, as in a synchronous rebuild.
             if (!shapeFactory.boundedOperations?.selfIntersectionDetails) return undefined;
-            return prepareValidatedFeature(
+            const validated = prepareValidatedFeature(
                 (preparedContext) => thickenHandler.evaluate(feature, preparedContext),
                 context,
                 true,
             );
+            return {
+                ready: validated.ready,
+                canFallback: validated.canFallback,
+                cancel: () => validated.cancel(),
+                take: () => {
+                    const result = validated.take();
+                    return result.isOk
+                        ? result
+                        : Result.err(explainSelfIntersection(feature, context, result.error));
+                },
+            };
         }
         const failed = (message: string): IAsyncShapeOperation<IShape> => ({
             ready: Promise.resolve(),
@@ -181,6 +192,39 @@ export function resolveThickness(
         return Result.err("The thickness must not be zero");
     }
     return resolved;
+}
+
+/**
+ * A self-intersecting wall's error with the factory's curvature estimate on the input (the
+ * worker's verdict names only output faces). Other errors pass unchanged.
+ */
+function explainSelfIntersection(
+    feature: ThickenFeatureData,
+    context: FeatureContext,
+    error: string,
+): string {
+    const input = context.input;
+    if (!/intersects itself/i.test(error) || !shapeFactory.explainThickenFailure || !input || input.isNull())
+        return error;
+    const thickness = resolveThickness(feature, context);
+    if (!thickness.isOk) return error;
+    const faces =
+        (feature.openFaces ?? []).length > 0 && input.findSubShapes(ShapeTypes.solid).length > 0
+            ? matchOpenFaces(feature, { ...context, tracking: undefined }, input)
+            : Result.ok<IFace[]>([]);
+    try {
+        return shapeFactory.explainThickenFailure(
+            error,
+            input,
+            thickness.value,
+            faces.isOk ? faces.value : [],
+        );
+    } catch {
+        // An explanation must never replace the verdict.
+        return error;
+    } finally {
+        if (faces.isOk) for (const face of faces.value) face.dispose();
+    }
 }
 
 /** The kernel call for the input's kind (see the module comment). */

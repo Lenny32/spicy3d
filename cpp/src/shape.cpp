@@ -36,6 +36,7 @@
 #include <HLRBRep_Algo.hxx>
 #include <HLRBRep_HLRToShape.hxx>
 #include <IntCurvesFace_Intersector.hxx>
+#include <Precision.hxx>
 #include <ShapeAnalysis.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -50,11 +51,14 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <algorithm>
 #include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "faceValidation.hpp"
 #include "guard.hpp"
@@ -144,18 +148,120 @@ class Shape {
         return hasSolid || testOne(shape);
     }
 
-    // Empty = proven clean. Coordinates describe the faulty region's bounding-box
-    // center, not an exact intersection point. Face indices belong to the queried output.
+    // At most this many interfering pairs are located (one section or distance query each);
+    // the others are only counted.
+    static constexpr int MAX_LOCATED_INTERSECTIONS = 4;
+
+    // Where two interfering sub-shapes meet: a point on their intersection and the extent of
+    // the whole intersection. Two faces are sectioned (the point lies on the longest
+    // intersection curve); other pairs, or faces the section misses, use their closest points,
+    // and `gap` is their distance — sub-shapes interfere through their tolerances too.
+    struct IntersectionRegion {
+        gp_Pnt point;
+        Bnd_Box extent;
+        double gap = 0;
+    };
+
+    static std::optional<IntersectionRegion> locateIntersection(const TopoDS_Shape& first, const TopoDS_Shape& second)
+    {
+        try {
+            if (first.ShapeType() == TopAbs_FACE && second.ShapeType() == TopAbs_FACE) {
+                BRepAlgoAPI_Section section(first, second, false);
+                section.Approximation(false);
+                section.ComputePCurveOn1(false);
+                section.ComputePCurveOn2(false);
+                section.Build();
+                if (section.IsDone() && !section.Shape().IsNull()) {
+                    IntersectionRegion region;
+                    double longest = -1;
+                    for (TopExp_Explorer it(section.Shape(), TopAbs_EDGE); it.More(); it.Next()) {
+                        const TopoDS_Edge& edge = TopoDS::Edge(it.Current());
+                        if (BRep_Tool::Degenerated(edge))
+                            continue;
+                        BRepAdaptor_Curve curve(edge);
+                        const double length = GCPnts_AbscissaPoint::Length(curve);
+                        BRepBndLib::Add(edge, region.extent, false);
+                        if (length > longest) {
+                            longest = length;
+                            region.point = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2);
+                        }
+                    }
+                    if (longest >= 0)
+                        return region;
+                    for (TopExp_Explorer it(section.Shape(), TopAbs_VERTEX); it.More(); it.Next()) {
+                        const gp_Pnt point = BRep_Tool::Pnt(TopoDS::Vertex(it.Current()));
+                        if (region.extent.IsVoid())
+                            region.point = point;
+                        region.extent.Add(point);
+                    }
+                    if (!region.extent.IsVoid())
+                        return region;
+                }
+            }
+            BRepExtrema_DistShapeShape distance(first, second);
+            if (!distance.IsDone() || distance.NbSolution() == 0)
+                return std::nullopt;
+            IntersectionRegion region;
+            const gp_Pnt a = distance.PointOnShape1(1);
+            const gp_Pnt b = distance.PointOnShape2(1);
+            region.point = gp_Pnt((a.XYZ() + b.XYZ()) / 2);
+            region.gap = distance.Value();
+            for (int i = 1; i <= distance.NbSolution(); ++i) {
+                region.extent.Add(distance.PointOnShape1(i));
+                region.extent.Add(distance.PointOnShape2(i));
+            }
+            return region;
+        } catch (const Standard_Failure&) {
+            // Locating is a courtesy: the verdict stands, the caller falls back to the bounding box.
+            return std::nullopt;
+        }
+    }
+
+    // Empty = proven clean. Otherwise the output faces involved and, per interfering pair (the
+    // first few), a point on the actual intersection and its extent; a pair that cannot be
+    // located keeps the approximate bounding-box center of its sub-shapes, labelled as such.
+    // Face indices belong to the queried output.
     static std::string selfIntersectionDiagnostic(const TopoDS_Shape& shape)
     {
         if (shape.IsNull())
             throw std::runtime_error("Self-intersection check requires a non-null shape");
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
         TopExp::MapShapes(shape, TopAbs_FACE, faces);
+        // Zero-based indices of the output faces that are or contain `subshape`.
+        auto owningFaces = [&](const TopoDS_Shape& subshape) {
+            std::vector<int> owners;
+            for (int i = 1; i <= faces.Extent(); ++i) {
+                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> members;
+                TopExp::MapShapes(faces.FindKey(i), members);
+                if (members.Contains(subshape))
+                    owners.push_back(i - 1);
+            }
+            return owners;
+        };
+        auto describe = [&](const TopoDS_Shape& subshape) {
+            std::ostringstream text;
+            const auto owners = owningFaces(subshape);
+            if (subshape.ShapeType() == TopAbs_FACE && owners.size() == 1) {
+                text << "face " << owners.front();
+                return text.str();
+            }
+            text << (subshape.ShapeType() == TopAbs_EDGE ? "edge" : subshape.ShapeType() == TopAbs_VERTEX ? "vertex"
+                                                                                                          : "sub-shape");
+            if (!owners.empty()) {
+                text << " of face" << (owners.size() > 1 ? "s" : "");
+                for (size_t k = 0; k < owners.size(); ++k)
+                    text << (k ? "/" : " ") << owners[k];
+            }
+            return text.str();
+        };
+        auto point = [](std::ostringstream& text, double x, double y, double z) {
+            text << "(" << x << ", " << y << ", " << z << ")";
+        };
         auto testOne = [&](const TopoDS_Shape& part) -> std::string {
             BOPAlgo_ArgumentAnalyzer analyzer;
             analyzer.SetShape1(part);
             analyzer.SelfInterMode() = true;
+            // Stops after the self-interference test; that test still lists every pair.
             analyzer.StopOnFirstFaulty() = true;
             analyzer.Perform();
             if (!analyzer.HasFaulty())
@@ -164,32 +270,77 @@ class Shape {
                 if (fault.GetCheckStatus() != BOPAlgo_SelfIntersect)
                     throw std::runtime_error("Self-intersection check could not complete (result unknown)");
             }
-            const auto& faulty = analyzer.GetCheckResult().First().GetFaultyShapes1();
             std::ostringstream message;
             message << "Shape intersects itself; output face indices (zero-based):";
-            bool located = false;
-            for (int i = 1; i <= faces.Extent(); ++i) {
-                NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> members;
-                TopExp::MapShapes(faces.FindKey(i), members);
-                for (const auto& subshape : faulty) {
-                    if (members.Contains(subshape)) {
-                        message << " " << i - 1;
-                        located = true;
-                        break;
+            std::vector<int> involved;
+            for (const auto& fault : analyzer.GetCheckResult()) {
+                for (const auto& subshape : fault.GetFaultyShapes1()) {
+                    for (int owner : owningFaces(subshape)) {
+                        if (std::find(involved.begin(), involved.end(), owner) == involved.end())
+                            involved.push_back(owner);
                     }
                 }
             }
-            if (!located)
+            std::sort(involved.begin(), involved.end());
+            if (involved.empty())
                 message << " unavailable";
-            Bnd_Box region;
-            for (const auto& subshape : faulty)
-                BRepBndLib::Add(subshape, region, false);
-            if (!region.IsVoid() && !region.IsOpen()) {
-                double x0, y0, z0, x1, y1, z1;
-                region.Get(x0, y0, z0, x1, y1, z1);
-                message << "; approximate faulty region center xyz (mm): ("
-                        << (x0 + x1) / 2 << ", " << (y0 + y1) / 2 << ", " << (z0 + z1) / 2 << ")";
+            for (int index : involved)
+                message << " " << index;
+            const int pairs = analyzer.GetCheckResult().Size();
+            message << "; " << pairs << " intersecting pair" << (pairs == 1 ? "" : "s");
+            // Crossing faces first: their section is the intersection itself, while touching
+            // edges and vertices only mark where it reaches the boundary.
+            std::vector<const BOPAlgo_CheckResult*> ordered;
+            for (const auto& fault : analyzer.GetCheckResult())
+                ordered.push_back(&fault);
+            auto rank = [](const BOPAlgo_CheckResult* fault) {
+                int faces = 0;
+                for (const auto& subshape : fault->GetFaultyShapes1())
+                    faces += subshape.ShapeType() == TopAbs_FACE;
+                return -faces;
+            };
+            std::stable_sort(ordered.begin(), ordered.end(), [&](auto a, auto b) { return rank(a) < rank(b); });
+            int located = 0;
+            for (const auto* fault : ordered) {
+                if (located == MAX_LOCATED_INTERSECTIONS)
+                    break;
+                ++located;
+                const auto& faulty = fault->GetFaultyShapes1();
+                message << "; ";
+                if (faulty.Size() == 2) {
+                    message << describe(faulty.First()) << " x " << describe(faulty.Last());
+                    if (const auto region = locateIntersection(faulty.First(), faulty.Last())) {
+                        if (region->gap > Precision::Confusion()) {
+                            message << " overlap within their tolerances near xyz (mm): ";
+                            point(message, region->point.X(), region->point.Y(), region->point.Z());
+                            message << ", gap " << region->gap << " mm";
+                            continue;
+                        }
+                        double x0, y0, z0, x1, y1, z1;
+                        region->extent.Get(x0, y0, z0, x1, y1, z1);
+                        message << " intersect at xyz (mm): ";
+                        point(message, region->point.X(), region->point.Y(), region->point.Z());
+                        message << ", intersection extent (mm): ";
+                        point(message, x0, y0, z0);
+                        message << " to ";
+                        point(message, x1, y1, z1);
+                        continue;
+                    }
+                } else if (!faulty.IsEmpty()) {
+                    message << describe(faulty.First()) << " intersects itself";
+                }
+                Bnd_Box region;
+                for (const auto& subshape : faulty)
+                    BRepBndLib::Add(subshape, region, false);
+                if (!region.IsVoid() && !region.IsOpen()) {
+                    double x0, y0, z0, x1, y1, z1;
+                    region.Get(x0, y0, z0, x1, y1, z1);
+                    message << ", not located; approximate faulty region center xyz (mm): ";
+                    point(message, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+                }
             }
+            if (pairs > located)
+                message << "; " << pairs - located << " more pair" << (pairs - located == 1 ? "" : "s") << " not located";
             return message.str();
         };
         bool hasSolid = false;

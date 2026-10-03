@@ -195,6 +195,13 @@ export interface IShapeFactory {
      * @unit length thickness
      */
     makeThickSolidTolerant?(shape: IShape, openFaces: IShape[], thickness: number): Result<IShape>;
+    /**
+     * `error`, a failed thicken of `shape`, with what sampling the input can tell: the sharpest
+     * curvature toward the offset side against |thickness|, and where. Never repeats the offset;
+     * returns `error` unchanged when it has nothing to add.
+     * @unit length thickness
+     */
+    explainThickenFailure?(error: string, shape: IShape, thickness: number, openFaces?: IShape[]): string;
     /** @unit length radius */
     fillet(shape: IShape, edges: number[], radius: number): Result<IShape>;
     /** OCCT smooth radius interpolation per selected edge; normalized arc length, natural curve direction.
