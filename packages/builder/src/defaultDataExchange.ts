@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DataExportError,
     type DataExportOptions,
     DocumentRebuilds,
     EditableShapeNode,
@@ -147,16 +148,34 @@ export class DefaultDataExchange implements IDataExchange {
         options?: DataExportOptions,
     ): Promise<BlobPart[] | undefined> {
         if (nodes.length === 0) return undefined;
+        const result = await this.exportResult(type, nodes, options);
+        if (result.isOk) return result.value;
+        if (result.error.kind === "no-geometry")
+            PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
+        else PubSub.default.pub("showToast", "error.default:{0}", result.error.message);
+        return undefined;
+    }
+
+    async exportResult(
+        type: string,
+        nodes: VisualNode[],
+        options?: DataExportOptions,
+    ): Promise<Result<BlobPart[], DataExportError>> {
+        const failed = (message: string) => Result.err<DataExportError>({ kind: "failed", message });
+        if (nodes.length === 0)
+            return Result.err({ kind: "no-geometry", message: "No nodes to export", nodes: [] });
         if (options?.stl && type !== ".stl" && type !== ".stl binary") {
-            return this.handleExportResult(Result.err("Tessellation tolerances apply only to STL exports"));
+            return failed("Tessellation tolerances apply only to STL exports");
         }
         const toleranceError = validateStlTessellation(options?.stl);
-        if (toleranceError) return this.handleExportResult(Result.err(toleranceError));
+        if (toleranceError) return failed(toleranceError);
 
         const document = nodes[0].document;
         const unit = exportLengthUnit(this.exportUnitHandling(type), options?.lengthUnit);
         // Mesh formats and BREP have no unit field: the numbers themselves are converted.
         const scale = fromMillimetres(1, unit);
+        const rebuilt = await this.awaitRebuilds(nodes, options?.signal);
+        if (!rebuilt.isOk) return Result.err(rebuilt.error);
         let shapeResult: Result<BlobPart> | undefined;
         if (type === ".ply") {
             shapeResult = document.visual.meshExporter.exportToPly(nodes, true, { scale });
@@ -166,40 +185,76 @@ export class DefaultDataExchange implements IDataExchange {
             shapeResult = document.visual.meshExporter.exportToObj(nodes, { scale });
         } else {
             // STEP/IGES writers convert and record the unit themselves; the rest scale here.
-            const shapes = await this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
-            if (!shapes.length) return undefined;
+            const shapes = this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
+            if (!shapes.isOk) return Result.err(shapes.error);
             // STL goes through the headless OCCT-mesh converter (not the Three.js
             // visual exporter), so the same path works in the browser and the MCP server.
-            if (type === ".stl") shapeResult = this.exportStl(document, shapes, false, options, scale);
-            if (type === ".stl binary") shapeResult = this.exportStl(document, shapes, true, options, scale);
-            if (type === ".step") shapeResult = this.exportStep(document, shapes, unit);
-            if (type === ".iges") shapeResult = this.exportIges(document, shapes, unit);
-            if (type === ".brep") shapeResult = this.exportBrep(document, shapes);
+            if (type === ".stl") shapeResult = this.exportStl(document, shapes.value, false, options, scale);
+            if (type === ".stl binary")
+                shapeResult = this.exportStl(document, shapes.value, true, options, scale);
+            if (type === ".step") shapeResult = this.exportStep(document, shapes.value, unit);
+            if (type === ".iges") shapeResult = this.exportIges(document, shapes.value, unit);
+            if (type === ".brep") shapeResult = this.exportBrep(document, shapes.value);
         }
 
-        if (shapeResult) {
-            return this.handleExportResult(shapeResult);
-        }
-        return undefined;
+        if (!shapeResult) return failed(`Unsupported export format "${type}"`);
+        return shapeResult.isOk ? Result.ok([shapeResult.value]) : failed(String(shapeResult.error));
     }
 
-    private async getExportShapes(nodes: VisualNode[], scale: number): Promise<IShape[]> {
-        const selected = nodes.filter((node): node is ShapeNode => node instanceof ShapeNode);
-        // Hidden bodies may never have been evaluated. Demand every selected shape before
-        // awaiting: a pending getter returns last-good (or an initial error), not export data.
-        for (const node of selected) void node.shape;
-        const documents = new Set(selected.map((node) => node.document));
-        await Promise.all([...documents].map((document) => DocumentRebuilds.settled(document)));
+    /**
+     * Hidden bodies may never have been evaluated. Demand every selected shape before
+     * awaiting: a pending getter returns last-good (or an initial error), not export data.
+     */
+    private async awaitRebuilds(
+        nodes: VisualNode[],
+        signal?: AbortSignal,
+    ): Promise<Result<void, DataExportError>> {
+        for (const node of nodes) if (node instanceof ShapeNode) void node.shape;
+        const documents = [...new Set(nodes.map((node) => node.document))];
+        const settled = Promise.all(documents.map((document) => DocumentRebuilds.settled(document)));
+        if (signal) {
+            let stop!: () => void;
+            const aborted = new Promise<void>((resolve) => {
+                stop = resolve;
+            });
+            const onAbort = () => stop();
+            if (signal.aborted) stop();
+            else signal.addEventListener("abort", onAbort, { once: true });
+            try {
+                await Promise.race([settled, aborted]);
+            } finally {
+                signal.removeEventListener("abort", onAbort);
+            }
+        } else {
+            await settled;
+        }
+        const pending = documents.filter((document) => DocumentRebuilds.pending(document));
+        if (pending.length === 0) return Result.ok(undefined);
+        const features = pending.flatMap((document) => DocumentRebuilds.status(document).featureIndexes);
+        return Result.err({
+            kind: "rebuild-pending",
+            message: `the model is still rebuilding${features.length ? ` (at feature ${features.join(", ")})` : ""}`,
+        });
+    }
 
+    private getExportShapes(nodes: VisualNode[], scale: number): Result<IShape[], DataExportError> {
+        const selected = nodes.filter((node): node is ShapeNode => node instanceof ShapeNode);
         // Do not use the earlier getter results or start another lazy evaluation here.
         const shapes: IShape[] = [];
+        const missing: string[] = [];
         for (const node of selected) {
             const shape = node.resolvedShape;
             if (shape) shapes.push(this.scaled(shape.transformedMul(node.worldTransform()), scale));
+            else missing.push(node.id);
         }
-
-        !shapes.length && PubSub.default.pub("showToast", "error.export.noNodeCanBeExported");
-        return shapes;
+        if (shapes.length) return Result.ok(shapes);
+        return Result.err({
+            kind: "no-geometry",
+            message: selected.length
+                ? "No selected node has geometry after its rebuild"
+                : "No selected node has exportable shape geometry",
+            nodes: missing,
+        });
     }
 
     /** `shape` scaled about the origin — millimetres into the export unit. */
@@ -245,13 +300,5 @@ export class DefaultDataExchange implements IDataExchange {
         const result = shapeConverter.convertToBrep(comp.value);
         comp.value.dispose();
         return result;
-    }
-
-    private handleExportResult(result: Result<BlobPart> | undefined) {
-        if (!result?.isOk) {
-            PubSub.default.pub("showToast", "error.default:{0}", result?.error);
-            return undefined;
-        }
-        return [result.value];
     }
 }

@@ -36,7 +36,9 @@ describe("fileTools", () => {
             const result = JSON.parse((await tool.handler({ format: ".step", ids: ["n1"] })) as string);
             expect(result.ok).toBe(true);
             expect(result.filename).toBe("box.step");
-            expect(app.dataExchange.export).toHaveBeenCalledWith(".step", [node]);
+            expect(app.dataExchange.export).toHaveBeenCalledWith(".step", [node], {
+                signal: expect.any(AbortSignal),
+            });
         } finally {
             URL.createObjectURL = createObjectURL;
             URL.revokeObjectURL = revokeObjectURL;

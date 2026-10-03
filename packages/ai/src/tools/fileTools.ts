@@ -2,7 +2,9 @@
 // See LICENSE file in the project root for full license information.
 
 import {
+    type DataExportError,
     type DataExportOptions,
+    DocumentRebuilds,
     download,
     I18n,
     type IApplication,
@@ -19,6 +21,11 @@ import { MAX_CHUNK_EXPORT_BYTES, retainExport } from "./exportChunks";
 import { imageByteBudget } from "./imageEncoding";
 
 const DEFAULT_EXPORT_BYTES = 1024 * 1024;
+/**
+ * How long an export waits for pending rebuilds. Tool calls run one at a time, so an unbounded
+ * wait blocks every later call; this leaves the writer time within the relay's 120 s answer limit.
+ */
+export const EXPORT_REBUILD_WAIT_MS = 60_000;
 const MAX_EXPORT_BYTES = 8 * DEFAULT_EXPORT_BYTES;
 
 function exportMimeType(format: string): string {
@@ -70,9 +77,55 @@ function resolveFilename(visuals: VisualNode[], format: string, filename: unknow
     return name;
 }
 
+/** The call's signal, also aborted after `EXPORT_REBUILD_WAIT_MS`; `dispose` clears the timer. */
+function rebuildWait(signal?: AbortSignal): { signal: AbortSignal; dispose(): void } {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const timer = setTimeout(abort, EXPORT_REBUILD_WAIT_MS);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    return {
+        signal: controller.signal,
+        dispose: () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", abort);
+        },
+    };
+}
+
+type ExportOutcome = { data: BlobPart[] } | { error: DataExportError };
+
+async function exportNodes(
+    app: IApplication,
+    format: string,
+    nodes: VisualNode[],
+    options: DataExportOptions,
+): Promise<ExportOutcome> {
+    if (app.dataExchange.exportResult) {
+        const result = await app.dataExchange.exportResult(format, nodes, options);
+        return result.isOk ? { data: result.value } : { error: result.error };
+    }
+    const data = await app.dataExchange.export(format, nodes, options);
+    return data ? { data } : { error: { kind: "failed", message: "no file was produced" } };
+}
+
+function exportError(document: IDocument, error: DataExportError): Record<string, unknown> {
+    if (error.kind === "rebuild-pending")
+        return {
+            error: `Rebuild in progress, nothing was exported (${error.message}); retry export_nodes once get_rebuild_status reports pending 0`,
+            rebuild: DocumentRebuilds.status(document),
+        };
+    if (error.kind === "no-geometry")
+        return {
+            error: `Export failed: ${error.message}; check the nodes' rebuild errors`,
+            nodes: error.nodes,
+        };
+    return { error: `Export failed: ${error.message}` };
+}
+
 async function handleExportNodes(
     args: Record<string, unknown>,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
     context?: ToolCallContext,
 ): Promise<string> {
     const app = globalThis.app;
@@ -106,7 +159,7 @@ async function handleExportNodes(
     const formatError = validateFormat(app, format);
     if (formatError) return JSON.stringify({ error: formatError });
     const custom = args["linearTolerance"] !== undefined || args["angularTolerance"] !== undefined;
-    let options: DataExportOptions | undefined;
+    let options: DataExportOptions = {};
     if (custom) {
         if (format !== ".stl" && format !== ".stl binary")
             return JSON.stringify({ error: "Tessellation tolerances apply only to STL exports" });
@@ -124,19 +177,32 @@ async function handleExportNodes(
     if (mode !== "merged" && mode !== "separate")
         return JSON.stringify({ error: 'mode must be "merged" or "separate"' });
     if (mode === "separate")
-        return handleSeparateExport(app, doc, args, format, delivery, maxBytes, options, context?.caller);
+        return handleSeparateExport(
+            app,
+            doc,
+            args,
+            format,
+            delivery,
+            maxBytes,
+            options,
+            signal,
+            context?.caller,
+        );
 
     const nodes = resolveNodes(doc, args["ids"]);
     if (typeof nodes === "string") return JSON.stringify({ error: nodes });
     const visuals = nodes.filter((n): n is VisualNode => n instanceof VisualNode);
     if (visuals.length === 0) return JSON.stringify({ error: "no exportable nodes" });
 
-    const data = options
-        ? await app.dataExchange.export(format, visuals, options)
-        : await app.dataExchange.export(format, visuals);
-    if (!data) {
-        return JSON.stringify({ error: "export failed: no exportable geometry for this format" });
+    const wait = rebuildWait(signal);
+    let outcome: ExportOutcome;
+    try {
+        outcome = await exportNodes(app, format, visuals, { ...options, signal: wait.signal });
+    } finally {
+        wait.dispose();
     }
+    if ("error" in outcome) return JSON.stringify(exportError(doc, outcome.error));
+    const data = outcome.data;
 
     const filename = resolveFilename(visuals, format, args["filename"]);
     return deliverExport(
@@ -225,7 +291,8 @@ async function handleSeparateExport(
     format: string,
     delivery: "download" | "base64" | "chunks",
     maxBytes: number,
-    options?: DataExportOptions,
+    options: DataExportOptions,
+    signal?: AbortSignal,
     caller?: string,
 ): Promise<string> {
     const ids = args["ids"];
@@ -246,51 +313,62 @@ async function handleSeparateExport(
     const names = new Set<string>();
     const exported: string[] = [];
     let accumulatedBytes = 0;
-    for (const id of requested) {
-        const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
-        const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
-        outputs.push(output);
-        if (!node || !(node instanceof VisualNode)) {
-            output.error = node ? "Node has no exportable visual geometry" : "Node not found";
-            continue;
-        }
-        const safeName =
-            Array.from(node.name)
-                .map((character) =>
-                    character === "/" || character === "\\" || character.charCodeAt(0) < 32 ? "_" : character,
-                )
-                .join("") || "model";
-        const suffix = format.replace(" binary", "");
-        const base = safeName.toLowerCase().endsWith(suffix) ? safeName.slice(0, -suffix.length) : safeName;
-        let filename = `${base}${suffix}`;
-        let counter = 2;
-        while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
-        output.filename = filename;
-        try {
-            const data = options
-                ? await app.dataExchange.export(format, [node], options)
-                : await app.dataExchange.export(format, [node]);
-            if (!data) {
-                output.error = "Export failed: no exportable geometry for this format";
+    // One wait for the whole batch: a later node must not wait EXPORT_REBUILD_WAIT_MS again.
+    const wait = rebuildWait(signal);
+    try {
+        for (const id of requested) {
+            const node = document.modelManager.findNodes((candidate) => candidate.id === id)[0];
+            const output: BatchExportOutput = { id, mimeType: exportMimeType(format) };
+            outputs.push(output);
+            if (!node || !(node instanceof VisualNode)) {
+                output.error = node ? "Node has no exportable visual geometry" : "Node not found";
                 continue;
             }
-            const blob = new Blob(data);
-            accumulatedBytes += blob.size;
-            if (accumulatedBytes > maxBytes) {
-                return JSON.stringify({
-                    error: "Separate export exceeds maxBytes before archiving",
-                    bytes: accumulatedBytes,
-                    maxBytes,
-                    outputs,
-                });
+            const safeName =
+                Array.from(node.name)
+                    .map((character) =>
+                        character === "/" || character === "\\" || character.charCodeAt(0) < 32
+                            ? "_"
+                            : character,
+                    )
+                    .join("") || "model";
+            const suffix = format.replace(" binary", "");
+            const base = safeName.toLowerCase().endsWith(suffix)
+                ? safeName.slice(0, -suffix.length)
+                : safeName;
+            let filename = `${base}${suffix}`;
+            let counter = 2;
+            while (names.has(filename.toLowerCase())) filename = `${base} (${counter++})${suffix}`;
+            output.filename = filename;
+            try {
+                const outcome = await exportNodes(app, format, [node], { ...options, signal: wait.signal });
+                if ("error" in outcome) {
+                    // Every later node waits for the same rebuilds: stop with nothing exported.
+                    if (outcome.error.kind === "rebuild-pending")
+                        return JSON.stringify({ ...exportError(document, outcome.error), outputs });
+                    output.error = exportError(document, outcome.error)["error"] as string;
+                    continue;
+                }
+                const blob = new Blob(outcome.data);
+                accumulatedBytes += blob.size;
+                if (accumulatedBytes > maxBytes) {
+                    return JSON.stringify({
+                        error: "Separate export exceeds maxBytes before archiving",
+                        bytes: accumulatedBytes,
+                        maxBytes,
+                        outputs,
+                    });
+                }
+                zip.file(filename, await blob.arrayBuffer());
+                names.add(filename.toLowerCase());
+                output.bytes = blob.size;
+                exported.push(id);
+            } catch {
+                output.error = "Export failed";
             }
-            zip.file(filename, await blob.arrayBuffer());
-            names.add(filename.toLowerCase());
-            output.bytes = blob.size;
-            exported.push(id);
-        } catch {
-            output.error = "Export failed";
         }
+    } finally {
+        wait.dispose();
     }
     if (exported.length === 0) return JSON.stringify({ error: "No batch outputs exported", outputs });
     let filename = (args["filename"] as string | undefined)?.trim() || "models.zip";
@@ -346,7 +424,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes. Waits up to 60 s for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0.",
             parameters: {
                 type: "object",
                 properties: {

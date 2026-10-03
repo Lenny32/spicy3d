@@ -114,7 +114,7 @@ describe("separate MCP model exports", () => {
             ["missing", "Node not found"],
             ["b", "Export failed"],
             ["a", undefined],
-            ["c", "Export failed: no exportable geometry for this format"],
+            ["c", "Export failed: no file was produced"],
         ]);
         const archive = await JSZip.loadAsync(result.data, { base64: true });
         expect(Object.keys(archive.files)).toEqual(["Part.step"]);

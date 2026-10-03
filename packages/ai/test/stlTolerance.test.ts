@@ -45,6 +45,7 @@ test.each(["merged", "separate"])("passes STL tolerances to every %s output", as
     expect(exportFile).toHaveBeenCalledTimes(1);
     expect(exportFile).toHaveBeenCalledWith(".stl binary", [node], {
         stl: { linearTolerance: 0.05, angularTolerance: 5 },
+        signal: expect.any(AbortSignal),
     });
 });
 
