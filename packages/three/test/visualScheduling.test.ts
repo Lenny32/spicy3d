@@ -11,6 +11,7 @@ import {
     NodeChildList,
     type PerformanceDetails,
     PerformanceTrace,
+    PubSub,
     Result,
 } from "@spicy3d/core";
 import {
@@ -129,10 +130,87 @@ describe("scheduled bodies in the Three visual lifecycle", () => {
         );
     });
 
-    test("Document.load awaits the scheduled body and returns with its real visual mesh installed", async () => {
+    test("initial visuals yield between small nodes with the entire model available", async () => {
+        const source = new TestDocument();
+        const nodes = Array.from(
+            { length: 3 },
+            (_, index) => new GroupNode({ document: source, name: `shape ${index}` }),
+        );
+        source.modelManager.addNode(...nodes);
+        const stored = source.modelManager.serialize();
+        const displayed: string[] = [];
+        const add = rs.spyOn(context, "addNode").mockImplementation((batch) => {
+            displayed.push(
+                ...batch.filter((node) => !(node === doc.modelManager.rootNode)).map((node) => node.id),
+            );
+        });
+        const progress: number[] = [];
+        const onProgress: Parameters<typeof PubSub.default.sub<"rebuildProgress">>[1] = (
+            _document,
+            id,
+            value,
+        ) => {
+            if (id === "visual-load" && value) progress.push(value.completed);
+        };
+        PubSub.default.sub("rebuildProgress", onProgress);
+        let completed = false;
+        const loading = doc.modelManager.deserialize(stored).then(() => {
+            completed = true;
+        });
+        try {
+            await Promise.resolve();
+            expect(displayed).toEqual([]);
+            expect(doc.modelManager.findNode((node) => node.id === nodes[2].id)?.name).toBe("shape 2");
+            await rs.waitFor(() => expect(displayed.length).toBeGreaterThan(0), { interval: 1 });
+            expect(completed).toBe(false);
+            expect(displayed.length).toBeLessThan(3);
+            await loading;
+            expect(displayed).toEqual(nodes.map((node) => node.id));
+            expect(progress).toEqual([0, 1, 2, 3]);
+            expect(completed).toBe(true);
+        } finally {
+            await loading;
+            PubSub.default.remove("rebuildProgress", onProgress);
+            add.mockRestore();
+            source.dispose();
+        }
+    });
+
+    test.each([false, true])("initial visual cleanup handles failure/disposal (%s)", async (dispose) => {
+        const progress: Array<{ completed: number; total: number } | undefined> = [];
+        const onProgress: Parameters<typeof PubSub.default.sub<"rebuildProgress">>[1] = (
+            _document,
+            id,
+            value,
+        ) => {
+            if (id === "visual-load") progress.push(value);
+        };
+        PubSub.default.sub("rebuildProgress", onProgress);
+        const add = rs.spyOn(context, "addNode").mockImplementation(() => {
+            throw new Error("mesh failed");
+        });
+        const loading = doc.modelManager.deserialize(doc.modelManager.serialize());
+        const outcome = loading.catch((error: Error) => error.message);
+        try {
+            await Promise.resolve();
+            if (dispose) context.dispose();
+            expect(await outcome).toBe(dispose ? undefined : "mesh failed");
+            expect(add).toHaveBeenCalledTimes(dispose ? 0 : 1);
+            expect(progress).toEqual([{ completed: 0, total: 1 }, undefined]);
+        } finally {
+            await outcome;
+            PubSub.default.remove("rebuildProgress", onProgress);
+            add.mockRestore();
+        }
+    });
+
+    test.each([3, 12])("Document.load returns with the real mesh installed (%s features)", async (count) => {
         const source = new Document(createMockApplication(), "synthetic visual load");
         source.modelManager.addNode(
-            new ParametricBodyNode({ document: source, featuresJson: JSON.stringify(steps()) }),
+            new ParametricBodyNode({
+                document: source,
+                featuresJson: JSON.stringify(steps().slice(0, count)),
+            }),
         );
         const stored = source.serialize();
         source.dispose();
@@ -157,7 +235,10 @@ describe("scheduled bodies in the Three visual lifecycle", () => {
             const visual = loadingContext.getVisual(body) as ThreeGeometry;
             expect(body.isRebuilding).toBe(false);
             expect(visual.faces()?.geometry.getAttribute("position").count).toBe(3);
-            expect(outputs.at(-1)?.accesses).toEqual([{ nodeId: body.id, meshKind: "body", visible: true }]);
+            expect(outputs).toHaveLength(count);
+            expect(outputs.at(-1)?.accesses).toEqual(
+                count === 12 ? [{ nodeId: body.id, meshKind: "body", visible: true }] : [undefined],
+            );
         } finally {
             loadingContext?.dispose();
             loaded?.dispose();

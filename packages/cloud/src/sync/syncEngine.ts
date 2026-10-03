@@ -712,9 +712,10 @@ export class SyncEngine implements IRepositorySync {
 
     /**
      * Opens a cloud document: this device's pending save when there is one (the server gets it
-     * later), the server's head otherwise — or, offline, the copy last synced here.
+     * later), otherwise the complete copy last synced here. Opening starts a background pull
+     * through the usual fast-forward/merge path; a cache miss loads the server's head.
      */
-    async load(id: string): Promise<Result<LoadedDocument, DocumentRepositoryError>> {
+    async load(id: string, useCache = true): Promise<Result<LoadedDocument, DocumentRepositoryError>> {
         const record = await this.record(id);
         if (record?.localDirty && record.localSnapshot) {
             const pending = await this.snapshotContent(record);
@@ -730,17 +731,26 @@ export class SyncEngine implements IRepositorySync {
                 `[cloud] ${id}: the pending save can't be read (${pending.error.kind}), opening the head`,
             );
         }
+        if (useCache && record && !record.localDirty && record.baseVersion?.manifestSha256) {
+            const cached = await this.repository.loadCachedVersion(record.baseVersion.manifestSha256);
+            if (cached.isOk) {
+                this.setState(id, "clean", false);
+                return Result.ok({
+                    data: { ...cached.value, name: record.name },
+                    version: record.baseVersion.id,
+                });
+            }
+        }
         const loaded = await this.repository.loadHead(id);
         if (loaded.isOk) {
-            const { head, name, data } = loaded.value;
-            const manifest = await this.repository.manifestOf(head);
+            const { head, name, data, blobs } = loaded.value;
             const ownerId = this.ownerId;
-            if (ownerId && manifest.isOk) {
+            if (ownerId) {
                 await this.options.store.putIfClean({
                     docId: id,
                     ownerId,
                     name,
-                    baseVersion: versionRef(head, manifest.value.blobs),
+                    baseVersion: versionRef(head, blobs),
                     localDirty: false,
                     clientId: this.repository.clientId,
                     updatedAt: this.now(),
@@ -1191,14 +1201,17 @@ export class SyncEngine implements IRepositorySync {
         const version = head.value.version;
         const document = this.openDocument(docId);
         const base = record?.baseVersion?.id ?? document?.version;
-        if (!version || version.id === base) {
+        if (
+            !version ||
+            (version.id === base && (!document || document.name === head.value.name || document.isDirty))
+        ) {
             entry.pullRequested = false;
             entry.waitingIdle = false;
             this.setState(docId, "clean", false);
             return;
         }
         if (!document) {
-            // Closed and clean: the next opening loads the head.
+            // Closed and clean: the next opening revalidates the cached base.
             entry.pullRequested = false;
             this.setState(docId, "clean", false);
             return;
@@ -1216,7 +1229,12 @@ export class SyncEngine implements IRepositorySync {
         if (!head.isOk) return;
         const version = head.value.version;
         entry.pullRequested = false;
-        if (!version || version.id === document.version || document.isDirty) return;
+        if (
+            !version ||
+            (version.id === document.version && document.name === head.value.name) ||
+            document.isDirty
+        )
+            return;
         const loaded = await this.repository.loadVersion(version);
         if (!loaded.isOk || !(await this.canReplace(document, entry))) {
             entry.pullRequested = true;
@@ -1285,13 +1303,13 @@ export class SyncEngine implements IRepositorySync {
         document.version = version.id;
         entry.pullRequested = false;
         entry.lastMerge = undefined;
-        await this.rebase(docId, version, manifest.isOk ? manifest.value.blobs : []);
+        await this.rebase(docId, version, manifest.isOk ? manifest.value.blobs : [], name);
         this.setState(docId, "clean", false);
         PubSub.default.pub("showToast", "cloud.sync.updatedFrom{0}", this.deviceLabel(version.deviceName));
     }
 
     /** A clean record now based on `version` (written only if no save got in meanwhile). */
-    private async rebase(docId: string, version: CloudVersion, blobs: string[]) {
+    private async rebase(docId: string, version: CloudVersion, blobs: string[], name?: string) {
         const ownerId = this.ownerId;
         if (!ownerId) return;
         await this.withRecord(docId, async () => {
@@ -1299,7 +1317,7 @@ export class SyncEngine implements IRepositorySync {
             await this.options.store.putIfClean({
                 docId,
                 ownerId,
-                name: current?.name ?? this.openDocument(docId)?.name ?? docId,
+                name: name ?? current?.name ?? this.openDocument(docId)?.name ?? docId,
                 baseVersion: versionRef(version, blobs),
                 localDirty: false,
                 clientId: this.repository.clientId,
@@ -1944,6 +1962,7 @@ export class SyncEngine implements IRepositorySync {
 
     /** "Open latest": this device's pending changes are dropped (the caller reopens the head). */
     async discardLocal(docId: string): Promise<void> {
+        this.repository.loadFreshOnNextOpen(docId);
         const entry = this.entry(docId);
         entry.lastMerge = undefined;
         this.clearConflict(entry);

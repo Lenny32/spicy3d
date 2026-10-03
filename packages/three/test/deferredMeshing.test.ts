@@ -258,6 +258,27 @@ describe("deferred geometry", () => {
         expect(context.useCoarseDisplayMesh).toBe(false);
     });
 
+    test("chunked initial loading retains the large-batch decision without affecting later edits", async () => {
+        idleQueue();
+        const shapes = Array.from({ length: 100 }, () => progressiveNode());
+        doc.modelManager.rootNode.add(...shapes.map((item) => item.node));
+        context.removeNode(shapes.map((item) => item.node));
+        const add = rs.spyOn(context, "addNode");
+        const loader = context as unknown as { handleNodesLoaded(root: INode): Promise<void> };
+        await loader.handleNodesLoaded(doc.modelManager.rootNode);
+        expect(add.mock.calls).toHaveLength(101);
+        expect(add.mock.calls.map(([batch]) => batch.length)).toEqual(Array(101).fill(1));
+        expect(add.mock.calls.map(([, coarse]) => coarse)).toEqual(Array(101).fill(true));
+        expect(shapes.map((item) => item.coarse.mock.calls.length)).toEqual(Array(100).fill(2));
+        expect(shapes.map((item) => item.fullMesh.mock.calls.length)).toEqual(Array(100).fill(0));
+        expect(context.useCoarseDisplayMesh).toBe(false);
+
+        const replacement = progressiveNode();
+        shapes[0].node.shape = Result.ok(replacement.shape);
+        expect(replacement.coarse).not.toHaveBeenCalled();
+        expect(replacement.fullMesh).toHaveBeenCalledTimes(1);
+    });
+
     test("node hover raycasts the displayed meshes without refining bodies or generating profiles", () => {
         idleQueue();
         const shapes = Array.from({ length: 100 }, () => progressiveNode());

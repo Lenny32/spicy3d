@@ -7,6 +7,7 @@ import {
     type CollectionChangedArgs,
     ComponentNode,
     DeepObserver,
+    DocumentMutations,
     type EdgeMeshData,
     GeometryNode,
     GroupNode,
@@ -27,6 +28,7 @@ import {
     NodeUtils,
     PerformanceTrace,
     type Plane,
+    PubSub,
     RefSegmentAnnotation,
     type ShapeMeshData,
     type ShapeNode,
@@ -131,6 +133,7 @@ export class ThreeVisualContext implements IVisualContext {
     private readonly analysisMaterials = new Map<Mesh, ThreeMaterial>();
     private readonly _visualNodeMap = new Map<IVisualObject, INode>();
     private readonly _NodeVisualMap = new Map<INode, IVisualObject & Object3D>();
+    private disposed = false;
     readonly materialMap = new Map<string, ThreeMaterial>();
 
     readonly visualShapes: Group;
@@ -145,7 +148,7 @@ export class ThreeVisualContext implements IVisualContext {
         this.tempShapes = new Group();
         this.cssObjects = new Group();
         scene.add(this.visualShapes, this.tempShapes, this.cssObjects);
-        visual.document.modelManager.addNodeObserver(this.handleNodeChanged);
+        visual.document.modelManager.addNodeObserver(this.handleNodeChanged, this.handleNodesLoaded);
         visual.document.modelManager.materials.onCollectionChanged(this.onMaterialCollectionChanged);
     }
 
@@ -225,6 +228,34 @@ export class ThreeVisualContext implements IVisualContext {
         this.removeNode(rms);
     };
 
+    private readonly handleNodesLoaded = async (root: INode): Promise<void> => {
+        const nodes: INode[] = [];
+        NodeUtils.nodeOrChildrenAppendToNodes(nodes, root);
+        const coarseInitialBatch =
+            nodes.filter((node) => node instanceof GeometryNode && node.visible && node.parentVisible)
+                .length >= 100;
+        const document = this.visual.document;
+        const scope = DocumentMutations.captureScope(document);
+        // Distinct from any body's feature progress, which can run concurrently.
+        const progressId = "visual-load";
+        try {
+            for (let index = 0; index < nodes.length; index++) {
+                PubSub.default.pub("rebuildProgress", document, progressId, {
+                    completed: index,
+                    total: nodes.length,
+                });
+                // Yield before the first mesh too, so the loading UI can paint.
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                if (this.disposed) return;
+                const add = () => this.addNode([nodes[index]], coarseInitialBatch);
+                if (scope) scope.run(add);
+                else add();
+            }
+        } finally {
+            PubSub.default.pub("rebuildProgress", document, progressId, undefined);
+        }
+    };
+
     addVisualObject(object: IVisualObject): void {
         if (object instanceof Object3D) {
             this.visualShapes.add(object);
@@ -238,6 +269,7 @@ export class ThreeVisualContext implements IVisualContext {
     }
 
     dispose() {
+        this.disposed = true;
         this.cancelRefinement?.();
         this.cancelRefinement = undefined;
         this.meshRefinements.clear();
@@ -563,10 +595,11 @@ export class ThreeVisualContext implements IVisualContext {
         ThreeGeometry.buildMeshesIn(visual, true);
     }
 
-    addNode(nodes: INode[]) {
+    addNode(nodes: INode[], coarseInitialBatch = false) {
         const additions = [...new Set(nodes)].filter((node) => !this._NodeVisualMap.has(node));
         const previous = this.useCoarseDisplayMesh;
         this.useCoarseDisplayMesh =
+            coarseInitialBatch ||
             additions.filter((node) => node instanceof GeometryNode && node.visible && node.parentVisible)
                 .length >= 100;
         try {
