@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IDisposable, type IFace, type IShape, Matrix4, ShapeTypes } from "@spicy3d/core";
+import { type IDisposable, type IFace, type IShape, Matrix4, ShapeTypes, XYZ } from "@spicy3d/core";
 import type { ShapeResult } from "../lib/spicy-wasm";
 import { thickenFailureDiagnostic } from "../src/thickenDiagnostics";
 import { createBox, createSphere, createTestFactory, unwrapOk } from "./helpers";
@@ -156,4 +156,39 @@ test.each([
     expect(message).toContain("curvature radius 2 mm");
     expect(message).toContain("this analytic collapse was not resolved by tolerant mode");
     expect(message).not.toContain("retry with tolerant mode");
+});
+
+test.each([
+    3.75, -3.75,
+])("18 open control-point sections with shared knots thicken at %s mm and support a boolean trim", (thickness) => {
+    // Issue #143's workaround: cubic sections, 12 poles, one clamped uniform knot vector.
+    const knots = Array.from({ length: 10 }, (_, i) => i / 9);
+    const multiplicities = knots.map((_, i) => (i === 0 || i === 9 ? 4 : 1));
+    const sections = Array.from({ length: 18 }, (_, section) =>
+        keep(
+            unwrapOk(
+                factory.bspline(
+                    Array.from({ length: 12 }, (_, pole) => {
+                        const t = pole / 11;
+                        return new XYZ(50 * t, (5 + section / 10) * Math.sin(Math.PI * t), section * 3);
+                    }),
+                    knots,
+                    multiplicities,
+                    3,
+                    false,
+                ),
+            ),
+        ),
+    );
+    const skin = keep(unwrapOk(factory.loft(sections, false, false, "c2")));
+    const wall = keep(unwrapOk(factory.makeThickSolidBySimple(skin, thickness)));
+    expect(wall.shapeType).toBe(ShapeTypes.solid);
+    expect(wall.checkShape()).toBe(true);
+    expect(wall.volume()).toBeGreaterThan(0);
+    const cutter = keep(createBox(factory, 25, 20, 60));
+    cutter.matrix = Matrix4.fromTranslation(0, -10, -1);
+    const trimmed = keep(unwrapOk(factory.booleanCut([wall], [cutter])));
+    expect(trimmed.checkShape()).toBe(true);
+    expect(trimmed.volume()).toBeGreaterThan(wall.volume() * 0.3);
+    expect(trimmed.volume()).toBeLessThan(wall.volume() * 0.7);
 });

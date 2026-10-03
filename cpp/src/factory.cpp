@@ -69,6 +69,7 @@
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomProjLib.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_ConicalSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
@@ -2890,20 +2891,62 @@ public:
     // sampled one); the sampled one runs again only to word a failure. Re-parameterizing the
     // edges (BRepLib::SameParameter, ShapeFix) does not repair such a result: the offset geometry
     // itself is off, so it is refused.
-    static std::string thickSolidResultError(const TopoDS_Shape& thickenedShape)
+    static std::string thickSolidResultError(const TopoDS_Shape& thickenedShape, const TopoDS_Shape& input = TopoDS_Shape())
     {
         if (thickenedShape.IsNull()) {
             return "Failed to create thick solid: empty result";
         }
-        if (BRepCheck_Analyzer(thickenedShape, true, false, true).IsValid()) {
+        BRepCheck_Analyzer exact(thickenedShape, true, false, true);
+        if (exact.IsValid()) {
             return "";
         }
         if (!BRepCheck_Analyzer(thickenedShape).IsValid()) {
             return "Failed to create thick solid: Thick solid is invalid (BRepCheck_Analyzer)";
         }
+        std::string detail;
+        // Reuse the failed analyzer rather than running another offset or exact check.
+        // Indices are zero-based and output faces need not correspond to input faces.
+        try {
+            NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outputFaces;
+            TopExp::MapShapes(thickenedShape, TopAbs_FACE, outputFaces);
+            for (int i = 1; i <= std::min(outputFaces.Extent(), 64); ++i) {
+                if (!exact.IsValid(outputFaces.FindKey(i))) {
+                    detail += "; exact validation failed on output face index " + std::to_string(i - 1);
+                    break;
+                }
+            }
+            NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> inputFaces;
+            if (!input.IsNull())
+                TopExp::MapShapes(input, TopAbs_FACE, inputFaces);
+            int densest = 0;
+            int knotCount = 0;
+            Handle(Geom_BSplineSurface) surface;
+            for (int i = 1; i <= std::min(inputFaces.Extent(), 64); ++i) {
+                auto candidate = Handle(Geom_BSplineSurface)::DownCast(untrimmedSurface(BRep_Tool::Surface(TopoDS::Face(inputFaces.FindKey(i)))));
+                if (!candidate.IsNull() && candidate->NbUKnots() + candidate->NbVKnots() > knotCount) {
+                    densest = i;
+                    knotCount = candidate->NbUKnots() + candidate->NbVKnots();
+                    surface = candidate;
+                }
+            }
+            if (!surface.IsNull()) {
+                detail += "; input B-spline face index " + std::to_string(densest - 1)
+                    + " has " + std::to_string(surface->NbUKnots()) + " distinct U knots and "
+                    + std::to_string(surface->NbVKnots()) + " distinct V knots (degrees "
+                    + std::to_string(surface->UDegree()) + "/" + std::to_string(surface->VDegree())
+                    + "; densest knot layout among the first " + std::to_string(std::min(inputFaces.Extent(), 64)) + " input faces)"
+                    + "; incompatible loft section knots may contribute, but knot counts alone do not establish the cause";
+            }
+        } catch (const Standard_Failure&) {
+            // A failed diagnostic must preserve the original validation error.
+        }
         return "Failed to create thick solid: offset edge curves are inconsistent with their surfaces "
-               "(exact BRepCheck_Analyzer); thicken a solid loft with open faces instead, or change the "
-               "thickness or the sections";
+               "(exact BRepCheck_Analyzer)"
+            + detail
+            + "; for a loft, try compatible sections with the same B-spline degree, knots and multiplicities "
+              "(for example, control-point sections with one shared clamped knot vector). "
+              "A solid loft with open end faces may also help; neither workaround is guaranteed. "
+              "Otherwise change the thickness or smooth the sections";
     }
 
     static const char* offsetErrorName(BRepOffset_Error error)
@@ -3012,7 +3055,7 @@ public:
         if (thickSolidUnchanged(shape, makeThickSolid.Shape()) || thickSolidGeometricallyUnchanged(shape, makeThickSolid.Shape(), thickness)) {
             return ShapeResult { TopoDS_Shape(), false, "Failed to create thick solid: the offset returned the input shape unchanged" };
         }
-        std::string resultError = thickSolidResultError(makeThickSolid.Shape());
+        std::string resultError = thickSolidResultError(makeThickSolid.Shape(), shape);
         if (!resultError.empty()) {
             return ShapeResult { TopoDS_Shape(), false, resultError };
         }
@@ -3038,7 +3081,7 @@ public:
             return ShapeResult { TopoDS_Shape(), false,
                 std::string("Failed to create thick solid: ") + offsetErrorName(makeThickSolid.MakeOffset().Error()) };
         }
-        std::string resultError = thickSolidResultError(makeThickSolid.Shape());
+        std::string resultError = thickSolidResultError(makeThickSolid.Shape(), shape);
         if (!resultError.empty()) {
             return ShapeResult { TopoDS_Shape(), false, resultError };
         }
