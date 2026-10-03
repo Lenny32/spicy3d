@@ -40,7 +40,7 @@ export const DefaultRibbon: RibbonTabProfile[] = [
             },
             {
                 groupName: "ribbon.group.modify",
-                items: ["modify.shell", "modify.move"],
+                items: ["modify.shell", "modify.move", "modify.referencePlacement"],
                 collapsedItems: [
                     "modify.rotate",
                     "modify.split",

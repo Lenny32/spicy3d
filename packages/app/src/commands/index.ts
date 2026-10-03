@@ -19,5 +19,6 @@ export * from "./measure";
 export * from "./modify";
 export * from "./redo";
 export * from "./referenceDeviation";
+export * from "./referencePlacement";
 export * from "./undo";
 export * from "./workingPlane";
