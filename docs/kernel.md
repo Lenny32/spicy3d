@@ -91,6 +91,14 @@ unchanged. Diagnostics never retry the offset; worker cancellation/timeouts and 
 do not trigger sampling. If more than 64 faces exist, diagnostics explicitly say
 “sampled the first 64 of N faces”. Validation failures describe a possible offset collapse.
 
+`BRepOffset_C0Geometry` is diagnosed separately: OCCT rejects a surface whose first
+derivatives are discontinuous, irrespective of the requested thickness. Diagnostics check
+surface continuity on at most 64 input faces, excluding openings, and identify the first C0
+face when available. The remedy is to smooth the surface to at least C1 continuity or split
+it at its internal discontinuities before thickening. Curvature sampling and advice to lower
+thickness are skipped for this error; an unavailable face query preserves the continuity cause
+without inventing a face or a radius.
+
 The opt-in `tolerant` thicken option (parametric module 15; 14→15 identity migration) builds
 material rather than a bare offset. With no option, old documents retain their exact behavior.
 Closed full spheres and ring tori with inward thickness at least their sphere/tube radius

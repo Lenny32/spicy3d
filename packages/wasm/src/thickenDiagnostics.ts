@@ -41,6 +41,13 @@ export function thickenFailureDiagnostic(
     let trapped = false;
     try {
         faces = input.findSubShapes(ShapeTypes.face) as IFace[];
+        if (error.includes("BRepOffset_C0Geometry")) {
+            for (const [faceIndex, face] of faces.slice(0, MAX_FACES).entries()) {
+                if (openingFaces.some((opening) => face.isSame(opening))) continue;
+                if (hasC0Surface(face)) return continuityDiagnostic(error, faces.length, faceIndex);
+            }
+            return continuityDiagnostic(error, faces.length);
+        }
         for (const [faceIndex, face] of faces.slice(0, MAX_FACES).entries()) {
             if (openingFaces.some((opening) => face.isSame(opening))) continue;
             const candidate = sampleFace(face, faceIndex, thickness);
@@ -53,6 +60,7 @@ export function thickenFailureDiagnostic(
     } finally {
         if (!trapped) for (const face of faces) disposeDiagnostic(face);
     }
+    if (error.includes("BRepOffset_C0Geometry")) return continuityDiagnostic(error, faces.length);
     const sampled = faces.length > MAX_FACES ? ` (sampled the first 64 of ${faces.length} faces)` : "";
     if (!region) {
         // Keep validation errors verbatim; only an uninformative kernel offset status needs a hint.
@@ -71,6 +79,29 @@ export function thickenFailureDiagnostic(
             ? "retry with tolerant mode for supported analytic solids (complete spheres and ring tori)"
             : "tolerant recovery has not been verified for this solid; do not rely on it for this collapse";
     return `${error}; possible offset collapse on input face index ${faceIndex} near (${number(point.x)}, ${number(point.y)}, ${number(point.z)}) mm: sampled curvature radius ${number(radius)} mm <= |thickness| ${number(Math.abs(thickness))} mm in the offset direction. Try |thickness| below ${number(radius)} mm or smooth this region; ${remedy}. This sampled local limit${sampled} is not a guaranteed maximum successful thickness.`;
+}
+
+function continuityDiagnostic(error: string, faceCount: number, faceIndex?: number): string {
+    const region =
+        faceIndex === undefined
+            ? `no C0 input face was identified among the first ${Math.min(faceCount, MAX_FACES)} faces`
+            : `C0 surface on input face index ${faceIndex}`;
+    return `${error}; ${region}. OCCT requires a surface with continuous first derivatives for this offset. Smooth the surface to at least C1 continuity or split it at its internal discontinuities before thickening. Reducing |thickness| does not fix this continuity error.`;
+}
+
+function hasC0Surface(face: IFace): boolean {
+    let surface: ISurface | undefined;
+    let trapped = false;
+    try {
+        surface = face.surface();
+        return surface.continuity() === "c0";
+    } catch (failure) {
+        trapped = isNativeTrap(failure);
+        if (trapped) throw failure;
+        return false;
+    } finally {
+        if (surface && !trapped) disposeDiagnostic(surface);
+    }
 }
 
 function number(value: number): string {
