@@ -4,6 +4,7 @@
 import { rs } from "@rstest/core";
 import {
     AutosaveHolds,
+    DocumentMutations,
     DocumentRebuilds,
     EditableShapeNode,
     type IDocument,
@@ -181,18 +182,25 @@ test("real ThreeGeometry cold load schedules work and installs only completed me
     const app = createMockApplication();
     let context: ThreeVisualContext | undefined;
     let loadedDocument: IDocument | undefined;
+    const visualReady = Promise.withResolvers<void>();
     app.visualFactory.create = (doc) => {
         loadedDocument = doc;
         const visual = createMockVisualWithDocument(doc);
         context = new ThreeVisualContext(visual, new Scene());
         context.materialMap.set("", new MeshLambertMaterial());
+        const visualContext = context;
+        const addNode = visualContext.addNode.bind(visualContext);
+        rs.spyOn(visualContext, "addNode").mockImplementation((nodes, coarse) => {
+            addNode(nodes, coarse);
+            if (nodes.some((node) => node instanceof ParametricBodyNode)) visualReady.resolve();
+        });
         Object.assign(visual, { context });
         return visual;
     };
     const flush = rs.spyOn(DocumentRebuilds, "flush");
     try {
         const loading = Document.load(app, stored);
-        await checkpoint();
+        await visualReady.promise;
         expect(loadedDocument).not.toBeUndefined();
         if (!loadedDocument || !context) throw new Error("No visual document");
         document = loadedDocument;
@@ -461,7 +469,7 @@ test("small chains are synchronous; save awaits large rebuilds and synchronous s
 test.each([
     false,
     true,
-])("load awaits visual rebuilds and preserves mid-load edits: %s", async (editDuringLoad) => {
+])("load holds edits until visual rebuilds finish: %s", async (attemptEditDuringLoad) => {
     document.dispose();
     document = new Document(createMockApplication(), "load test");
     body(16);
@@ -469,6 +477,7 @@ test.each([
     document.dispose();
     const application = createMockApplication();
     let loadingDocument: IDocument | undefined;
+    const rebuildStarted = Promise.withResolvers<void>();
     application.visualFactory.create = (doc) => {
         loadingDocument = doc;
         doc.modelManager.addNodeObserver((records) => {
@@ -477,19 +486,25 @@ test.each([
                 NodeUtils.nodeOrChildrenAppendToNodes(nodes, record.node);
                 for (const node of nodes) if (node instanceof ParametricBodyNode) void node.shape;
             }
+            rebuildStarted.resolve();
         });
         return createMockVisualWithDocument(doc);
     };
     const loading = Document.load(application, stored);
-    await checkpoint();
+    await rebuildStarted.promise;
     expect(loadingDocument).not.toBeUndefined();
     if (!loadingDocument) throw new Error("Document was not constructed");
     const loadingDoc = loadingDocument;
-    expect(loadingDoc.history.disabled).toBe(false);
-    if (editDuringLoad) {
-        Transaction.execute(loadingDoc, "rename during load", () => {
-            loadingDoc.name = "edited during load";
-        });
+    expect(loadingDoc.history.disabled).toBe(true);
+    expect(DocumentMutations.isHeld(loadingDoc)).toBe(true);
+    expect(DocumentRebuilds.pending(loadingDoc)).toBe(true);
+    if (attemptEditDuringLoad) {
+        expect(() => {
+            Transaction.execute(loadingDoc, "rename during load", () => {
+                loadingDoc.name = "edited during load";
+            });
+        }).toThrow("wait for it to finish");
+        expect(loadingDoc.name).toBe("load test");
     }
     const loaded = await loading;
     expect(loaded).not.toBeUndefined();
@@ -501,7 +516,14 @@ test.each([
     expect(node.shape.isOk).toBe(true);
     expect(node.isRebuilding).toBe(false);
     expect(calls.slice(-16).map((call) => call.id)).toEqual(steps(16).map((step) => step.id));
-    expect(document.isDirty).toBe(editDuringLoad);
+    expect(document.history.disabled).toBe(false);
+    expect(DocumentMutations.isHeld(document)).toBe(false);
+    expect(document.isDirty).toBe(false);
+    Transaction.execute(document, "rename after load", () => {
+        document.name = "edited after load";
+    });
+    expect(document.name).toBe("edited after load");
+    expect(document.isDirty).toBe(true);
 });
 
 test("batched edits of two producers rebuild their shared consumer once", () => {

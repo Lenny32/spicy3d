@@ -3,6 +3,7 @@
 
 import { PubSub } from "./foundation/pubsub";
 import { redactSecrets } from "./foundation/redact";
+import { formatUtcIso } from "./foundation/utils/dateTime";
 
 export type ErrorLogSource = "app" | "uncaught" | "promise";
 
@@ -63,7 +64,7 @@ export class ErrorLog {
     static format(entries: readonly ErrorLogEntry[] = ErrorLog._entries): string {
         return entries
             .map((e) => {
-                const head = `[${new Date(e.time).toISOString()}] (${e.source}) ${e.message}`;
+                const head = `[${formatUtcIso(e.time)}] (${e.source}) ${e.message}`;
                 return e.details ? `${head}\n${e.details}` : head;
             })
             .join("\n\n");

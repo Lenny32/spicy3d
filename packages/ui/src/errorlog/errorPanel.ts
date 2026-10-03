@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { ErrorLog, type ErrorLogEntry, I18n } from "@spicy3d/core";
+import { ErrorLog, type ErrorLogEntry, formatTime, I18n } from "@spicy3d/core";
 import { button, div, span, svg } from "@spicy3d/element";
 import style from "./errorPanel.module.css";
 
@@ -64,7 +64,7 @@ export class ErrorPanel extends HTMLElement {
     }
 
     private row(entry: ErrorLogEntry): HTMLElement {
-        const time = new Date(entry.time).toLocaleTimeString();
+        const time = formatTime(entry.time);
         const head = div(
             { className: style.rowHead },
             span({ className: style.time, textContent: time }),
