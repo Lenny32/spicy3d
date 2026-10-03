@@ -173,7 +173,9 @@ class Shape {
                 section.Build();
                 if (section.IsDone() && !section.Shape().IsNull()) {
                     IntersectionRegion region;
-                    double longest = -1;
+                    // Any non-degenerate section edge locates the pair; the longest one picks the point.
+                    bool found = false;
+                    double longest = 0;
                     for (TopExp_Explorer it(section.Shape(), TopAbs_EDGE); it.More(); it.Next()) {
                         const TopoDS_Edge& edge = TopoDS::Edge(it.Current());
                         if (BRep_Tool::Degenerated(edge))
@@ -181,12 +183,13 @@ class Shape {
                         BRepAdaptor_Curve curve(edge);
                         const double length = GCPnts_AbscissaPoint::Length(curve);
                         BRepBndLib::Add(edge, region.extent, false);
-                        if (length > longest) {
+                        if (!found || length > longest) {
+                            found = true;
                             longest = length;
                             region.point = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2);
                         }
                     }
-                    if (longest >= 0)
+                    if (found)
                         return region;
                     for (TopExp_Explorer it(section.Shape(), TopAbs_VERTEX); it.More(); it.Next()) {
                         const gp_Pnt point = BRep_Tool::Pnt(TopoDS::Vertex(it.Current()));
