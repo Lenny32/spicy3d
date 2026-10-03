@@ -18,6 +18,7 @@ import {
     LENGTH_UNIT_LABELS,
     LENGTH_UNITS_LIST,
     type LengthUnit,
+    type MeshNode,
     PropertyUtils,
     PubSub,
     property,
@@ -28,6 +29,7 @@ import {
     validateStlTessellation,
 } from "@spicy3d/core";
 import { importFiles } from "../utils";
+import { showReferencePlacement } from "./referencePlacement";
 
 @command({
     key: "file.import",
@@ -56,13 +58,17 @@ export class ImportReferenceMesh implements ICommand {
         );
         if (!files.isOk || files.value.length === 0) return;
         const document = application.activeView?.document ?? (await application.newDocument("Untitled"));
+        let imported: MeshNode | undefined;
         await Transaction.executeAsync(document, "import reference mesh", async () => {
             for (const file of files.value) {
                 const result = await importer.call(application.dataExchange, document, file);
                 if (!result.isOk) PubSub.default.pub("showToast", "error.default:{0}", result.error);
+                else imported = result.value;
             }
         });
         application.activeView?.cameraController.fitContent();
+        // Keep the placement panel on the last mesh successfully imported in this batch.
+        if (imported) showReferencePlacement(imported);
     }
 }
 

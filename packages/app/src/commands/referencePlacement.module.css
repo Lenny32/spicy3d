@@ -1,0 +1,56 @@
+.panel {
+    display: flex;
+    min-height: 0;
+    height: 100%;
+    color: var(--foreground-color);
+    font-size: 12px;
+}
+
+.content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    gap: 10px;
+    padding: 12px;
+    overflow: auto;
+
+    & > * {
+        flex-shrink: 0;
+    }
+
+    & h2 {
+        margin: 0;
+        font-size: 14px;
+    }
+
+    & p {
+        margin: 0;
+        line-height: 1.5;
+    }
+
+    & fieldset {
+        display: flex;
+        gap: 8px;
+        border: 1px solid var(--border-color);
+        min-width: 0;
+    }
+
+    & label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    & input {
+        width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+    }
+
+    & button {
+        padding: 6px;
+        cursor: pointer;
+    }
+}
