@@ -1047,9 +1047,15 @@ async function runProgram(
         throw e;
     } finally {
         programRefIds.delete(localRefs);
-        releaseSnapshot();
-        owner.release();
-        releaseAutosave();
+        // Execution, commit and rollback can start owned rebuilds. Keep ownership until they
+        // have settled, and release it even if waiting fails, or the document would stay held.
+        try {
+            await DocumentRebuilds.settled(doc);
+        } finally {
+            releaseSnapshot();
+            owner.release();
+            releaseAutosave();
+        }
     }
 
     return JSON.stringify(

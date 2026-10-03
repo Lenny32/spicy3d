@@ -314,7 +314,8 @@ export class ParametricBodyNode
     }
 
     async whenRebuilt(): Promise<boolean> {
-        while (this._job) await this._job.settled;
+        // A settled job still referenced (a callback that never ran) must not spin this loop.
+        for (let job = this._job; job; job = this._job === job ? undefined : this._job) await job.settled;
         return !this._isDisposed && this._lastRebuildSucceeded;
     }
     /**
@@ -905,7 +906,12 @@ export class ParametricBodyNode
         this._run = run;
         const steps = this.evaluateChain(asynchronous, run);
         const mutationScope = DocumentMutations.captureScope(this.document);
-        const owned = <T>(action: () => T): T => (mutationScope ? mutationScope.run(action) : action());
+        // A job can outlive the program that started it. Expired authority is never re-entered:
+        // with the document free again the job finishes like an interactive one; while another
+        // owner holds it, the job is orphaned and only clears its runtime state.
+        const owned = <T>(action: () => T): T =>
+            mutationScope && !mutationScope.released ? mutationScope.run(action) : action();
+        const orphaned = () => mutationScope?.released === true && DocumentMutations.isHeld(this.document);
         const advance = () => {
             const batchTrace = PerformanceTrace.enabled
                 ? PerformanceTrace.begin("body.batch", { nodeId: this.id })
@@ -932,10 +938,10 @@ export class ParametricBodyNode
                 this.document,
                 steps,
                 advance,
-                (result) =>
+                (result) => {
+                    if (this._job !== job || this._isDisposed) return;
+                    this._job = undefined;
                     owned(() => {
-                        if (this._job !== job || this._isDisposed) return;
-                        this._job = undefined;
                         if (run.outcome === "cancelled") {
                             const result = this.generateShape("superseded");
                             if (result.isOk) this.shape = result;
@@ -947,25 +953,34 @@ export class ParametricBodyNode
                         else if (!this._shape.isOk) this._shape = result;
                         this.emitPropertyChanged("featuresJson", this.featuresJson);
                         this.document.visual.update();
-                    }),
+                    });
+                },
                 (index) => this.reportRebuildProgress(index),
-                (error) =>
-                    owned(() => {
-                        if (this._job !== job) return;
-                        this._job = undefined;
+                (error) => {
+                    if (this._job !== job) return;
+                    this._job = undefined;
+                    this._lastRebuildSucceeded = false;
+                    this.reportRebuildProgress(undefined);
+                    // The original failure stays the diagnostic, on the feature the replay had reached.
+                    const feature = this.features[job.featureIndex ?? 0] ?? this.features[0];
+                    this._featureErrors.set(feature?.id ?? "", String(error));
+                    owned(() => this.emitPropertyChanged("featuresJson", this.featuresJson));
+                },
+                () => run.current() && !orphaned(),
+                () => {
+                    if (this._job !== job || this._isDisposed) return;
+                    this._job = undefined;
+                    if (orphaned()) {
+                        // The holder's own edits rebuild this body; nothing is published meanwhile.
                         this._lastRebuildSucceeded = false;
                         this.reportRebuildProgress(undefined);
-                        this._featureErrors.set(this.features[0]?.id ?? "", String(error));
-                        this.emitPropertyChanged("featuresJson", this.featuresJson);
-                    }),
-                run.current,
-                () =>
+                        return;
+                    }
                     owned(() => {
-                        if (this._job !== job || this._isDisposed) return;
-                        this._job = undefined;
                         const result = this.generateShape("superseded");
                         if (result.isOk) this.shape = result;
-                    }),
+                    });
+                },
                 () => {
                     run.synchronous = true;
                 },

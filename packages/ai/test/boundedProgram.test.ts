@@ -233,6 +233,43 @@ test("a program never joins an unrelated open transaction", async () => {
     }
 });
 
+test.each([
+    ["commit", [boxOp("owned")]],
+    ["rollback", [boxOp("owned"), { method: "shape.volume", target: "missing", id: "volume" }]],
+])("a program keeps ownership until rebuilds it started settle: %s", async (outcome, ops) => {
+    const { doc, tool, box } = setup();
+    const rebuilt = Promise.withResolvers<void>();
+    let finishRebuild!: () => void;
+    box.mockImplementationOnce((_plane: unknown, dx: number) => {
+        // Stands in for an owned background rebuild a program op leaves behind.
+        const release = DocumentRebuilds.add(doc, { settled: rebuilt.promise, flush: () => {} });
+        finishRebuild = () => {
+            release();
+            rebuilt.resolve();
+        };
+        return Result.ok(new MockShape({ shapeType: ShapeTypes.solid, id: `box-${dx}` }));
+    });
+    try {
+        let finished = false;
+        const running = tool.handler({ ops }).finally(() => {
+            finished = true;
+        });
+        const result = outcome === "commit" ? expect(running).resolves : expect(running).rejects;
+        await rs.waitFor(() => expect(box).toHaveBeenCalledTimes(1));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(finished).toBe(false);
+        expect(DocumentMutations.isHeld(doc)).toBe(true);
+        expect(AutosaveHolds.isHeld).toBe(true);
+        finishRebuild();
+        await (outcome === "commit" ? result.toContain("owned") : result.toThrow());
+        expect(DocumentMutations.isHeld(doc)).toBe(false);
+        expect(AutosaveHolds.isHeld).toBe(false);
+    } finally {
+        finishRebuild?.();
+        doc.dispose();
+    }
+});
+
 test("program entry rechecks command ownership after waiting for earlier rebuilds", async () => {
     const { app, doc, tool, box } = setup();
     rs.spyOn(DocumentRebuilds, "settled").mockImplementation(async () => {
