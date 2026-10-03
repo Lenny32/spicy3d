@@ -177,6 +177,7 @@ test("MCP status and document resources answer while worker work blocks the muta
                 text: JSON.stringify({
                     hasActiveDocument: committed.hasActiveDocument,
                     name: committed.name,
+                    rootId: committed.rootId,
                     nodeCount: committed.nodeCount,
                     nodes: committed.nodes,
                 }),

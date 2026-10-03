@@ -18,7 +18,7 @@ import {
 } from "@spicy3d/core";
 import type { Tool, ToolCallContext } from "../llm/types";
 import { type AgentCloudInfo, agentCloudLink, onAgentCloudChanged } from "./cloudLink";
-import { getDocument } from "./documentContext";
+import { DOCUMENT_NAME_MAX_LENGTH, getDocument } from "./documentContext";
 import { guardKernelTool } from "./kernelTools";
 import { OPEN_WAIT_MS, OpenConsent } from "./openConsent";
 
@@ -29,7 +29,6 @@ export const CLOUD_TOOL_NAMES = [OPEN_DOCUMENT_TOOL, NEW_DOCUMENT_TOOL, SAVE_TOO
 
 /** The server keeps labels up to this length (SpicySrv `label_too_long`). */
 export const LABEL_MAX_LENGTH = 200;
-const NAME_MAX_LENGTH = 200;
 
 /** The document as the agent is told about it: where it is stored and how far it is saved. */
 export interface AgentDocumentInfo extends AgentCloudInfo {
@@ -281,7 +280,8 @@ async function statOf(
 async function newDocument(args: Record<string, unknown>): Promise<string> {
     if (typeof args["name"] !== "string" || args["name"].trim() === "") return error("name is required");
     const name = args["name"].trim();
-    if (name.length > NAME_MAX_LENGTH) return error(`name must be at most ${NAME_MAX_LENGTH} characters`);
+    if (name.length > DOCUMENT_NAME_MAX_LENGTH)
+        return error(`name must be at most ${DOCUMENT_NAME_MAX_LENGTH} characters`);
     const app = application();
     const cloud = app?.repositories.cloud;
     if (!app || !agentCloudLink() || !cloud) return error(NOT_SIGNED_IN);

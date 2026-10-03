@@ -29,7 +29,7 @@ Workflow:
    - saved but not uploaded: the tab is offline; it uploads by itself later;
    - error "Conflict pending user resolution": someone saved another change meanwhile and it could not be merged automatically. The user is shown the conflict and decides. Never resolve it yourself, never recreate the edits elsewhere to get around it; tell the user and wait. Once they say it is resolved, spicy3d_save again if there is anything left to save.
 
-New documents: spicy3d_new_document { name } creates an empty cloud document and makes it active; it exists in the cloud after its first spicy3d_save.
+New documents: spicy3d_new_document { name } creates an empty cloud document and makes it active; it exists in the cloud after its first spicy3d_save. rename_document { name } renames the active document (and its root component); the cloud library shows the new name after the next spicy3d_save.
 
 Older versions: spicy3d_open_document { id, version } (a version id from spicy3d_document_history) opens that version as a read-only preview, beside the document — the user's open document is not touched, so nothing is asked — look, measure, screenshot, compare. It can't be saved (spicy3d_save refuses it); restoring an old version is the user's decision, from the version history.
 

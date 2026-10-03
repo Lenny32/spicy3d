@@ -229,9 +229,14 @@ describe("parametric response mode", () => {
 
 test("parametric job tools append after existing tools and bypass only by built-in identity", () => {
     const tools = buildTools();
-    // #124 appended read_export_chunk, then get_error_log, after the jobs to preserve the cached tools prefix.
-    expect(tools.slice(-2).map((tool) => tool.name)).toEqual(["read_export_chunk", "get_error_log"]);
-    const jobs = tools.slice(-5, -2);
+    // #124 appended read_export_chunk, then get_error_log, and #166 rename_document, after the jobs
+    // to preserve the cached tools prefix.
+    expect(tools.slice(-3).map((tool) => tool.name)).toEqual([
+        "read_export_chunk",
+        "get_error_log",
+        "rename_document",
+    ]);
+    const jobs = tools.slice(-6, -3);
     expect(jobs.map((tool) => tool.name)).toEqual([
         "start_parametric_job",
         "get_parametric_job",

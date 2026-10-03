@@ -122,6 +122,23 @@ describe("Browser model", () => {
         }
     });
 
+    test("renaming the root renames the document as one undo step", () => {
+        const { document, model, actions } = setup();
+        try {
+            const root = document.modelManager.rootNode;
+            const before = document.history.undoCount();
+            expect(actions.rename(model.entries.get(model.rootKey)!, " Mouse side ")).toBe(true);
+            expect(root.name).toBe("Mouse side");
+            expect(document.name).toBe("Mouse side");
+            expect(document.history.undoCount()).toBe(before + 1);
+            document.history.undo();
+            expect(root.name).toBe("test");
+            expect(document.name).toBe("test");
+        } finally {
+            document.dispose();
+        }
+    });
+
     test("activation directs creation and removing its ancestor falls back to the nearest live container", () => {
         const { document, model, actions, component } = setup();
         try {
