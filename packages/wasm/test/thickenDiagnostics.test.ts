@@ -116,6 +116,99 @@ test("planar validation failures retain their original meaning", () => {
     expect(thickenFailureDiagnostic(error, box, -3.75)).toBe(error);
 });
 
+function c0Skin(): IShape {
+    const sections = [0, 10].map((z) =>
+        keep(
+            unwrapOk(
+                factory.bspline(
+                    [
+                        new XYZ(0, 0, z),
+                        new XYZ(2, 0, z),
+                        new XYZ(4, 0, z),
+                        new XYZ(6, 0, z),
+                        new XYZ(6, 2, z),
+                        new XYZ(6, 4, z),
+                        new XYZ(6, 6, z),
+                    ],
+                    [0, 0.5, 1],
+                    [4, 3, 4],
+                    3,
+                    false,
+                ),
+            ),
+        ),
+    );
+    return keep(unwrapOk(factory.loft(sections, false, false, "c0")));
+}
+
+test("a C0 free-form surface names its face and continuity remedy without estimating curvature", () => {
+    const skin = c0Skin();
+    const faces = skin.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    expect(faces).toHaveLength(1);
+    const surface = keep(faces[0].surface());
+    expect(surface.continuity()).toBe("c0");
+    const derivative = rs.spyOn(Object.getPrototypeOf(surface), "d2");
+    const error = "Failed to create thick solid: BRepOffset_C0Geometry";
+    const message = thickenFailureDiagnostic(error, skin, -3.75);
+    expect(message).toContain(error);
+    expect(message).toContain("C0 surface on input face index 0");
+    expect(message).toContain("at least C1 continuity or split");
+    expect(message).toContain("Reducing |thickness| does not fix");
+    expect(message).not.toContain("curvature radius");
+    expect(derivative).not.toHaveBeenCalled();
+});
+
+test("a native join failure on a C0 skin forwards the face-specific continuity diagnostic", () => {
+    const skin = c0Skin();
+    const result = factory.makeThickSolidByJoin(skin, [], -3.75, "arc");
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("BRepOffset_C0Geometry");
+    expect(result.error).toContain("C0 surface on input face index 0");
+    expect(result.error).toContain("at least C1 continuity");
+    expect(result.error).not.toContain("Try |thickness| below");
+});
+
+test("C0 diagnosis excludes opening faces and preserves the cause when no face is identified", () => {
+    const skin = c0Skin();
+    const faces = skin.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    expect(faces).toHaveLength(1);
+    const message = thickenFailureDiagnostic("BRepOffset_C0Geometry", skin, -3.75, faces);
+    expect(message).toContain("no C0 input face was identified among the first 1 faces");
+    expect(message).toContain("at least C1 continuity");
+    expect(message).not.toContain("on input face index");
+});
+
+test("C0 diagnosis checks at most 64 surfaces and does not blame an uninspected face", () => {
+    const box = keep(createBox(factory));
+    const faces = box.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const surface = rs.spyOn(faces[0], "surface");
+    rs.spyOn(faces[0], "dispose").mockImplementation(() => {});
+    const input = { findSubShapes: () => Array.from({ length: 65 }, () => faces[0]) } as unknown as IShape;
+    const message = thickenFailureDiagnostic("BRepOffset_C0Geometry", input, -3.75);
+    expect(surface).toHaveBeenCalledTimes(64);
+    expect(message).toContain("no C0 input face was identified among the first 64 faces");
+    expect(message).not.toContain("curvature radius");
+});
+
+test("a trap during a continuity query stops diagnosis and preserves the kernel error", () => {
+    const skin = c0Skin();
+    const faces = skin.findSubShapes(ShapeTypes.face) as IFace[];
+    owned.push(...faces);
+    const surface = keep(faces[0].surface());
+    rs.spyOn(Object.getPrototypeOf(faces[0]), "surface").mockReturnValue(surface);
+    const release = rs.spyOn(surface, "dispose");
+    const continuity = rs.spyOn(surface, "continuity").mockImplementation(() => {
+        throw new WebAssembly.RuntimeError("unreachable");
+    });
+    const error = "Failed to create thick solid: BRepOffset_C0Geometry";
+    expect(thickenFailureDiagnostic(error, skin, -3.75)).toBe(error);
+    expect(continuity).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
+});
+
 test("diagnostics sample only the first 64 faces and name the sampling cap", () => {
     const sphere = keep(createSphere(factory, undefined, 2));
     const faces = sphere.findSubShapes(ShapeTypes.face) as IFace[];
