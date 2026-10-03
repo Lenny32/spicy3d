@@ -8,6 +8,7 @@
 #include "faceValidation.hpp"
 #include "guard.hpp"
 #include "guidedLoftValidation.hpp"
+#include "loftThicken.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BOPAlgo_BuilderFace.hxx>
@@ -757,7 +758,10 @@ static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp
         if (exactDepth > 0) {
             GProp_GProps area, volume;
             BRepGProp::SurfaceProperties(profile, area);
-            BRepGProp::VolumeProperties(output, volume);
+            // Fixed quadrature can overestimate the volume error on a knot-dense curved
+            // cap and reject a fully covered profile (issue #146). Keep the same tolerance,
+            // using adaptive integration to measure the translated-surface volume.
+            BRepGProp::VolumeProperties(output, volume, 1e-9);
             Handle(Geom_Plane) profilePlane = Handle(Geom_Plane)::DownCast(
                 untrimmedSurface(BRep_Tool::Surface(profile)));
             double expected = area.Mass() * std::abs(profilePlane->Pln().Axis().Direction().Dot(dir)) * exactDepth;
@@ -3069,6 +3073,17 @@ public:
         }
         std::string resultError = thickSolidResultError(makeThickSolid.Shape(), shape);
         if (!resultError.empty()) {
+            // A sampled-valid offset may only need more accurate boundary curves. Preserve
+            // the original error if this restricted retry cannot produce an exact-valid solid.
+            if (BRepCheck_Analyzer(makeThickSolid.Shape()).IsValid()) {
+                try {
+                    const TopoDS_Shape recovered = LoftThicken::recover(shape, thickness);
+                    if (!recovered.IsNull() && thickSolidResultError(recovered, shape).empty()
+                        && !thickSolidUnchanged(shape, recovered))
+                        return ShapeResult { recovered, true, "" };
+                } catch (const Standard_Failure&) {
+                }
+            }
             return ShapeResult { TopoDS_Shape(), false, resultError };
         }
         return ShapeResult { makeThickSolid.Shape(), true, "" };
