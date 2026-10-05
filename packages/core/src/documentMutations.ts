@@ -3,6 +3,7 @@
 
 import type { IDocument } from "./document";
 import { History } from "./foundation/history";
+import { Signal } from "./foundation/signal";
 
 export interface IDocumentMutationScope {
     /** Authority applies only to this synchronous turn, never across an await. */
@@ -14,6 +15,9 @@ export interface IDocumentMutationScope {
 
 /** Runtime-only ownership while an atomic mutation yields to a worker. */
 export class DocumentMutations {
+    /** Lets runtime controls refresh when document editing is locked or unlocked. */
+    static readonly changed = new Signal<(document: IDocument) => void>();
+
     private static readonly owners = new WeakMap<IDocument, symbol>();
     private static readonly active = new WeakMap<IDocument, symbol>();
     private static readonly scopes = new WeakMap<IDocument, IDocumentMutationScope>();
@@ -65,9 +69,11 @@ export class DocumentMutations {
                 releaseHistory();
                 DocumentMutations.owners.delete(document);
                 DocumentMutations.scopes.delete(document);
+                DocumentMutations.changed.emit(document);
             },
         };
         DocumentMutations.scopes.set(document, scope);
+        DocumentMutations.changed.emit(document);
         return scope;
     }
 }

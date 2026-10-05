@@ -142,6 +142,7 @@ export class BrowserModel {
         document.settings?.onPropertyChanged(this.onSettingsChanged);
         document.acts.onCollectionChanged(this.onViewsChanged);
         BrowserProviders.changed.sub(this.onProvidersChanged);
+        DocumentMutations.changed.sub(this.onMutationChanged);
     }
 
     get activeKey(): string {
@@ -392,6 +393,9 @@ export class BrowserModel {
         if (entry) entry.name = this.document.name;
         this.changed.emit();
     };
+    private readonly onMutationChanged = (document: IDocument) => {
+        if (document === this.document) this.changed.emit();
+    };
     private readonly onSettingsChanged = () => {
         const entry = this.entries.get(`${this.rootKey}:units`);
         if (entry) entry.name = `Units: ${documentLengthUnit(this.document)}`;
@@ -468,6 +472,7 @@ export class BrowserModel {
         this.document.settings?.removePropertyChanged(this.onSettingsChanged);
         this.document.acts.removeCollectionChanged(this.onViewsChanged);
         BrowserProviders.changed.remove(this.onProvidersChanged);
+        DocumentMutations.changed.remove(this.onMutationChanged);
         for (const node of this.watched) node.removePropertyChanged(this.onNodeChanged);
         for (const view of this.watchedViews) view.removePropertyChanged(this.onViewsChanged);
         for (const origin of this.origins.values()) origin.dispose();
