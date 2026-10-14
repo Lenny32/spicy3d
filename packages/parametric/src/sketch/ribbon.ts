@@ -43,6 +43,7 @@ export const SketchRibbonProfiles: RibbonProfileExtra[] = [
                         icon: "icon-text",
                         items: ["sketch.text", "sketch.editText", "sketch.explodeText"],
                     },
+                    "sketch.importSvg",
                     "sketch.point",
                     "sketch.projectEdges",
                 ],
