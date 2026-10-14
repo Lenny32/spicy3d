@@ -99,3 +99,21 @@ test("zero-length segments are dropped and their neighbours joined", () => {
 test.each([0, -1, Number.NaN, Infinity])("scale %s is refused", (scale) => {
     expect(svgSketchClipboard(drawing(RECT), { scale, angle: 0 }).isOk).toBe(false);
 });
+
+test("kept as one piece, every piece is locked and no joint is added", () => {
+    const clipboard = svgSketchClipboard(drawing(`${RECT}<circle cx="10" cy="10" r="4"/>`), {
+        scale: 1,
+        angle: 0,
+        lock: true,
+    });
+    expect(clipboard.isOk).toBe(true);
+    const { entities, constraints } = clipboard.value;
+    expect(entities).toHaveLength(8);
+    expect(constraints.map((c) => c.kind)).toEqual(entities.map(() => ConstraintKind.Block));
+    expect(constraints.map((c) => c.refs[0].entityId)).toEqual(entities.map((e) => e.id));
+    // the pieces still meet end to end, so the outlines close without the joints
+    for (const [index, entity] of entities.slice(0, 4).entries()) {
+        const next = entities[(index + 1) % 4];
+        expect(entity.params.slice(2, 4)).toEqual(next.params.slice(0, 2));
+    }
+});

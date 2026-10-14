@@ -33,10 +33,13 @@ afterAll(() => {
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="20mm" viewBox="0 0 50 20">
     <path d="M0 0 H40 C50 5 50 15 40 20 H0 Z"/><circle cx="10" cy="10" r="4"/></svg>`;
 
-test("an imported drawing builds profiles with holes and extrudes off a face plane", () => {
+test.each([
+    { lock: false, label: "joined" },
+    { lock: true, label: "kept as one piece" },
+])("an imported drawing ($label) builds profiles with holes and extrudes off a face plane", ({ lock }) => {
     const drawing = parseSvg(SVG);
     expect(drawing.isOk).toBe(true);
-    const clipboard = svgSketchClipboard(drawing.value, { scale: 1, angle: 0 });
+    const clipboard = svgSketchClipboard(drawing.value, { scale: 1, angle: 0, lock });
     expect(clipboard.isOk).toBe(true);
     const pasted = transformSketchSelection(
         { entities: [], constraints: [] },

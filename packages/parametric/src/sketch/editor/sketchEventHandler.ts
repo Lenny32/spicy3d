@@ -21,6 +21,7 @@ import {
     snapTargetEntityId,
 } from "../autoConstraints";
 import { bsplinePolyline } from "../bsplineGeometry";
+import { lockedGroupOf } from "../lockedGroups";
 import {
     arcAngles,
     ConstraintKind,
@@ -42,6 +43,7 @@ import { type SketchTextData, textContains, textRotationPoint } from "../sketchT
 import { constraintTargetEntities } from "../solverEntities";
 import { sampleSpline } from "../splineGeometry";
 import { textFrameMesh, textOutlineMesh } from "../textVisual";
+import { transformSketchSelection } from "../utilityOperations";
 import { promptControlBSpline } from "./controlBSplinePrompt";
 import { applyConstraintIcon, type BadgeSymbol, badgeSymbol, isBadgeEventTarget } from "./sketchAnnotations";
 import style from "./sketchAnnotations.module.css";
@@ -77,6 +79,13 @@ export class SketchEventHandler implements IEventHandler {
         start: [number, number];
     };
     private lastTextClick?: { id: number; time: number };
+    /** A locked drawing (`lockedGroupOf`) dragged as one rigid piece; applied on release. */
+    private lockedDrag?: {
+        ids: number[];
+        start: [number, number];
+        delta: [number, number];
+        moving?: boolean;
+    };
     private draggingRef?: SketchPointRef;
     private dragPreviewId?: number;
     private hoverMeshId?: number;
@@ -364,6 +373,11 @@ export class SketchEventHandler implements IEventHandler {
             ]);
             return;
         }
+        if (this.lockedDrag) {
+            const uv = this.pointerToUV(view, event);
+            if (uv) this.previewLockedDrag(uv);
+            return;
+        }
         if (this.draggingRef !== undefined) {
             const uv = this.pointerToUV(view, event);
             if (uv !== undefined) {
@@ -435,6 +449,8 @@ export class SketchEventHandler implements IEventHandler {
             return;
         }
         const ref = this.hitTestPoint(view, event);
+        if (this.beginLockedDrag(view, ref?.entityId ?? this.hitTestEntity(view, event), uv, event.shiftKey))
+            return;
         // Datum, external references and generated offsets are pinned and never draggable.
         if (ref !== undefined && !this.editor.solver.isFixed(ref.entityId)) {
             this.beginPointDrag(view, ref);
@@ -466,6 +482,71 @@ export class SketchEventHandler implements IEventHandler {
             return;
         }
         this.selectEntity(view, entityId, event.shiftKey);
+    }
+
+    /**
+     * A press on a locked piece selects its whole drawing (shift toggles it) and, unless shift is
+     * held, starts dragging the drawing as one: locked geometry never stretches under a point drag.
+     */
+    private beginLockedDrag(
+        view: IView,
+        entityId: number | undefined,
+        uv: [number, number] | undefined,
+        additive: boolean,
+    ): boolean {
+        if (entityId === undefined || entityId < 1) return false;
+        const ids = lockedGroupOf(this.editor.solver.toData(), entityId);
+        if (ids === undefined) return false;
+        if (additive) {
+            const selected = ids.every((id) => this.selectedEntities.has(id));
+            for (const id of ids) {
+                if (selected) this.selectedEntities.delete(id);
+                else this.selectedEntities.add(id);
+            }
+        } else if (!ids.every((id) => this.selectedEntities.has(id))) {
+            this.selectedEntities.clear();
+            for (const id of ids) this.selectedEntities.add(id);
+        }
+        this.updateSelectionHighlight(view);
+        if (!additive && uv) {
+            this.clearHover(view);
+            this.lockedDrag = { ids: this.selectedEntityIds, start: uv, delta: [0, 0] };
+        }
+        return true;
+    }
+
+    private previewLockedDrag(uv: [number, number]): void {
+        const drag = this.lockedDrag!;
+        const delta: [number, number] = [uv[0] - drag.start[0], uv[1] - drag.start[1]];
+        // a click's jitter must not nudge the drawing: it moves once the pointer left half the pick tolerance
+        if (!drag.moving && Math.hypot(...delta) < this.editor.screenTolerance() / 2) return;
+        drag.moving = true;
+        drag.delta = delta;
+        const moved = transformSketchSelection(this.editor.solver.toData(), drag.ids, {
+            kind: "move",
+            delta: drag.delta,
+        });
+        if (!moved.isOk) return;
+        const ids = new Set(moved.value.ids);
+        this.editor.annotations.setGeometryPreview([
+            ...moved.value.data.entities
+                .filter((e) => ids.has(e.id))
+                .map((e) => sketchEntityMesh(this.editor, e, 0xffaa33)),
+            ...(moved.value.data.texts ?? [])
+                .filter((text) => ids.has(text.id))
+                .flatMap((text) => [
+                    textOutlineMesh(this.editor.node.plane, text),
+                    textFrameMesh(this.editor.node.plane, text),
+                ]),
+        ]);
+    }
+
+    private endLockedDrag(view: IView): void {
+        const { ids, delta } = this.lockedDrag!;
+        this.lockedDrag = undefined;
+        this.editor.annotations.setGeometryPreview([]);
+        if (Math.hypot(delta[0], delta[1]) > 1e-9) this.editor.applyTransform(ids, { kind: "move", delta });
+        this.updateSelectionHighlight(view);
     }
 
     private beginPointDrag(view: IView, ref: SketchPointRef): void {
@@ -508,6 +589,10 @@ export class SketchEventHandler implements IEventHandler {
             return;
         }
 
+        if (this.lockedDrag) {
+            this.endLockedDrag(view);
+            return;
+        }
         if (this.draggingRef === undefined) return;
         const ref = this.draggingRef;
         this.draggingRef = undefined;
@@ -557,8 +642,9 @@ export class SketchEventHandler implements IEventHandler {
 
     /** Escape peels off one layer at a time: label placement, pick, constraint selection, entity selection, session. */
     private handleEscape(view: IView): void {
-        if (this.textDrag) {
+        if (this.textDrag || this.lockedDrag) {
             this.textDrag = undefined;
+            this.lockedDrag = undefined;
             this.editor.annotations.setGeometryPreview([]);
             return;
         }
@@ -581,7 +667,7 @@ export class SketchEventHandler implements IEventHandler {
         // whose node-selection step can delete the very sketch node being edited,
         // leaving the editor drawing into an invisible orphan
         event.stopImmediatePropagation();
-        if (this.editor.isPicking || this.draggingRef !== undefined) return;
+        if (this.editor.isPicking || this.draggingRef !== undefined || this.lockedDrag) return;
         // a label being placed follows the cursor — it is the delete target
         const draggingLabel = this.editor.annotations.draggingLabelId;
         if (draggingLabel !== undefined) {
@@ -679,6 +765,7 @@ export class SketchEventHandler implements IEventHandler {
         this.selectedEntities.clear();
         this.draggingRef = undefined;
         this.textDrag = undefined;
+        this.lockedDrag = undefined;
     }
 
     // ------------------------------------------------------------------ Hover, drag and snap feedback

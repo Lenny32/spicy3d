@@ -12,6 +12,7 @@ import {
 import { SketchImportSvgCommand } from "../../src/sketch/commands/sketchImportSvg";
 import { SketchEditor } from "../../src/sketch/editor/sketchEditor";
 import type { SketchEventHandler } from "../../src/sketch/editor/sketchEventHandler";
+import { ConstraintKind } from "../../src/sketch/sketchModel";
 import { SketchNode } from "../../src/sketch/sketchNode";
 import "./setup";
 
@@ -80,6 +81,7 @@ function setup(plane: Plane = Plane.XY) {
             handler.pointerDown(view, event(x, y));
             await Promise.resolve();
         },
+        release: () => handler.pointerUp(view, event(0, 0)),
     };
 }
 
@@ -107,6 +109,7 @@ afterEach(() => {
         ._propertiesCache;
     cache.delete("scale");
     cache.delete("rotation");
+    cache.delete("keepSolid");
     rs.restoreAllMocks();
     rs.unstubAllGlobals();
 });
@@ -122,7 +125,9 @@ test("the drawing lands in the open sketch, centred on the click", async () => {
     await run;
     expect(node.data.entities).toHaveLength(4);
     expect(extent(node.data.entities.map((e) => e.params))).toEqual([180, 10, 220, 30]);
-    expect(node.data.constraints).toHaveLength(4);
+    // kept as one piece by default: each piece locked, no joints
+    expect(node.data.constraints.map((c) => c.kind)).toEqual(Array(4).fill(ConstraintKind.Block));
+    expect(editor.solver.diagnose()).toMatchObject({ conflicting: [], redundant: [] });
     // no separate shape: the sketch is still the document's only node
     expect(doc.modelManager.findNodes()).toEqual([node]);
     // one undo step removes the whole drawing
@@ -166,4 +171,59 @@ test("File > Import SVG is routed to the sketch only while one is open", () => {
     expect(SvgImportRoute.redirect?.()).toBeUndefined();
     setup();
     expect(SvgImportRoute.redirect?.()).toBe("sketch.importSvg");
+});
+
+test("without keeping it as one piece, the pieces are only joined, and the choice is remembered", async () => {
+    const { editor, node } = setup();
+    const { command, run } = await start(editor);
+    expect(command.keepSolid).toBe(true);
+    command.keepSolid = false;
+    command.apply();
+    await run;
+    expect(node.data.constraints.map((c) => c.kind)).toEqual(Array(4).fill(ConstraintKind.P2PCoincident));
+    const next = await start(editor);
+    expect(next.command.keepSolid).toBe(false);
+    await next.command.cancel();
+    await next.run;
+});
+
+test("a click on a locked piece selects the whole drawing and dragging moves it in one piece", async () => {
+    const { editor, node, doc, click, move, release } = setup();
+    const { run } = await start(editor);
+    await click(200, 20);
+    await run;
+    editor.selectEntities([]);
+    // the middle of the bottom edge, then a corner: either way the drawing moves as a whole
+    await click(200, 10);
+    expect(editor.selectedEntityIds.sort()).toEqual(node.data.entities.map((e) => e.id).sort());
+    move(250, 60);
+    release();
+    expect(extent(node.data.entities.map((e) => e.params))).toEqual([230, 60, 270, 80]);
+    await click(230, 60);
+    move(200, 50);
+    release();
+    expect(extent(node.data.entities.map((e) => e.params))).toEqual([200, 50, 240, 70]);
+    // still locked where it now lies: a 40 × 20 rectangle, nothing stretched
+    expect(node.data.constraints.map((c) => c.kind)).toEqual(Array(4).fill(ConstraintKind.Block));
+    for (const entity of node.data.entities) {
+        const [x1, y1, x2, y2] = entity.params;
+        expect([20, 40]).toContain(Math.round(Math.hypot(x2 - x1, y2 - y1) * 1e6) / 1e6);
+    }
+    // each drag is one undo step
+    doc.history.undo();
+    expect(extent(node.data.entities.map((e) => e.params))).toEqual([230, 60, 270, 80]);
+});
+
+test("a click, even with a slight jitter, only selects the locked drawing", async () => {
+    const { editor, node, click, move, release } = setup();
+    const { run } = await start(editor);
+    await click(200, 20);
+    await run;
+    const before = structuredClone(node.data);
+    editor.selectEntities([]);
+    await click(220, 20);
+    move(221, 20);
+    release();
+    expect(node.data).toEqual(before);
+    expect(editor.selectedEntityIds).toHaveLength(4);
 });

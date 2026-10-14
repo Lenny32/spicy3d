@@ -10,6 +10,12 @@ export interface SvgSketchOptions {
     readonly scale: number;
     /** Counter-clockwise rotation about the drawing's bounding-box centre, in degrees. */
     readonly angle: number;
+    /**
+     * Keeps the drawing in one piece: every piece gets a Block (Lock) constraint and the joints
+     * are left out — over locked pieces they would only be redundant, and the shared endpoints are
+     * computed from the same points, so outlines still close into profiles.
+     */
+    readonly lock?: boolean;
 }
 
 /** Under this length (mm, after scaling) a segment is dropped and its neighbours are joined. */
@@ -18,7 +24,8 @@ const DEGENERATE_LENGTH = 1e-9;
 /**
  * An SVG drawing as ordinary sketch geometry, ready for the paste placement: straight segments
  * become lines, cubics exact degree-3 control B-splines, consecutive pieces of a subpath are tied
- * by coincident constraints (closed subpaths wrap around), so closed outlines build profiles.
+ * by coincident constraints (closed subpaths wrap around), so closed outlines build profiles —
+ * or, with `lock`, every piece is locked instead (see `SvgSketchOptions.lock`).
  * The geometry is scaled, rotated about the bounding-box centre and centred on `origin` [0, 0].
  */
 export function svgSketchClipboard(drawing: SvgDrawing, options: SvgSketchOptions): Result<SketchClipboard> {
@@ -57,7 +64,17 @@ export function svgSketchClipboard(drawing: SvgDrawing, options: SvgSketchOption
                     if (!added.isOk) return Result.err(added.error);
                     edges.push({ id: added.value, end: 3 });
                 }
-                const joints = subpath.closed && edges.length > 1 ? edges.length : edges.length - 1;
+                for (const edge of options.lock ? edges : []) {
+                    solver.addConstraint({
+                        kind: ConstraintKind.Block,
+                        refs: [{ entityId: edge.id, pointIndex: 0 }],
+                    });
+                }
+                const joints = options.lock
+                    ? 0
+                    : subpath.closed && edges.length > 1
+                      ? edges.length
+                      : edges.length - 1;
                 for (let index = 0; index < joints; index++) {
                     solver.addConstraint({
                         kind: ConstraintKind.P2PCoincident,

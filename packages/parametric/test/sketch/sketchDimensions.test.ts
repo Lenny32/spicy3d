@@ -129,6 +129,22 @@ async function placeDistanceDimension(app: any, doc: any, view: any): Promise<vo
     await run;
 }
 
+/** Runs the distance command through two point picks and the label position (screen coordinates). */
+async function placeDistanceDimensionBetween(
+    app: any,
+    doc: any,
+    view: any,
+    ...clicks: [number, number][]
+): Promise<void> {
+    const handler = doc.visual.eventHandler as SketchEventHandler;
+    const run = new DistanceDimensionCommand().execute(app);
+    for (const [x, y] of clicks) {
+        handler.pointerDown(view, pointerEvent(x, y));
+        await tick();
+    }
+    await run;
+}
+
 function cancelDialog(dialog: DialogCapture): void {
     const buttons = dialog.buttons as DialogButton[];
     const cancel = buttons.find((b) => b.content === "common.cancel");
@@ -204,6 +220,70 @@ describe("dimension commands", () => {
                 { entityId: line, pointIndex: 0 },
                 { entityId: line, pointIndex: 1 },
             ]);
+            editor.exit();
+        } finally {
+            restorePub();
+            restoreFactory();
+        }
+    });
+
+    test("a dimension on locked geometry only is refused and changes nothing", async () => {
+        const { app, doc, view, dialog, restorePub, restoreFactory } = setup();
+        const pub = rs.spyOn(PubSub.default, "pub");
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY });
+            const editor = SketchEditor.enter(node);
+            const line = editor.solver.addLine(0, 0, 100, 0);
+            editor.solver.addConstraint({
+                kind: ConstraintKind.Block,
+                refs: [{ entityId: line, pointIndex: 0 }],
+            });
+            editor.solve(true);
+            const before = editor.solver.toData();
+            const handler = doc.visual.eventHandler as SketchEventHandler;
+
+            const run = new DistanceDimensionCommand().execute(app);
+            handler.pointerDown(view, pointerEvent(450, 300));
+            await tick();
+            handler.pointerDown(view, pointerEvent(450, 250));
+            await run;
+
+            expect(pub).toHaveBeenCalledWith("statusBarTip", "sketch.dimensionLocked");
+            expect(dialog.content).toBeUndefined();
+            expect(editor.solver.toData()).toEqual(before);
+            editor.exit();
+        } finally {
+            pub.mockRestore();
+            restorePub();
+            restoreFactory();
+        }
+    });
+
+    test("a dimension from locked to free geometry moves only the free side", async () => {
+        const { app, doc, view, dialog, restorePub, restoreFactory } = setup();
+        try {
+            const node = new SketchNode({ document: doc, plane: Plane.XY });
+            const editor = SketchEditor.enter(node);
+            const locked = editor.solver.addLine(0, 0, 100, 0);
+            editor.solver.addConstraint({
+                kind: ConstraintKind.Block,
+                refs: [{ entityId: locked, pointIndex: 0 }],
+            });
+            const free = editor.solver.addLine(0, 50, 100, 50);
+            editor.solve(true);
+
+            // the locked line's start, the free line, then the label
+            await placeDistanceDimensionBetween(app, doc, view, [400, 300], [400, 250], [380, 275]);
+
+            expect(confirmDialog(dialog, "30")).toBe(true);
+            expect(editor.solver.toData().constraints.map((c) => c.kind)).toEqual([
+                ConstraintKind.Block,
+                ConstraintKind.P2LDistance,
+            ]);
+            expect(editor.solver.entity(locked)?.params).toEqual([0, 0, 100, 0]);
+            // the free line now lies 30 mm from the locked line's start
+            const [x1, y1, x2, y2] = editor.solver.entity(free)!.params;
+            expect(Math.abs(x1 * y2 - x2 * y1) / Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(30, 6);
             editor.exit();
         } finally {
             restorePub();
@@ -1070,7 +1150,9 @@ describe("dimension commands", () => {
             expect(confirmDialog(dialog, "-30")).toBe(true);
             expect(editor.solver.toData().constraints.at(-1)?.datum).toBeCloseTo(-Math.PI / 6);
             editor.editDatum(constraint.id);
+            console.log("DBG", JSON.stringify(editor.solver.toData()));
             expect(confirmDialog(dialog, "30")).toBe(true);
+            console.log("DBG2", JSON.stringify(editor.solver.toData()));
             const [ax, ay] = editor.solver.pointOf({ entityId: 2, pointIndex: 0 });
             const [bx, by] = editor.solver.pointOf({ entityId: 2, pointIndex: 1 });
             expect(Math.atan2(by - ay, bx - ax)).toBeCloseTo(Math.PI / 6, 6);

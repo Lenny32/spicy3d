@@ -21,13 +21,15 @@ import { SketchUtilityCommand } from "./sketchUtilityCommand";
  * own plane (a face included): the drawing follows the cursor by its bounding-box centre — at
  * the sketch origin until the cursor moves — and a click, or Apply, drops it as one undo step.
  * Scale, size and angle can be typed before or while placing; the preview follows at once.
+ * Kept as one piece (the default), every piece is locked: dragging moves the drawing as a whole
+ * and dimensions cannot distort it (`lockedGroups.ts`).
  */
 @command({ key: "sketch.importSvg", icon: "icon-import" })
 export class SketchImportSvgCommand extends SketchUtilityCommand {
     /** The drawing's own size in millimetres, from its units; 0 until a file is read. */
     private naturalSize = { width: 0, height: 0 };
     private drawing?: SvgDrawing;
-    private built?: { scale: number; angle: number; clipboard?: SketchClipboard };
+    private built?: { scale: number; angle: number; lock: boolean; clipboard?: SketchClipboard };
 
     protected override get numericInput(): boolean {
         return true;
@@ -67,12 +69,21 @@ export class SketchImportSvgCommand extends SketchUtilityCommand {
         if (Number.isFinite(value)) this.setProperty("rotation", value);
     }
 
+    /** Locks every piece so the drawing cannot be stretched or distorted (`SvgSketchOptions.lock`). */
+    @property("file.svg.keepSolid")
+    public get keepSolid(): boolean {
+        return this.getPrivateValue("keepSolid", true);
+    }
+    public set keepSolid(value: boolean) {
+        this.setProperty("keepSolid", value);
+    }
+
     /**
-     * Width and height follow the file and the scale; only scale (shared with `file.importSvg`)
-     * and rotation are carried over.
+     * Width and height follow the file and the scale; only scale (shared with `file.importSvg`),
+     * rotation and keep-solid are carried over.
      */
     protected override isPropertyCached(property: Property): boolean {
-        return property.name === "scale" || property.name === "rotation";
+        return property.name === "scale" || property.name === "rotation" || property.name === "keepSolid";
     }
 
     private emitSizeChanged() {
@@ -80,14 +91,14 @@ export class SketchImportSvgCommand extends SketchUtilityCommand {
         this.emitPropertyChanged("height", this.height);
     }
 
-    /** The drawing at the current scale and angle, rebuilt only when one of them changed. */
+    /** The drawing at the current scale, angle and locking, rebuilt only when one of them changed. */
     private clipboard(): SketchClipboard | undefined {
         if (!this.drawing) return undefined;
-        const { scale, rotation: angle } = this;
-        if (this.built?.scale !== scale || this.built.angle !== angle) {
-            const result = svgSketchClipboard(this.drawing, { scale, angle });
+        const { scale, rotation: angle, keepSolid: lock } = this;
+        if (this.built?.scale !== scale || this.built.angle !== angle || this.built.lock !== lock) {
+            const result = svgSketchClipboard(this.drawing, { scale, angle, lock });
             if (!result.isOk) PubSub.default.pub("displayError", result.error);
-            this.built = { scale, angle, clipboard: result.isOk ? result.value : undefined };
+            this.built = { scale, angle, lock, clipboard: result.isOk ? result.value : undefined };
         }
         return this.built.clipboard;
     }
