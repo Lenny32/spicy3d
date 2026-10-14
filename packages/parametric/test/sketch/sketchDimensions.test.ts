@@ -1150,9 +1150,7 @@ describe("dimension commands", () => {
             expect(confirmDialog(dialog, "-30")).toBe(true);
             expect(editor.solver.toData().constraints.at(-1)?.datum).toBeCloseTo(-Math.PI / 6);
             editor.editDatum(constraint.id);
-            console.log("DBG", JSON.stringify(editor.solver.toData()));
             expect(confirmDialog(dialog, "30")).toBe(true);
-            console.log("DBG2", JSON.stringify(editor.solver.toData()));
             const [ax, ay] = editor.solver.pointOf({ entityId: 2, pointIndex: 0 });
             const [bx, by] = editor.solver.pointOf({ entityId: 2, pointIndex: 1 });
             expect(Math.atan2(by - ay, bx - ax)).toBeCloseTo(Math.PI / 6, 6);
