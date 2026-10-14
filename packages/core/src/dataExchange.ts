@@ -4,8 +4,9 @@
 import type { IDocument } from "./document";
 import type { Result } from "./foundation/result";
 import type { Matrix4 } from "./math";
-import type { MeshNode, VisualNode } from "./model";
+import type { EditableShapeNode, MeshNode, VisualNode } from "./model";
 import type { StlTessellationOptions } from "./shape/shapeConverter";
+import type { SvgShapeOptions } from "./svg/svgShape";
 import type { LengthUnit } from "./units/lengthUnit";
 
 /**
@@ -75,6 +76,15 @@ export interface IDataExchange {
         file: File,
         options?: ReferenceMeshImportOptions,
     ): Promise<Result<MeshNode>>;
+    /**
+     * Imports the outlines of an SVG file as one shape on the XY plane (closed outlines as
+     * faces, ready to extrude), sized by the file's physical units times `options.scale`.
+     */
+    importSvg?(
+        document: IDocument,
+        file: File,
+        options?: SvgShapeOptions,
+    ): Promise<Result<EditableShapeNode>>;
     /** Shows the failure as a toast and resolves `undefined`; see `exportResult`. */
     export(type: string, nodes: VisualNode[], options?: DataExportOptions): Promise<BlobPart[] | undefined>;
     /** Like `export`, without UI: the failure is returned to the caller. */

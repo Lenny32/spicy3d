@@ -3,6 +3,7 @@
 
 import {
     awaitExportRebuilds,
+    buildSvgShape,
     type DataExport,
     type DataExportError,
     type DataExportOptions,
@@ -23,9 +24,11 @@ import {
     type Mesh,
     MeshNode,
     PubSub,
+    parseSvg,
     type ReferenceMeshImportOptions,
     Result,
     ShapeNode,
+    type SvgShapeOptions,
     type VisualNode,
     validateStlTessellation,
 } from "@spicy3d/core";
@@ -70,7 +73,7 @@ export class DefaultDataExchange implements IDataExchange {
     }
 
     importFormats(): string[] {
-        return [".step", ".stp", ".iges", ".igs", ".brep", ".stl"];
+        return [".step", ".stp", ".iges", ".igs", ".brep", ".stl", ".svg"];
     }
 
     exportFormats(): string[] {
@@ -99,6 +102,10 @@ export class DefaultDataExchange implements IDataExchange {
             importResult = await this.importStep(document, file);
         } else if (this.extensionIs(fileName, ".iges", ".igs")) {
             importResult = await this.importIges(document, file);
+        } else if (this.extensionIs(fileName, ".svg")) {
+            const result = await this.importSvg(document, file);
+            if (!result.isOk) PubSub.default.pub("showToast", "error.import.svg:{0}", result.error);
+            return;
         }
 
         this.handleImportResult(document, fileName, importResult);
@@ -118,6 +125,24 @@ export class DefaultDataExchange implements IDataExchange {
         node.name = name;
         document.modelManager.addNode(node);
         document.visual.update();
+    }
+
+    async importSvg(
+        document: IDocument,
+        file: File,
+        options: SvgShapeOptions = {},
+    ): Promise<Result<EditableShapeNode>> {
+        if (document.repository.isReadOnly?.(document.id)) return Result.err("Document is read-only");
+        const drawing = parseSvg(await file.text());
+        if (!drawing.isOk) return Result.err(drawing.error);
+        const built = buildSvgShape(shapeFactory, drawing.value, options);
+        if (!built.isOk) return Result.err(built.error);
+        const node = new EditableShapeNode({ document, name: file.name, shape: built.value.shape });
+        document.modelManager.addNode(node);
+        document.visual.update();
+        const skipped = drawing.value.skipped.length + built.value.failed;
+        if (skipped > 0) PubSub.default.pub("showToast", "toast.import.svgSkipped{0}", skipped);
+        return Result.ok(node);
     }
 
     async importBrep(document: IDocument, file: File) {
