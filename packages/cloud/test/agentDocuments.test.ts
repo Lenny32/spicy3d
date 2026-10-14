@@ -148,6 +148,9 @@ describe("the agent's cloud link", () => {
         a.network.down = true;
         doc.edit("w", "11");
         await doc.save("manual");
+        // The push of the manual save is tried (and fails) while offline: its attempt is what the
+        // agent's save joins. Back online before that, the manual save would be pushed alone.
+        await until(() => a.repository.stateOf("doc-1") === "offline", "the manual save tried offline");
         doc.edit("w", "12");
         a.network.down = false;
 
