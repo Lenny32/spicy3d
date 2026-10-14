@@ -510,6 +510,7 @@ export default {
         "command.sketch.offset": "Offset",
         "command.sketch.copy": "Copy",
         "command.sketch.paste": "Paste",
+        "command.sketch.importSvg": "Import SVG",
         "command.sketch.move": "Move",
         "command.sketch.rotate": "Rotate",
         "command.sketch.mirror": "Mirror",
@@ -1584,6 +1585,7 @@ export default {
         "file.svg.scale": "Scale",
         "file.svg.width": "Width",
         "file.svg.height": "Height",
+        "file.svg.angle": "Angle (degrees)",
         "file.svg.faces": "Closed outlines as faces (to extrude)",
         "toast.import.svgSkipped{0}":
             "{0} SVG element(s) could not be imported (text, images or invalid outlines)",

@@ -50,18 +50,27 @@ export abstract class SketchUtilityCommand extends SketchConstraintCommand {
         editor: SketchEditor,
         ids: number[],
         proposal: (uv: [number, number]) => SketchTransform,
-        clipboard?: SketchClipboard,
+        /** A function is read at every preview and at the commit (geometry that follows the panel). */
+        clipboard?: SketchClipboard | (() => SketchClipboard | undefined),
         copy = false,
     ): Promise<void> {
         let last: [number, number] | undefined;
-        const apply = (uv: [number, number]) => editor.applyTransform(ids, proposal(uv), clipboard, copy);
+        const source = () => (typeof clipboard === "function" ? clipboard() : clipboard);
+        const apply = (uv: [number, number]) => {
+            const pasted = source();
+            if (clipboard !== undefined && pasted === undefined) return false;
+            return editor.applyTransform(ids, proposal(uv), pasted, copy);
+        };
         this.confirm = () => {
             const point = this.numericInput ? (last ?? ([0, 0] as [number, number])) : last;
             if (point && apply(point)) editor.cancelPick();
         };
         const render = (at: [number, number] | undefined) => {
+            const pasted = source();
             const result =
-                at && transformSketchSelection(editor.solver.toData(), ids, proposal(at), clipboard, copy);
+                at && (clipboard === undefined || pasted !== undefined)
+                    ? transformSketchSelection(editor.solver.toData(), ids, proposal(at), pasted, copy)
+                    : undefined;
             editor.annotations.setGeometryPreview(
                 result?.isOk
                     ? [

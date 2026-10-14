@@ -9,6 +9,7 @@ import {
     type IDocument,
     PubSub,
     Result,
+    SvgImportRoute,
     type SvgShapeOptions,
 } from "@spicy3d/core";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
@@ -92,6 +93,29 @@ describe("ImportSvg", () => {
         expect(options?.scale).toBeCloseTo(2.5);
         expect(options?.faces).toBe(true);
         expect(fitContent).toHaveBeenCalled();
+    });
+
+    test("hands over to the routed command without reading a file", async () => {
+        const { application, importSvg } = setup();
+        const pub = rs.spyOn(PubSub.default, "pub").mockImplementation(() => {});
+        const click = rs.fn();
+        const create = originalCreateElement.bind(document) as (tag: string) => HTMLElement;
+        document.createElement = ((tag: string) => {
+            const element = create(tag);
+            if (tag === "input") (element as HTMLInputElement).click = click;
+            return element;
+        }) as typeof document.createElement;
+        SvgImportRoute.redirect = () => "sketch.importSvg";
+        try {
+            await new ImportSvg().execute(application);
+            expect(pub).not.toHaveBeenCalledWith("executeCommand", "sketch.importSvg");
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(pub).toHaveBeenCalledWith("executeCommand", "sketch.importSvg");
+            expect(click).not.toHaveBeenCalled();
+            expect(importSvg).not.toHaveBeenCalled();
+        } finally {
+            SvgImportRoute.redirect = undefined;
+        }
     });
 
     test.each([0, -2, Number.NaN])("an invalid scale of %d is ignored", (value) => {

@@ -26,6 +26,7 @@ import {
     property,
     Result,
     readFilesAsync,
+    SvgImportRoute,
     Transaction,
     VisualNode,
     validateStlTessellation,
@@ -77,7 +78,8 @@ export class ImportReferenceMesh implements ICommand {
 /**
  * Imports an SVG drawing as one shape on the XY plane, scaled before it is built: closed
  * outlines become faces that `create.extrude` turns into solids. The file is read first so the
- * panel can show — and edit — the size the drawing will have.
+ * panel can show — and edit — the size the drawing will have. While a module routes it elsewhere
+ * (`SvgImportRoute`, e.g. an open sketch), it hands over to that command instead.
  */
 @command({ key: "file.importSvg", icon: "icon-import" })
 export class ImportSvg extends CancelableCommand {
@@ -130,6 +132,13 @@ export class ImportSvg extends CancelableCommand {
     private emitSizeChanged() {
         this.emitPropertyChanged("width", this.width);
         this.emitPropertyChanged("height", this.height);
+    }
+
+    override async execute(application: IApplication): Promise<void> {
+        const redirect = SvgImportRoute.redirect?.();
+        if (redirect === undefined) return super.execute(application);
+        // After this command has finished, so the command service accepts the next one.
+        setTimeout(() => PubSub.default.pub("executeCommand", redirect));
     }
 
     protected async executeAsync() {
