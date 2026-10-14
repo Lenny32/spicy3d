@@ -4,6 +4,7 @@
 import {
     Act,
     BrowserProviders,
+    DocumentMutations,
     FolderNode,
     I18n,
     type INode,
@@ -231,6 +232,37 @@ describe("Browser interactions", () => {
         doc.history.undo();
         expect(nodes[0].visible).toBe(false);
         expect(visibilityIcon()).toBe("#icon-eye-slash");
+    });
+
+    test("a sketch hidden during a modeling operation can be shown after the operation finishes", () => {
+        const { doc, row, nodes } = setup();
+        const sketch = nodes[0];
+        const unregister = BrowserProviders.register({
+            describe: (node) =>
+                node === sketch
+                    ? { type: "sketch", category: "sketches", icon: "icon-sketchEdit" }
+                    : undefined,
+        });
+        const scope = DocumentMutations.hold(doc);
+        try {
+            scope.run(() => {
+                sketch.visible = false;
+            });
+            const visibility = mustQuery<HTMLButtonElement>(row(sketch.id), "[data-visibility]");
+            expect(visibility.disabled).toBe(true);
+            expect(visibility.getAttribute("aria-label")).toBe(I18n.translate("items.menu.show"));
+
+            scope.release();
+            expect(visibility.disabled).toBe(false);
+            visibility.click();
+            expect(sketch.visible).toBe(true);
+            expect(visibility.getAttribute("aria-label")).toBe(I18n.translate("items.menu.hide"));
+            doc.history.undo();
+            expect(sketch.visible).toBe(false);
+        } finally {
+            scope.release();
+            unregister();
+        }
     });
 
     test.each([
