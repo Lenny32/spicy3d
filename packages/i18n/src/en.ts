@@ -1169,6 +1169,7 @@ export default {
         "ribbon.tab.sketch": "Sketch",
         "sketch.conflicting": "Conflicting constraints",
         "sketch.constraintExists": "Constraint already exists",
+        "sketch.dimensionLocked": "This geometry is locked: remove its Lock to dimension it",
         "sketch.constructionPlaneInvalid{0}":
             "Sketch construction plane is missing or invalid; the sketch is hidden ({0} warnings)",
         "sketch.externalRefAssociativeOnly": "External references only accept associative constraints",
@@ -1586,6 +1587,7 @@ export default {
         "file.svg.width": "Width",
         "file.svg.height": "Height",
         "file.svg.angle": "Angle (degrees)",
+        "file.svg.keepSolid": "Keep as one piece (locked)",
         "file.svg.faces": "Closed outlines as faces (to extrude)",
         "toast.import.svgSkipped{0}":
             "{0} SVG element(s) could not be imported (text, images or invalid outlines)",

@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { AsyncController, command, type I18nKeys, type ParameterValue } from "@spicy3d/core";
+import { AsyncController, command, type I18nKeys, type ParameterValue, PubSub } from "@spicy3d/core";
 import {
     type DimensionAnchor,
     lineIntersection,
@@ -13,6 +13,7 @@ import {
 } from "../editor/dimensionLayout";
 import type { DimensionPreview } from "../editor/sketchAnnotations";
 import type { SketchEditor, SketchPickTarget } from "../editor/sketchEditor";
+import { lockedEntityIds } from "../lockedGroups";
 import {
     ConstraintKind,
     datumUnitSpec,
@@ -434,6 +435,10 @@ function commitDimension(
     initial: ParameterValue,
     options?: { apply?: (id: number, value: ParameterValue) => void; positiveOnly?: boolean },
 ): void {
+    if (onLockedGeometryOnly(editor, constraint)) {
+        PubSub.default.pub("statusBarTip", "sketch.dimensionLocked");
+        return;
+    }
     const id = editor.solver.addConstraint(constraint);
     editor.dimensionAnchors.set(id, anchor);
     editor.solve(true);
@@ -447,6 +452,21 @@ function commitDimension(
             editor.solve(true);
         },
         { positiveOnly: options?.positiveOnly },
+    );
+}
+
+/**
+ * Whether the dimension would only measure locked geometry (an SVG imported in one piece, or
+ * anything under Lock), against reference geometry at most: nothing it could drive may move, so
+ * it is refused instead of over-constraining the sketch. A dimension to free geometry is fine —
+ * it positions that geometry and leaves the locked drawing as it is.
+ */
+function onLockedGeometryOnly(editor: SketchEditor, constraint: Omit<SketchConstraintData, "id">): boolean {
+    const locked = lockedEntityIds(editor.solver.toData());
+    const ids = new Set(constraint.refs.map((r) => r.entityId));
+    return (
+        [...ids].some((id) => locked.has(id)) &&
+        [...ids].every((id) => locked.has(id) || id < 1 || editor.solver.isFixed(id))
     );
 }
 
