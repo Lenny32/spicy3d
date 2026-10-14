@@ -78,6 +78,10 @@ describe("ImportSvg", () => {
         command.width = 100;
         expect(command.scale).toBeCloseTo(2.5);
         expect(command.height).toBeCloseTo(50);
+        command.width = -1;
+        expect(command.width).toBeCloseTo(100);
+        command.height = 0;
+        expect(command.height).toBeCloseTo(50);
         command.confirm();
         await running;
 
@@ -90,12 +94,11 @@ describe("ImportSvg", () => {
         expect(fitContent).toHaveBeenCalled();
     });
 
-    test("invalid sizes are ignored", () => {
+    test.each([0, -2, Number.NaN])("an invalid scale of %d is ignored", (value) => {
         const command = new ImportSvg();
         command.scale = 3;
-        command.scale = 0;
-        command.scale = Number.NaN;
-        command.width = -1;
+        expect(command.scale).toBe(3);
+        command.scale = value;
         expect(command.scale).toBe(3);
     });
 
