@@ -49,6 +49,7 @@ export * from "./shape";
 export * from "./snap";
 export * from "./snapType";
 export * from "./step";
+export * from "./svg";
 export * from "./ui";
 export * from "./units";
 export * from "./userActivity";

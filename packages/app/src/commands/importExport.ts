@@ -19,8 +19,10 @@ import {
     LENGTH_UNITS_LIST,
     type LengthUnit,
     type MeshNode,
+    type Property,
     PropertyUtils,
     PubSub,
+    parseSvg,
     property,
     Result,
     readFilesAsync,
@@ -69,6 +71,100 @@ export class ImportReferenceMesh implements ICommand {
         application.activeView?.cameraController.fitContent();
         // Keep the placement panel on the last mesh successfully imported in this batch.
         if (imported) showReferencePlacement(imported);
+    }
+}
+
+/**
+ * Imports an SVG drawing as one shape on the XY plane, scaled before it is built: closed
+ * outlines become faces that `create.extrude` turns into solids. The file is read first so the
+ * panel can show — and edit — the size the drawing will have.
+ */
+@command({ key: "file.importSvg", icon: "icon-import" })
+export class ImportSvg extends CancelableCommand {
+    /** The drawing's own size in millimetres, from its units; 0 until a file is read. */
+    private naturalSize = { width: 0, height: 0 };
+
+    @property("file.svg.scale")
+    public get scale(): number {
+        return this.getPrivateValue("scale", 1);
+    }
+    public set scale(value: number) {
+        if (!Number.isFinite(value) || value <= 0) return;
+        this.setProperty("scale", value, () => this.emitSizeChanged());
+    }
+
+    @property("file.svg.width", { quantity: "length" })
+    public get width(): number {
+        return this.naturalSize.width * this.scale;
+    }
+    public set width(value: number) {
+        if (this.naturalSize.width > 0) this.scale = value / this.naturalSize.width;
+    }
+
+    @property("file.svg.height", { quantity: "length" })
+    public get height(): number {
+        return this.naturalSize.height * this.scale;
+    }
+    public set height(value: number) {
+        if (this.naturalSize.height > 0) this.scale = value / this.naturalSize.height;
+    }
+
+    @property("file.svg.faces")
+    public get faces(): boolean {
+        return this.getPrivateValue("faces", true);
+    }
+    public set faces(value: boolean) {
+        this.setProperty("faces", value);
+    }
+
+    @property("common.confirm")
+    public confirm() {
+        this.controller?.success();
+    }
+
+    /** Width and height follow the file and the scale; only those two are carried over. */
+    protected override isPropertyCached(property: Property): boolean {
+        return property.name === "scale" || property.name === "faces";
+    }
+
+    private emitSizeChanged() {
+        this.emitPropertyChanged("width", this.width);
+        this.emitPropertyChanged("height", this.height);
+    }
+
+    protected async executeAsync() {
+        const importer = this.application.dataExchange.importSvg;
+        if (!importer) return;
+        const files = await readFilesAsync(".svg", false);
+        if (this.checkCanceled() || !files.isOk || files.value.length === 0) return;
+        const file = files.value[0];
+        const drawing = parseSvg(await file.text());
+        const bounds = drawing.isOk ? drawing.value.bounds : undefined;
+        if (!bounds) {
+            const error = drawing.isOk ? "The SVG file has no outlines to import" : drawing.error;
+            PubSub.default.pub("showToast", "error.import.svg:{0}", error);
+            return;
+        }
+        this.naturalSize = { width: bounds.max.x - bounds.min.x, height: bounds.max.y - bounds.min.y };
+        this.emitSizeChanged();
+
+        const controller = new AsyncController();
+        this.controller = controller;
+        const confirmed = await new Promise<boolean>((resolve) => {
+            controller.onCompleted(() => resolve(true));
+            controller.onCancelled(() => resolve(false));
+        });
+        if (!confirmed || this.checkCanceled()) return;
+
+        const document = this.document;
+        const options = { scale: this.scale, faces: this.faces };
+        let imported = false;
+        await Transaction.executeAsync(document, "import svg", async () => {
+            const result = await importer.call(this.application.dataExchange, document, file, options);
+            if (!result.isOk) PubSub.default.pub("showToast", "error.import.svg:{0}", result.error);
+            imported = result.isOk;
+        });
+        if (imported) this.application.activeView?.cameraController.fitContent();
     }
 }
 

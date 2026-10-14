@@ -367,6 +367,7 @@ export default {
         "placement.unavailable":
             "Placement is unavailable. Select an editable mesh and finish any active command.",
         "command.file.importReferenceMesh": "Import reference mesh (STL, mm)",
+        "command.file.importSvg": "Import SVG",
         "command.measure.referenceDeviation": "Reference mesh deviation",
         "prompt.deviation.model": "Select the CAD body to compare",
         "prompt.deviation.reference": "Select the reference mesh",
@@ -892,6 +893,7 @@ export default {
         "error.repository.unauthorized": "Your session has expired — please sign in again",
         "error.export.noNodeCanBeExported": "No node can be exported",
         "error.import.unsupportedFileType:{0}": "Unsupported file type: {0}",
+        "error.import.svg:{0}": "Cannot import the SVG file: {0}",
         "error.input.cannotInputANumber": "Overlap with reference point, 1 number cannot be entered",
         "error.input.invalidNumber": "Please enter a valid number, separated by ,",
         "error.input.threeNumberCanBeInput": "Reference point is empty, only 3 numbers can be entered",
@@ -1579,6 +1581,12 @@ export default {
         "file.stl.customTessellation": "Custom STL tessellation",
         "file.stl.linearTolerance": "Linear deflection",
         "file.stl.angularTolerance": "Angular deflection (degrees)",
+        "file.svg.scale": "Scale",
+        "file.svg.width": "Width",
+        "file.svg.height": "Height",
+        "file.svg.faces": "Closed outlines as faces (to extrude)",
+        "toast.import.svgSkipped{0}":
+            "{0} SVG element(s) could not be imported (text, images or invalid outlines)",
         "fillet.variableRadius": "Variable radius",
         "fillet.editRadiusLaw": "Edit radius law…",
         "fillet.cornerSetback": "Corner setback",
