@@ -8,6 +8,7 @@
         "@spicy3d/cloud": "*",
         "@spicy3d/i18n": "*",
         "@spicy3d/parametric": "*",
+        "@spicy3d/telemetry": "*",
         "@spicy3d/three": "*",
         "@spicy3d/ui": "*",
         "@spicy3d/wasm": "*"

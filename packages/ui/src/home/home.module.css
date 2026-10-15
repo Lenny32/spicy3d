@@ -150,6 +150,23 @@
             min-width: 0;
             padding: 2px;
 
+            button {
+                width: 108px;
+                height: 30px;
+                padding: 0 8px;
+                border-radius: 8px;
+                border: 1px solid var(--input-border-color);
+                background-color: var(--input-background-color);
+                color: var(--input-text-color);
+                font-size: 13px;
+                text-align: left;
+                cursor: pointer;
+
+                &:hover {
+                    border-color: var(--border-hover-color);
+                }
+            }
+
             select {
                 width: 108px;
                 height: 30px;

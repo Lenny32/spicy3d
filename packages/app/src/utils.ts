@@ -1,16 +1,18 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { I18n, type IApplication, PubSub, Transaction } from "@spicy3d/core";
+import { I18n, type IApplication, PubSub, Telemetry, Transaction } from "@spicy3d/core";
 
 export async function importFiles(application: IApplication, files: File[] | FileList) {
     const document = application.activeView?.document ?? (await application.newDocument("Untitled"));
     PubSub.default.pub(
         "showPermanent",
         async () => {
-            await Transaction.executeAsync(document, "import model", async () => {
-                await document.application.dataExchange.import(document, files);
-            });
+            await Telemetry.trace("file.import", () =>
+                Transaction.executeAsync(document, "import model", async () => {
+                    await document.application.dataExchange.import(document, files);
+                }),
+            );
             document.application.activeView?.cameraController.fitContent();
         },
         "toast.executing{0}",

@@ -34,6 +34,43 @@ Most of this comes from upstream.
 - Undo/redo, documents stored in IndexedDB
 - Plugins loaded at runtime with `?plugin=<url>` (examples in `plugins/`: hello world in JS and TS, macros, a node-based visual programming editor)
 - UI in English
+- No tracking. Optional telemetry to your own OpenTelemetry collector, off unless you set it up (see [Telemetry](#telemetry))
+
+## Telemetry
+
+Spicy3D sends nothing about you or your work by default. There is no built-in endpoint, and until
+you configure one the telemetry code isn't even loaded: no request is made.
+
+If you run an OTLP collector (for example a Harness project telemetry URL, or any OTLP/HTTP collector),
+you can turn it on in **Settings → Telemetry** on the home page:
+
+- **OTLP URL**: the collector's base URL, e.g. `https://harness.example.com/otlp/<key>`. The app
+  appends `/v1/logs` and `/v1/traces` and sends OTLP/HTTP JSON (no protobuf, no gzip).
+- **Key** (optional): sent as `Authorization: Bearer <key>` and `x-api-key: <key>`. Leave it empty
+  when the key is part of the URL.
+- **Send errors and performance data**: the switch. **Test connection** sends one small log record
+  and shows the collector's answer.
+
+The setting is kept in this browser (`localStorage` `spicy3d.settings.telemetry`), never synced to an
+account. Turning it off or clearing the URL stops sending at once and drops anything still queued.
+
+What is sent, and only to the URL you entered:
+
+- error messages and stack traces: uncaught errors, unhandled promise rejections, and the app's own
+  warnings and errors. Before they leave the browser, quoted text, file names, filesystem paths,
+  URL queries and anything that looks like a credential are masked
+- the names and durations of a few operations: `document.open`, `document.save`, `file.import`,
+  `file.export`, `body.rebuild`, and whether they failed
+- the app version (`service.name = spicy3d`, `service.version`), and the browser and OS family
+  (e.g. "Firefox", "Linux"; no versions, no user agent)
+- a random `service.instance.id` made for each page load and never stored
+
+What is never sent: file or document names, paths, model or scene data, values you type, query
+strings, and any user, account or device identifier.
+
+If the app is served by the `spicy3d-web` image, its Content-Security-Policy only lets the page
+connect to its own origin. Add the collector's origin to `SPICY3D_CONNECT_ORIGINS`
+([docs/deployment.md](docs/deployment.md)), or Test connection will report a network error.
 
 ## Getting started
 
@@ -111,6 +148,7 @@ npm workspace under `packages/`:
 | `app` | `Application`, body nodes, commands, hotkeys |
 | `ai` | In-app assistant tools and the MCP server |
 | `builder` | `AppBuilder`, which wires everything together at startup |
+| `telemetry` | The optional OpenTelemetry exporters, loaded only once telemetry is switched on |
 | `i18n`, `storage`, `web` | Translations, IndexedDB, entry point |
 
 Stack: TypeScript, Three.js, OCCT 8 via Emscripten, Rspack, Biome, Rstest.

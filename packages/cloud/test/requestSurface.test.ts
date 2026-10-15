@@ -32,6 +32,10 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     },
     "packages/cloud/src/sync/events.ts": { count: 1, why: "WebSocket to /ws/events (Origin checked)" },
     "packages/core/src/deploymentConfig.ts": { count: 3, why: "GET of the app's own deployment.json" },
+    "packages/core/src/telemetry/telemetryConnection.ts": {
+        count: 2,
+        why: "Test connection: one POST to the OTLP collector the user configured, no cookies",
+    },
     "packages/ui/src/mainWindow.ts": { count: 1, why: "GET of the app's own iconfont.js" },
 };
 

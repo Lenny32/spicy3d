@@ -1369,6 +1369,23 @@ export default {
         "autosave.file.toggle": "Autosave to file",
         "autosave.file.toggleHint": "Write autosaves back to the .spicy file this document was opened from",
         "autosave.file.denied": "No permission to write to the file: autosave to file stays off",
+        "telemetry.setting": "Telemetry",
+        "telemetry.title": "Telemetry",
+        "telemetry.off": "Off",
+        "telemetry.about":
+            "Off unless you set it up. Switched on with a URL, this browser sends to that collector only: error messages and stack traces, the names and durations of a few operations (opening, saving, importing, exporting, rebuilding), the app version and the browser and OS family. Never file names, model data or what you type; no user or device identifier. Nothing ships with a built-in endpoint.",
+        "telemetry.enabled": "Send errors and performance data",
+        "telemetry.url": "OTLP URL",
+        "telemetry.urlHint": "The collector's OTLP/HTTP base URL; /v1/logs and /v1/traces are appended.",
+        "telemetry.key": "Key (optional)",
+        "telemetry.keyHint":
+            "Sent as Authorization: Bearer and x-api-key. Leave it empty when the key is part of the URL.",
+        "telemetry.test": "Test connection",
+        "telemetry.testing": "Testing…",
+        "telemetry.test.ok{0}": "It works: the collector answered HTTP {0}.",
+        "telemetry.test.status{0}": "The collector answered HTTP {0}.",
+        "telemetry.test.error{0}": "The collector could not be reached: {0}",
+        "telemetry.test.invalidUrl": "Enter an http(s) URL (required when telemetry is on).",
         "account.settings.autosave": "Autosave",
         "account.settings.autosaveHint":
             "How often changed documents are saved on their own. It applies on every device you sign in on.",

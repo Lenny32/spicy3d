@@ -3,7 +3,14 @@
 
 import { rs } from "@rstest/core";
 import * as app from "@spicy3d/app";
-import { ExternalContentPolicy, type IApplication, type IWindow, Logger } from "@spicy3d/core";
+import {
+    ExternalContentPolicy,
+    type IApplication,
+    type IWindow,
+    Logger,
+    ObjectStorage,
+    TelemetrySettings,
+} from "@spicy3d/core";
 import { createMockApplication, mockLocalStorage } from "@spicy3d/core/test-utils";
 import { ThreeVisulFactory } from "@spicy3d/three";
 import { MainWindow } from "@spicy3d/ui";
@@ -78,6 +85,18 @@ rs.mock("@spicy3d/cloud", () => {
         startCloudSettings: (...args: unknown[]) => {
             cloudMock.settingsCalls.push(args);
             return () => {};
+        },
+    };
+});
+
+const telemetryMock = rs.hoisted(() => ({ moduleLoaded: 0, started: [] as unknown[] }));
+
+rs.mock("@spicy3d/telemetry", () => {
+    telemetryMock.moduleLoaded++;
+    return {
+        startOtelTelemetry: (options: unknown) => {
+            telemetryMock.started.push(options);
+            return { log() {}, span() {}, flush: async () => {}, shutdown: async () => {} };
         },
     };
 });
@@ -394,6 +413,50 @@ describe("AppBuilder", () => {
             } finally {
                 warn.mockRestore();
             }
+        });
+    });
+
+    describe("useTelemetry", () => {
+        const storage = () => new ObjectStorage("spicy3d-test", `telemetry-${Math.random()}`);
+
+        test("default settings: the OpenTelemetry chunk is never loaded and nothing is sent", async () => {
+            const fetch = rs.fn(async () => new Response(null));
+            rs.stubGlobal("fetch", fetch);
+            try {
+                const builder = new AppBuilder().useTelemetry(new TelemetrySettings(storage()));
+                const inits = (builder as any)._inits as (() => Promise<void>)[];
+
+                await inits.at(-1)!();
+                await builder.telemetry!.ready;
+
+                // Runs before the "switched on" case, which is the first to import the module.
+                expect(telemetryMock.moduleLoaded).toBe(0);
+                expect(fetch).not.toHaveBeenCalled();
+                builder.telemetry!.dispose();
+            } finally {
+                rs.unstubAllGlobals();
+            }
+        });
+
+        test("switched on with a URL: the chunk is loaded and started with the app version", async () => {
+            const settings = new TelemetrySettings(storage());
+            settings.config = { enabled: true, url: "https://collector.example.com/otlp", key: "" };
+            const builder = new AppBuilder().useTelemetry(settings);
+            const inits = (builder as any)._inits as (() => Promise<void>)[];
+
+            await inits.at(-1)!();
+            await builder.telemetry!.ready;
+
+            expect(telemetryMock.moduleLoaded).toBe(1);
+            expect(telemetryMock.started).toEqual([
+                expect.objectContaining({
+                    baseUrl: "https://collector.example.com/otlp",
+                    serviceVersion: __APP_VERSION__,
+                }),
+            ]);
+            settings.config = { enabled: false, url: "", key: "" };
+            expect(builder.telemetry!.isRunning).toBe(false);
+            builder.telemetry!.dispose();
         });
     });
 

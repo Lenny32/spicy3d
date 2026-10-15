@@ -53,6 +53,7 @@ import {
     type Serialized,
     Serializer,
     ShapeNode,
+    Telemetry,
     VariableTable,
 } from "@spicy3d/core";
 import { registerAdvancedInspectAnalyses } from "./analysis/advanced";
@@ -429,7 +430,7 @@ export class Document extends Observable implements IDocument {
     private followUp?: FollowUpSave;
 
     private startSave(kind: SaveKind, label?: string): Promise<Result<SaveOutcome, DocumentRepositoryError>> {
-        const promise = this.saveNow(kind, label);
+        const promise = Telemetry.trace("document.save", () => this.saveNow(kind, label));
         const running = promise.finally(() => {
             if (this.running === running) this.running = undefined;
         });
