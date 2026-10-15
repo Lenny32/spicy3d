@@ -189,7 +189,7 @@ test.each<[string, () => Promise<{ doc: TestDocument; bodyId: string }>, Paramet
     ["sketch run as a job in a reloaded document", reloaded, NEW_SKETCH, "job"],
 ])(
     "an unrelated %s neither rebuilds the loft nor re-derives its sections",
-    async (_, build, ops, path) => {
+    async (_, build, ops, route) => {
         const { doc, body, sections } = await settledModel(await build());
         const revisions = sections.map((sketch) => sketch.geometryRevision);
         const data = sections.map((sketch) => sketch.dataJson);
@@ -202,7 +202,7 @@ test.each<[string, () => Promise<{ doc: TestDocument; bodyId: string }>, Paramet
         body.onPropertyChanged(changed);
         for (const sketch of sections) sketch.onPropertyChanged(changed);
 
-        if (path === "job") await runAsJob(doc, ops);
+        if (route === "job") await runAsJob(doc, ops);
         else run(doc, ops);
         await DocumentRebuilds.settled(doc);
 
