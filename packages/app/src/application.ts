@@ -31,6 +31,7 @@ import {
     redactUrl,
     type Serialized,
     setCurrentApplication,
+    Telemetry,
     VisualConfig,
     type VisualItemConfig,
 } from "@spicy3d/core";
@@ -259,9 +260,11 @@ export class Application extends Observable implements IApplication {
             else await this.createActiveView(open);
             return open;
         }
-        const document = await Document.open(this, id, repository);
-        await this.createActiveView(document);
-        return document;
+        return Telemetry.trace("document.open", async () => {
+            const document = await Document.open(this, id, repository);
+            await this.createActiveView(document);
+            return document;
+        });
     }
 
     async newDocument(name: string, repository?: IDocumentRepository): Promise<IDocument> {
@@ -276,9 +279,11 @@ export class Application extends Observable implements IApplication {
     }
 
     async loadDocument(data: Serialized, source?: DocumentSource): Promise<IDocument | undefined> {
-        const document = await Document.load(this, data, source);
-        await this.createActiveView(document);
-        return document;
+        return Telemetry.trace("document.open", async () => {
+            const document = await Document.load(this, data, source);
+            await this.createActiveView(document);
+            return document;
+        });
     }
 
     /**

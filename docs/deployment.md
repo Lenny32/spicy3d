@@ -98,7 +98,9 @@ stays read-only):
   `script-src`, `connect-src` (manifest, CSS) and `img-src` (icons). Anything that is not an origin
   (`scheme://host[:port]`) stops the container at start (`docker/19-spicy3d-plugin-origins.sh`).
 - `SPICY3D_CONNECT_ORIGINS` (container environment, default empty): space-separated `https://` /
-  `wss://` origins the page may connect to besides its own, e.g. hosts `?url=` opens files from. Checked like `SPICY3D_PLUGIN_ORIGINS`.
+  `wss://` origins the page may connect to besides its own, e.g. hosts `?url=` opens files from, or
+  the OTLP collector users enter in Settings → Telemetry (README "Telemetry"). Checked like
+  `SPICY3D_PLUGIN_ORIGINS`.
 - `absolute_redirect off`: a redirect (a folder without its trailing slash) keeps the address the
   browser used, not nginx's own port behind the proxy.
 

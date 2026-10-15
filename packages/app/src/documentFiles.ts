@@ -105,7 +105,7 @@ export async function openDocumentFile(
 ): Promise<IDocument | undefined> {
     const decoded = await decodeDocumentFile(file);
     if (!decoded.isOk) {
-        Logger.warn(`document file: cannot read ${file.name} (${decoded.error.message})`);
+        Logger.warn(`document file: cannot read the file (${decoded.error.message})`);
         PubSub.default.pub("showToast", "error.document.notSpicy3D");
         return undefined;
     }
@@ -155,7 +155,7 @@ async function requestWriteAccess(handle: FileSystemFileHandle): Promise<boolean
         if (!permissions.requestPermission) return true;
         return (await permissions.requestPermission({ mode: "readwrite" })) === "granted";
     } catch (error) {
-        Logger.warn(`document file: no write access to ${handle.name}`, error);
+        Logger.warn(`document file: no write access to the file`, error);
         return false;
     }
 }
@@ -201,7 +201,7 @@ export async function autosaveToOriginFile(document: IDocument): Promise<Result<
         PubSub.default.pub("documentSaved", document, "auto");
         return Result.ok(undefined);
     } catch (error) {
-        Logger.warn(`document file: cannot autosave to ${handle.name}`, error);
+        Logger.warn(`document file: cannot autosave to the file`, error);
         return Result.err((error as Error).message);
     }
 }
@@ -248,7 +248,7 @@ export async function saveDocumentFile(document: IDocument): Promise<Result<Docu
         }
         return Result.ok("written");
     } catch (error) {
-        Logger.warn(`document file: cannot write ${handle.name}`, error);
+        Logger.warn(`document file: cannot write the file`, error);
         return Result.err((error as Error).message);
     }
 }

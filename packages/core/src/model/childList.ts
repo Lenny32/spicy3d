@@ -203,27 +203,27 @@ export class NodeChildList {
         if (!this.validateChild(child)) return undefined;
 
         if (previousSibling === child) {
-            Logger.warn(`Cannot move ${child.name} relative to itself`);
+            Logger.warn(`Cannot move node ${child.id} relative to itself`);
             return undefined;
         }
 
         let ancestor: INode | undefined = newParent;
         while (ancestor !== undefined) {
             if (ancestor === child) {
-                Logger.warn(`Cannot move ${child.name} into itself or its descendant`);
+                Logger.warn(`Cannot move node ${child.id} into itself or its descendant`);
                 return undefined;
             }
             ancestor = ancestor.parent;
         }
 
         if (previousSibling && previousSibling.parent !== newParent) {
-            Logger.warn(`${previousSibling.name} is not a child node of the ${newParent.name} node`);
+            Logger.warn(`node ${previousSibling.id} is not a child node of the node ${newParent.id}`);
             return undefined;
         }
 
         const target = NodeChildList.of(newParent);
         if (target === undefined) {
-            Logger.warn(`${newParent.name} is not a linked-list node`);
+            Logger.warn(`node ${newParent.id} is not a linked-list node`);
         }
         return target;
     }
@@ -283,7 +283,7 @@ export class NodeChildList {
 
     private validateChild(item: INode): boolean {
         if (item.parent !== this.owner) {
-            Logger.warn(`${item.name} is not a child node of the ${this.owner.name} node`);
+            Logger.warn(`node ${item.id} is not a child node of the node ${this.owner.id}`);
             return false;
         }
         return true;

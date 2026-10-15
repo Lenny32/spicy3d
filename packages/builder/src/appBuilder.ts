@@ -26,6 +26,8 @@ import {
     type IWindow,
     type Locale,
     Logger,
+    TelemetryController,
+    TelemetrySettings,
 } from "@spicy3d/core";
 import { DefaultDataExchange } from "./defaultDataExchange";
 import { watchKernelCrash } from "./kernelCrashBanner";
@@ -54,6 +56,8 @@ export class AppBuilder {
     protected _visualFactory?: IVisualFactory;
     protected _shapeProvider?: IShapeProvider;
     protected _window?: IWindow;
+    /** Set by `useTelemetry`. */
+    telemetry?: TelemetryController;
 
     /** Settles once every post-startup step (e.g. cloud discovery) has run; failures are only logged. */
     started: Promise<void> = Promise.resolve();
@@ -153,6 +157,23 @@ export class AppBuilder {
 
             const three = await import("@spicy3d/three");
             this._visualFactory = new three.ThreeVisulFactory((d) => new ShowPropertyEventHandler(d));
+        });
+        return this;
+    }
+
+    /**
+     * The optional telemetry (Settings → Telemetry, off by default): while it is off or has no URL,
+     * the OpenTelemetry chunk is never loaded and nothing is sent. Switched on, the app's warnings
+     * and errors and a few traced operations go to the user's OTLP/HTTP collector.
+     */
+    useTelemetry(settings: TelemetrySettings = TelemetrySettings.current): this {
+        this._inits.push(async () => {
+            this.telemetry = new TelemetryController(
+                settings,
+                () => import("@spicy3d/telemetry"),
+                __APP_VERSION__,
+            );
+            this.telemetry.start();
         });
         return this;
     }

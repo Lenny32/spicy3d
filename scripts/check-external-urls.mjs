@@ -30,6 +30,8 @@ const ALLOWED = [
     [/^(https?|wss?):\/\/(host|…|([\w-]+\.)*example\.(com|org|net))([:/]|$)/, "placeholder"],
     // Loopback, only where it is meant: the base URL when there is no page.
     [/^http:\/\/localhost\/$/, "base URL without a page", /^(packages\/(cloud|core)\/src\/|dist\/)/],
+    // The OTLP exporters' default collector; the optional telemetry always passes the user's URL.
+    [/^http:\/\/localhost:4318\/$/, "OpenTelemetry default endpoint, never used", /^dist\//],
     // Identifiers, never requested.
     [/^http:\/\/www\.w3\.org\//, "XML namespace"],
     [/^https?:\/\/json-schema\.org\//, "JSON Schema $schema id (ajv, MCP SDK)"],

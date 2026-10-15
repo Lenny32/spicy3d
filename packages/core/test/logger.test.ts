@@ -5,9 +5,9 @@ import { rs } from "@rstest/core";
 import type { LoggerLevel } from "../src";
 import { Logger } from "../src";
 
-// In non-production builds logger.ts replaces Logger.debug/info/warn/error with the
-// corresponding console methods at module load time, so the level filter does not
-// apply in this test environment.
+// In non-production builds logger.ts replaces Logger.debug/info with the corresponding
+// console methods at module load time, so the level filter does not apply to them in this
+// test environment; warn/error stay Logger's own so their listeners are told.
 const originalDebug = Logger.debug;
 const originalInfo = Logger.info;
 const originalWarn = Logger.warn;
@@ -49,12 +49,53 @@ describe("Logger class", () => {
             expect(Logger.info).toBe(console.log);
         });
 
-        test("warn should be the console.warn function", () => {
-            expect(Logger.warn).toBe(console.warn);
+        test("warn and error write to the console and tell the listeners", () => {
+            const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
+            const error = rs.spyOn(console, "error").mockImplementation(() => {});
+            const heard: [string, unknown, readonly unknown[]][] = [];
+            const stop = Logger.addListener((level, message, params) => heard.push([level, message, params]));
+            try {
+                const failure = new Error("boom");
+                Logger.warn("careful", 1);
+                Logger.error("failed", failure);
+
+                expect(warn).toHaveBeenCalledWith("careful", 1);
+                expect(error).toHaveBeenCalledWith("failed", failure);
+                expect(heard).toEqual([
+                    ["warn", "careful", [1]],
+                    ["error", "failed", [failure]],
+                ]);
+            } finally {
+                stop();
+                warn.mockRestore();
+                error.mockRestore();
+            }
         });
 
-        test("error should be the console.error function", () => {
-            expect(Logger.error).toBe(console.error);
+        test("a listener is told even below the level, never about its own logging, and can be removed", () => {
+            const error = rs.spyOn(console, "error").mockImplementation(() => {});
+            const heard: unknown[] = [];
+            const stop = Logger.addListener((_level, message) => {
+                heard.push(message);
+                Logger.error("from the listener");
+            });
+            try {
+                Logger.level = "error";
+                Logger.warn = originalWarn;
+                const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
+                Logger.warn("filtered out of the console");
+                expect(warn).not.toHaveBeenCalled();
+                warn.mockRestore();
+                expect(heard).toEqual(["filtered out of the console"]);
+                expect(error).toHaveBeenCalledWith("from the listener");
+
+                stop();
+                Logger.error("after removal");
+                expect(heard).toEqual(["filtered out of the console"]);
+            } finally {
+                stop();
+                error.mockRestore();
+            }
         });
     });
 

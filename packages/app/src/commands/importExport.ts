@@ -28,6 +28,7 @@ import {
     Result,
     readFilesAsync,
     SvgImportRoute,
+    Telemetry,
     Transaction,
     VisualNode,
     validateStlTessellation,
@@ -345,11 +346,13 @@ export class Export extends CancelableCommand {
             "showPermanent",
             async () => {
                 PubSub.default.pub("showToast", "toast.downloading");
-                if (this.merge || nodes.length === 1) {
-                    await this.exportMergedAsync(nodes);
-                } else {
-                    await this.exportAsZipAsync(nodes);
-                }
+                await Telemetry.trace("file.export", async () => {
+                    if (this.merge || nodes.length === 1) {
+                        await this.exportMergedAsync(nodes);
+                    } else {
+                        await this.exportAsZipAsync(nodes);
+                    }
+                });
             },
             "toast.executing{0}",
             I18n.translate("command.file.export"),

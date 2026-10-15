@@ -113,6 +113,7 @@ Signing out (or an expired session given up, another user signing in, the accoun
 | localStorage | `spicy3d.app.cloud.config` | The server's `/api/config` | Kept: not user data (it lets an offline start find the server). |
 | localStorage | `spicy3d.app.cloud.device` | Device name, keep-offline-copies, new-document location | Kept: settings of this browser. |
 | localStorage | `spicy3d.app.config`, `spicy3d.app.mcp.settings`, `spicy3d.settings.autosave` | App preferences, the remote MCP switch | Kept: not tied to the account. |
+| localStorage | `spicy3d.settings.telemetry` | The optional telemetry: switch, collector URL, key | Kept: a setting of this browser, not tied to the account. |
 | IndexedDB | `spicy3d-db` | Device documents | Never touched. |
 
 ## MCP
@@ -154,7 +155,15 @@ Signing out (or an expired session given up, another user signing in, the accoun
 
 ## Logs, toasts, telemetry
 
-- There is no telemetry; logs go to the browser console only.
+- No telemetry by default; logs go to the browser console only. The optional telemetry (README
+  "Telemetry", core `telemetry/`, `@spicy3d/telemetry`) sends nothing until the user enters an OTLP
+  URL and switches it on: until then the OpenTelemetry chunk is not loaded
+  (`builder/test/telemetryLoading.test.ts`, `appBuilder.test.ts`). Everything it sends goes through
+  `Telemetry.log` / `Telemetry.start`: messages and stacks are passed through `redactSecrets` and
+  then lose quoted text, file names and filesystem paths (`telemetryMessage`/`telemetryStack`);
+  spans carry only an operation name, duration and outcome; the resource holds the app version,
+  browser/OS family and a per-page-load random `service.instance.id`. Its key is stored with the
+  setting in `localStorage` (the user's own collector credential, not an account secret).
 - `redactUrl` / `redactSecrets` (core `foundation/redact.ts`) strip queries, fragments and user info
   from URLs and mask `Bearer …`, `token=…`/`"password": …` style fields and `spicy_pat_…` secrets.
   They are used wherever a URL or a foreign error message is logged (plugin and file URLs, relay

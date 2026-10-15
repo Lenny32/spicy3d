@@ -9,6 +9,7 @@
  *   1. the app starts and the OCCT WebAssembly kernel works (a box is built),
  *   2. a document saved to the browser's storage opens again with its content,
  *   3. nothing ever asked for another origin (a LAN without internet access sees no failed request),
+ *      and the optional telemetry (off by default) never loaded its OpenTelemetry chunk,
  *   4. over plain HTTP on a non-loopback host the insecure-context banner shows, and not on localhost,
  *   5. a `.spicyplugin` whose entry uses its import map loads (blob: module, no inline import map).
  *
@@ -153,6 +154,7 @@ async function open(browser, url) {
     const context = await browser.newContext({ serviceWorkers: "block", ignoreHTTPSErrors: true });
     const external = [];
     const problems = [];
+    const scripts = [];
     await context.route("**/*", (route) => {
         const target = route.request().url();
         if (new URL(target).origin === origin) return route.continue();
@@ -169,6 +171,7 @@ async function open(browser, url) {
         if (message.type() === "error" || /Content Security Policy/i.test(text)) problems.push(text);
     });
     page.on("response", (response) => {
+        if (response.request().resourceType() === "script") scripts.push(response);
         const target = new URL(response.url());
         // Signed out, the server answers "who am I?" with 401: expected.
         if (response.status() === 401 && target.pathname === "/api/me") return;
@@ -196,7 +199,7 @@ async function open(browser, url) {
         const seen = [...problems, ...external.map((u) => `blocked: ${u}`)];
         throw new Error(`${url}: the app did not start (${error.message})\n  ${seen.join("\n  ")}`);
     }
-    return { context, page, external, problems };
+    return { context, page, external, problems, scripts };
 }
 
 /** 1–3 and the banner on one URL. */
@@ -310,6 +313,12 @@ async function checkApp(browser, url, { expectServer = false, withPlugin = false
             `a .spicyplugin with an import map loads under the CSP (${JSON.stringify(plugin)})`,
         );
     }
+    // Telemetry is off by default: its OpenTelemetry chunk is never fetched (README "Telemetry").
+    const loaded = await Promise.all(run.scripts.map((response) => response.text().catch(() => "")));
+    check(
+        !loaded.some((text) => text.includes("@opentelemetry/")),
+        "telemetry off by default: the OpenTelemetry chunk is not loaded",
+    );
     check(
         run.external.length === 0,
         `no request to another origin${run.external.length ? `: ${run.external.join(", ")}` : ""}`,

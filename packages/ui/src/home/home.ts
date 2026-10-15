@@ -35,6 +35,7 @@ import { FeatureEditPreviewSelector } from "./featureEditPreviewSelector";
 import style from "./home.module.css";
 import { LanguageSelector } from "./languageSelector";
 import { Navigation3DSelector } from "./navigation3DSelector";
+import { TelemetrySettingsButton } from "./telemetrySettings";
 import { ThemeSelector } from "./themeSelector";
 
 interface ApplicationCommand {
@@ -232,6 +233,14 @@ export class Home extends HTMLElement {
                     textContent: new Localize("featureEdit.preview"),
                 }),
                 div({ className: style.settingControl }, FeatureEditPreviewSelector({})),
+            ),
+            div(
+                { className: style.settingItem },
+                span({
+                    className: style.settingLabel,
+                    textContent: new Localize("telemetry.setting"),
+                }),
+                div({ className: style.settingControl }, new TelemetrySettingsButton()),
             ),
         );
     }

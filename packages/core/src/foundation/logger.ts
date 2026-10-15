@@ -10,8 +10,35 @@ const LEVEL_PRIORITY: Record<LoggerLevel, number> = {
     error: 3,
 };
 
+/** Told about every warning and error logged, whatever `Logger.level` (the optional telemetry). */
+export type LoggerListener = (level: "warn" | "error", message: unknown, params: readonly unknown[]) => void;
+
 export class Logger {
     static level: LoggerLevel = "info";
+    private static readonly listeners = new Set<LoggerListener>();
+    private static notifying = false;
+
+    /** Returns the unsubscriber. A listener that logs itself is not called again for that. */
+    static addListener(listener: LoggerListener): () => void {
+        Logger.listeners.add(listener);
+        return () => Logger.listeners.delete(listener);
+    }
+
+    private static notify(level: "warn" | "error", message: unknown, params: readonly unknown[]) {
+        if (Logger.listeners.size === 0 || Logger.notifying) return;
+        Logger.notifying = true;
+        try {
+            for (const listener of [...Logger.listeners]) {
+                try {
+                    listener(level, message, params);
+                } catch {
+                    // A listener never breaks logging.
+                }
+            }
+        } finally {
+            Logger.notifying = false;
+        }
+    }
 
     static isEnabled(level: LoggerLevel): boolean {
         return LEVEL_PRIORITY[Logger.level] <= LEVEL_PRIORITY[level];
@@ -33,19 +60,19 @@ export class Logger {
         if (Logger.isEnabled("warn")) {
             console.warn(message, ...optionalParams);
         }
+        Logger.notify("warn", message, optionalParams);
     }
 
     static error(message?: any, ...optionalParams: any[]) {
         if (Logger.isEnabled("error")) {
             console.error(message, ...optionalParams);
         }
+        Logger.notify("error", message, optionalParams);
     }
 }
 
-// facilitate debugging
+// facilitate debugging (warnings and errors keep going through the listeners)
 if (!__IS_PRODUCTION__) {
     Logger.debug = console.debug;
     Logger.info = console.log;
-    Logger.warn = console.warn;
-    Logger.error = console.error;
 }

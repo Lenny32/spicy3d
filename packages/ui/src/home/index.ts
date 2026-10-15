@@ -4,3 +4,4 @@
 export * from "./autosaveSelector";
 export * from "./featureEditPreviewSelector";
 export * from "./home";
+export * from "./telemetrySettings";

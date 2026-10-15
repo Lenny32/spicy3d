@@ -33,6 +33,7 @@ import {
     ShapeNode,
     serializable,
     serialize,
+    Telemetry,
     Transaction,
     withConstructionFeaturePosition,
 } from "@spicy3d/core";
@@ -1143,6 +1144,7 @@ export class ParametricBodyNode
      * is by feature-list index, so user-suppressed features still count.
      */
     private *evaluateChain(asynchronous: boolean, run: RebuildRun): RebuildSteps {
+        const telemetry = Telemetry.start("body.rebuild");
         const trace = PerformanceTrace.enabled
             ? PerformanceTrace.begin("body.rebuild", {
                   nodeId: this.id,
@@ -1338,6 +1340,8 @@ export class ParametricBodyNode
         } finally {
             this._timeline.endRun();
             if (!committed) this._timeline.discard(nextCache, this.currentShape());
+            // A cancelled run is superseded by the next one: only finished rebuilds are traced.
+            if (run.outcome !== "cancelled") telemetry.end(run.outcome === "failed");
             if (trace)
                 PerformanceTrace.end(trace, {
                     committed,
