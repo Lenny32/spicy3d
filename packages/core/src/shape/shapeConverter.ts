@@ -30,14 +30,37 @@ export interface IShapeConverter {
      */
     convertToSTL(shapes: IShape[], options?: StlExportOptions): Result<Uint8Array>;
     convertFromSTL(document: IDocument, stl: Uint8Array): Result<FolderNode>;
+    /**
+     * Headless indexed mesh of one shape (3MF): the same OCCT meshing as STL, with coincident
+     * vertices merged and collapsed triangles left out. See {@link IndexedMesh}.
+     */
+    convertToIndexedMesh(shape: IShape, options?: StlTessellationOptions): Result<IndexedMesh>;
 }
 
-/** Runtime tessellation controls; neither value changes the CAD shape. */
+/**
+ * A triangle mesh with shared vertices: `vertices` holds x,y,z per vertex, `triangles` three
+ * vertex indices per triangle, counter-clockwise seen from outside. Coordinates are in the
+ * shape's unit.
+ */
+export interface IndexedMesh {
+    readonly vertices: Float64Array;
+    readonly triangles: Uint32Array;
+}
+
+/** Runtime tessellation controls of the meshed exports (STL, 3MF); neither value changes the CAD shape. */
 export interface StlTessellationOptions {
     /** Requested linear tessellation deflection in the input shape's coordinate unit (normally mm); finite >= 0.001. */
     linearTolerance?: number;
     /** Angular deflection in degrees; finite > 0 and <= 180. */
     angularTolerance?: number;
+}
+
+/** Export formats meshed by OCCT for the file: the ones that take the custom tessellation tolerances. */
+export const MESHED_EXPORT_FORMATS: readonly string[] = [".stl", ".stl binary", ".3mf"];
+export const MESHED_EXPORT_ONLY_ERROR = "Tessellation tolerances apply only to STL and 3MF exports";
+
+export function isMeshedExportFormat(format: string): boolean {
+    return MESHED_EXPORT_FORMATS.includes(format);
 }
 
 /** Validate before entering the synchronous kernel mesher. */

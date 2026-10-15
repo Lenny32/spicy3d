@@ -10,16 +10,19 @@ import {
     gc,
     type IDisposable,
     type IDocument,
+    type IndexedMesh,
     type IShape,
     type IShapeConverter,
     Material,
     Result,
     type StlExportOptions,
+    type StlTessellationOptions,
 } from "@spicy3d/core";
 import type { ShapeNode } from "../lib/spicy-wasm";
+import { weldMeshes } from "./indexedMesh";
 import { guardKernelResults } from "./kernelGuard";
 import { OccShape } from "./shape";
-import { shapesToStl } from "./stlWriter";
+import { exportFaceMesh, shapesToStl } from "./stlWriter";
 
 export class OccShapeConverter implements IShapeConverter {
     private readonly addShapeNode = (
@@ -147,5 +150,14 @@ export class OccShapeConverter implements IShapeConverter {
 
     convertFromSTL(document: IDocument, stl: Uint8Array): Result<FolderNode> {
         return this.converterFromData(document, stl, wasm.Converter.convertFromStl);
+    }
+
+    convertToIndexedMesh(shape: IShape, options?: StlTessellationOptions): Result<IndexedMesh> {
+        try {
+            const faces = exportFaceMesh(shape, options);
+            return Result.ok(weldMeshes(faces ? [faces] : []));
+        } catch (error) {
+            return Result.err(String(error));
+        }
     }
 }

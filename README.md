@@ -30,7 +30,7 @@ Most of this comes from upstream.
 - Move, rotate, mirror
 - Snapping to points, edges, faces and the workplane, with axis tracking
 - Length, angle, area and volume measurement
-- STEP, IGES, BREP and STL import/export
+- STEP, IGES, BREP and STL import/export; PLY, OBJ and 3MF export (3MF for slicers: one named, coloured object per body, unit recorded in the file — see [docs/3mf-export.md](docs/3mf-export.md))
 - Undo/redo, documents stored in IndexedDB
 - Plugins loaded at runtime with `?plugin=<url>` (examples in `plugins/`: hello world in JS and TS, macros, a node-based visual programming editor)
 - UI in English

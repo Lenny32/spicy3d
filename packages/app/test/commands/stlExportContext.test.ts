@@ -6,7 +6,7 @@ import { createMockApplication, createMockDocument } from "@spicy3d/core/test-ut
 import { CommandContext } from "../../../ui/src/ribbon/commandContext";
 import { Export } from "../../src/commands/importExport";
 
-test("real export context reveals opted-in STL fields and edits linear deflection in project units", () => {
+test("real export context reveals opted-in STL/3MF fields and edits linear deflection in project units", () => {
     const project = createMockDocument();
     project.settings.load({ lengthUnit: "cm" });
     const application = createMockApplication();
@@ -18,7 +18,7 @@ test("real export context reveals opted-in STL fields and edits linear deflectio
     document.body.append(context);
     try {
         const controls = (context as unknown as { propMap: Map<string, [unknown, HTMLElement][]> }).propMap;
-        const custom = controls.get("isStl")?.[0][1];
+        const custom = controls.get("isMeshed")?.[0][1];
         const linear = controls.get("customTessellation")?.[0][1];
         expect(custom).not.toBeUndefined();
         expect(linear).not.toBeUndefined();
@@ -41,6 +41,9 @@ test("real export context reveals opted-in STL fields and edits linear deflectio
         command.format = ".step";
         expect(custom.style.display).toBe("none");
         expect(linear.style.display).toBe("none");
+        command.format = ".3mf";
+        expect(custom.style.display).toBe("");
+        expect(linear.style.display).toBe("");
     } finally {
         context.dispose();
         context.remove();

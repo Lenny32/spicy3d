@@ -1,7 +1,12 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IShape, type StlExportOptions, validateStlTessellation } from "@spicy3d/core";
+import {
+    type IShape,
+    type StlExportOptions,
+    type StlTessellationOptions,
+    validateStlTessellation,
+} from "@spicy3d/core";
 import { OccShape } from "./shape";
 
 /**
@@ -144,33 +149,41 @@ export function meshesToStl(meshes: StlMesh[], options?: StlExportOptions): Uint
 }
 
 /**
- * Headless STL export for shapes. Default exports read the existing face mesh;
- * explicit tolerances remesh an independent native copy without touching display caches.
- * This is the UI-independent core export used by both the browser app and the MCP
- * server.
+ * The triangles of one shape for a meshed export (STL, 3MF), one entry per face as OCCT
+ * meshed it. Default exports read the existing face mesh; explicit tolerances remesh an
+ * independent native copy without touching display caches. Throws on invalid tolerances.
  */
-export function shapesToStl(shapes: IShape[], options?: StlExportOptions): Uint8Array {
+export function exportFaceMesh(shape: IShape, options?: StlTessellationOptions): StlMesh | undefined {
     const error = validateStlTessellation(options);
     if (error) throw new Error(error);
     const custom = options?.linearTolerance !== undefined || options?.angularTolerance !== undefined;
     const meshForExport = custom ? wasm.Mesher.meshForExport : undefined;
     if (custom && !meshForExport)
         throw new Error("Custom STL tolerances are not available in this kernel build");
+    if (custom && !(shape instanceof OccShape))
+        throw new Error("Custom STL tolerances require an OCCT shape");
+    const faces = meshForExport
+        ? meshForExport(
+              (shape as OccShape).shape,
+              options?.linearTolerance ?? 0.005,
+              options?.angularTolerance === undefined ? 0.2 : (options.angularTolerance * Math.PI) / 180,
+              options?.linearTolerance === undefined,
+          )
+        : shape.mesh.faces;
+    return faces && faces.index.length > 0 ? { position: faces.position, index: faces.index } : undefined;
+}
+
+/**
+ * Headless STL export for shapes, through {@link exportFaceMesh}. This is the UI-independent
+ * core export used by both the browser app and the MCP server.
+ */
+export function shapesToStl(shapes: IShape[], options?: StlExportOptions): Uint8Array {
+    const error = validateStlTessellation(options);
+    if (error) throw new Error(error);
     const meshes: StlMesh[] = [];
     for (const shape of shapes) {
-        if (custom && !(shape instanceof OccShape))
-            throw new Error("Custom STL tolerances require an OCCT shape");
-        const faces = meshForExport
-            ? meshForExport(
-                  (shape as OccShape).shape,
-                  options?.linearTolerance ?? 0.005,
-                  options?.angularTolerance === undefined ? 0.2 : (options.angularTolerance * Math.PI) / 180,
-                  options?.linearTolerance === undefined,
-              )
-            : shape.mesh.faces;
-        if (faces && faces.index.length > 0) {
-            meshes.push({ position: faces.position, index: faces.index });
-        }
+        const mesh = exportFaceMesh(shape, options);
+        if (mesh) meshes.push(mesh);
     }
     return meshesToStl(meshes, options);
 }

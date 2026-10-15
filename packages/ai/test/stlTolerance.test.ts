@@ -18,7 +18,7 @@ function prepare() {
     Object.assign(app, {
         activeView: { document },
         dataExchange: {
-            exportFormats: () => [".stl", ".stl binary", ".step"],
+            exportFormats: () => [".stl", ".stl binary", ".step", ".3mf"],
             export: exportFile,
         },
     });
@@ -76,4 +76,35 @@ test("rejects STL tolerances on another format", async () => {
     const result = JSON.parse((await tool.handler({ format: ".step", linearTolerance: 0.1 })) as string);
     expect(result.error).toContain("only to STL");
     expect(exportFile).not.toHaveBeenCalled();
+});
+
+test.each([
+    "merged",
+    "separate",
+])("passes tolerances to every %s 3MF output with the 3MF MIME type", async (mode) => {
+    const { tool, node, exportFile } = prepare();
+    const result = JSON.parse(
+        (await tool.handler({
+            format: ".3mf",
+            mode,
+            delivery: "base64",
+            linearTolerance: 0.05,
+            angularTolerance: 5,
+        })) as string,
+    );
+    expect(result.ok).toBe(true);
+    expect(exportFile).toHaveBeenCalledWith(".3mf", [node], {
+        stl: { linearTolerance: 0.05, angularTolerance: 5 },
+        signal: expect.any(AbortSignal),
+    });
+    const output = mode === "merged" ? result : result.outputs[0];
+    expect(output).toMatchObject({ filename: "part.3mf", mimeType: "model/3mf" });
+});
+
+test("lists 3MF among the export formats and the tolerance formats", () => {
+    const { tool } = prepare();
+    const schema = tool.parameters as unknown as { properties: Record<string, { description: string }> };
+    expect(tool.description).toContain("'.3mf'");
+    expect(schema.properties["linearTolerance"].description).toContain("3MF");
+    expect(schema.properties["angularTolerance"].description).toContain("3MF");
 });

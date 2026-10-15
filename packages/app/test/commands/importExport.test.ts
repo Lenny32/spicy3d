@@ -112,6 +112,7 @@ describe("Export", () => {
                 ".stl binary",
                 ".ply",
                 ".ply binary",
+                ".3mf",
             ]);
         } finally {
             restoreApp();
@@ -372,11 +373,48 @@ describe("Export", () => {
                     });
                 }
                 cmd.format = ".step";
-                expect(cmd.isStl).toBe(false);
+                expect(cmd.isMeshed).toBe(false);
                 expect((cmd as any).exportOptions).toEqual({ lengthUnit: "mm" });
                 expect(PropertyUtils.getProperty(Export.prototype, "linearTolerance")?.quantity).toBe(
                     "length",
                 );
+            } finally {
+                exportSpy.mockRestore();
+                ctx.restore();
+            }
+        });
+
+        test.each([
+            { merge: true, downloads: ["a.3mf"] },
+            { merge: false, downloads: ["a.zip"] },
+        ])("offers the tolerances for 3MF and downloads $downloads (merge=$merge)", async ({
+            merge,
+            downloads,
+        }) => {
+            const ctx = setupExportContext();
+            const exportSpy = rs.spyOn(ctx.app.dataExchange, "export");
+            try {
+                const cmd = new Export();
+                cmd.format = ".3mf";
+                expect(cmd.isMeshed).toBe(true);
+                cmd.merge = merge;
+                cmd.customTessellation = true;
+                cmd.linearTolerance = 0.05;
+                cmd.angularTolerance = 8;
+                (cmd as any)._application = ctx.app;
+                (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
+                await confirmExport(cmd);
+                expect(ctx.permanentCallback).not.toBeUndefined();
+                await ctx.permanentCallback!();
+                expect(exportSpy).toHaveBeenCalledTimes(merge ? 1 : 2);
+                for (const call of exportSpy.mock.calls) {
+                    expect(call[0]).toBe(".3mf");
+                    expect(call[2]).toEqual({
+                        lengthUnit: "mm",
+                        stl: { linearTolerance: 0.05, angularTolerance: 8 },
+                    });
+                }
+                expect(ctx.downloads).toEqual(downloads);
             } finally {
                 exportSpy.mockRestore();
                 ctx.restore();
@@ -463,6 +501,25 @@ describe("Export", () => {
             }
         });
 
+        test("should name the files in the zip .3mf for a 3MF export", async () => {
+            const ctx = setupExportContext();
+            try {
+                const cmd = new Export();
+                cmd.format = ".3mf";
+                cmd.merge = false;
+                (cmd as any)._application = ctx.app;
+                (cmd as any).selectNodesAsync = () => Promise.resolve([{ name: "a" }, { name: "b" }]);
+
+                await confirmExport(cmd);
+                await ctx.permanentCallback!();
+
+                expect(ctx.exportedNames).toEqual(["a", "b"]);
+                expect(await zipFileNames(ctx.blobs[0])).toEqual(["a.3mf", "b.3mf"]);
+            } finally {
+                ctx.restore();
+            }
+        });
+
         test("should deduplicate file names in the zip when nodes share a name", async () => {
             const ctx = setupExportContext();
             try {
@@ -516,7 +573,7 @@ function installExportApp(): () => void {
         configurable: true,
         get: () => ({
             dataExchange: {
-                exportFormats: () => [".step", ".stl", ".stl binary", ".ply", ".ply binary"],
+                exportFormats: () => [".step", ".stl", ".stl binary", ".ply", ".ply binary", ".3mf"],
             },
         }),
     });

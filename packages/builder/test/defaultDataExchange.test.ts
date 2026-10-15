@@ -8,16 +8,32 @@ import {
     type IDocument,
     type IMeshExporter,
     type INode,
+    type IndexedMesh,
     type IShape,
+    Material,
     type Matrix4,
     PubSub,
     Result,
     type StlExportOptions,
+    type StlTessellationOptions,
     type VisualNode,
     XYZ,
 } from "@spicy3d/core";
 import { createMockDocument, MockShape, TestNode } from "@spicy3d/core/test-utils";
 import { DefaultDataExchange } from "../src/defaultDataExchange";
+
+const TRIANGLE_MESH: IndexedMesh = {
+    vertices: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    triangles: new Uint32Array([0, 1, 2]),
+};
+
+async function read3mfModel(data: BlobPart[] | undefined): Promise<Document> {
+    expect(data).toHaveLength(1);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(data![0] as Uint8Array);
+    const xml = await zip.file("3D/3dmodel.model")!.async("string");
+    return new DOMParser().parseFromString(xml, "application/xml");
+}
 
 describe("DefaultDataExchange", () => {
     let exchange: DefaultDataExchange;
@@ -57,6 +73,7 @@ describe("DefaultDataExchange", () => {
             expect(formats).toContain(".ply");
             expect(formats).toContain(".ply binary");
             expect(formats).toContain(".obj");
+            expect(formats).toContain(".3mf");
         });
 
         test("should return an array of strings", () => {
@@ -291,6 +308,10 @@ describe("DefaultDataExchange", () => {
                         Result.ok("iges-data") as Result<BlobPart>,
                 ),
                 convertToBrep: rs.fn((_shape: IShape) => Result.ok("brep-data") as Result<BlobPart>),
+                convertToIndexedMesh: rs.fn(
+                    (_shape: IShape, _options?: StlTessellationOptions): Result<IndexedMesh> =>
+                        Result.ok(TRIANGLE_MESH),
+                ),
             };
             rs.stubGlobal("shapeConverter", converter);
             return converter;
@@ -453,6 +474,142 @@ describe("DefaultDataExchange", () => {
             expect(converter.convertToSTL).toHaveBeenCalledWith([scaled], { binary: false });
         });
 
+        describe(".3mf", () => {
+            test("writes one named object per node, meshed from the transformed shape", async () => {
+                const converter = stubShapeConverter();
+                const doc = createMockDocument();
+                const a = createShapeNode(doc, "Bracket");
+                const b = createShapeNode(doc, "Lid");
+
+                const result = await exchange.export(".3mf", [a.node, b.node]);
+
+                expect(converter.convertToIndexedMesh.mock.calls.map((call) => call[0])).toEqual([
+                    a.transformed,
+                    b.transformed,
+                ]);
+                expect(converter.convertToSTL).not.toHaveBeenCalled();
+                const model = await read3mfModel(result);
+                expect(model.documentElement.getAttribute("unit")).toBe("millimeter");
+                const objects = Array.from(model.getElementsByTagName("object"));
+                expect(objects.map((object) => object.getAttribute("name"))).toEqual(["Bracket", "Lid"]);
+                expect(model.getElementsByTagName("item")).toHaveLength(2);
+                const metadata = Array.from(model.getElementsByTagName("metadata")).map((entry) =>
+                    entry.getAttribute("name"),
+                );
+                expect(metadata).toEqual(["Title", "Application", "CreationDate"]);
+            });
+
+            test.each([
+                { unit: "cm", name: "centimeter", factor: 0.1 },
+                { unit: "in", name: "inch", factor: 1 / 25.4 },
+            ] as const)("records $unit in the file and scales the vertices to it", async ({
+                unit,
+                name,
+                factor,
+            }) => {
+                const converter = stubShapeConverter();
+                const doc = createMockDocument();
+                const { node, transformed } = createShapeNode(doc, "cube");
+                const scaled = new MockShape({ id: "scaled" });
+                const scale = rs.fn((_matrix: Matrix4) => scaled);
+                transformed.transformedMul = scale;
+
+                const result = await exchange.export(".3mf", [node], { lengthUnit: unit });
+
+                expect((await read3mfModel(result)).documentElement.getAttribute("unit")).toBe(name);
+                // A 20 mm edge is written as 20 mm in the declared unit.
+                expect(scale.mock.calls[0][0].ofPoint(new XYZ({ x: 20, y: 0, z: 0 })).x).toBeCloseTo(
+                    20 * factor,
+                    12,
+                );
+                expect(converter.convertToIndexedMesh).toHaveBeenCalledWith(scaled, undefined);
+            });
+
+            test("accepts custom tolerances, in millimetres scaled to the export unit", async () => {
+                const converter = stubShapeConverter();
+                const doc = createMockDocument();
+                const { node } = createShapeNode(doc, "tolerance");
+
+                const result = await exchange.export(".3mf", [node], {
+                    lengthUnit: "cm",
+                    stl: { linearTolerance: 0.2, angularTolerance: 6 },
+                });
+
+                expect(result).toHaveLength(1);
+                expect(converter.convertToIndexedMesh.mock.calls[0][1]).toEqual({
+                    linearTolerance: 0.020000000000000004,
+                    angularTolerance: 6,
+                });
+            });
+
+            test("colours each object by its node's first material", async () => {
+                stubShapeConverter();
+                const doc = createMockDocument();
+                const red = new Material({ document: doc, name: "Red PLA", color: 0xff0000 });
+                const blue = new Material({ document: doc, name: "Blue PETG", color: "#0000ffcc" });
+                doc.modelManager.materials.push(red, blue);
+                const a = createShapeNode(doc, "a");
+                const b = createShapeNode(doc, "b");
+                const c = createShapeNode(doc, "c");
+                a.node.materialId = red.id;
+                b.node.materialId = [blue.id, red.id];
+                c.node.materialId = "unknown";
+
+                const model = await read3mfModel(await exchange.export(".3mf", [a.node, b.node, c.node]));
+
+                const bases = Array.from(model.getElementsByTagName("base")).map((base) => [
+                    base.getAttribute("name"),
+                    base.getAttribute("displaycolor"),
+                ]);
+                expect(bases).toEqual([
+                    ["Red PLA", "#FF0000"],
+                    ["Blue PETG", "#0000FF"],
+                ]);
+                const objects = Array.from(model.getElementsByTagName("object"));
+                expect(objects.map((object) => object.getAttribute("pindex"))).toEqual(["0", "1", null]);
+            });
+
+            test("skips nodes whose shape meshes to no triangles", async () => {
+                const converter = stubShapeConverter();
+                const doc = createMockDocument();
+                const solid = createShapeNode(doc, "solid");
+                const wire = createShapeNode(doc, "wire");
+                converter.convertToIndexedMesh.mockImplementation((shape: IShape) =>
+                    Result.ok(
+                        shape === wire.transformed
+                            ? { vertices: new Float64Array(), triangles: new Uint32Array() }
+                            : TRIANGLE_MESH,
+                    ),
+                );
+
+                const result = await exchange.exportResult(".3mf", [solid.node, wire.node]);
+
+                expect(result.isOk).toBe(true);
+                expect(result.value.skipped).toEqual([wire.node.id]);
+                const model = await read3mfModel(result.value.data);
+                const names = Array.from(model.getElementsByTagName("object")).map((object) =>
+                    object.getAttribute("name"),
+                );
+                expect(names).toEqual(["solid"]);
+
+                const none = await exchange.exportResult(".3mf", [wire.node]);
+                expect(none.isOk).toBe(false);
+                expect(none.error).toMatchObject({ kind: "no-geometry", nodes: [wire.node.id] });
+            });
+
+            test("returns the mesher's error unchanged", async () => {
+                const converter = stubShapeConverter();
+                converter.convertToIndexedMesh.mockReturnValue(Result.err("BRepMesh failed"));
+                const doc = createMockDocument();
+                const { node } = createShapeNode(doc, "mesh-failure");
+
+                const result = await exchange.exportResult(".3mf", [node]);
+
+                expect(result.isOk).toBe(false);
+                expect(result.error).toEqual({ kind: "failed", message: "BRepMesh failed" });
+            });
+        });
+
         test("should hand STEP its unit instead of scaling the geometry", async () => {
             const converter = stubShapeConverter();
             const doc = createMockDocument();
@@ -487,6 +644,7 @@ describe("DefaultDataExchange", () => {
             [".brep", "none"],
             [".obj", "none"],
             [".ply", "none"],
+            [".3mf", "embedded"],
         ] as const)("should report %s unit handling as %s", (type, kind) => {
             expect(exchange.exportUnitHandling(type).kind).toBe(kind);
         });

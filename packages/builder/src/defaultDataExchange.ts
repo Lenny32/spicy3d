@@ -17,10 +17,12 @@ import {
     type INode,
     type IShape,
     isLengthUnit,
+    isMeshedExportFormat,
     type LengthUnit,
     lengthUnitFactor,
     Material,
     Matrix4,
+    MESHED_EXPORT_ONLY_ERROR,
     type Mesh,
     MeshNode,
     PubSub,
@@ -33,9 +35,17 @@ import {
     validateStlTessellation,
 } from "@spicy3d/core";
 import { parseReferenceStl } from "./referenceStl";
+import { type ThreeMfObject, threeMfColor, write3mf } from "./threeMf";
 
-/** STEP and IGES record their unit; the mesh formats and BREP are bare coordinates. */
-const EMBEDDED_UNIT_FORMATS = new Set([".step", ".iges"]);
+interface ExportShape {
+    readonly node: ShapeNode;
+    readonly shape: IShape;
+}
+
+/** STEP, IGES and 3MF record their unit; the other mesh formats and BREP are bare coordinates. */
+const EMBEDDED_UNIT_FORMATS = new Set([".step", ".iges", ".3mf"]);
+/** The STEP and IGES writers convert millimetres themselves; every other format is scaled here. */
+const WRITER_SCALED_FORMATS = new Set([".step", ".iges"]);
 
 export class DefaultDataExchange implements IDataExchange {
     referenceMeshFormats(): string[] {
@@ -77,7 +87,7 @@ export class DefaultDataExchange implements IDataExchange {
     }
 
     exportFormats(): string[] {
-        return [".step", ".iges", ".brep", ".stl", ".stl binary", ".ply", ".ply binary", ".obj"];
+        return [".step", ".iges", ".brep", ".stl", ".stl binary", ".ply", ".ply binary", ".obj", ".3mf"];
     }
 
     exportUnitHandling(type: string): ExportUnitHandling {
@@ -190,15 +200,16 @@ export class DefaultDataExchange implements IDataExchange {
         const failed = (message: string) => Result.err<DataExportError>({ kind: "failed", message });
         if (nodes.length === 0)
             return Result.err({ kind: "no-geometry", message: "No nodes to export", nodes: [] });
-        if (options?.stl && type !== ".stl" && type !== ".stl binary") {
-            return failed("Tessellation tolerances apply only to STL exports");
+        if (options?.stl && !isMeshedExportFormat(type)) {
+            return failed(MESHED_EXPORT_ONLY_ERROR);
         }
         const toleranceError = validateStlTessellation(options?.stl);
         if (toleranceError) return failed(toleranceError);
 
         const document = nodes[0].document;
         const unit = exportLengthUnit(this.exportUnitHandling(type), options?.lengthUnit);
-        // Mesh formats and BREP have no unit field: the numbers themselves are converted.
+        // STEP/IGES writers convert millimetres themselves; every other format gets the numbers
+        // converted here (3MF records the unit too, the vertices must match it).
         const scale = fromMillimetres(1, unit);
         const rebuilt = await awaitExportRebuilds(nodes, options?.signal);
         if (!rebuilt.isOk) return Result.err(rebuilt.error);
@@ -211,19 +222,25 @@ export class DefaultDataExchange implements IDataExchange {
         } else if (type === ".obj") {
             shapeResult = document.visual.meshExporter.exportToObj(nodes, { scale });
         } else {
-            // STEP/IGES writers convert and record the unit themselves; the rest scale here.
-            const shapes = this.getExportShapes(nodes, EMBEDDED_UNIT_FORMATS.has(type) ? 1 : scale);
-            if (!shapes.isOk) return Result.err(shapes.error);
-            skipped = shapes.value.skipped;
+            const exported = this.getExportShapes(nodes, WRITER_SCALED_FORMATS.has(type) ? 1 : scale);
+            if (!exported.isOk) return Result.err(exported.error);
+            skipped = exported.value.skipped;
+            const shapes = exported.value.entries.map((entry) => entry.shape);
+            if (type === ".3mf") {
+                const written = await this.export3mf(document, exported.value.entries, unit, options, scale);
+                if (!written.isOk) return Result.err(written.error);
+                return Result.ok({
+                    data: [written.value.bytes as BlobPart],
+                    skipped: [...skipped, ...written.value.skipped],
+                });
+            }
             // STL goes through the headless OCCT-mesh converter (not the Three.js
             // visual exporter), so the same path works in the browser and the MCP server.
-            if (type === ".stl")
-                shapeResult = this.exportStl(document, shapes.value.shapes, false, options, scale);
-            if (type === ".stl binary")
-                shapeResult = this.exportStl(document, shapes.value.shapes, true, options, scale);
-            if (type === ".step") shapeResult = this.exportStep(document, shapes.value.shapes, unit);
-            if (type === ".iges") shapeResult = this.exportIges(document, shapes.value.shapes, unit);
-            if (type === ".brep") shapeResult = this.exportBrep(document, shapes.value.shapes);
+            if (type === ".stl") shapeResult = this.exportStl(document, shapes, false, options, scale);
+            if (type === ".stl binary") shapeResult = this.exportStl(document, shapes, true, options, scale);
+            if (type === ".step") shapeResult = this.exportStep(document, shapes, unit);
+            if (type === ".iges") shapeResult = this.exportIges(document, shapes, unit);
+            if (type === ".brep") shapeResult = this.exportBrep(document, shapes);
         }
 
         if (!shapeResult) return failed(`Unsupported export format "${type}"`);
@@ -235,17 +252,21 @@ export class DefaultDataExchange implements IDataExchange {
     private getExportShapes(
         nodes: VisualNode[],
         scale: number,
-    ): Result<{ shapes: IShape[]; skipped: string[] }, DataExportError> {
+    ): Result<{ entries: ExportShape[]; skipped: string[] }, DataExportError> {
         const selected = nodes.filter((node): node is ShapeNode => node instanceof ShapeNode);
         // Do not use the earlier getter results or start another lazy evaluation here.
-        const shapes: IShape[] = [];
+        const entries: ExportShape[] = [];
         const missing: string[] = [];
         for (const node of selected) {
             const shape = node.resolvedShape;
-            if (shape) shapes.push(this.scaled(shape.transformedMul(node.worldTransform()), scale));
+            if (shape)
+                entries.push({
+                    node,
+                    shape: this.scaled(shape.transformedMul(node.worldTransform()), scale),
+                });
             else missing.push(node.id);
         }
-        if (shapes.length) return Result.ok({ shapes, skipped: missing });
+        if (entries.length) return Result.ok({ entries, skipped: missing });
         return Result.err({
             kind: "no-geometry",
             message: selected.length
@@ -263,6 +284,69 @@ export class DefaultDataExchange implements IDataExchange {
         return result;
     }
 
+    /** Tolerances in millimetres, converted like the coordinates. */
+    private scaledTolerance(options: DataExportOptions | undefined, scale: number) {
+        const tolerance = options?.stl;
+        return (
+            tolerance && {
+                linearTolerance:
+                    tolerance.linearTolerance === undefined ? undefined : tolerance.linearTolerance * scale,
+                angularTolerance: tolerance.angularTolerance,
+            }
+        );
+    }
+
+    /**
+     * One 3MF object and build item per node, in the export unit with the world transform baked
+     * in, coloured by the node's (first) material. Nodes whose shape has no faces are skipped.
+     * Open shells and loose faces are written as they mesh, as STL does: slicers report their
+     * open edges rather than the export refusing them.
+     */
+    private async export3mf(
+        document: IDocument,
+        entries: ExportShape[],
+        unit: LengthUnit,
+        options: DataExportOptions | undefined,
+        scale: number,
+    ): Promise<Result<{ bytes: Uint8Array; skipped: string[] }, DataExportError>> {
+        const tolerance = this.scaledTolerance(options, scale);
+        const objects: ThreeMfObject[] = [];
+        const skipped: string[] = [];
+        for (const { node, shape } of entries) {
+            const mesh = shapeConverter.convertToIndexedMesh(shape, tolerance);
+            if (!mesh.isOk) return Result.err({ kind: "failed", message: String(mesh.error) });
+            if (mesh.value.triangles.length === 0) {
+                skipped.push(node.id);
+                continue;
+            }
+            const material = this.materialOf(document, node);
+            const color = threeMfColor(material?.color);
+            objects.push({
+                name: node.name,
+                mesh: mesh.value,
+                ...(material && color && { material: { name: material.name, color } }),
+            });
+        }
+        if (objects.length === 0)
+            return Result.err({
+                kind: "no-geometry",
+                message: "No selected node has faces to mesh",
+                nodes: skipped,
+            });
+        const bytes = await write3mf({
+            unit,
+            objects,
+            title: document.name,
+            creationDate: new Date().toISOString().slice(0, 10),
+        });
+        return Result.ok({ bytes, skipped });
+    }
+
+    private materialOf(document: IDocument, node: ShapeNode): Material | undefined {
+        const id = Array.isArray(node.materialId) ? node.materialId[0] : node.materialId;
+        return document.modelManager.materials.find((material) => material.id === id);
+    }
+
     private exportStl(
         doc: IDocument,
         shapes: IShape[],
@@ -270,14 +354,9 @@ export class DefaultDataExchange implements IDataExchange {
         options?: DataExportOptions,
         scale = 1,
     ): Result<BlobPart> {
-        const tolerance = options?.stl;
         return shapeConverter.convertToSTL(shapes, {
             binary,
-            ...(tolerance && {
-                linearTolerance:
-                    tolerance.linearTolerance === undefined ? undefined : tolerance.linearTolerance * scale,
-                angularTolerance: tolerance.angularTolerance,
-            }),
+            ...this.scaledTolerance(options, scale),
         }) as Result<BlobPart>;
     }
 
