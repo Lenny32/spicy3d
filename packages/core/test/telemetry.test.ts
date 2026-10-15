@@ -9,6 +9,7 @@ import {
     Logger,
     ObjectStorage,
     Result,
+    randomInstanceId,
     Telemetry,
     TelemetryController,
     type TelemetryLogRecord,
@@ -291,6 +292,29 @@ describe("TelemetryController", () => {
         controller?.dispose();
         controller = undefined;
         rs.unstubAllGlobals();
+    });
+
+    test("starts in an insecure context (plain HTTP on a LAN: no crypto.randomUUID)", async () => {
+        const randomUUID = crypto.randomUUID;
+        Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+        try {
+            const settings = new TelemetrySettings(storage());
+            settings.config = { enabled: true, url: "https://a.example.com", key: "" };
+            const { load, started } = fakeModule();
+            controller = new TelemetryController(settings, load, "1");
+            controller.start();
+            await controller.ready;
+
+            expect(started[0].options.instanceId).toMatch(
+                /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+            );
+        } finally {
+            Object.defineProperty(crypto, "randomUUID", { value: randomUUID, configurable: true });
+        }
+    });
+
+    test("instance ids are random per session", () => {
+        expect(randomInstanceId()).not.toBe(randomInstanceId());
     });
 
     test("with the default settings nothing is loaded and no request is made", async () => {
