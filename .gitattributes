@@ -1,0 +1,5 @@
+# Files run or read inside Linux containers must keep LF endings, even in a Windows checkout:
+# a CR makes `set -eu` fail ("set: invalid option name") and the container restart in a loop.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+docker/**   text eol=lf
