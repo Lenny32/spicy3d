@@ -96,6 +96,12 @@ describe("TelemetrySettings", () => {
     ])("base URL of %j is %j", (url, expected) => {
         expect(telemetryBaseUrl(url)).toBe(expected);
     });
+
+    test("a long run of trailing slashes is trimmed in one linear pass (CodeQL js/polynomial-redos)", () => {
+        expect(telemetryBaseUrl(`https://h.example.com/otlp${"/".repeat(100_000)}`)).toBe(
+            "https://h.example.com/otlp",
+        );
+    });
 });
 
 describe("Telemetry", () => {
@@ -169,6 +175,17 @@ describe("telemetry privacy", () => {
     test("messages and stacks are capped", () => {
         expect(telemetryMessage("x".repeat(5000)).length).toBe(1001);
         expect(telemetryStack(`m\n${"    at f (a.js:1:1)\n".repeat(1000)}`).length).toBe(4001);
+    });
+
+    test("huge uncontrolled text is cut before the patterns run", () => {
+        // Path-like text without an extension makes the file-name pattern backtrack from every start.
+        const adversarial = "a.b/".repeat(250_000);
+        const started = performance.now();
+        expect(telemetryMessage(adversarial).length).toBe(1001);
+        // One line: the whole "stack" is its first line, which is capped like a message.
+        expect(telemetryStack(adversarial).length).toBe(1001);
+        expect(telemetryStack(`Error: x\n${adversarial}`).length).toBe(4001);
+        expect(performance.now() - started).toBeLessThan(2000);
     });
 
     test.each([

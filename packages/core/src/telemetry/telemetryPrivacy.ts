@@ -14,6 +14,12 @@ const FILE_PATTERN =
 /** Absolute filesystem paths (`/home/x/…`, `C:\Users\…`). */
 const PATH_PATTERN = /(?:\b[A-Za-z]:\\|(?<![\w:/])\/(?:home|Users|tmp|var|mnt|media)\/)[^\s"'<>]*/g;
 
+/**
+ * How much of a message or stack is looked at. Cut before any pattern runs, so redaction stays
+ * cheap however long the (uncontrolled) text is; what is sent is capped shorter still.
+ */
+const MAX_INPUT = 2 * MAX_STACK;
+
 function truncate(text: string, max: number): string {
     return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -24,7 +30,7 @@ function truncate(text: string, max: number): string {
  */
 export function telemetryMessage(text: string): string {
     return truncate(
-        redactSecrets(text)
+        redactSecrets(text.slice(0, MAX_INPUT))
             .replace(QUOTED_PATTERN, (match) => `${match[0]}${REDACTED}${match[match.length - 1]}`)
             .replace(PATH_PATTERN, REDACTED)
             .replace(FILE_PATTERN, REDACTED),
@@ -37,7 +43,7 @@ export function telemetryMessage(text: string): string {
  * first line repeats the message, which goes through {@link telemetryMessage}.
  */
 export function telemetryStack(stack: string): string {
-    const [first, ...frames] = stack.split("\n");
+    const [first, ...frames] = stack.slice(0, MAX_INPUT).split("\n");
     return truncate([telemetryMessage(first), ...frames.map(redactSecrets)].join("\n"), MAX_STACK);
 }
 

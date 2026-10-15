@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { ObjectStorage, Observable } from "../foundation";
+import { trimTrailingSlashes } from "../foundation/utils/strings";
 
 /** What the user configured in Settings → Telemetry. */
 export interface TelemetryConfig {
@@ -28,7 +29,7 @@ export function telemetryBaseUrl(url: string): string | undefined {
     } catch {
         return undefined;
     }
-    return trimmed.replace(/\/+$/, "");
+    return trimTrailingSlashes(trimmed);
 }
 
 /** `base` + `/v1/logs` or `/v1/traces`. */
