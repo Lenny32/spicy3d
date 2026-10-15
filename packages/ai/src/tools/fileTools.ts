@@ -12,7 +12,9 @@ import {
     type IDocument,
     type INode,
     isLengthUnit,
+    isMeshedExportFormat,
     Matrix4,
+    MESHED_EXPORT_ONLY_ERROR,
     Transaction,
     VisualNode,
     validateStlTessellation,
@@ -37,6 +39,8 @@ function exportMimeType(format: string): string {
             return "model/iges";
         case ".stl":
             return "model/stl";
+        case ".3mf":
+            return "model/3mf";
         default:
             return "application/octet-stream";
     }
@@ -184,8 +188,7 @@ async function handleExportNodes(
     const custom = args["linearTolerance"] !== undefined || args["angularTolerance"] !== undefined;
     let options: DataExportOptions = {};
     if (custom) {
-        if (format !== ".stl" && format !== ".stl binary")
-            return JSON.stringify({ error: "Tessellation tolerances apply only to STL exports" });
+        if (!isMeshedExportFormat(format)) return JSON.stringify({ error: MESHED_EXPORT_ONLY_ERROR });
         options = {
             stl: {
                 linearTolerance: args["linearTolerance"] as number | undefined,
@@ -469,7 +472,7 @@ export function buildFileTools(): Tool[] {
         {
             name: "export_nodes",
             description:
-                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj'). Omit ids for all top-level nodes. Waits about 60 s from the request (queue time included; a long synchronous kernel step can extend it) for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0. Merged exports list nodes left out for lack of geometry in skipped.",
+                "Export nodes to one CAD/mesh file. Default delivery downloads in the browser; chunks returns only metadata and an exportId for read_export_chunk (client scripts decode ranges directly to disk, outside model context). Temporary exports last 10 minutes, belong to the calling session and allow up to 32 MiB. base64 returns inline bytes with filename/MIME metadata. Inline base64 defaults to a 1 MiB limit (max 8 MiB), also bounded by the relay response limit. filename is a basename; this browser tool cannot write an agent's filesystem path. format is an app export format ('.step', '.iges', '.brep', '.stl', '.stl binary', '.ply', '.ply binary', '.obj', '.3mf' — 3MF writes one named, coloured object per node with the unit recorded in the file). Omit ids for all top-level nodes. Waits about 60 s from the request (queue time included; a long synchronous kernel step can extend it) for pending parametric rebuilds; a model still rebuilding returns a 'Rebuild in progress' error: retry once get_rebuild_status reports pending 0. Merged exports list nodes left out for lack of geometry in skipped.",
             parameters: {
                 type: "object",
                 properties: {
@@ -506,14 +509,14 @@ export function buildFileTools(): Tool[] {
                         type: "number",
                         exclusiveMinimum: 0,
                         description:
-                            "STL only: absolute linear tessellation deflection in millimetres; omit to preserve legacy relative deflection",
+                            "STL and 3MF only: absolute linear tessellation deflection in millimetres; omit to preserve legacy relative deflection",
                     },
                     angularTolerance: {
                         type: "number",
                         exclusiveMinimum: 0,
                         maximum: 180,
                         description:
-                            "STL only: angular tessellation deflection in degrees; omit to preserve the legacy 0.2-radian setting",
+                            "STL and 3MF only: angular tessellation deflection in degrees; omit to preserve the legacy 0.2-radian setting",
                     },
                 },
                 required: ["format"],

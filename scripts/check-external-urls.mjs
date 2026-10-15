@@ -35,6 +35,11 @@ const ALLOWED = [
     [/^https?:\/\/json-schema\.org\//, "JSON Schema $schema id (ajv, MCP SDK)"],
     [/^https:\/\/raw\.githubusercontent\.com\/ajv-validator\/ajv\//, "JSON Schema $id (ajv)"],
     [/^https?:\/\/www\.eclipse\.org\/(emf|elk)\//, "EMF / ELK namespace (visual-programming's elkjs)"],
+    [
+        /^http:\/\/schemas\.(microsoft\.com\/3dmanufacturing|openxmlformats\.org\/package)\//,
+        "3MF / OPC namespace and relationship type",
+        /^(packages\/builder\/src\/threeMf\.ts$|dist\/)/,
+    ],
     // Built at runtime from parts (`http://[${host}]`) or without a host (`http:///org/…`): no fixed target.
     [/^(https?|wss?):\/\/(\/|\[?\$\{)/, "URL template, not a fixed target"],
     // Links the user may open; nothing loads them.

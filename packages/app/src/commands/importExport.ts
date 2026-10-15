@@ -15,6 +15,7 @@ import {
     I18n,
     type IApplication,
     type ICommand,
+    isMeshedExportFormat,
     LENGTH_UNIT_LABELS,
     LENGTH_UNITS_LIST,
     type LengthUnit,
@@ -191,15 +192,16 @@ export class Export extends CancelableCommand {
     public set format(value: string) {
         this.setProperty("format", value, () => {
             this.emitUnitChanged();
-            this.emitPropertyChanged("isStl", this.isStl);
+            this.emitPropertyChanged("isMeshed", this.isMeshed);
         });
     }
 
-    public get isStl(): boolean {
-        return this.format === ".stl" || this.format === ".stl binary";
+    /** STL and 3MF: meshed by OCCT for the file, so they take the tessellation tolerances. */
+    public get isMeshed(): boolean {
+        return isMeshedExportFormat(this.format);
     }
 
-    @property("file.stl.customTessellation", { dependencies: [{ property: "isStl", value: true }] })
+    @property("file.stl.customTessellation", { dependencies: [{ property: "isMeshed", value: true }] })
     public get customTessellation(): boolean {
         return this.getPrivateValue("customTessellation", false);
     }
@@ -210,7 +212,7 @@ export class Export extends CancelableCommand {
     @property("file.stl.linearTolerance", {
         quantity: "length",
         dependencies: [
-            { property: "isStl", value: true },
+            { property: "isMeshed", value: true },
             { property: "customTessellation", value: true },
         ],
     })
@@ -223,7 +225,7 @@ export class Export extends CancelableCommand {
 
     @property("file.stl.angularTolerance", {
         dependencies: [
-            { property: "isStl", value: true },
+            { property: "isMeshed", value: true },
             { property: "customTessellation", value: true },
         ],
     })
@@ -237,7 +239,7 @@ export class Export extends CancelableCommand {
     private get exportOptions(): DataExportOptions {
         return {
             lengthUnit: this.outputUnit,
-            ...(this.isStl &&
+            ...(this.isMeshed &&
                 this.customTessellation && {
                     stl: { linearTolerance: this.linearTolerance, angularTolerance: this.angularTolerance },
                 }),
