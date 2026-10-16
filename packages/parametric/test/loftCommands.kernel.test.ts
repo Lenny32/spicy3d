@@ -269,12 +269,17 @@ describe("loft command (real kernel)", () => {
 });
 
 describe("loft edit session (real kernel)", () => {
-    function loftBody(doc: TestDocument, base: SketchNode, top: SketchNode) {
+    function addLoftBody(doc: TestDocument, base: SketchNode, top: SketchNode) {
         const body = new ParametricBodyNode({
             document: doc,
             features: [{ id: "l1", type: "loft", sections: [{ sketchId: base.id }, { sketchId: top.id }] }],
         });
         doc.modelManager.addNode(body);
+        return body;
+    }
+
+    function loftBody(doc: TestDocument, base: SketchNode, top: SketchNode) {
+        const body = addLoftBody(doc, base, top);
         expect(body.shape.isOk).toBe(true);
         return body;
     }
@@ -388,8 +393,12 @@ describe("loft edit session (real kernel)", () => {
         let document: TestDocument | undefined;
         try {
             const { app, doc, base, top } = setup();
-            const body = loftBody(doc, base, top);
+            // The bounded worker validates the smooth loft in an asynchronous rebuild.
+            const body = addLoftBody(doc, base, top);
             document = doc;
+            void body.shape;
+            await DocumentRebuilds.settled(doc);
+            expect(body.shape.isOk).toBe(true);
             body.setFeaturesEmitShapeChanged([
                 ...body.features,
                 { id: "wall", type: "thicken", thickness: -0.1, tolerant: true },

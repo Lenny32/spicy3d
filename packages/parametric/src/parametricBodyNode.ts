@@ -880,12 +880,7 @@ export class ParametricBodyNode
                 this.features.some(
                     (feature) =>
                         !feature.suppressed &&
-                        (((feature.type === "sweep" ||
-                            feature.type === "faceSweep" ||
-                            (feature.type === "loft" &&
-                                feature.guided !== undefined &&
-                                shapeFactory.supportsDeferredGuidedLoft)) &&
-                            shapeFactory.boundedOperations?.shapeQuery !== undefined) ||
+                        (validatesInWorker(feature) ||
                             (feature.type === "thicken" &&
                                 (feature.tolerant === true ||
                                     shapeFactory.boundedOperations?.selfIntersectionDetails !== undefined)) ||
@@ -1626,12 +1621,7 @@ export class ParametricBodyNode
         const pending =
             preparedOperation ??
             (asynchronous
-                ? (feature.type === "sweep" ||
-                      feature.type === "faceSweep" ||
-                      (feature.type === "loft" &&
-                          feature.guided !== undefined &&
-                          shapeFactory.supportsDeferredGuidedLoft)) &&
-                  shapeFactory.boundedOperations?.shapeQuery !== undefined
+                ? validatesInWorker(feature)
                     ? prepareValidatedFeature((context) => evaluateFeature(feature, context), context)
                     : featureHandler(feature.type)?.prepareAsync?.(feature, context)
                 : undefined);
@@ -1906,4 +1896,20 @@ function unvalidatedInputNote(
     if (!unvalidated || !error.startsWith(`${feature.type} step "`)) return error;
     const name = unvalidated.name ? `"${unvalidated.name}" ` : "";
     return `${error}; its input passed through ${unvalidated.type} ${name}step "${unvalidated.id}", whose result was not checked for self-intersection (synchronous evaluation) — a self-intersecting operand can cause this`;
+}
+
+/**
+ * Features whose output is checked for self-intersection by the bounded worker during an
+ * asynchronous rebuild: sweeps, guided lofts on a kernel deferring their analyzer, and smooth
+ * lofts, whose interpolated sides can overshoot their sections (#176).
+ */
+function validatesInWorker(feature: FeatureData): boolean {
+    const validated =
+        feature.type === "sweep" ||
+        feature.type === "faceSweep" ||
+        (feature.type === "loft" &&
+            (feature.guided !== undefined
+                ? shapeFactory.supportsDeferredGuidedLoft === true
+                : feature.ruled !== true));
+    return validated && shapeFactory.boundedOperations?.shapeQuery !== undefined;
 }
