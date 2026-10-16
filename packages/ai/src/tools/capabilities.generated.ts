@@ -2155,7 +2155,7 @@ shape.* (target must be a shape):
   shape.extremaDistance(target, other: ref) -> number
   shape.inspectionDistance(target, other: ref) -> Result<{ distance: number; first: XYZ; second: XYZ; }, string>
   shape.inspectionCommonVolume(target, other: ref) -> Result<number, string>
-  shape.inspectionMass(target) -> Result<{ volume: number; center: XYZ; }, string>
+  shape.inspectionMass(target) -> Result<{ volume: number; center: XYZ; relativeError?: number | undefined; }, string>
   shape.inspectionSectionCaps(target, plane: plane) -> shape ref (registered under the op id)
   shape.checkShape(target) -> boolean
   shape.checkFaces(target) -> { index: number; isValid: boolean; status: string[]; }[]

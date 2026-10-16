@@ -46,6 +46,8 @@
 #include <string>
 #include <vector>
 
+#include "massProperties.hpp"
+
 struct CornerSetbackResult {
     TopoDS_Shape shape;
     bool isOk = false;
@@ -720,8 +722,8 @@ static CornerSetbackResult build(const TopoDS_Shape& input, const std::array<int
     if (selfInterference.HasFaulty())
         return failure("the final setback solid fails the self-interference check");
     GProp_GProps before, after;
-    BRepGProp::VolumeProperties(shape, before);
-    BRepGProp::VolumeProperties(output, after);
+    MassProperties::volume(shape, before);
+    MassProperties::volume(output, after);
     if (!std::isfinite(before.Mass()) || !std::isfinite(after.Mass()) || !(after.Mass() > 0 && after.Mass() < before.Mass()))
         return failure("the corner patch does not define an inward rounded solid");
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outputShapes;

@@ -70,8 +70,11 @@ export interface IShape extends IDisposable {
     inspectionDistance?(other: IShape): Result<{ distance: number; first: XYZ; second: XYZ }>;
     /** Volume of the boolean common, in cubic document units; zero also covers touching. */
     inspectionCommonVolume?(other: IShape): Result<number>;
-    /** Volume and centroid of a valid solid in world coordinates. */
-    inspectionMass?(): Result<{ volume: number; center: XYZ }>;
+    /**
+     * Volume and centroid of a valid solid in world coordinates. `relativeError` is the
+     * kernel's estimated relative error of the volume integration, absent when unknown.
+     */
+    inspectionMass?(): Result<{ volume: number; center: XYZ; relativeError?: number }>;
     /** Exact planar cap faces of the positive-side cut; empty compound if no cut. */
     inspectionSectionCaps?(plane: Plane): Result<IShape>;
     /**

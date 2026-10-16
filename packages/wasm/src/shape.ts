@@ -93,6 +93,14 @@ function selfIntersectionBinding(): SelfIntersectionCheck | undefined {
     return (shape) => Boolean(check.call(shapeClass, shape));
 }
 
+/**
+ * The kernel's volume error estimate (#177): negative = unknown (fixed-order fallback), and
+ * kernels older than the estimate leave the field out.
+ */
+function relativeErrorOf(value: number | undefined): { relativeError?: number } {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? { relativeError: value } : {};
+}
+
 export interface OccShapeOptions {
     shape: TopoDS_Shape;
     id?: string;
@@ -363,7 +371,7 @@ export class OccShape implements IShape, IInspectionPrecheck {
             : Result.ok(value);
     }
 
-    inspectionMass(): Result<{ volume: number; center: XYZ }> {
+    inspectionMass(): Result<{ volume: number; center: XYZ; relativeError?: number }> {
         if (
             this.isNull() ||
             (this.shapeType !== ShapeTypes.solid &&
@@ -380,7 +388,11 @@ export class OccShape implements IShape, IInspectionPrecheck {
             Number.isFinite(value.volume) &&
             value.volume > 0 &&
             [value.center.x, value.center.y, value.center.z].every(Number.isFinite)
-            ? Result.ok({ volume: value.volume, center: toXYZ(value.center) })
+            ? Result.ok({
+                  volume: value.volume,
+                  center: toXYZ(value.center),
+                  ...relativeErrorOf(value.relativeError),
+              })
             : Result.err("Volume center is unavailable");
     }
 

@@ -196,6 +196,21 @@ The application offers Recover and Reload. Recover creates a fresh main WASM ins
 A main-thread hang is not a crash: the page cannot detect or end it. A worker hang is ended by
 its finite deadline without marking the main kernel crashed.
 
+## Volume and area integration (#177)
+
+Every volume and area the kernel computes (`Shape.volume`, `inspectionMass`,
+`inspectionCommonVolume`, `Face.area` and the internal sanity checks of extrude, thicken, corner
+setback and the tolerant envelope) goes through `cpp/src/massProperties.hpp`:
+`BRepGProp::VolumePropertiesGK` integrated span by span (`IsUseSpan`) and the adaptive
+`SurfaceProperties(Eps)`, relative epsilon `1e-7`. OCCT's default `VolumeProperties` uses a fixed
+Gauss order over each face's whole parameter range: on faces made from periodic B-spline outlines
+(planar caps trimmed by one, lofts through them) it was 1-15% off with no error estimate, and the
+adaptive non-GK `VolumeProperties(Eps)` was 10% off on such a cap while reporting `1e-16`. The
+span-wise result agrees with a 0.01 mm tessellation to `1e-4` (`packages/wasm/test/massProperties.test.ts`).
+Analytic shapes cost the same; a spline-heavy solid of a few hundred spans takes ~15x the fixed-order
+time (0.6 s instead of 0.04 s natively). When the adaptive integration fails, the fixed-order one is
+used and `inspectionMass` leaves out `relativeError` (otherwise the kernel's estimate).
+
 ## Guard rails against known hangs
 
 - **Intersection join on many faces.** `makeThickSolidByJoin` with `joinType: "intersection"` runs

@@ -9,6 +9,7 @@
 #include "guard.hpp"
 #include "guidedLoftValidation.hpp"
 #include "loftThicken.hpp"
+#include "massProperties.hpp"
 #include "shared.hpp"
 #include "thickEnvelope.hpp"
 #include "utils.hpp"
@@ -758,11 +759,10 @@ static TrackedShapeResult prismBetweenFaces(const TopoDS_Face& profile, const gp
         // This rejects a cap that only intercepted part of the profile without approximating it.
         if (exactDepth > 0) {
             GProp_GProps area, volume;
-            BRepGProp::SurfaceProperties(profile, area);
-            // Fixed quadrature can overestimate the volume error on a knot-dense curved
-            // cap and reject a fully covered profile (issue #146). Keep the same tolerance,
-            // using adaptive integration to measure the translated-surface volume.
-            BRepGProp::VolumeProperties(output, volume, 1e-9);
+            MassProperties::area(profile, area);
+            // Fixed quadrature misjudges knot-dense curved caps and rejected fully covered
+            // profiles (issues #146, #177); both sides use the span-wise integration.
+            MassProperties::volume(output, volume);
             Handle(Geom_Plane) profilePlane = Handle(Geom_Plane)::DownCast(
                 untrimmedSurface(BRep_Tool::Surface(profile)));
             double expected = area.Mass() * std::abs(profilePlane->Pln().Axis().Direction().Dot(dir)) * exactDepth;
@@ -881,7 +881,7 @@ static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& 
         if (!BRepCheck_Analyzer(projectedFace).IsValid())
             return fail("Projected cap face is invalid");
         GProp_GProps area;
-        BRepGProp::SurfaceProperties(projectedFace, area);
+        MassProperties::area(projectedFace, area);
         piecesArea += std::abs(area.Mass());
         if (shadow.IsNull())
             shadow = projectedFace;
@@ -897,8 +897,8 @@ static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& 
     if (shadow.IsNull())
         return fail("The bounded tool has no ending cap history");
     GProp_GProps footprint, unionArea, commonArea;
-    BRepGProp::SurfaceProperties(profile, footprint);
-    BRepGProp::SurfaceProperties(shadow, unionArea);
+    MassProperties::area(profile, footprint);
+    MassProperties::area(shadow, unionArea);
     const double tolerance = 1e-6 * std::max(1.0, std::abs(footprint.Mass()));
     // Folded caps can project multiple layers onto the same footprint: explicitly unsupported.
     if (std::abs(piecesArea - std::abs(unionArea.Mass())) > tolerance)
@@ -908,7 +908,7 @@ static bool capCoversProfile(const TrackedShapeResult& tool, const TopoDS_Face& 
     common.Build();
     if (!common.IsDone() || common.HasErrors())
         return fail("Projected footprint intersection failed");
-    BRepGProp::SurfaceProperties(common.Shape(), commonArea);
+    MassProperties::area(common.Shape(), commonArea);
     if (std::abs(std::abs(commonArea.Mass()) - std::abs(footprint.Mass())) > tolerance)
         return fail("The ending cap does not cover the full profile footprint");
     return true;
@@ -1204,7 +1204,7 @@ static RegionsResult boundedAreas(const TopoDS_Face& baseFace, const NCollection
         Bnd_Box box;
         BRepBndLib::Add(area, box);
         GProp_GProps props;
-        BRepGProp::SurfaceProperties(area, props);
+        MassProperties::area(area, props);
         if (box.SquareExtent() > outerThreshold || props.Mass() < Precision::Confusion()) {
             continue;
         }
@@ -2308,7 +2308,7 @@ public:
                     continue;
                 }
                 GProp_GProps volume;
-                BRepGProp::VolumeProperties(tool.shape, volume);
+                MassProperties::volume(tool.shape, volume);
                 if (std::abs(volume.Mass()) <= Precision::Confusion())
                     continue;
                 valid.push_back({ bodyIndex, f - 1, face, tool, std::abs(volume.Mass()) });
@@ -2327,7 +2327,7 @@ public:
                 if (!common.IsDone() || common.HasErrors())
                     return trackedError("Cannot compare next-face candidate containment");
                 GProp_GProps volume;
-                BRepGProp::VolumeProperties(common.Shape(), volume);
+                MassProperties::volume(common.Shape(), volume);
                 double overlap = std::abs(volume.Mass());
                 double tolerance = 1e-6 * std::max({ 1.0, valid[a].volume, valid[b].volume });
                 bool aInB = std::abs(overlap - valid[a].volume) <= tolerance;
@@ -2356,7 +2356,7 @@ public:
             if (!common.IsDone() || common.HasErrors())
                 return trackedError("Cannot validate partial next-face candidates");
             GProp_GProps area;
-            BRepGProp::SurfaceProperties(common.Shape(), area);
+            MassProperties::area(common.Shape(), area);
             if (std::abs(area.Mass()) > 1e-6)
                 return trackedError("The next boundary is partial or piecewise; one uniformly nearest full-coverage face is required");
         }
@@ -3035,10 +3035,10 @@ public:
         if (solids.IsEmpty() || thickenedShape.IsNull())
             return false;
         GProp_GProps inputVolume, resultVolume, inputArea, resultArea;
-        BRepGProp::VolumeProperties(input, inputVolume);
-        BRepGProp::VolumeProperties(thickenedShape, resultVolume);
-        BRepGProp::SurfaceProperties(input, inputArea);
-        BRepGProp::SurfaceProperties(thickenedShape, resultArea);
+        MassProperties::volume(input, inputVolume);
+        MassProperties::volume(thickenedShape, resultVolume);
+        MassProperties::area(input, inputArea);
+        MassProperties::area(thickenedShape, resultArea);
         return std::abs(std::abs(inputVolume.Mass()) - std::abs(resultVolume.Mass())) <= 1e-4 * std::abs(inputArea.Mass() * thickness)
             && std::abs(inputArea.Mass() - resultArea.Mass()) <= 1e-9 * std::max(1.0, inputArea.Mass());
     }
@@ -3146,7 +3146,7 @@ public:
         if (solids.Extent() != 1)
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope currently requires one solid; open skins are unsupported" };
         GProp_GProps sourceMass;
-        BRepGProp::VolumeProperties(shape, sourceMass);
+        MassProperties::volume(shape, sourceMass);
         const double sourceVolume = sourceMass.Mass();
         if (!std::isfinite(sourceVolume) || sourceVolume <= 0)
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope requires positive input volume" };
@@ -3168,7 +3168,7 @@ public:
                 }
             }
             GProp_GProps surfaceArea;
-            BRepGProp::SurfaceProperties(shape, surfaceArea);
+            MassProperties::area(shape, surfaceArea);
             if (expectedVolume > 0 && -thickness >= radius
                 && std::abs(sourceVolume - expectedVolume) <= 1e-6 * expectedVolume
                 && std::abs(surfaceArea.Mass() - expectedArea) <= 1e-6 * expectedArea) {
@@ -3201,7 +3201,7 @@ public:
         if (ordinary.isOk) {
             if (!openings.IsEmpty()) {
                 GProp_GProps wallMass;
-                BRepGProp::VolumeProperties(ordinary.shape, wallMass);
+                MassProperties::volume(ordinary.shape, wallMass);
                 // Ordinary arc can legitimately fill a small opening at a tapered
                 // tip. Preserve that result, but never accept the unchanged solid.
                 if (std::isfinite(wallMass.Mass()) && wallMass.Mass() > 0
@@ -3210,7 +3210,7 @@ public:
             } else {
                 TopoDS_Shape cavity = ordinary.shape;
                 GProp_GProps cavityMass;
-                BRepGProp::VolumeProperties(cavity, cavityMass);
+                MassProperties::volume(cavity, cavityMass);
                 if (cavityMass.Mass() < 0)
                     cavity.Reverse();
                 BRepAlgoAPI_Cut wall(thickness < 0 ? shape : cavity, thickness < 0 ? cavity : shape);
@@ -3218,7 +3218,7 @@ public:
                 wall.Build();
                 if (wall.IsDone() && !wall.HasErrors() && thickSolidResultError(wall.Shape()).empty()) {
                     GProp_GProps wallMass;
-                    BRepGProp::VolumeProperties(wall.Shape(), wallMass);
+                    MassProperties::volume(wall.Shape(), wallMass);
                     if (std::isfinite(wallMass.Mass()) && wallMass.Mass() > 0
                         && !thickSolidGeometricallyUnchanged(shape, wall.Shape(), thickness)
                         && (thickness > 0 || wallMass.Mass() < sourceVolume * (1 - 1e-7)) && acceptable(wall.Shape()))
@@ -3249,7 +3249,7 @@ public:
             if (thickSolidUnchanged(shape, thickenedShape) || thickSolidGeometricallyUnchanged(shape, thickenedShape, thickness))
                 return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed: offset returned the input unchanged (unrecognized cavity collapse)" };
             GProp_GProps offsetMass;
-            BRepGProp::VolumeProperties(thickenedShape, offsetMass);
+            MassProperties::volume(thickenedShape, offsetMass);
             if (offsetMass.Mass() < 0)
                 thickenedShape.Reverse();
             if (openings.IsEmpty()) {
@@ -3272,7 +3272,7 @@ public:
         if (!validationError.empty())
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope: " + validationError };
         GProp_GProps mass;
-        BRepGProp::VolumeProperties(thickenedShape, mass);
+        MassProperties::volume(thickenedShape, mass);
         if (!std::isfinite(mass.Mass()) || mass.Mass() <= 0
             || (thickness < 0 && mass.Mass() >= sourceVolume * (1 - 1e-7)))
             return ShapeResult { TopoDS_Shape(), false, "Tolerant envelope failed volume sanity check" };

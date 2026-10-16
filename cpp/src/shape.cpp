@@ -62,6 +62,7 @@
 
 #include "faceValidation.hpp"
 #include "guard.hpp"
+#include "massProperties.hpp"
 #include "shared.hpp"
 #include "utils.hpp"
 #include <BRepCheck_Analyzer.hxx>
@@ -84,6 +85,8 @@ struct InspectionDistance {
 struct InspectionMass {
     double volume;
     Vector3 center;
+    // Estimated relative error of the volume integration, -1 when unknown.
+    double relativeError;
 };
 
 struct InspectionUVBounds {
@@ -534,7 +537,7 @@ public:
         if (!common.IsDone() || common.HasErrors() || common.Shape().IsNull())
             return std::nullopt;
         GProp_GProps props;
-        BRepGProp::VolumeProperties(common.Shape(), props);
+        MassProperties::volume(common.Shape(), props);
         double volume = std::abs(props.Mass());
         return std::isfinite(volume) ? std::optional<double>(volume) : std::nullopt;
     }
@@ -544,13 +547,13 @@ public:
         if (!containsOnlySolids(shape) || !BRepCheck_Analyzer(shape).IsValid())
             return std::nullopt;
         GProp_GProps props;
-        BRepGProp::VolumeProperties(shape, props);
+        const double relativeError = MassProperties::volume(shape, props);
         if (!std::isfinite(props.Mass()) || std::abs(props.Mass()) < 1e-12)
             return std::nullopt;
         const gp_Pnt center = props.CentreOfMass();
         if (!std::isfinite(center.X()) || !std::isfinite(center.Y()) || !std::isfinite(center.Z()))
             return std::nullopt;
-        return InspectionMass { std::abs(props.Mass()), Vector3::fromPnt(center) };
+        return InspectionMass { std::abs(props.Mass()), Vector3::fromPnt(center), relativeError };
     }
 
     static TopoDS_Shape inspectionSectionCaps(const TopoDS_Shape& shape, const Pln& plane)
@@ -614,7 +617,7 @@ public:
             if (surface.GetType() != GeomAbs_Plane || std::abs(surface.Plane().Axis().Direction().Dot(normal)) < 1.0 - 1e-7)
                 continue;
             GProp_GProps props;
-            BRepGProp::SurfaceProperties(face, props);
+            MassProperties::area(face, props);
             if (std::abs(cut.Distance(props.CentreOfMass())) <= 1e-6)
                 builder.Add(caps, face);
         }
@@ -701,9 +704,7 @@ public:
 
     static double volume(const TopoDS_Shape& shape)
     {
-        GProp_GProps props;
-        BRepGProp::VolumeProperties(shape, props);
-        return props.Mass();
+        return MassProperties::volume(shape);
     }
 };
 
@@ -972,7 +973,7 @@ public:
     static double area(const TopoDS_Face& face)
     {
         GProp_GProps props;
-        BRepGProp::SurfaceProperties(face, props);
+        MassProperties::area(face, props);
         return props.Mass();
     }
 
@@ -1100,7 +1101,8 @@ EMSCRIPTEN_BINDINGS(Shape)
         .field("second", &InspectionDistance::second);
     value_object<InspectionMass>("InspectionMass")
         .field("volume", &InspectionMass::volume)
-        .field("center", &InspectionMass::center);
+        .field("center", &InspectionMass::center)
+        .field("relativeError", &InspectionMass::relativeError);
     register_optional<InspectionUVBounds>();
     value_object<InspectionUVBounds>("InspectionUVBounds")
         .field("u1", &InspectionUVBounds::u1)

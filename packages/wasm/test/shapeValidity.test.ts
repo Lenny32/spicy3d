@@ -254,6 +254,24 @@ describe("inspections refuse invalid inputs before calling the kernel", () => {
         expect(common).toHaveBeenCalledTimes(1);
         expect(mass).toHaveBeenCalledTimes(1);
     });
+
+    test.each([
+        { kernel: 2e-8, reported: 2e-8 },
+        { kernel: 0, reported: 0 },
+        { kernel: -1, reported: undefined },
+        { kernel: undefined, reported: undefined },
+    ])("inspectionMass reports the kernel's relative error $kernel as $reported", ({ kernel, reported }) => {
+        const center = { x: 1, y: 2, z: 3 };
+        rs.spyOn(wasm.Shape, "inspectionMass").mockReturnValue({
+            volume: 6000,
+            center,
+            ...(kernel === undefined ? {} : { relativeError: kernel }),
+        } as ReturnType<typeof wasm.Shape.inspectionMass>);
+        const mass = unwrapOk(occBox(10, 20, 30).inspectionMass());
+        expect(mass.volume).toBe(6000);
+        expect(mass.relativeError).toBe(reported);
+        expect("relativeError" in mass).toBe(reported !== undefined);
+    });
 });
 
 describe("checkSelfIntersection is feature-detected on the kernel build", () => {

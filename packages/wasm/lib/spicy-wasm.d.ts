@@ -612,7 +612,8 @@ export type InspectionDistance = {
 
 export type InspectionMass = {
   volume: number,
-  center: Vector3
+  center: Vector3,
+  relativeError: number
 };
 
 export type InspectionRayResult = {
