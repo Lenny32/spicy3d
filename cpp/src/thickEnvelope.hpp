@@ -101,7 +101,7 @@ inline double volumeOf(const TopoDS_Shape& shape)
 
 struct Sheet {
     TopoDS_Face face;
-    Handle(Geom_Surface) basis; // the skin face's surface, extended
+    opencascade::handle<Geom_Surface> basis; // the skin face's surface, extended
     double u0, u1, v0, v1; // parameter box of `basis` covered by the sheet
     double fu0, fu1, fv0, fv1; // the face's own parameter box, inside the above
     double distance; // signed offset along the basis normal
@@ -112,20 +112,20 @@ struct Sheet {
 // The face's surface over its UV box, grown by `margin` (model units) in every open direction.
 // Non-planar surfaces become B-splines so that GeomLib can extrapolate them (C2: the offset of a
 // C1 junction would have a crease there).
-inline bool extendedSheet(const TopoDS_Face& face, double thickness, double margin, Sheet& sheet)
+inline bool extendedSheet(const TopoDS_Face& skinFace, double thickness, double margin, Sheet& sheet)
 {
-    const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+    const opencascade::handle<Geom_Surface> surface = BRep_Tool::Surface(skinFace);
     if (surface.IsNull())
         return false;
     double u0, u1, v0, v1;
-    BRepTools::UVBounds(face, u0, u1, v0, v1);
-    sheet.face = face;
+    BRepTools::UVBounds(skinFace, u0, u1, v0, v1);
+    sheet.face = skinFace;
     sheet.fu0 = u0;
     sheet.fu1 = u1;
     sheet.fv0 = v0;
     sheet.fv1 = v1;
-    sheet.distance = face.Orientation() == TopAbs_REVERSED ? -thickness : thickness;
-    BRepAdaptor_Surface adaptor(face, false);
+    sheet.distance = skinFace.Orientation() == TopAbs_REVERSED ? -thickness : thickness;
+    BRepAdaptor_Surface adaptor(skinFace, false);
     sheet.planar = adaptor.GetType() == GeomAbs_Plane;
     if (sheet.planar) {
         sheet.basis = new Geom_Plane(adaptor.Plane());
@@ -135,7 +135,7 @@ inline bool extendedSheet(const TopoDS_Face& face, double thickness, double marg
         sheet.v1 = v1 + margin;
         return true;
     }
-    Handle(Geom_BSplineSurface) spline
+    opencascade::handle<Geom_BSplineSurface> spline
         = GeomConvert::SurfaceToBSplineSurface(new Geom_RectangularTrimmedSurface(surface, u0, u1, v0, v1));
     if (spline.IsNull())
         return false;
@@ -145,7 +145,7 @@ inline bool extendedSheet(const TopoDS_Face& face, double thickness, double marg
         spline->SetUNotPeriodic();
     if (spline->IsVPeriodic())
         spline->SetVNotPeriodic();
-    Handle(Geom_BoundedSurface) bounded = spline;
+    opencascade::handle<Geom_BoundedSurface> bounded = spline;
     for (const bool inU : { true, false }) {
         if (inU ? closedU : closedV)
             continue;
@@ -181,6 +181,8 @@ struct SheetGrid {
     std::vector<double> us, vs; // parameters of the grid lines, refined around folds
 
     int node(int i, int j) const { return i * (nv + 1) + j; }
+    size_t nodeCount() const { return static_cast<size_t>(nu + 1) * static_cast<size_t>(nv + 1); }
+    size_t cellCount() const { return static_cast<size_t>(nu) * static_cast<size_t>(nv); }
     bool kept(int i, int j) const { return i >= 0 && j >= 0 && i < nu && j < nv && keep[i * nv + j]; }
     double u(int i) const { return us[i]; }
     double v(int j) const { return vs[j]; }
@@ -231,7 +233,7 @@ inline void evaluateGrid(const Sheet& sheet, SheetGrid& grid)
 {
     grid.nu = static_cast<int>(grid.us.size()) - 1;
     grid.nv = static_cast<int>(grid.vs.size()) - 1;
-    grid.points.resize((grid.nu + 1) * (grid.nv + 1));
+    grid.points.resize(grid.nodeCount());
     grid.foldedNode.resize(grid.points.size());
     for (int i = 0; i <= grid.nu; ++i) {
         for (int j = 0; j <= grid.nv; ++j) {
@@ -301,7 +303,7 @@ inline SheetGrid sampleGrid(const Sheet& sheet, double thickness)
             break;
         evaluateGrid(sheet, grid);
     }
-    grid.folded.assign(grid.nu * grid.nv, 0);
+    grid.folded.assign(grid.cellCount(), 0);
     for (int i = 0; i < grid.nu; ++i) {
         for (int j = 0; j < grid.nv; ++j) {
             bool folded = grid.foldedNode[grid.node(i, j)] || grid.foldedNode[grid.node(i + 1, j)]
@@ -364,13 +366,13 @@ inline void trimGrid(SheetGrid& grid, const SkinCloud& cloud, double depth)
     std::vector<char> nodeVisible(grid.points.size(), 0);
     for (size_t index = 0; index < grid.points.size(); ++index)
         nodeVisible[index] = !grid.foldedNode[index] && cloud.nearest(grid.points[index], depth) >= depth * (1 - 1e-3);
-    std::vector<char> visible(grid.nu * grid.nv, 0);
+    std::vector<char> visible(grid.cellCount(), 0);
     for (int i = 0; i < grid.nu; ++i)
         for (int j = 0; j < grid.nv; ++j)
             visible[i * grid.nv + j] = !grid.folded[i * grid.nv + j]
                 && (nodeVisible[grid.node(i, j)] || nodeVisible[grid.node(i + 1, j)] || nodeVisible[grid.node(i, j + 1)]
                     || nodeVisible[grid.node(i + 1, j + 1)]);
-    grid.keep.assign(grid.nu * grid.nv, 0);
+    grid.keep.assign(grid.cellCount(), 0);
     for (int i = 0; i < grid.nu; ++i) {
         for (int j = 0; j < grid.nv; ++j) {
             if (grid.folded[i * grid.nv + j])
@@ -530,19 +532,19 @@ inline bool insideLoop(const std::vector<GridNode>& loop, double x, double y)
 // A piece's own surface, the exact offset of the basis cut down to the piece's nodes. One
 // surface per piece: on a shared surface the boolean operations would take two pieces for the
 // same domain and never intersect them, but the inner corner is where two pieces of a sheet cross.
-inline Handle(Geom_Surface) pieceSurface(const Sheet& sheet, const SheetGrid& grid, int i0, int i1, int j0, int j1)
+inline opencascade::handle<Geom_Surface> pieceSurface(const Sheet& sheet, const SheetGrid& grid, int i0, int i1, int j0, int j1)
 {
     if (sheet.planar) {
-        gp_Pln moved = Handle(Geom_Plane)::DownCast(sheet.basis)->Pln();
+        gp_Pln moved = opencascade::handle<Geom_Plane>::DownCast(sheet.basis)->Pln();
         moved.Translate(gp_Vec(moved.Axis().Direction()) * sheet.distance);
         return new Geom_Plane(moved);
     }
-    const auto basis = Handle(Geom_BSplineSurface)::DownCast(sheet.basis->Copy());
+    const auto basis = opencascade::handle<Geom_BSplineSurface>::DownCast(sheet.basis->Copy());
     basis->Segment(grid.u(i0), grid.u(i1), grid.v(j0), grid.v(j1));
     return new Geom_OffsetSurface(basis, sheet.distance, true);
 }
 
-inline TopoDS_Wire loopWire(const Sheet& sheet, const SheetGrid& grid, const Handle(Geom_Surface) & surface,
+inline TopoDS_Wire loopWire(const Sheet& sheet, const SheetGrid& grid, const opencascade::handle<Geom_Surface>& surface,
     const std::vector<GridNode>& loop)
 {
     const auto uv = [&](const GridNode& node) { return gp_Pnt2d(grid.u(node.first), grid.v(node.second)); };
@@ -557,7 +559,7 @@ inline TopoDS_Wire loopWire(const Sheet& sheet, const SheetGrid& grid, const Han
     for (size_t k = 0; k < loop.size(); ++k) {
         const auto a = uv(loop[k]);
         const auto b = uv(loop[(k + 1) % loop.size()]);
-        Handle(Geom2d_Line) line = new Geom2d_Line(a, gp_Dir2d(b.X() - a.X(), b.Y() - a.Y()));
+        opencascade::handle<Geom2d_Line> line = new Geom2d_Line(a, gp_Dir2d(b.X() - a.X(), b.Y() - a.Y()));
         BRepBuilderAPI_MakeEdge edge(line, surface, vertices[k], vertices[(k + 1) % loop.size()], 0, a.Distance(b));
         if (!edge.IsDone())
             return TopoDS_Wire();
@@ -623,7 +625,7 @@ inline double distanceTo(const gp_Pnt& point, const TopoDS_Shape& target)
 // the cell allows up to depth / 2; `steps` receives how deep each one is.
 inline std::vector<gp_Pnt> interiorPoints(const TopoDS_Shape& cell, double depth, int count, std::vector<double>& steps)
 {
-    Handle(IntTools_Context) context = new IntTools_Context();
+    opencascade::handle<IntTools_Context> context = new IntTools_Context();
     std::vector<gp_Pnt> points;
     for (TopExp_Explorer faces(cell, TopAbs_FACE); faces.More() && static_cast<int>(points.size()) < count; faces.Next()) {
         const auto face = TopoDS::Face(faces.Current());
