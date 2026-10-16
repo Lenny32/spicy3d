@@ -185,7 +185,7 @@ export class SelectMeasure extends CancelableCommand {
         mesh.color = VisualConfig.highlightEdgeColor;
         mesh.position = new Float32Array(transform.ofPoints(mesh.position));
 
-        const area = face.area();
+        const area = face.measuredArea?.() ?? face.area();
         this.addSumItem(area);
         const center = this.wireCenter(mesh.position);
         const id = this.document.visual.context.displayMesh([mesh]);
@@ -220,7 +220,7 @@ export class SelectMeasure extends CancelableCommand {
         mesh.color = VisualConfig.highlightEdgeColor;
         mesh.position = new Float32Array(transform.ofPoints(mesh.position));
 
-        const volume = solid.volume();
+        const volume = solid.measuredVolume?.() ?? solid.volume();
         this.addSumItem(volume);
         const id = this.document.visual.context.displayMesh([mesh]);
         this.#disposeSet.add(

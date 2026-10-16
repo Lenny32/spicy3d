@@ -1,7 +1,7 @@
 // Part of the Spicy3D Project, derived from Chili3D, under the AGPL-3.0 License.
 // See LICENSE file in the project root for full license information.
 
-import { type IShape, Result, ShapeTypes } from "@spicy3d/core";
+import { type IFace, type IShape, Result, ShapeTypes } from "@spicy3d/core";
 
 export interface ShapeDescriptor {
     volume: number;
@@ -54,7 +54,10 @@ export function describeShape(shape: IShape): Result<ShapeDescriptor> {
     const faces = shape.findSubShapes(ShapeTypes.face);
     let area = 0;
     try {
-        for (const face of faces) area += (face as IShape & { area(): number }).area();
+        for (const face of faces) {
+            const measured = face as IFace;
+            area += measured.measuredArea?.() ?? measured.area();
+        }
     } finally {
         faces.forEach((face) => face.dispose());
     }
