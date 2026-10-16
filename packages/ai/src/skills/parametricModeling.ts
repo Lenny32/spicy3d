@@ -55,7 +55,9 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
                                                     PointOn [point] + [bspline] slides a point on it;
                                                     Tangent [line, bspline] = the line along its end tangent
   Any entity may carry construction: true (constrainable helper geometry, never part of a profile) and
-  name: "..." (a name later refs in this call can use instead of the id).
+  name: "..." (stored in the sketch: later refs in this call and in later editSketch calls can use it
+  instead of the id; unique per sketch — reusing a stored name fails; copies and trim/split pieces
+  are unnamed; names given to projectEdges and to constraints only last for the call).
   Control-mode bspline uses poles:[[u,v],...] instead of points/params/parametrization. Optional
   degree defaults to min(3,poleCount-1); distinct strictly increasing knots and multiplicities must
   be supplied together (or use generated defaults). Open ends are clamped (degree+1); initial
@@ -67,7 +69,7 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   one ends (the last one ending on the first one's start); a periodic bspline closes on its own.
   The result (results[id]) reports the created entity and constraint ids, the names, dofs and solve status.
 - { op: "editSketch", sketch, actions: [...] }   edits an existing sketch (or one built earlier in the call)
-- { op: "sketchInfo", sketch, id? }   reads a sketch back: entities with their points, constraints with
+- { op: "sketchInfo", sketch, id? }   reads a sketch back: entities with their points (and stored names), constraints with
   their datums (display units), angleSide (+1 counterclockwise, -1 clockwise) and effectiveDatum
   (the signed angle in degrees used by the solver), externals (projected edges, ids -100 and below), dofs, solve status,
   conflicting/redundant constraint ids and the dimensions autoDimension would add. Read it before editing
@@ -221,7 +223,8 @@ the way the UI picks them — by entities and points — and the refs are derive
   { kind: "Angle", entities: [line1, line2], datum }               signed from line1 to line2, CCW positive; angleSide preserves the chosen side
   Re-sending the same datum expression keeps a clockwise side; sketchInfo reports effectiveDatum.
   { kind: "Scale", entities: [line1, line2], datum }    length(line1) = datum × length(line2)
-  Entity keys: an id, a name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
+  Entity keys: an id, an entity name stored in the sketch (given at creation, in this or an earlier call),
+  a projected edge name given earlier in this call, or "origin" (point 0), "xAxis", "yAxis" (lines).
   Point indexes are zero-based; point: -1 selects the last point in constraints (points or refs)
   and movePoint. For an open B-spline, point: 0 and point: -1 are its start and end; for a periodic
   B-spline, -1 is the last fit point/control pole (a periodic curve has no endpoints).

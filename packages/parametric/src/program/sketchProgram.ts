@@ -69,7 +69,10 @@ import { copySketchSelection, type SketchTransform } from "../sketch/utilityOper
  * rolls the whole program back.
  */
 
-/** An entity reference: its id, a name given earlier in this program, or a datum name. */
+/**
+ * An entity reference: its id, a name stored in the sketch (given at creation by this or an earlier
+ * program), a name given to a projected edge earlier in this program, or a datum name.
+ */
 export type SketchEntityKey = number | string;
 
 export interface SketchPointSpec {
@@ -96,7 +99,7 @@ export interface SketchEntitySpec {
     /** Bspline only: a closed C2 curve; the first point is not repeated as the last. */
     periodic?: boolean;
     construction?: boolean;
-    /** Names the entity for later refs in this program. */
+    /** Names the entity, stored with it: later refs in this and later programs can use the name. */
     name?: string;
 }
 
@@ -193,7 +196,10 @@ export type SketchAction =
     | { action: "autoConstrain"; entities?: SketchEntityKey[]; tolerance?: number; angleTolerance?: number }
     | { action: "autoDimension" };
 
-/** Names given in one program, per sketch node — they only live for that call. */
+/**
+ * Names given in one program, per sketch node. Entity names of real entities are also stored in the
+ * sketch (`SketchEntityData.name`); projected edges' names and constraint names only live for the call.
+ */
 export interface SketchNames {
     entities: Map<string, number>;
     constraints: Map<string, number>;
@@ -939,21 +945,46 @@ export class SketchSession {
 
     // ------------------------------------------------------------------ References
 
+    /** Names a new entity; a real entity keeps the name in the sketch, unique among its entities. */
     private nameEntity(name: string, id: number): void {
+        if (typeof name !== "string" || name.trim() === "")
+            throw new Error('"name" must be a non-empty string');
+        if (name in DATUM_NAMES) throw new Error(`"${name}" is reserved for the sketch datum`);
+        const holder = [...this.solver.entitiesNamed(name), this.names.entities.get(name)].find(
+            (other) => other !== undefined && other !== id && this.exists(other),
+        );
+        if (holder !== undefined) {
+            throw new Error(`the name "${name}" is already used by entity ${holder} of this sketch`);
+        }
+        if (id > 0) this.solver.setEntityName(id, name);
         this.names.entities.set(name, id);
         this.report.names[name] = id;
+    }
+
+    private exists(id: number): boolean {
+        return (
+            this.solver.entity(id) !== undefined ||
+            this.solver.externalEntitiesData().some((e) => e.id === id)
+        );
     }
 
     private entityId(key: SketchEntityKey): number {
         if (typeof key === "number" && Number.isInteger(key)) return key;
         const name = String(key);
         const id = DATUM_NAMES[name] ?? this.names.entities.get(name);
-        if (id === undefined) {
+        if (id !== undefined) return id;
+        const stored = this.solver.entitiesNamed(name);
+        if (stored.length > 1) {
             throw new Error(
-                `unknown sketch entity "${name}" — use an entity id, "origin"/"xAxis"/"yAxis", or a name given earlier in this program`,
+                `the name "${name}" is shared by entities ${stored.join(", ")} — use an entity id`,
             );
         }
-        return id;
+        if (stored.length === 0) {
+            throw new Error(
+                `unknown sketch entity "${name}" — use an entity id, "origin"/"xAxis"/"yAxis", or an entity name stored in this sketch`,
+            );
+        }
+        return stored[0];
     }
 
     private constraintId(key: number | string): number {

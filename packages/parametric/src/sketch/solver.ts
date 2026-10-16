@@ -194,6 +194,8 @@ export class SketchSolver implements ExternalEntityHost {
     /** Entity tables holding real AND external entities (externals under reserved negative ids). */
     private readonly entityTypes = new Map<number, SketchEntityType>();
     private readonly constructionEntities = new Set<number>();
+    /** Stored entity names (`SketchEntityData.name`), unique per sketch when given by a program. */
+    private readonly entityNames = new Map<number, string>();
     private readonly entityParams = new Map<number, number[]>();
     private readonly entityCache = new Map<number, number[]>();
     /**
@@ -289,6 +291,9 @@ export class SketchSolver implements ExternalEntityHost {
             // Source construction is independent of whether its generated curve contributes a profile.
             if (target.construction) replacement.construction = true;
             else delete replacement.construction;
+            // the regenerated curve keeps the target's own name, never the source's
+            if (target.name !== undefined) replacement.name = target.name;
+            else delete replacement.name;
             // Fitted B-splines can change point count. Keep endpoint joins on the new end.
             const oldEnd = offsetEndpointIndexes(target).at(-1);
             const newEnd = offsetEndpointIndexes(replacement).at(-1);
@@ -602,6 +607,19 @@ export class SketchSolver implements ExternalEntityHost {
         else this.constructionEntities.delete(entityId);
     }
 
+    /** Stores (or with `undefined` clears) the name of a real entity; uniqueness is the caller's rule. */
+    setEntityName(entityId: number, name: string | undefined): void {
+        if (!this.entityTypes.has(entityId) || entityId <= 0)
+            throw new Error(`Unknown sketch entity: ${entityId}`);
+        if (name === undefined) this.entityNames.delete(entityId);
+        else this.entityNames.set(entityId, name);
+    }
+
+    /** Real entities stored under `name` — more than one only when a merge joined two namings. */
+    entitiesNamed(name: string): number[] {
+        return [...this.entityNames].filter(([, stored]) => stored === name).map(([id]) => id);
+    }
+
     addCircle(cx: number, cy: number, r: number): number {
         return this.registerEntity("circle", this.addEntityParams("circle", [cx, cy, r]));
     }
@@ -805,6 +823,7 @@ export class SketchSolver implements ExternalEntityHost {
         }
         this.entityTypes.delete(id);
         this.constructionEntities.delete(id);
+        this.entityNames.delete(id);
         this.entityParams.delete(id);
         this.entityCache.delete(id);
         this.bsplineOptions.delete(id);
@@ -1063,6 +1082,7 @@ export class SketchSolver implements ExternalEntityHost {
             ...(options?.parametrization === undefined ? {} : { parametrization: options.parametrization }),
             ...(options?.periodic ? { periodic: true } : {}),
             ...(options?.control ? { control: structuredClone(options.control) } : {}),
+            ...(this.entityNames.has(id) ? { name: this.entityNames.get(id) } : {}),
         };
     }
 
@@ -1266,6 +1286,7 @@ export class SketchSolver implements ExternalEntityHost {
         this.system = newSolverSystem();
         this.entityTypes.clear();
         this.constructionEntities.clear();
+        this.entityNames.clear();
         this.entityParams.clear();
         this.entityCache.clear();
         this.bsplineOptions.clear();
@@ -2023,6 +2044,7 @@ export class SketchSolver implements ExternalEntityHost {
                 );
             }
             if (entity.construction) this.constructionEntities.add(entity.id);
+            if (entity.name !== undefined) this.entityNames.set(entity.id, entity.name);
         }
         this.loadingConstraints = true;
         try {

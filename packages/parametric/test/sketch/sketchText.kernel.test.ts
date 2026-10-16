@@ -18,7 +18,7 @@ import { initWasm, ShapeFactory } from "@spicy3d/wasm";
 import { resolveProfiles, sketchProfiles } from "../../src/features/profileBuilder";
 import { collectEdges } from "../../src/features/profileGeometry";
 import { captureProfileRef } from "../../src/features/profileRef";
-import "../../src/migrations";
+import { SKETCH_FORMAT_VERSION } from "../../src/migrations";
 import "../../src/mergeRules";
 import { ParametricBodyNode } from "../../src/parametricBodyNode";
 import { randomSketchIds } from "../../src/sketch/sketchIds";
@@ -275,7 +275,7 @@ test("a spicy file reopens exact outlines and an extrusion with glyph holes", as
         moduleVersions: DocumentMigrations.moduleVersions(),
         models: doc.modelManager.serialize(),
     };
-    expect(envelope.moduleVersions["sketch"]).toBe(6);
+    expect(envelope.moduleVersions["sketch"]).toBe(SKETCH_FORMAT_VERSION);
     const decoded = await decodeDocumentFile(await encodeDocumentFile(envelope));
     expect(decoded.isOk).toBe(true);
     const reopened = newDocument();

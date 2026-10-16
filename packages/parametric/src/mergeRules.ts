@@ -355,6 +355,7 @@ registerMergePayload("sketch.data", {
                                 parametrization: { kind: "derived" },
                                 periodic: { kind: "derived" },
                                 construction: scalar,
+                                name: scalar,
                             },
                         },
                     },
@@ -368,6 +369,7 @@ registerMergePayload("sketch.data", {
                             control: atomic,
                             parametrization: scalar,
                             periodic: scalar,
+                            name: scalar,
                         },
                     },
                 },
@@ -443,7 +445,8 @@ registerMergePayload("sketch.data", {
     note:
         "`SketchNode.dataJson` (`SketchData`). Entities, constraints, dimension anchors and external " +
         "references are keyed by id; an entity's `params` is one value (its geometry; a bspline's fit points), " +
-        "a bspline's `parametrization` and `periodic` one value each, a constraint's `refs` " +
+        "a bspline's `parametrization` and `periodic` one value each, an entity's `name` one value (two " +
+        "devices naming different entities alike both keep it; programs then ask for the id), a constraint's `refs` " +
         "one value that must resolve. Offset sources and targets use these refs; their expression datum merges independently. Entities marked derivation=offset carry derived geometry rebuilt after merging. Detaching an offset versus editing it is an entity conflict. Angle datum source and side (`angleSide`) merge as one value, independently of geometry. The resolution results of an external reference (`type`, `snapshot`, " +
         "`dangling`) are recomputed by the rebuild. The legacy id counters merge by max / min.",
 });

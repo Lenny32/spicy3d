@@ -59,6 +59,11 @@ export interface SketchEntityData {
     control?: ControlBSplineDefinition;
     /** bspline only: a closed, C2 curve — the first fit point is not repeated as the last. */
     periodic?: boolean;
+    /**
+     * Name a program gave the entity at creation (sketch format 7), so later programs can address it;
+     * unique within the sketch when given — copies, trim and split pieces are unnamed.
+     */
+    name?: string;
 }
 
 /**

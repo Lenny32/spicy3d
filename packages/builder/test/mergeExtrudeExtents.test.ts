@@ -11,7 +11,7 @@ import {
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
 import "@spicy3d/parametric";
-import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric/src/migrations";
+import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "@spicy3d/parametric/src/migrations";
 import "@spicy3d/wasm";
 
 // The merge rule of an extrude's extents (parametric format 3, docs/merge.md "Features"). Base: the
@@ -205,7 +205,7 @@ test("the parametric-6 starting-face fixture survives cloud manifest/blob assemb
     expect(merged.conflicts).toEqual([]);
     expect(merged.merged["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 6,
+        sketch: SKETCH_FORMAT_VERSION,
     });
 });
 
@@ -261,7 +261,7 @@ test("the parametric-8 next fixture survives exact cloud manifest/blob assembly"
     expect(result.conflicts).toEqual([]);
     expect(result.merged["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 6,
+        sketch: SKETCH_FORMAT_VERSION,
     });
 });
 

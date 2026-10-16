@@ -1,0 +1,65 @@
+{
+    "__cla$$__": "Document",
+    "formatVersion": 2,
+    "moduleVersions": {
+        "parametric": 15,
+        "sketch": 7
+    },
+    "id": "fixture-sketch7-names",
+    "name": "Fixture sketch v7: stored entity names",
+    "models": {
+        "components": [],
+        "nodes": [
+            {
+                "id": "folder-root",
+                "name": "test",
+                "visible": true,
+                "__cla$$__": "FolderNode"
+            },
+            {
+                "plane": {
+                    "origin": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "normal": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "__cla$$__": "XYZ"
+                    },
+                    "xvec": {
+                        "x": 1,
+                        "y": 0,
+                        "z": 0,
+                        "__cla$$__": "XYZ"
+                    },
+                    "__cla$$__": "Plane"
+                },
+                "dataJson": "{\"entities\":[{\"id\":418273645091,\"type\":\"bspline\",\"params\":[0,0,20,-5,40,0,30,20,10,20],\"parametrization\":\"chord\",\"periodic\":true,\"name\":\"outer\"},{\"id\":927364518204,\"type\":\"circle\",\"params\":[20,8,3],\"name\":\"hole\"},{\"id\":556120938471,\"type\":\"line\",\"params\":[0,-10,40,-10],\"construction\":true}],\"constraints\":[{\"id\":301928374655,\"kind\":4,\"refs\":[{\"entityId\":556120938471,\"pointIndex\":0},{\"entityId\":556120938471,\"pointIndex\":1}]}]}",
+                "materialId": "",
+                "faceMaterialPair": [],
+                "transform": {
+                    "array": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                    "__cla$$__": "Matrix4"
+                },
+                "id": "sketch-names",
+                "name": "Named outline",
+                "visible": true,
+                "__cla$$__": "SketchNode",
+                "parentId": "folder-root"
+            }
+        ],
+        "materials": []
+    },
+    "variables": [],
+    "settings": {
+        "lengthUnit": "mm"
+    },
+    "acts": [],
+    "userData": {
+        "names": "untouched user data"
+    }
+}
