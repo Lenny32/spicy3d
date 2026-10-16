@@ -138,6 +138,24 @@ describe("AutosaveSettings", () => {
         settings.applyStoreValue(30);
         expect(settings.intervalMinutes).toBe(5);
     });
+
+    test.each([
+        { key: "spicy3d.settings.autosave", value: { intervalMinutes: 15 }, expected: 15 },
+        {
+            key: "spicy3d.settings.autosave.account",
+            value: { userId: "user-1", intervalMinutes: 30, pending: false },
+            expected: 30,
+        },
+    ])("the shared settings read $key at startup", async ({ key, value, expected }) => {
+        localStorage.setItem(key, JSON.stringify(value));
+        try {
+            rs.resetModules();
+            const fresh = await import("../src/autosave");
+            expect(fresh.AutosaveSettings.current.intervalMinutes).toBe(expected);
+        } finally {
+            localStorage.removeItem(key);
+        }
+    });
 });
 
 describe("AutosaveHolds", () => {
