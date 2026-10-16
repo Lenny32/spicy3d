@@ -84,7 +84,7 @@ function measure(context: AnalysisContext): Result<AnalysisResult> {
                     const formatted = formatValue(value, 1, context);
                     rows.push({ label: `${label} length (${formatted.unit})`, value: formatted.text });
                 } else if (shape.shapeType === ShapeTypes.face) {
-                    const value = (shape as IFace).area();
+                    const value = (shape as IFace).measuredArea?.() ?? (shape as IFace).area();
                     area += value;
                     const formatted = formatValue(value, 2, context);
                     rows.push({ label: `${label} area (${formatted.unit})`, value: formatted.text });
@@ -172,7 +172,7 @@ function measure(context: AnalysisContext): Result<AnalysisResult> {
                     kind = "length";
                     currentDimension = 1;
                 } else if (shape.shapeType === ShapeTypes.face) {
-                    value = (shape as IFace).area();
+                    value = (shape as IFace).measuredArea?.() ?? (shape as IFace).area();
                     kind = "area";
                     currentDimension = 2;
                 } else if (
@@ -242,7 +242,7 @@ function measure(context: AnalysisContext): Result<AnalysisResult> {
         }
         if (shape.shapeType === ShapeTypes.face) {
             const face = shape as IFace;
-            const area = formatValue(face.area(), 2, context);
+            const area = formatValue(face.measuredArea?.() ?? face.area(), 2, context);
             return Result.ok({ rows: [{ label: `Area (${area.unit})`, value: area.text }] });
         }
         if (

@@ -730,6 +730,14 @@ export const queryCapabilities: QueryCapability[] = [
         params: [],
     },
     {
+        method: "shape.measuredVolume",
+        name: "measuredVolume",
+        owner: "shape",
+        family: "shape",
+        returnKind: "data",
+        params: [],
+    },
+    {
         method: "vertex.point",
         name: "point",
         owner: "vertex",
@@ -908,6 +916,14 @@ export const queryCapabilities: QueryCapability[] = [
         ],
     },
     { method: "face.area", name: "area", owner: "face", family: "shape", returnKind: "data", params: [] },
+    {
+        method: "face.measuredArea",
+        name: "measuredArea",
+        owner: "face",
+        family: "shape",
+        returnKind: "data",
+        params: [],
+    },
     {
         method: "face.normal",
         name: "normal",
@@ -2167,6 +2183,7 @@ shape.* (target must be a shape):
   shape.shellSewing(target, tolerance: length) -> shape ref (registered under the op id)
   shape.setTolerance(target, tolerance: length) -> null — mutates the target ref's geometry in place (re-applied on ref refresh)
   shape.volume(target) -> number
+  shape.measuredVolume(target) -> number
 
 vertex.* (target must be a vertex):
   vertex.point(target) -> XYZ
@@ -2197,6 +2214,7 @@ face.* (target must be a face):
   face.inspectionUVBounds(target) -> Result<{ u1: number; u2: number; v1: number; v2: number; }, string>
   face.inspectionRayHit(target, point: xyz, direction: xyz, minDistance: length, maxDistance: length, tolerance: length?) -> Result<XYZ | undefined, string>
   face.area(target) -> number
+  face.measuredArea(target) -> number
   face.normal(target, u: number, v: number) -> [point: XYZ, normal: XYZ]
   face.outerWire(target) -> shape ref (registered under the op id)
   face.surface(target) -> surface ref (registered under the op id)

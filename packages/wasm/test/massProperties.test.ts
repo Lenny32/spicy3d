@@ -8,8 +8,9 @@ import "./setup";
 
 // #177: BRepGProp's fixed-order volume integration was several percent off on faces built
 // from periodic B-spline outlines (a planar cap trimmed by one, a loft through them), and the
-// adaptive VolumeProperties(Eps) was wrong on the cap while reporting a tiny error. The kernel
-// integrates span by span (Gauss-Kronrod); these shapes then agree with a fine tessellation.
+// adaptive VolumeProperties(Eps) was wrong on the cap while reporting a tiny error. The measured
+// values (measuredVolume, measuredArea, inspectionMass) integrate span by span (Gauss-Kronrod)
+// and agree with a fine tessellation; volume()/area() stay the fast fixed-order integration.
 
 const factory = createTestFactory();
 const converter = createTestConverter();
@@ -68,8 +69,8 @@ describe("volume of periodic B-spline geometry", () => {
     test.each([24, 64])("a prism of a %i-span outline is its cap area times the depth", (count) => {
         const cap = own(unwrapOk(factory.face([outline(count, 0, 1)]))) as IFace;
         const prism = own(unwrapOk(factory.prism(cap, new XYZ(0, 0, 10))));
-        const area = cap.area();
-        expectRelative(prism.volume(), area * 10, 1e-6);
+        const area = cap.measuredArea!();
+        expectRelative(prism.measuredVolume!(), area * 10, 1e-6);
         // The cap's area itself, checked against the tessellation of the prism.
         expectRelative(fineMeshVolume(prism), area * 10, 2e-4);
     });
@@ -87,10 +88,41 @@ describe("volume of periodic B-spline geometry", () => {
         expect(loft.checkShape()).toBe(true);
         const mesh = fineMeshVolume(loft);
         // The fixed-order integration was 8-15% too high here.
-        expectRelative(loft.volume(), mesh, 3e-4);
+        expectRelative(loft.measuredVolume!(), mesh, 3e-4);
         const mass = unwrapOk((loft as OccShape).inspectionMass());
-        expect(mass.volume).toBeCloseTo(loft.volume(), 6);
+        expect(mass.volume).toBeCloseTo(loft.measuredVolume!(), 6);
         expect(mass.relativeError).toBeGreaterThanOrEqual(0);
         expect(mass.relativeError).toBeLessThan(1e-6);
+    });
+});
+
+describe("measured values on kernels without the bindings", () => {
+    type Bindings = { measuredArea?: unknown; measuredVolume?: unknown };
+
+    /** Runs `run` with `name` removed from `owner`, then puts it back. */
+    function withoutBinding(owner: Bindings, name: keyof Bindings, run: () => void) {
+        const original = owner[name];
+        expect(original).toBeTypeOf("function");
+        delete owner[name];
+        try {
+            run();
+        } finally {
+            owner[name] = original;
+        }
+    }
+
+    test("measuredArea falls back to area()", () => {
+        const cap = own(unwrapOk(factory.face([outline(24, 0, 1)]))) as IFace;
+        withoutBinding(wasm.Face as unknown as Bindings, "measuredArea", () => {
+            expect(cap.measuredArea!()).toBe(cap.area());
+        });
+    });
+
+    test("measuredVolume falls back to volume()", () => {
+        const cap = own(unwrapOk(factory.face([outline(24, 0, 1)]))) as IFace;
+        const prism = own(unwrapOk(factory.prism(cap, new XYZ(0, 0, 10))));
+        withoutBinding(wasm.Shape as unknown as Bindings, "measuredVolume", () => {
+            expect(prism.measuredVolume!()).toBe(prism.volume());
+        });
     });
 });

@@ -60,8 +60,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "massProperties.hpp"
-
 namespace ThickEnvelope {
 
 struct Result {
@@ -96,7 +94,9 @@ inline TopoDS_Compound compoundOf(const std::vector<TopoDS_Shape>& shapes)
 
 inline double volumeOf(const TopoDS_Shape& shape)
 {
-    return MassProperties::volume(shape);
+    GProp_GProps mass;
+    BRepGProp::VolumeProperties(shape, mass);
+    return mass.Mass();
 }
 
 struct Sheet {
@@ -719,7 +719,7 @@ inline Result build(const TopoDS_Shape& solid, const NCollection_List<TopoDS_Sha
         if (points.empty()) {
             // A sliver too thin to step into is negligible: with the wall when on the offset side.
             GProp_GProps mass;
-            MassProperties::volume(cell, mass);
+            BRepGProp::VolumeProperties(cell, mass);
             if (std::abs(mass.Mass()) > 1e-6 * sourceVolume)
                 return { TopoDS_Shape(), "a split cell has no interior point" };
             if (BRepClass3d_SolidClassifier(solid, mass.CentreOfMass(), Precision::Confusion()).State() == offsetSide)

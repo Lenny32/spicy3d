@@ -108,7 +108,16 @@ export interface IShape extends IDisposable {
     shellSewing(tolerance: number): IShape;
     /** @unit length tolerance */
     setTolerance(tolerance: number): void;
+    /**
+     * Fast signed volume (OCCT's fixed-order integration) for checks; it can be several percent
+     * off on solids with spline-trimmed faces (#177) — report `measuredVolume` or `inspectionMass`.
+     */
     volume(): number;
+    /**
+     * Signed volume for measurement (span-wise adaptive integration, #177); kernels without it
+     * leave the method out — use `shape.measuredVolume?.() ?? shape.volume()`.
+     */
+    measuredVolume?(): number;
 }
 
 export interface ISubShape extends IShape {
@@ -175,7 +184,16 @@ export interface IFace extends IShape {
         maxDistance: number,
         tolerance?: number,
     ): Result<XYZ | undefined>;
+    /**
+     * The face's fingerprint area, stored in face references and identity keys: OCCT's
+     * fixed-order integration, which can be several percent off on spline-trimmed faces (#177).
+     */
     area(): number;
+    /**
+     * The face's area for measurement (span-wise adaptive integration, #177); kernels without
+     * it leave the method out — use `face.measuredArea?.() ?? face.area()`.
+     */
+    measuredArea?(): number;
     /**
      * Point and outward unit normal at surface parameters (u, v), following the face orientation.
      * The normal is the zero vector for a surface-less face or where the surface derivatives degenerate

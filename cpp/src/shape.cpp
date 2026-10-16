@@ -617,7 +617,7 @@ public:
             if (surface.GetType() != GeomAbs_Plane || std::abs(surface.Plane().Axis().Direction().Dot(normal)) < 1.0 - 1e-7)
                 continue;
             GProp_GProps props;
-            MassProperties::area(face, props);
+            BRepGProp::SurfaceProperties(face, props);
             if (std::abs(cut.Distance(props.CentreOfMass())) <= 1e-6)
                 builder.Add(caps, face);
         }
@@ -702,7 +702,17 @@ public:
         aFixTol.SetTolerance(shape, tolerance);
     }
 
+    // Fast fixed-order volume for the sanity checks (orientation, overlap, thicken results)
+    // that were tuned against it; can be several percent off on spline-heavy solids (#177).
     static double volume(const TopoDS_Shape& shape)
+    {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(shape, props);
+        return props.Mass();
+    }
+
+    // The volume for measurement: span-wise adaptive integration (massProperties.hpp).
+    static double measuredVolume(const TopoDS_Shape& shape)
     {
         return MassProperties::volume(shape);
     }
@@ -970,7 +980,17 @@ public:
             : InspectionRayResult { true, false, Vector3 { 0.0, 0.0, 0.0 } };
     }
 
+    // The face's fingerprint area: stored in face references and identity keys, so it
+    // keeps OCCT's fixed-order integration that saved documents were matched against (#177).
     static double area(const TopoDS_Face& face)
+    {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        return props.Mass();
+    }
+
+    // The face's area for measurement: span-wise adaptive integration (massProperties.hpp).
+    static double measuredArea(const TopoDS_Face& face)
     {
         GProp_GProps props;
         MassProperties::area(face, props);
@@ -1141,7 +1161,8 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("hlr", guardedEntry<&Shape::hlr>("Shape.hlr"))
         .class_function("shellSewing", guardedEntry<&Shape::shellSewing>("Shape.shellSewing"))
         .class_function("setTolerance", guardedEntry<&Shape::setTolerance>("Shape.setTolerance"))
-        .class_function("volume", guardedEntry<&Shape::volume>("Shape.volume"));
+        .class_function("volume", guardedEntry<&Shape::volume>("Shape.volume"))
+        .class_function("measuredVolume", guardedEntry<&Shape::measuredVolume>("Shape.measuredVolume"));
 
     class_<Vertex>("Vertex").class_function("point", guardedEntry<&Vertex::point>("Vertex.point"));
 
@@ -1169,6 +1190,7 @@ EMSCRIPTEN_BINDINGS(Shape)
         .class_function("inspectionUVBounds", guardedEntry<&Face::inspectionUVBounds>("Face.inspectionUVBounds"))
         .class_function("inspectionRayHit", guardedEntry<&Face::inspectionRayHit>("Face.inspectionRayHit"))
         .class_function("area", guardedEntry<&Face::area>("Face.area"))
+        .class_function("measuredArea", guardedEntry<&Face::measuredArea>("Face.measuredArea"))
         .class_function("offset", guardedEntry<&Face::offset>("Face.offset"))
         .class_function("outerWire", guardedEntry<&Face::outerWire>("Face.outerWire"))
         .class_function("surface", guardedEntry<&Face::surface>("Face.surface"))

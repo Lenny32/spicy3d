@@ -458,6 +458,10 @@ export class OccShape implements IShape, IInspectionPrecheck {
         return wasm.Shape.volume(this.shape);
     }
 
+    measuredVolume(): number {
+        return wasm.Shape.measuredVolume?.(this.shape) ?? this.volume();
+    }
+
     inspectionSectionCaps(plane: Plane, validated?: ReadonlySet<IShape>): Result<IShape> {
         if (
             this.isNull() ||
@@ -906,6 +910,10 @@ export class OccFace extends OccShape implements IFace {
 
     area(): number {
         return wasm.Face.area(this.face);
+    }
+
+    measuredArea(): number {
+        return wasm.Face.measuredArea?.(this.face) ?? this.area();
     }
 
     normal(u: number, v: number): [point: XYZ, normal: XYZ] {

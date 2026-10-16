@@ -933,6 +933,7 @@ interface EmbindModule {
     shellSewing(_0: TopoDS_Shape, _1: number): TopoDS_Shape;
     setTolerance(_0: TopoDS_Shape, _1: number): void;
     volume(_0: TopoDS_Shape): number;
+    measuredVolume(_0: TopoDS_Shape): number;
     findAncestor(_0: TopoDS_Shape, _1: TopoDS_Shape, _2: TopAbs_ShapeEnum): Array<TopoDS_Shape>;
     findSubShapes(_0: TopoDS_Shape, _1: TopAbs_ShapeEnum): Array<TopoDS_Shape>;
     getDirectSubShapes(_0: TopoDS_Shape): Array<TopoDS_Shape>;
@@ -974,6 +975,7 @@ interface EmbindModule {
     inspectionTrimmedIso(_0: TopoDS_Face, _1: boolean, _2: number): TopoDS_Shape;
     inspectionUVBounds(_0: TopoDS_Face): InspectionUVBounds | undefined;
     area(_0: TopoDS_Face): number;
+    measuredArea(_0: TopoDS_Face): number;
     offset(_0: TopoDS_Face, _1: number, _2: GeomAbs_JoinType): TopoDS_Shape;
     outerWire(_0: TopoDS_Face): TopoDS_Wire;
     surface(_0: TopoDS_Face): Handle_Geom_Surface;

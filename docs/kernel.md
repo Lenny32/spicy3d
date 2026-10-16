@@ -198,9 +198,8 @@ its finite deadline without marking the main kernel crashed.
 
 ## Volume and area integration (#177)
 
-Every volume and area the kernel computes (`Shape.volume`, `inspectionMass`,
-`inspectionCommonVolume`, `Face.area` and the internal sanity checks of extrude, thicken, corner
-setback and the tolerant envelope) goes through `cpp/src/massProperties.hpp`:
+The measured values — `Shape.measuredVolume`, `Face.measuredArea`, `inspectionMass` and
+`inspectionCommonVolume` — go through `cpp/src/massProperties.hpp`:
 `BRepGProp::VolumePropertiesGK` integrated span by span (`IsUseSpan`) and the adaptive
 `SurfaceProperties(Eps)`, relative epsilon `1e-7`. OCCT's default `VolumeProperties` uses a fixed
 Gauss order over each face's whole parameter range: on faces made from periodic B-spline outlines
@@ -210,6 +209,20 @@ span-wise result agrees with a 0.01 mm tessellation to `1e-4` (`packages/wasm/te
 Analytic shapes cost the same; a spline-heavy solid of a few hundred spans takes ~15x the fixed-order
 time (0.6 s instead of 0.04 s natively). When the adaptive integration fails, the fixed-order one is
 used and `inspectionMass` leaves out `relativeError` (otherwise the kernel's estimate).
+
+`Shape.volume` and `Face.area` keep the fixed-order integration, on purpose:
+
+- `Face.area` is the face's fingerprint, stored in face references (`ProfileRef.area`,
+  `parametricProgram` face data) and identity keys (`construction/resolver.ts`) and rewritten on
+  rebuild: a new value would rewrite stored references and could stop old ones from matching.
+- `Shape.volume` and the kernel's internal volume/area checks (extrude cover, thicken, tolerant
+  envelope, corner setback, solid orientation in `wasm/src/factory.ts`) are sign and ratio checks
+  tuned against it, and they run many times per feature: with the span-wise integration, shelling
+  a periodic ruled loft went from seconds to over ten minutes.
+
+Measurement uses `shape.measuredVolume?.() ?? shape.volume()` / `face.measuredArea?.() ?? face.area()`
+(measure tool, analysis panels, similarity descriptor; the analysis panels' solid volumes come from
+`inspectionMass`); kernels without the bindings fall back to the fixed-order values.
 
 ## Guard rails against known hangs
 
