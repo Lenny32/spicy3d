@@ -1,12 +1,12 @@
 {
     "schema": 1,
-    "inputs": "14321971a17adb92e1afc3ce8819a9756b883c92d40d117c1737d90cab0f17c8",
-    "tag": "wasm-14321971a17adb92",
-    "url": "https://github.com/Lenny32/spicy3d/releases/download/wasm-14321971a17adb92",
+    "inputs": "46b085fb285a58dc4bb5ceb1ee83d46ff17dc8863ef47bb1bf8f486fd7cb4f2d",
+    "tag": "wasm-46b085fb285a58dc",
+    "url": "https://github.com/Lenny32/spicy3d/releases/download/wasm-46b085fb285a58dc",
     "files": {
         "spicy-wasm.wasm": {
-            "sha256": "e6f38f6a779fb56e7fa3d53f060c70a8f4471f25f220548c890ae18362329f20",
-            "size": 11973952
+            "sha256": "f68864365a47274622f79f3f52fee1c0b2c5063694d81f411f290f9b4c64de0a",
+            "size": 11974458
         },
         "spicy-wasm.js": {
             "sha256": "ec4e09fb26c6a9f48cc0a0e5e3cbb3a9f9bd2ba0d8ade87ae5891e13628f807c",
