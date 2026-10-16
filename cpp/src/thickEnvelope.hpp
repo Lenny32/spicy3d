@@ -114,7 +114,7 @@ struct Sheet {
 // C1 junction would have a crease there).
 inline bool extendedSheet(const TopoDS_Face& skinFace, double thickness, double margin, Sheet& sheet)
 {
-    const opencascade::handle<Geom_Surface> surface = BRep_Tool::Surface(skinFace);
+    const auto surface = BRep_Tool::Surface(skinFace);
     if (surface.IsNull())
         return false;
     double u0, u1, v0, v1;
@@ -135,7 +135,7 @@ inline bool extendedSheet(const TopoDS_Face& skinFace, double thickness, double 
         sheet.v1 = v1 + margin;
         return true;
     }
-    opencascade::handle<Geom_BSplineSurface> spline
+    auto spline
         = GeomConvert::SurfaceToBSplineSurface(new Geom_RectangularTrimmedSurface(surface, u0, u1, v0, v1));
     if (spline.IsNull())
         return false;
@@ -145,7 +145,7 @@ inline bool extendedSheet(const TopoDS_Face& skinFace, double thickness, double 
         spline->SetUNotPeriodic();
     if (spline->IsVPeriodic())
         spline->SetVNotPeriodic();
-    opencascade::handle<Geom_BoundedSurface> bounded = spline;
+    auto bounded = opencascade::handle<Geom_BoundedSurface>(spline);
     for (const bool inU : { true, false }) {
         if (inU ? closedU : closedV)
             continue;
@@ -559,7 +559,7 @@ inline TopoDS_Wire loopWire(const Sheet& sheet, const SheetGrid& grid, const ope
     for (size_t k = 0; k < loop.size(); ++k) {
         const auto a = uv(loop[k]);
         const auto b = uv(loop[(k + 1) % loop.size()]);
-        opencascade::handle<Geom2d_Line> line = new Geom2d_Line(a, gp_Dir2d(b.X() - a.X(), b.Y() - a.Y()));
+        const auto line = opencascade::handle<Geom2d_Line>(new Geom2d_Line(a, gp_Dir2d(b.X() - a.X(), b.Y() - a.Y())));
         BRepBuilderAPI_MakeEdge edge(line, surface, vertices[k], vertices[(k + 1) % loop.size()], 0, a.Distance(b));
         if (!edge.IsDone())
             return TopoDS_Wire();
@@ -625,7 +625,7 @@ inline double distanceTo(const gp_Pnt& point, const TopoDS_Shape& target)
 // the cell allows up to depth / 2; `steps` receives how deep each one is.
 inline std::vector<gp_Pnt> interiorPoints(const TopoDS_Shape& cell, double depth, int count, std::vector<double>& steps)
 {
-    opencascade::handle<IntTools_Context> context = new IntTools_Context();
+    const auto context = opencascade::handle<IntTools_Context>(new IntTools_Context());
     std::vector<gp_Pnt> points;
     for (TopExp_Explorer faces(cell, TopAbs_FACE); faces.More() && static_cast<int>(points.size()) < count; faces.Next()) {
         const auto face = TopoDS::Face(faces.Current());
