@@ -22,7 +22,7 @@ import {
     DirectionalLight,
     Group,
     Layers,
-    type Mesh,
+    Mesh,
     OrthographicCamera,
     PerspectiveCamera,
     Raycaster,
@@ -455,6 +455,67 @@ describe("ThreeView — isolate / unisolate", () => {
         expect(view.camera.layers.mask).toBe(
             (1 << Constants.Layers.Default) | (1 << Constants.Layers.Isolation),
         );
+    });
+});
+
+describe("ThreeView — isolation across rebuilds (#178)", () => {
+    function isolatedSetup() {
+        const { view, context, doc } = createTestView();
+        const visuals = new Map<unknown, Group>();
+        context.getVisual = ((n: unknown) => visuals.get(n)) as never;
+        const visualOf = (node: unknown) => {
+            const group = new Group();
+            group.add(new Mesh());
+            visuals.set(node, group);
+            return group;
+        };
+        const onIsolationLayer = (object: { layers: Layers }) =>
+            object.layers.isEnabled(Constants.Layers.Isolation) &&
+            !object.layers.isEnabled(Constants.Layers.Solid);
+        return { view, doc, visuals, visualOf, onIsolationLayer };
+    }
+
+    test("meshes a rebuild puts back on their normal layer are isolated again before rendering", () => {
+        const { view, visualOf, onIsolationLayer } = isolatedSetup();
+        const node = { id: "parent" };
+        const visual = visualOf(node);
+        view.isolate([node as never]);
+        expect(onIsolationLayer(visual.children[0])).toBe(true);
+
+        visual.clear();
+        const rebuilt = new Mesh();
+        rebuilt.layers.set(Constants.Layers.Solid);
+        visual.add(rebuilt);
+        view["renderScene"]();
+
+        expect(onIsolationLayer(rebuilt)).toBe(true);
+        expect(onIsolationLayer(visual)).toBe(true);
+    });
+
+    test("a node restored as a new instance with the same id stays isolated and unisolates", () => {
+        const { view, doc, visuals, visualOf, onIsolationLayer } = isolatedSetup();
+        const original = { id: "parent" };
+        visualOf(original);
+        view.isolate([original as never]);
+
+        visuals.delete(original);
+        const restored = { id: "parent" };
+        const visual = visualOf(restored);
+        const findNodes = rs.fn((predicate: (node: { id: string }) => boolean) =>
+            [restored, { id: "other" }].filter(predicate),
+        );
+        doc.modelManager.findNodes = findNodes as never;
+        view["renderScene"]();
+
+        expect(onIsolationLayer(visual)).toBe(true);
+        expect(onIsolationLayer(visual.children[0])).toBe(true);
+        // Resolved once: later frames use the restored instance without walking the tree.
+        view["renderScene"]();
+        expect(findNodes).toHaveBeenCalledTimes(1);
+
+        view.unisolate();
+        expect(visual.layers.isEnabled(Constants.Layers.Default)).toBe(true);
+        expect(visual.children[0].layers.isEnabled(Constants.Layers.Solid)).toBe(true);
     });
 });
 

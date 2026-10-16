@@ -28,6 +28,12 @@ const RETENTION_MS = 10 * 60_000;
 const MAX_RESULT_BYTES = 1_048_576;
 const jobTools = new WeakSet<Tool>();
 
+/**
+ * Resolves in a later task, after every pending microtask — the start call's answer travelling
+ * through the MCP SDK to the socket included (#178).
+ */
+const afterAcknowledgement = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 /** Identity-based bypass: naming a plugin tool like a built-in never grants it queue access. */
 export function isProgramJobTool(tool: Tool): boolean {
     return jobTools.has(tool);
@@ -92,6 +98,10 @@ export class ProgramJobs {
         this.jobs.set(job.id, job);
         void context
             .scheduleMutation(async () => {
+                // An idle queue starts this within the start call's own microtasks, and a synchronous
+                // kernel call (an editFeature rebuild cannot yield) would hold back the jobId answer
+                // until it returns — past the client's timeout, leaving nothing to poll or cancel.
+                await afterAcknowledgement();
                 if (job.controller.signal.aborted) return;
                 job.state = "running";
                 try {
