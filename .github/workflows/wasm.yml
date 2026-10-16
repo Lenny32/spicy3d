@@ -244,6 +244,11 @@ jobs:
 
             - name: Commit the lock
               run: |
+                  # The branch may have moved since job `state`: never pin these files under other inputs.
+                  if [[ "$(node scripts/wasm-artifact.mjs tag)" != "$TAG" ]]; then
+                      echo "::error::The branch's kernel sources changed since $TAG was decided; the run for the new commit pins its own kernel."
+                      exit 1
+                  fi
                   node scripts/wasm-artifact.mjs lock --dir out
                   node scripts/wasm-artifact.mjs check
                   if git diff --quiet; then
