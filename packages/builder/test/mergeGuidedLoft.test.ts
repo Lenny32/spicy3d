@@ -11,7 +11,7 @@ import {
 } from "@spicy3d/core";
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import "@spicy3d/app";
-import { PARAMETRIC_FORMAT_VERSION } from "@spicy3d/parametric";
+import { PARAMETRIC_FORMAT_VERSION, SKETCH_FORMAT_VERSION } from "@spicy3d/parametric";
 import "@spicy3d/wasm";
 
 // biome-ignore lint/suspicious/noExplicitAny: these helpers inspect the merge engine's serialized document payload
@@ -129,6 +129,6 @@ test("cloud featuresJson blobs and device exports preserve the complete version1
     expect(feature(decoded.value).guided).toEqual(feature(b).guided);
     expect(decoded.value["moduleVersions"]).toMatchObject({
         parametric: PARAMETRIC_FORMAT_VERSION,
-        sketch: 6,
+        sketch: SKETCH_FORMAT_VERSION,
     });
 });

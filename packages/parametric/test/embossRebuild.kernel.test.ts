@@ -17,10 +17,10 @@ import "../../wasm/test/setup";
 import { FeatureChainPreview } from "../src/commands/featureEditPreview";
 import { captureEdgeRef } from "../src/features/edgeRef";
 import { type EmbossFeatureData, evaluateFeature } from "../src/features/feature";
+import { SKETCH_FORMAT_VERSION } from "../src/migrations";
 import { ParametricBodyNode } from "../src/parametricBodyNode";
 import { SketchNode } from "../src/sketch";
 import { embossFixture, rectangle } from "./_helpers/emboss";
-import "../src/migrations";
 import "./sketch/setup";
 
 beforeAll(() => {
@@ -304,7 +304,7 @@ test("parametric 13 migration preserves existing models and newer readers enforc
     } as Serialized;
     const result = DocumentMigrations.migrate(data);
     expect(result.isOk).toBe(true);
-    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 15, sketch: 6 });
+    expect(result.value["moduleVersions"]).toMatchObject({ parametric: 15, sketch: SKETCH_FORMAT_VERSION });
     expect(result.value["models"]).toEqual(data["models"]);
     expect(result.value["userData"]).toEqual(data["userData"]);
 });

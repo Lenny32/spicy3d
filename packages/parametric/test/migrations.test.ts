@@ -120,10 +120,10 @@ function sketchV1Fixtures(): string[] {
         .map((x) => x.name);
 }
 
-describe("sketch format 6 (associative offsets)", () => {
+describe("sketch format 7 (entity names)", () => {
     test("is the running version, reached from 1 without a gap", () => {
-        expect(SKETCH_FORMAT_VERSION).toBe(6);
-        expect(DocumentMigrations.currentVersion("sketch")).toBe(6);
+        expect(SKETCH_FORMAT_VERSION).toBe(7);
+        expect(DocumentMigrations.currentVersion("sketch")).toBe(7);
         expect(DocumentMigrations.findGaps()).toEqual([]);
     });
 
@@ -134,7 +134,7 @@ describe("sketch format 6 (associative offsets)", () => {
         const migrated = migrateDocument(data);
 
         expect(migrated.isOk).toBe(true);
-        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+        expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 7 });
         expect(migrated.value["models"]).toEqual(original["models"]);
         expect(data).toEqual(original);
     });
@@ -168,7 +168,7 @@ test("sketch v3 documents open in v5 with control definitions and all stored met
     const original = structuredClone(data),
         migrated = migrateDocument(data);
     expect(migrated.isOk).toBe(true);
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 7 });
     expect(migrated.value["models"]).toEqual(original["models"]);
     expect(data).toEqual(original);
 });
@@ -178,7 +178,7 @@ test("sketch 5 migrates verbatim without introducing associative links", () => {
     const original = structuredClone(data);
     const result = migrateDocument(data);
     expect(result.isOk).toBe(true);
-    expect(result.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(result.value["moduleVersions"]).toMatchObject({ sketch: 7 });
     expect(result.value["models"]).toEqual(original["models"]);
     expect(result.value["userData"]).toEqual(original["userData"]);
     expect(data).toEqual(original);
@@ -188,12 +188,34 @@ test("sketch 6 fixture preserves relation, distance expression and cache marker"
     const { data } = fixture("v2/sketch6-associative-offset.json");
     const result = migrateDocument(data);
     expect(result.isOk).toBe(true);
-    expect(result.value).toEqual({ ...data, moduleVersions: { ...data["moduleVersions"], parametric: 15 } });
+    expect(result.value).toEqual({ ...data, moduleVersions: { parametric: 15, sketch: 7 } });
     const sketch = JSON.parse(data["models"].nodes[1].dataJson);
     expect(sketch.constraints[0]).toMatchObject({ kind: 34, datum: "gap" });
     expect(sketch.entities[1].derivation).toBe("offset");
+    expect(sketch.entities.some((e: any) => "name" in e)).toBe(false);
+});
+
+test("sketch 7 fixture keeps its entity names and is refused by a sketch 6 reader", () => {
+    const { data } = fixture("v2/sketch7-entity-names.json");
+    const original = structuredClone(data);
+    const result = migrateDocument(data);
+    expect(result.isOk).toBe(true);
+    expect(result.value).toEqual(original);
+    const sketch = JSON.parse(data["models"].nodes[1].dataJson);
+    expect(sketch.entities.map((e: any) => e.name)).toEqual(["outer", "hole", undefined]);
+
+    const older = new MigrationRegistry();
+    older.registerModule("sketch", 6);
+    const refused = older.migrate(data);
+    expect(refused.isOk).toBe(false);
+    expect(refused.error).toMatchObject({ kind: "newerFormat", module: "sketch", version: 7, supported: 6 });
+    expect(data).toEqual(original);
+});
+
+test("a sketch 8 document is refused before touching models", () => {
+    const { data } = fixture("v2/sketch7-entity-names.json");
     const newer = structuredClone(data);
-    newer["moduleVersions"]["sketch"] = 7;
+    newer["moduleVersions"]["sketch"] = 8;
     const refused = migrateDocument(newer);
     expect(refused.isOk).toBe(false);
     expect(newer["models"]).toEqual(data["models"]);
