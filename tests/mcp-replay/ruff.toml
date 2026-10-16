@@ -1,0 +1,6 @@
+# Python style of the replay runner, matching the repo's Biome settings (110 columns, double quotes).
+line-length = 110
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "I"]

@@ -1,0 +1,221 @@
+{
+    "schema": "spicy3d.mcp-replay",
+    "schemaVersion": 1,
+    "name": "background-job",
+    "description": "Background jobs awaited through their terminal state and the rebuilds they leave: a parametric job moving the sketch (entity ids bound from the sketch's response), a program job, and a parametric job that fails and rolls back entirely.",
+    "setup": { "document": { "kind": "empty" } },
+    "steps": [
+        {
+            "id": "plate",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "sketch",
+                        "id": "s1",
+                        "plane": "XY",
+                        "entities": [
+                            { "type": "line", "params": [0, 0, 40, 0] },
+                            { "type": "line", "params": [40, 0, 40, 30] },
+                            { "type": "line", "params": [40, 30, 0, 30] },
+                            { "type": "line", "params": [0, 30, 0, 0] }
+                        ]
+                    },
+                    { "op": "extrude", "id": "b1", "sketch": "s1", "depth": 20, "name": "Plate" }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.bodies[0].status", "equals": "ok" },
+                    { "path": "result.results.s1.entities", "length": 4 }
+                ]
+            }
+        },
+        {
+            "id": "startMove",
+            "call": "start_parametric_job",
+            "args": {
+                "ops": [
+                    {
+                        "op": "editSketch",
+                        "sketch": { "$ref": "plate.result.created[id=s1].nodeId" },
+                        "actions": [
+                            {
+                                "action": "move",
+                                "entities": [
+                                    { "$ref": "plate.result.results.s1.entities[0].id" },
+                                    { "$ref": "plate.result.results.s1.entities[1].id" },
+                                    { "$ref": "plate.result.results.s1.entities[2].id" },
+                                    { "$ref": "plate.result.results.s1.entities[3].id" }
+                                ],
+                                "delta": [10, 5]
+                            }
+                        ]
+                    }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.jobId", "exists": true },
+                    { "path": "result.progress.total", "equals": 1 }
+                ]
+            }
+        },
+        {
+            "id": "moved",
+            "waitJob": { "tool": "get_parametric_job", "jobId": { "$ref": "startMove.result.jobId" } },
+            "timeoutSeconds": 180,
+            "expect": {
+                "assert": [
+                    { "path": "result.progress", "equals": { "completed": 1, "total": 1 } },
+                    { "path": "result.error", "exists": false }
+                ]
+            }
+        },
+        {
+            "id": "measureMoved",
+            "note": "The body follows its sketch: translated by (10, 5), same volume.",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "id": "bb",
+                        "method": "shape.boundingBox",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 24000, "tol": 1e-6 },
+                    {
+                        "path": "result.results.bb",
+                        "approx": {
+                            "min": { "x": 10, "y": 5, "z": 0 },
+                            "max": { "x": 50, "y": 35, "z": 20 }
+                        },
+                        "tol": 1e-6
+                    }
+                ]
+            }
+        },
+        {
+            "id": "startProgram",
+            "call": "start_program_job",
+            "args": {
+                "ops": [
+                    {
+                        "id": "cube",
+                        "method": "box",
+                        "args": {
+                            "plane": { "origin": { "x": 100, "y": 0, "z": 0 } },
+                            "dx": 10,
+                            "dy": 10,
+                            "dz": 10
+                        },
+                        "name": "Cube"
+                    },
+                    { "id": "vol", "method": "shape.volume", "target": "cube" }
+                ]
+            },
+            "expect": { "assert": [{ "path": "result.jobId", "exists": true }] }
+        },
+        {
+            "id": "programDone",
+            "waitJob": { "tool": "get_program_job", "jobId": { "$ref": "startProgram.result.jobId" } },
+            "timeoutSeconds": 180,
+            "expect": {
+                "assert": [
+                    { "path": "result.result.created", "length": 1 },
+                    { "path": "result.result.created[0].name", "equals": "Cube" },
+                    { "path": "result.result.results.vol", "approx": 1000, "tol": 1e-6 }
+                ]
+            }
+        },
+        {
+            "id": "startBad",
+            "note": "The second op's expression names no variable: the job fails and its first op is rolled back too.",
+            "call": "start_parametric_job",
+            "args": {
+                "ops": [
+                    {
+                        "op": "editFeature",
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" },
+                        "featureId": { "$ref": "plate.result.bodies[0].features[0].id" },
+                        "action": "setParameter",
+                        "key": "depth",
+                        "value": 50
+                    },
+                    {
+                        "op": "editFeature",
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" },
+                        "featureId": { "$ref": "plate.result.bodies[0].features[0].id" },
+                        "action": "setParameter",
+                        "key": "depth",
+                        "value": "no_such_variable * 2"
+                    }
+                ]
+            },
+            "expect": { "assert": [{ "path": "result.jobId", "exists": true }] }
+        },
+        {
+            "id": "badDone",
+            "waitJob": { "tool": "get_parametric_job", "jobId": { "$ref": "startBad.result.jobId" } },
+            "timeoutSeconds": 180,
+            "expect": {
+                "assert": [
+                    { "path": "result.state", "equals": "failed" },
+                    { "path": "result.error", "contains": "no_such_variable" }
+                ]
+            }
+        },
+        {
+            "id": "afterBad",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "id": "bb",
+                        "method": "shape.boundingBox",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 24000, "tol": 1e-6 },
+                    { "path": "result.results.bb.max.z", "approx": 20, "tol": 1e-6 }
+                ]
+            }
+        },
+        {
+            "id": "finalState",
+            "call": "get_document_state",
+            "expect": {
+                "assert": [
+                    { "path": "result.nodeCount", "equals": 3 },
+                    {
+                        "path": "result.nodes[name=Plate].id",
+                        "equals": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "path": "result.nodes[name=Cube].id",
+                        "equals": { "$ref": "programDone.result.result.created[0].nodeId" }
+                    }
+                ]
+            }
+        }
+    ]
+}
