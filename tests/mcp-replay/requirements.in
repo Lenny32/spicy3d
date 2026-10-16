@@ -1,0 +1,10 @@
+# Direct dependencies of the replay runner; requirements.txt pins them and everything they pull in.
+# Regenerate: uv pip compile requirements.in -o requirements.txt --generate-hashes --python-version 3.12
+# The MCP SDK stays on 1.x (classic initialize), like the page's @modelcontextprotocol/sdk 1.x.
+mcp==1.30.0
+playwright==1.63.0
+pytest==9.1.1
+# Lint + format (ruff.toml): ruff check spicy_replay tests && ruff format --check spicy_replay tests
+ruff==0.14.0
+# The stand-in relay's WebSocket support (uvicorn comes with mcp).
+websockets==15.0.1

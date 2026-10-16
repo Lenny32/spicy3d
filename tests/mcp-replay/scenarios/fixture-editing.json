@@ -1,0 +1,124 @@
+{
+    "schema": "spicy3d.mcp-replay",
+    "schemaVersion": 1,
+    "name": "fixture-editing",
+    "description": "Starts from a saved .spicy (fixtures/pocket-plate.spicy: plate_t = 20, a 40×30 plate extruded by plate_t, a 10×10 pocket cut 20 deep — written by the app itself). Objects are addressed by the node and feature ids stored in the file, never by run_program/run_parametric op ids: those live in per-document runtime maps a file does not restore. Checks the loaded geometry, then edits through the variable and the pocket feature.",
+    "setup": { "document": { "kind": "fixture", "path": "fixtures/pocket-plate.spicy" } },
+    "steps": [
+        {
+            "id": "loaded",
+            "call": "get_document_state",
+            "expect": {
+                "assert": [
+                    { "path": "result.name", "equals": "Pocket plate" },
+                    { "path": "result.nodes[id=LTldOVWa-c1fQITv8YS2F].type", "equals": "ParametricBodyNode" },
+                    { "path": "result.nodes[id=LTldOVWa-c1fQITv8YS2F].name", "equals": "Plate" }
+                ]
+            }
+        },
+        {
+            "id": "variables",
+            "call": "document_variables",
+            "args": { "action": "list" },
+            "expect": {
+                "assert": [
+                    { "path": "result.variables", "length": 1 },
+                    { "path": "result.variables[name=plate_t].expression", "equals": "20" },
+                    { "path": "result.variables[name=plate_t].value", "approx": 20, "tol": 1e-9 }
+                ]
+            }
+        },
+        {
+            "id": "measureLoaded",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    { "id": "vol", "method": "shape.volume", "target": "LTldOVWa-c1fQITv8YS2F" },
+                    { "id": "valid", "method": "shape.checkShape", "target": "LTldOVWa-c1fQITv8YS2F" },
+                    { "id": "bb", "method": "shape.boundingBox", "target": "LTldOVWa-c1fQITv8YS2F" }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 22000, "tol": 1e-6 },
+                    { "path": "result.results.valid", "equals": true },
+                    {
+                        "path": "result.results.bb",
+                        "approx": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 40, "y": 30, "z": 20 } },
+                        "tol": 1e-6
+                    }
+                ]
+            }
+        },
+        {
+            "id": "thicker",
+            "call": "document_variables",
+            "args": {
+                "action": "set",
+                "variables": [{ "name": "plate_t", "type": "length", "expression": "25" }]
+            }
+        },
+        {
+            "id": "settled",
+            "waitRebuilds": {},
+            "timeoutSeconds": 120
+        },
+        {
+            "id": "measureThicker",
+            "call": "run_program",
+            "args": { "ops": [{ "id": "vol", "method": "shape.volume", "target": "LTldOVWa-c1fQITv8YS2F" }] },
+            "expect": { "assert": [{ "path": "result.results.vol", "approx": 28000, "tol": 1e-6 }] }
+        },
+        {
+            "id": "throughPocket",
+            "note": "The pocket follows plate_t: it now cuts through.",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "editFeature",
+                        "body": "LTldOVWa-c1fQITv8YS2F",
+                        "featureId": "S-FtfYLyjPTpEly3_bS5Y",
+                        "action": "setParameter",
+                        "key": "depth",
+                        "value": "plate_t"
+                    }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.bodies[0].status", "equals": "ok" },
+                    { "path": "result.bodies[0].features[0].id", "equals": "S-FtfYLyjPTpEly3_bS5Y" },
+                    {
+                        "path": "result.bodies[0].features[0].parameters[key=depth].value",
+                        "equals": "plate_t"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "measureThrough",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    { "id": "vol", "method": "shape.volume", "target": "LTldOVWa-c1fQITv8YS2F" },
+                    { "id": "valid", "method": "shape.checkShape", "target": "LTldOVWa-c1fQITv8YS2F" },
+                    {
+                        "id": "faces",
+                        "method": "shape.findSubShapes",
+                        "target": "LTldOVWa-c1fQITv8YS2F",
+                        "args": { "subshapeType": "face" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 27500, "tol": 1e-6 },
+                    { "path": "result.results.valid", "equals": true },
+                    { "path": "result.results.faces.count", "equals": 10 }
+                ]
+            }
+        }
+    ]
+}

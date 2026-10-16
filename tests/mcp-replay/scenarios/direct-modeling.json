@@ -1,0 +1,173 @@
+{
+    "schema": "spicy3d.mcp-replay",
+    "schemaVersion": 1,
+    "name": "direct-modeling",
+    "description": "run_program: a box, a fillet the kernel must refuse (rolled back), the real fillet bound to the box's generated node id, then undo/redo. Volumes are analytic: 40·30·20 = 24000; a box with every edge rounded by r = 2 is (a−2r)(b−2r)(c−2r) + 2r·Σ(a−2r)(b−2r) + πr²·Σ(a−2r) + 4/3·πr³ = 23701.687229558…",
+    "setup": { "document": { "kind": "empty" } },
+    "steps": [
+        {
+            "id": "box",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    { "id": "b", "method": "box", "args": { "dx": 40, "dy": 30, "dz": 20 }, "name": "Block" },
+                    { "id": "vol", "method": "shape.volume", "target": "b" },
+                    { "id": "bb", "method": "shape.boundingBox", "target": "b" },
+                    {
+                        "id": "edges",
+                        "method": "shape.findSubShapes",
+                        "target": "b",
+                        "args": { "subshapeType": "edge" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.created", "length": 1 },
+                    { "path": "result.created[0].name", "equals": "Block" },
+                    { "path": "result.results.vol", "approx": 24000, "tol": 1e-6 },
+                    {
+                        "path": "result.results.bb",
+                        "approx": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 40, "y": 30, "z": 20 } },
+                        "tol": 1e-6
+                    },
+                    { "path": "result.results.edges.count", "equals": 12 }
+                ]
+            }
+        },
+        {
+            "id": "tooBig",
+            "note": "A 15 mm fillet cannot fit a 20 mm high box: the call fails and changes nothing.",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "f",
+                        "method": "fillet",
+                        "args": {
+                            "shape": { "$ref": "box.result.created[0].nodeId" },
+                            "edges": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                            "radius": 15
+                        }
+                    }
+                ]
+            },
+            "expect": {
+                "outcome": "toolError",
+                "assert": [{ "path": "result.error", "matches": "(?i)fillet" }]
+            }
+        },
+        {
+            "id": "rolledBack",
+            "call": "get_document_state",
+            "expect": {
+                "assert": [
+                    { "path": "result.nodeCount", "equals": 1 },
+                    { "path": "result.nodes[0].id", "equals": { "$ref": "box.result.created[0].nodeId" } },
+                    { "path": "result.nodes[0].name", "equals": "Block" }
+                ]
+            }
+        },
+        {
+            "id": "fillet",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "f",
+                        "method": "fillet",
+                        "args": {
+                            "shape": { "$ref": "box.result.created[0].nodeId" },
+                            "edges": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                            "radius": 2
+                        },
+                        "name": "Rounded"
+                    },
+                    { "id": "vol", "method": "shape.volume", "target": "f" },
+                    { "id": "valid", "method": "shape.checkShape", "target": "f" },
+                    { "id": "bb", "method": "shape.boundingBox", "target": "f" },
+                    {
+                        "id": "solids",
+                        "method": "shape.findSubShapes",
+                        "target": "f",
+                        "args": { "subshapeType": "solid" }
+                    },
+                    {
+                        "id": "faces",
+                        "method": "shape.findSubShapes",
+                        "target": "f",
+                        "args": { "subshapeType": "face" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.created", "length": 1 },
+                    { "path": "result.removed", "length": 1 },
+                    {
+                        "path": "result.removed[0].nodeId",
+                        "equals": { "$ref": "box.result.created[0].nodeId" }
+                    },
+                    { "path": "result.results.vol", "approx": 23701.687229558, "tol": 1e-6 },
+                    { "path": "result.results.valid", "equals": true },
+                    {
+                        "path": "result.results.bb",
+                        "approx": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 40, "y": 30, "z": 20 } },
+                        "tol": 1e-6
+                    },
+                    { "path": "result.results.solids.count", "equals": 1 },
+                    { "path": "result.results.faces.count", "equals": 26 }
+                ]
+            }
+        },
+        {
+            "id": "undo",
+            "call": "undo",
+            "expect": { "assert": [{ "path": "result.ok", "equals": true }] }
+        },
+        {
+            "id": "undone",
+            "note": "Undo brings back the box (same node id) in place of the fillet.",
+            "call": "get_document_state",
+            "expect": {
+                "assert": [
+                    { "path": "result.nodeCount", "equals": 1 },
+                    { "path": "result.nodes[0].id", "equals": { "$ref": "box.result.created[0].nodeId" } }
+                ]
+            }
+        },
+        {
+            "id": "redo",
+            "call": "redo",
+            "expect": { "assert": [{ "path": "result.ok", "equals": true }] }
+        },
+        {
+            "id": "redone",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "fillet.result.created[0].nodeId" }
+                    },
+                    {
+                        "id": "valid",
+                        "method": "shape.checkShape",
+                        "target": { "$ref": "fillet.result.created[0].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    {
+                        "path": "result.results.vol",
+                        "approx": { "$ref": "fillet.result.results.vol" },
+                        "tol": 1e-9
+                    },
+                    { "path": "result.results.valid", "equals": true }
+                ]
+            }
+        }
+    ]
+}

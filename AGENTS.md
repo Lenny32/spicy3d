@@ -14,6 +14,7 @@ npm run check          # Biome lint + auto-fix (run before commits)
 npm run format         # Biome + clang-format across all files
 npm run build:wasm     # C++ → WebAssembly (CMake + Emscripten); setup:wasm = one-time deps
 
+npm run mcp:replay -- [--standin] tests/mcp-replay/scenarios/*.json   # MCP replay (Python, see below)
 npx rstest packages/core/test/result.test.ts   # single file
 npx rstest -t "should handle error case"       # filter by name
 ```
@@ -72,6 +73,7 @@ OCCT V8_0_1 → `spicy-wasm.wasm` via Emscripten. `cpp/src/`: `factory.cpp` (sha
 - Reuse shared mocks from `@spicy3d/core/test-utils` (`TestDocument`, `createMockDocument`, `createMockApplication`, `createMockVisual`, ...) instead of per-package copies; package-specific facades (e.g. `packages/ui/test/_helpers/`) extend them. `initializeI18n()` runs automatically via rstest `setupFiles` — never call it in test files.
 - Assertions must execute: none hidden in event callbacks (unless the callback is also asserted to fire), no tautologies (`x === true || x === false`), no `if (x) expect(...)` — assert the precondition, then the behavior; `await` every promise whose `.then` asserts.
 - Assert behavior, not absence of crashes: bare `not.toThrow()` / `toBeDefined()` is a smell; `querySelector` results need `not.toBeNull()`.
+- **MCP replay** (`tests/mcp-replay/`, README there; #149): Python scenarios (`spicy3d.mcp-replay` schema v1, versioned apart from the document format) replayed through SpicySrv `/mcp` → the real browser tab → WASM — `run.sh` = hash-pinned venv (`requirements.in` → `requirements.txt`, MCP SDK 1.x) + Playwright Chromium; the browser half signs in, makes a per-run token (revoked after), opens an empty/`.spicy` fixture document as a device document, selects its tab by a unique device name and clicks the normal pairing Allow; steps = `call`/`waitJob`/`waitRebuilds`, bindings only as `{"$ref": "step.result.path"}` (never string rewriting), outcomes `ok`/`toolError`/`protocolError`, geometry via kernel queries with explicit `approx` tolerances; transport failures are never retried. `--standin` = local fake of SpicySrv's HTTP + relay surface (`spicy_replay/standin.py`) for development only. Fixture scenarios address objects by stored node/feature ids (op ids are runtime-only). Unit tests: `.venv/bin/python -m pytest tests/mcp-replay/tests`.
 - Restore global monkeypatches (`PubSub.default.pub`, `globalThis.fetch`, ...) in `finally`/`afterEach`, or use `rs.stubGlobal` + `rs.unstubAllGlobals()`.
 - Type `rs.fn` mocks with the real signature (`rs.fn((_edges: IEdge[]) => ...)`) so `mock.calls` typechecks; use `test.each` for near-identical repeated cases.
 

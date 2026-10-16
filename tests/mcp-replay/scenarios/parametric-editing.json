@@ -1,0 +1,293 @@
+{
+    "schema": "spicy3d.mcp-replay",
+    "schemaVersion": 1,
+    "name": "parametric-editing",
+    "description": "run_parametric: a 40×30 plate extruded by the variable plate_t, a 10×10 pocket cut 20 deep, then edits bound to the generated body/feature ids — the variable, editFeature, an edit the model must refuse (rolled back) — and undo. Every later feature replays on each edit: volume = 40·30·plate_t − 10·10·min(20, plate_t).",
+    "setup": { "document": { "kind": "empty" } },
+    "steps": [
+        {
+            "id": "vars",
+            "call": "document_variables",
+            "args": {
+                "action": "set",
+                "variables": [{ "name": "plate_t", "type": "length", "expression": "20" }]
+            },
+            "expect": { "assert": [{ "path": "result", "exists": true }] }
+        },
+        {
+            "id": "plate",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "sketch",
+                        "id": "s1",
+                        "plane": "XY",
+                        "entities": [
+                            { "type": "line", "params": [0, 0, 40, 0] },
+                            { "type": "line", "params": [40, 0, 40, 30] },
+                            { "type": "line", "params": [40, 30, 0, 30] },
+                            { "type": "line", "params": [0, 30, 0, 0] }
+                        ]
+                    },
+                    { "op": "extrude", "id": "b1", "sketch": "s1", "depth": "plate_t", "name": "Plate" }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.created[id=b1].name", "equals": "Plate" },
+                    { "path": "result.bodies", "length": 1 },
+                    { "path": "result.bodies[0].status", "equals": "ok" },
+                    { "path": "result.bodies[0].featureCount", "equals": 1 },
+                    { "path": "result.bodies[0].features[0].type", "equals": "extrude" },
+                    {
+                        "path": "result.bodies[0].features[0].parameters[key=depth].value",
+                        "equals": "plate_t"
+                    },
+                    { "path": "result.results.s1.entities", "length": 4 }
+                ]
+            }
+        },
+        {
+            "id": "pocket",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "sketch",
+                        "id": "s2",
+                        "plane": "XY",
+                        "entities": [
+                            { "type": "line", "params": [10, 10, 20, 10] },
+                            { "type": "line", "params": [20, 10, 20, 20] },
+                            { "type": "line", "params": [20, 20, 10, 20] },
+                            { "type": "line", "params": [10, 20, 10, 10] }
+                        ]
+                    },
+                    {
+                        "op": "extrude",
+                        "id": "cut",
+                        "sketch": "s2",
+                        "depth": 20,
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" },
+                        "operation": "cut"
+                    }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    {
+                        "path": "result.bodies[0].nodeId",
+                        "equals": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    { "path": "result.bodies[0].status", "equals": "ok" },
+                    { "path": "result.bodies[0].featureCount", "equals": 2 },
+                    { "path": "result.bodies[0].features[0].type", "equals": "extrude" }
+                ]
+            }
+        },
+        {
+            "id": "measurePocket",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "id": "valid",
+                        "method": "shape.checkShape",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 22000, "tol": 1e-6 },
+                    { "path": "result.results.valid", "equals": true }
+                ]
+            }
+        },
+        {
+            "id": "thicker",
+            "note": "Changing the variable rebuilds the body: the extrude follows, the pocket keeps its 20 mm.",
+            "call": "document_variables",
+            "args": {
+                "action": "set",
+                "variables": [{ "name": "plate_t", "type": "length", "expression": "35" }]
+            }
+        },
+        {
+            "id": "settled",
+            "waitRebuilds": {},
+            "timeoutSeconds": 120
+        },
+        {
+            "id": "measureThicker",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "id": "bb",
+                        "method": "shape.boundingBox",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.vol", "approx": 40000, "tol": 1e-6 },
+                    { "path": "result.results.bb.max.z", "approx": 35, "tol": 1e-6 }
+                ]
+            }
+        },
+        {
+            "id": "editDepth",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "editFeature",
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" },
+                        "featureId": { "$ref": "plate.result.bodies[0].features[0].id" },
+                        "action": "setParameter",
+                        "key": "depth",
+                        "value": 10
+                    }
+                ],
+                "responseMode": "compact"
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.bodies[0].status", "equals": "ok" },
+                    { "path": "result.bodies[0].features[0].parameters[key=depth].value", "equals": 10 }
+                ]
+            }
+        },
+        {
+            "id": "measureThin",
+            "note": "The pocket is now deeper than the plate: it cuts through.",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": { "assert": [{ "path": "result.results.vol", "approx": 11000, "tol": 1e-6 }] }
+        },
+        {
+            "id": "badEdit",
+            "note": "An expression naming no variable is refused; the whole program rolls back.",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "editFeature",
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" },
+                        "featureId": { "$ref": "plate.result.bodies[0].features[0].id" },
+                        "action": "setParameter",
+                        "key": "depth",
+                        "value": "no_such_variable * 2"
+                    }
+                ]
+            },
+            "expect": {
+                "outcome": "toolError",
+                "assert": [{ "path": "result.error", "contains": "no_such_variable" }]
+            }
+        },
+        {
+            "id": "afterBadEdit",
+            "call": "run_parametric",
+            "args": {
+                "ops": [
+                    {
+                        "op": "features",
+                        "id": "read",
+                        "body": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    { "path": "result.results.read", "length": 2 },
+                    { "path": "result.results.read[0].parameters[key=depth].value", "equals": 10 }
+                ]
+            }
+        },
+        {
+            "id": "measureAfterBadEdit",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    {
+                        "path": "result.results.vol",
+                        "approx": { "$ref": "measureThin.result.results.vol" },
+                        "tol": 1e-9
+                    }
+                ]
+            }
+        },
+        {
+            "id": "undoEdit",
+            "call": "undo",
+            "expect": { "assert": [{ "path": "result.ok", "equals": true }] }
+        },
+        {
+            "id": "settledAfterUndo",
+            "waitRebuilds": {},
+            "timeoutSeconds": 120
+        },
+        {
+            "id": "measureUndone",
+            "note": "Undo goes back to the depth that follows plate_t (35).",
+            "call": "run_program",
+            "args": {
+                "ops": [
+                    {
+                        "id": "vol",
+                        "method": "shape.volume",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    },
+                    {
+                        "id": "valid",
+                        "method": "shape.checkShape",
+                        "target": { "$ref": "plate.result.created[id=b1].nodeId" }
+                    }
+                ]
+            },
+            "expect": {
+                "assert": [
+                    {
+                        "path": "result.results.vol",
+                        "approx": { "$ref": "measureThicker.result.results.vol" },
+                        "tol": 1e-6
+                    },
+                    { "path": "result.results.valid", "equals": true }
+                ]
+            }
+        }
+    ]
+}
