@@ -11,8 +11,9 @@ name: WASM kernel
 #     lock  the release exists but the lock does not point at it (a run stopped after publishing);
 #     seed  no release yet, but the base branch still commits the pinned files (the move to releases):
 #           they are published as they are;
-#     build no release for these inputs: job `build` compiles them (Emscripten + OCCT, cpp/build cached
-#           per branch, read-only token).
+#     build no release for these inputs: job `build` compiles them (Emscripten + OCCT, read-only token;
+#           cpp/build cached per branch, seeded from develop's cache, which job `warm-cache` fills once
+#           per toolchain pin).
 # - Job `publish` (pull requests from this repository and manual runs on other branches only, never
 #   main/develop) creates the release, commits the lock (and the new .d.ts) to the branch, then starts
 #   this workflow, Code Quality and the offline smoke test on the branch again: a push made with
@@ -96,7 +97,7 @@ jobs:
         needs: state
         if: needs.state.outputs.state == 'build'
         runs-on: ubuntu-26.04
-        timeout-minutes: 300
+        timeout-minutes: 350
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -106,8 +107,9 @@ jobs:
               with:
                   node-version: 24
 
-            # emsdk, the OCCT checkout and the object files: only the changed sources compile again. Saved
-            # even when the build fails, so a second attempt does not start from zero.
+            # emsdk, the OCCT checkout and the object files: only the changed sources compile again. A
+            # branch reads its own cache and develop's (job `warm-cache`). Saved even when the build fails
+            # or runs out of time, so a second attempt does not start from zero.
             - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: cpp/build
@@ -118,7 +120,9 @@ jobs:
 
             - run: npm run setup:wasm
 
+            # A cold OCCT build takes hours: stopped before the job's limit so the cache below is saved.
             - run: npm run build:wasm
+              timeout-minutes: 300
 
             - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               if: always()
@@ -135,6 +139,48 @@ jobs:
                       packages/wasm/lib/spicy-wasm.d.ts
                   if-no-files-found: error
                   retention-days: 3
+
+    # Branch caches are not shared between branches, but every branch reads develop's: once per toolchain
+    # pin (the cache key), develop compiles OCCT so a pull request's build only compiles cpp/src. No
+    # release, no lock: develop never publishes a kernel.
+    warm-cache:
+        name: Warm the build cache (develop)
+        if: github.event_name == 'push' && github.ref_name == 'develop'
+        runs-on: ubuntu-26.04
+        timeout-minutes: 350
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - id: lookup
+              uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: cpp/build
+                  key: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-develop
+                  restore-keys: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-
+                  lookup-only: true
+
+            - if: steps.lookup.outputs.cache-matched-key == ''
+              uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            - if: steps.lookup.outputs.cache-matched-key == ''
+              run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+            - if: steps.lookup.outputs.cache-matched-key == ''
+              run: npm run setup:wasm
+
+            - if: steps.lookup.outputs.cache-matched-key == ''
+              run: npm run build:wasm
+              timeout-minutes: 300
+
+            - if: always() && steps.lookup.outputs.cache-matched-key == ''
+              uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: cpp/build
+                  key: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-develop
 
     publish:
         name: Publish kernel release
