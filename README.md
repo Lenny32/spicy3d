@@ -16,7 +16,7 @@ What we have added so far:
 - An MCP server that runs inside the page: signed in to a Spicy3D server with MCP, Claude Code, Cursor, VS Code and other MCP clients connect to the server with a personal access token and drive the open document (the MCP panel has the client configs).
 - A ribbon laid out like Fusion 360's, with context-aware shortcuts
 - An adaptive background grid in the viewport
-- CI: lint, typecheck, CodeQL, Semgrep and a dependency audit on pull requests to `develop` and `main`; the test suite runs on pull requests to `main`
+- CI: lint, typecheck, CodeQL (reviewed false positives listed with their reasons in `scripts/codeql-suppressions.mjs`), Semgrep and a dependency audit on pull requests to `develop` and `main`; the test suite runs on pull requests to `main`
 
 ## Features
 
@@ -92,7 +92,7 @@ npm run check   # Biome lint with auto-fix, run it before committing
 npm run format  # Biome + clang-format
 ```
 
-The WebAssembly module is prebuilt and committed. To rebuild it from `cpp/`, run `npm run setup:wasm` once, then `npm run build:wasm`.
+The WebAssembly module is prebuilt: `npm install` downloads the release pinned by `packages/wasm/wasm.lock.json` and checks its sha256 (`npm run fetch:wasm`; `SPICY3D_WASM_DIR=<folder>` on a machine without internet access). To rebuild it from `cpp/`, run `npm run setup:wasm` once, then `npm run build:wasm`; a pull request that changes `cpp/` gets its kernel built, published and pinned by the WASM workflow (`cpp/README.md`).
 
 With Docker, `docker compose up -d --build` builds the app and serves it on port 8080 (local documents only);
 `docker compose pull` takes the published image (`ghcr.io/lenny32/spicy3d`) instead.

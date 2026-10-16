@@ -92,6 +92,7 @@ jobs:
               with:
                   node-version: 24
 
+            # Also fetches the kernel packages/wasm/wasm.lock.json pins (scripts/fetch-wasm.mjs).
             - run: npm ci
 
             - run: npm run test
@@ -107,6 +108,9 @@ jobs:
               run: |
                   test -f dist/index.html
                   ls dist/*.wasm
+                  # The kernel bundled is the pinned release, byte for byte.
+                  kernel=$(node -p 'require("./packages/wasm/wasm.lock.json").files["spicy-wasm.wasm"].sha256')
+                  sha256sum dist/*.wasm | grep "^$kernel "
 
             - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
               with:
@@ -176,7 +180,10 @@ jobs:
               with:
                   node-version: 24
 
+            # Only for the smoke test's Chromium: the image already holds the kernel.
             - run: npm ci
+              env:
+                  SPICY3D_SKIP_WASM_FETCH: "1"
 
             - name: Smoke test the running image
               run: |

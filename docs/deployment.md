@@ -42,6 +42,14 @@ read-only root file system and no capabilities). Two targets share that hardened
 - `prebuilt` packages an already built `dist/` (`--build-context dist=<folder>`): the deploy workflow
   uses it to ship the exact files it tested and deployed to GitHub Pages.
 
+Either way the WebAssembly kernel is part of `dist/` and of the image: nothing is downloaded when
+it runs. It is only fetched at build time (#191): `packages/wasm/wasm.lock.json` pins a GitHub
+release and its sha256, and `npm ci` puts it in `packages/wasm/lib/` (`scripts/fetch-wasm.mjs`).
+`docker build .` takes it from the build context when the checkout already holds the pinned files,
+and downloads it otherwise; without internet access, run `npm install` with `SPICY3D_WASM_DIR`
+pointing at a folder holding `spicy-wasm.wasm`/`.js` first. The deploy workflow checks that the
+`.wasm` in `dist/` is the pinned one byte for byte.
+
 ```sh
 docker build -t spicy3d-web:0.0.1 .
 npm run build && docker build --target prebuilt --build-context dist=./dist -t spicy3d-web:0.0.1 .

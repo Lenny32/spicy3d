@@ -49,13 +49,28 @@ Debug build keeps the JS-based handling. The preventive guards in the query code
 `IsGeometric`, `IsDone` prechecks) stay: they give clearer messages than the raise they avoid, and
 they remain the safety net for a module built without the guard.
 
-### Committed binary
+### Release artifact
 
-`packages/wasm/lib/spicy-wasm.{wasm,js,d.ts}` is built from the current sources (Release preset,
-Emscripten 5.0.7, OCCT V8_0_1, 2026-10-16): `guard.hpp`, `-fwasm-exceptions` and every binding,
-including `ShapeFactory.bspline`, `Shape.checkSelfIntersection` and the free-form crease envelope
-of `ShapeFactory.makeThickSolidTolerant` (`thickEnvelope.hpp`). After changing C++, rebuild with
-`cmake --build --preset release --target spicy-wasm` (in `cpp/`) and copy the three files from
-`build/target/release/` into `packages/wasm/lib/`. The TypeScript side still feature-detects the
-newer bindings, and the tests of those fallbacks stub the binding absent instead of relying on an
-older binary.
+`packages/wasm/lib/spicy-wasm.{wasm,js}` are not committed (#191): `packages/wasm/wasm.lock.json`
+pins the GitHub release `wasm-<inputs>` holding them and their sha256, where `<inputs>` is the hash
+of everything they are built from (every file of `cpp/` but `build/` and `*.md`, and the Emscripten / OCCT
+pins in `scripts/setup_wasm_deps.mjs`; `node scripts/wasm-artifact.mjs inputs`). `spicy-wasm.d.ts`
+stays committed, pinned by the lock too. `npm install` (and `dev`, `build`, `test`) runs
+`scripts/fetch-wasm.mjs`, which puts the pinned files in place and checks their hash: no network
+when they are there, a download (shared cache `~/.cache/spicy3d-wasm`, or `SPICY3D_WASM_DIR` for a
+machine without internet access) otherwise, and an error, never another kernel, when that fails.
+
+After changing C++, `npm run build:wasm` installs your build into `packages/wasm/lib/`; the fetch
+script leaves it there (`npm run fetch:wasm -- --force` goes back to the pinned one). Push the
+sources only: on the pull request the WASM workflow (`.github/workflows/wasm.yml`) sees new inputs,
+builds the kernel (Release preset, `cpp/build` cached per branch), publishes the release, commits
+the lock and the new `.d.ts` to the branch and runs the checks again. It never builds on `develop`
+or `main`, where a stale lock fails the check. `npm run wasm:check` tells whether the lock matches
+the sources.
+
+The pinned kernel is built from the current sources (Release preset, Emscripten 5.0.7, OCCT
+V8_0_1, 2026-10-16): `guard.hpp`, `-fwasm-exceptions` and every binding, including
+`ShapeFactory.bspline`, `Shape.checkSelfIntersection` and the free-form crease envelope of
+`ShapeFactory.makeThickSolidTolerant` (`thickEnvelope.hpp`). The TypeScript side still
+feature-detects the newer bindings, and the tests of those fallbacks stub the binding absent
+instead of relying on an older binary.

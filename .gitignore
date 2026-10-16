@@ -8,3 +8,9 @@ coverage
 CMakeUserPresets.json
 types
 .claude/worktrees
+# The WebAssembly kernel: a release artifact pinned by packages/wasm/wasm.lock.json, fetched by npm install
+# (scripts/fetch-wasm.mjs). The .d.ts stays committed.
+packages/wasm/lib/spicy-wasm.wasm
+packages/wasm/lib/spicy-wasm.js
+packages/wasm/lib/*.tmp
+packages/wasm/lib/.fetched.json

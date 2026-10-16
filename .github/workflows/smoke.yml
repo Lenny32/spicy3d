@@ -7,7 +7,9 @@ name: Offline smoke test
 # shows over plain HTTP on a LAN name only.
 
 # Only when something that goes into the build or the smoke test changed: docs-only pushes, C++
-# sources alone (the committed packages/wasm/lib binary is what ships) and empty commits trigger nothing.
+# sources alone (the kernel that ships is the release packages/wasm/wasm.lock.json pins, fetched by npm ci;
+# a new one is built and pinned by the WASM workflow, which then runs this one again) and empty commits
+# trigger nothing.
 on:
     push:
         branches: ["main", "develop"]
@@ -20,6 +22,8 @@ on:
             - "tsconfig.json"
             - "rspack.config.ts"
             - "scripts/build-plugins.mjs"
+            - "scripts/fetch-wasm.mjs"
+            - "scripts/wasm-artifact.mjs"
             - "scripts/check-external-urls.mjs"
             - "scripts/smoke-offline.mjs"
             - "docker/default.conf.template"
