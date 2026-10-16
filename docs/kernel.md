@@ -56,7 +56,7 @@ memory keeps growing may take the browser tab (or the browser) down when it reac
   uses native WebAssembly exceptions (`-fwasm-exceptions`), and every binding entry goes through
   `cpp/src/guard.hpp`, which turns a raise into the binding's error channel: an error result
   (`isOk: false`), `undefined`, or a JS `Error`. The TS wrappers answer
-  `"<Op> failed: <message>"`. The committed binary is built from the current sources
+  `"<Op> failed: <message>"`. The pinned kernel release (`packages/wasm/wasm.lock.json`, `cpp/README.md`) is built from the current sources
   (Emscripten 5.0.7, OCCT V8_0_1, 2026-09-30); a module built without this handling still aborts
   on an OCCT raise (`RuntimeError: Aborted(…)`), which the preventive guards keep rare.
 - **Aborts and traps.** An abort (out of memory, a C++ bug, or any raise in an old binary) or a trap

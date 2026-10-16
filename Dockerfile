@@ -4,6 +4,10 @@
 # - `docker build .` (and `docker compose build`) builds the app from source (the last stage):
 #     docker build -t spicy3d-web:0.0.1 .
 #   `--build-arg SPICY3D_VERSION=1.2.0` sets the version shown in the app (default: package.json's).
+#   The WebAssembly kernel is bundled into the image like the rest of dist/: `npm ci` takes it from the
+#   context's packages/wasm/lib/ when it holds the pinned files (a checkout after `npm install`), else
+#   downloads the release packages/wasm/wasm.lock.json pins (scripts/fetch-wasm.mjs). The running image
+#   never downloads anything.
 #     docker run --rm -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL spicy3d-web:0.0.1
 # - `--target prebuilt --build-context dist=<folder>` packages an already built dist/ into the same
 #   hardened runtime instead; the deploy workflow uses it to ship the exact files it tested and deployed

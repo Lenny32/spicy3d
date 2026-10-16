@@ -120,7 +120,10 @@ jobs:
                   node-version: 24
                   cache: npm
 
+            # Biome and clang-format read no kernel binary (scripts/fetch-wasm.mjs).
             - run: npm ci
+              env:
+                  SPICY3D_SKIP_WASM_FETCH: "1"
 
             - name: Biome
               if: needs.changes.outputs.ts == 'true'
@@ -145,7 +148,10 @@ jobs:
                   node-version: 24
                   cache: npm
 
+            # The committed spicy-wasm.d.ts is enough for tsc (scripts/fetch-wasm.mjs).
             - run: npm ci
+              env:
+                  SPICY3D_SKIP_WASM_FETCH: "1"
 
             - run: npx tsc --noEmit -p tsconfig.json
 
@@ -226,8 +232,24 @@ jobs:
                           - public
                           - dist
 
+            # Uploaded after the reviewed false positives of scripts/codeql-suppressions.mjs are dropped
+            # (rule + file, each with its reason, printed in the log); everything else goes up as is.
             - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
               with:
+                  category: codeql-${{ matrix.language }}
+                  output: codeql-sarif
+                  upload: failure-only
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            - name: Drop reviewed false positives
+              run: node scripts/codeql-suppressions.mjs codeql-sarif
+
+            - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+              with:
+                  sarif_file: codeql-sarif
                   category: codeql-${{ matrix.language }}
 
     dependencies:
