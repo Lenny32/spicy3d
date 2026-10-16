@@ -8,6 +8,11 @@ export interface Tool {
     name: string;
     description: string;
     parameters: JsonSchema;
+    /**
+     * Takes arguments that can grow large (a whole program, a file): over the remote relay its
+     * listing names the relay's message limit, since a request above it never reaches the tab.
+     */
+    largeArguments?: boolean;
     /** `signal` aborts when the request is cancelled; long-running handlers should respect it. */
     handler: (
         args: Record<string, unknown>,
