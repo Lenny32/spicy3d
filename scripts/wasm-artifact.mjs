@@ -33,7 +33,7 @@ export const FETCHED_FILES = ["spicy-wasm.wasm", "spicy-wasm.js"];
 /** Committed next to them, pinned so a release never pairs with another build's types. */
 export const COMMITTED_FILES = ["spicy-wasm.d.ts"];
 
-/** Not build inputs: the local toolchain, OCCT checkout and build output, editor files. */
+/** Not build inputs: the local toolchain, OCCT checkout and build output, editor files, docs (`*.md`). */
 const IGNORED = new Set(["build", "CMakeUserPresets.json", ".DS_Store"]);
 const EXTRA_INPUTS = ["scripts/setup_wasm_deps.mjs"];
 
@@ -46,7 +46,7 @@ export const releaseUrl = (tag, repository = REPOSITORY) =>
 
 function* walk(dir, root) {
     for (const entry of readdirSync(dir).sort()) {
-        if (IGNORED.has(entry)) continue;
+        if (IGNORED.has(entry) || entry.endsWith(".md")) continue;
         const full = path.join(dir, entry);
         if (statSync(full).isDirectory()) yield* walk(full, root);
         else yield path.relative(root, full).split(path.sep).join("/");
@@ -54,9 +54,9 @@ function* walk(dir, root) {
 }
 
 /**
- * The hash of what the binary is built from: every file of `cpp/` (but its build folder) and the
- * toolchain pins, path and content, CRLF read as LF so a Windows checkout hashes the same. Needs no
- * git: the Docker build context has no `.git`.
+ * The hash of what the binary is built from: every file of `cpp/` (but its build folder and Markdown
+ * docs) and the toolchain pins, path and content, CRLF read as LF so a Windows checkout hashes the
+ * same. Needs no git: the Docker build context has no `.git`.
  */
 export function inputsHash(root = ROOT_DIR) {
     const files = [...walk(path.join(root, "cpp"), root), ...EXTRA_INPUTS].sort();

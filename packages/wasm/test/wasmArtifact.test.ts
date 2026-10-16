@@ -210,6 +210,7 @@ describe("wasm-artifact", () => {
         expect(before).toMatch(/^[0-9a-f]{64}$/);
 
         write("cpp/build/occt/huge.cxx", "build output");
+        write("cpp/README.md", "docs only");
         write("cpp/src/factory.cpp", "int a;\r\n");
         expect(await inputs()).toBe(before);
 

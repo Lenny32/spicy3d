@@ -53,7 +53,7 @@ they remain the safety net for a module built without the guard.
 
 `packages/wasm/lib/spicy-wasm.{wasm,js}` are not committed (#191): `packages/wasm/wasm.lock.json`
 pins the GitHub release `wasm-<inputs>` holding them and their sha256, where `<inputs>` is the hash
-of everything they are built from (every file of `cpp/` but `build/`, and the Emscripten / OCCT
+of everything they are built from (every file of `cpp/` but `build/` and `*.md`, and the Emscripten / OCCT
 pins in `scripts/setup_wasm_deps.mjs`; `node scripts/wasm-artifact.mjs inputs`). `spicy-wasm.d.ts`
 stays committed, pinned by the lock too. `npm install` (and `dev`, `build`, `test`) runs
 `scripts/fetch-wasm.mjs`, which puts the pinned files in place and checks their hash: no network
