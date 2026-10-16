@@ -464,3 +464,31 @@ test("a completed self-intersection details job returns the diagnostic without a
     expect(done.result.results.details).toContain("output face indices (zero-based): 1 3");
     expect(done.result.results.details).toContain("(2, 4, 6)");
 });
+
+test("the jobId answer is on the wire before a job's synchronous kernel work starts (#178)", async () => {
+    setup();
+    const sent: string[] = [];
+    // A synchronous kernel call (a smooth-loft editFeature rebuild) cannot yield: whatever has not
+    // been sent when it starts waits until it returns.
+    const execute = rs.fn(async () => {
+        sent.push("kernel");
+        return JSON.stringify({ created: [] });
+    });
+    const jobs = new ProgramJobs(execute);
+    managers.push(jobs);
+    const server = createMcpServer({ tools: buildProgramJobTools(jobs), queue: new SerialQueue() });
+    const client = new Client({ name: "ack-test", version: "1" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const send = serverSide.send.bind(serverSide);
+    serverSide.send = (message, options) => {
+        if ("result" in message && JSON.stringify(message.result).includes("jobId")) sent.push("jobId");
+        return send(message, options);
+    };
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    connections.push(client);
+    const response = await client.callTool({ name: "start_program_job", arguments: { ops: [boxOp] } });
+    const { jobId } = JSON.parse((response.content as { text: string }[])[0].text);
+    expect(jobId).toEqual(expect.any(String));
+    await rs.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(sent).toEqual(["jobId", "kernel"]);
+});
