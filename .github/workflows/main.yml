@@ -19,6 +19,7 @@ on:
             - "docker/**"
             - "scripts/generate-cloud-api.mjs"
             - "scripts/generate-shape-capabilities.mjs"
+            - "scripts/rewrite-history.sh"
             - ".github/dependabot.yml"
             - "!**.md"
             # Read by packages/builder/test/mergeRules.test.ts.
@@ -42,6 +43,11 @@ jobs:
 
             - name: Install dependencies
               run: npm install
+
+            # packages/builder/test/rewriteHistory.test.ts runs scripts/rewrite-history.sh, which needs it
+            # (skipped without).
+            - name: Install git-filter-repo
+              run: pipx install git-filter-repo==2.47.0
 
             - name: Run unit tests
               run: npm run test
