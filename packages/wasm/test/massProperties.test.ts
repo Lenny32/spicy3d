@@ -2,6 +2,7 @@
 // See LICENSE file in the project root for full license information.
 
 import { type IFace, type IShape, type IWire, XYZ, type XYZLike } from "@spicy3d/core";
+import type { OccShape } from "../src/shape";
 import { createTestConverter, createTestFactory, unwrapOk } from "./helpers";
 import "./setup";
 
@@ -87,7 +88,7 @@ describe("volume of periodic B-spline geometry", () => {
         const mesh = fineMeshVolume(loft);
         // The fixed-order integration was 8-15% too high here.
         expectRelative(loft.volume(), mesh, 3e-4);
-        const mass = unwrapOk(loft.inspectionMass());
+        const mass = unwrapOk((loft as OccShape).inspectionMass());
         expect(mass.volume).toBeCloseTo(loft.volume(), 6);
         expect(mass.relativeError).toBeGreaterThanOrEqual(0);
         expect(mass.relativeError).toBeLessThan(1e-6);
