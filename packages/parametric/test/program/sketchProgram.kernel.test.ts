@@ -262,6 +262,45 @@ describe("sketch entities", () => {
         expect(failure).toContain(message);
     });
 
+    test("a scan outline too large for the solver fails bounded; the issue's six-point probe then works", () => {
+        // #175: the solver's 16 MiB heap aborted (OOM) and stayed compromised for later sketches
+        const scan = Array.from({ length: 400 }, (_, i): [number, number] => {
+            const t = (2 * Math.PI * i) / 400;
+            return [50 * Math.cos(t), 30 * Math.sin(t)];
+        });
+        const doc = newDoc();
+        const failure = runExpectingFailure(doc, [
+            { op: "sketch", id: "scan", entities: [{ type: "bspline", periodic: true, points: scan }] },
+        ]);
+        expect(failure).toContain("too large for the constraint solver");
+        expect(failure).toContain("fewer points");
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "probe",
+                name: "B-spline connectivity probe",
+                entities: [
+                    {
+                        type: "bspline",
+                        periodic: true,
+                        points: [
+                            [-60, 0],
+                            [-58, 0],
+                            [-57, 1],
+                            [-58, 2],
+                            [-60, 2],
+                            [-61, 1],
+                        ],
+                    },
+                ],
+            },
+        ]);
+        const probe = entity(sketchOf(doc, result, "probe"), 1);
+        expect(probe).toMatchObject({ type: "bspline", periodic: true });
+        expect(probe.params).toHaveLength(12);
+        expect(report(result, "probe").solve).toBe("OkUnderconstrained");
+    });
+
     test("a constrained arc keeps its end on its circle", () => {
         const doc = newDoc();
         const result = run(doc, [

@@ -11,6 +11,7 @@ import type {
 } from "@salusoft89/planegcs/dist/planegcs_dist/gcs_system";
 import initPlaneGcsModule from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.js";
 import wasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm";
+import { Logger } from "@spicy3d/core";
 import {
     type BSplineCurve2d,
     type BSplineParametrization,
@@ -235,23 +236,135 @@ const CURVE_REFRESH_PASSES = 50;
 /** Fit points moving less than this in the last pass (since the knots were computed) end the refresh. */
 const CURVE_REFRESH_TOLERANCE = 1e-10;
 
+/**
+ * PlaneGCS runs in a fixed 16 MiB heap (the package is built without memory growth). A system that
+ * needs more aborts the module (`Aborted(OOM)`), and what the aborted solve had allocated is never
+ * freed: every abort leaves less for the sketches after it. Its solve and diagnosis are dense, so
+ * the memory grows with unknowns × equations, and with every pole a point-on-B-spline equation
+ * spans. A native system is measured on a dry run of its build (`countingSystem`) and one that would
+ * not fit is refused with an error naming its size (`checkSolverSize`) before anything is allocated.
+ */
+export interface SolverSize {
+    /** Free native params (dragged ones included: the diagnosis counts them free). */
+    unknowns: number;
+    /** Native equations. */
+    equations: number;
+    /** Poles spanned by the curves' point-on-curve equations, summed over the equations. */
+    curveTerms: number;
+}
+
+/**
+ * Heap a system may plan for, below the 16 MiB that also hold the module's own data and the other
+ * live systems: up to about 180 fit points of one B-spline or 200 chained lines in one sketch. Where
+ * a fresh module aborts varies with the solve path (a 185-point B-spline aborted once, a 205-point
+ * one solved); this refuses the smallest abort seen.
+ */
+export const SOLVER_MEMORY_BUDGET = 13 * 1024 * 1024;
+
+/** Bytes per pole a point-on-curve equation spans: what B-splines need beyond the dense matrices. */
+const CURVE_TERM_BYTES = 32;
+
+/**
+ * Bytes a solve of a system of `size` is expected to take, fitted to the sizes at which a fresh
+ * module aborts (chains of coincident points, horizontal pairs, free params, B-splines).
+ */
+export function solverBytes(size: SolverSize): number {
+    const { unknowns: n, equations: m, curveTerms } = size;
+    return 8 * (2.6 * m * n + 2.9 * m * m + 90 * n) + CURVE_TERM_BYTES * curveTerms;
+}
+
+/** A point on a B-spline is held by one equation per coordinate. */
+const POINT_ON_BSPLINE_EQUATIONS = 2;
+
+/** Native equations of a constraint call, where it is not one. */
+const NATIVE_EQUATIONS: Record<string, number> = {
+    add_constraint_p2p_coincident: 2,
+    add_constraint_p2p_symmetric_ppp: 2,
+    add_constraint_p2p_symmetric_ppl: 2,
+    add_constraint_point_on_bspline: POINT_ON_BSPLINE_EQUATIONS,
+};
+
+/** A stand-in for a native system that only counts what a build gives it into `size`. */
+function countingSystem(size: SolverSize): GcsSystem {
+    let params = 0;
+    const handle = { delete() {} };
+    return new Proxy({} as GcsSystem, {
+        get(_, key) {
+            if (key === "push_p_param")
+                return (_value: number, fixed: boolean) => {
+                    if (!fixed) size.unknowns++;
+                    return params++;
+                };
+            if (typeof key === "string" && key.startsWith("add_constraint_"))
+                return () => {
+                    size.equations += NATIVE_EQUATIONS[key] ?? 1;
+                };
+            return () => handle;
+        },
+    });
+}
+
+/** Throws, naming the size, when a system of `size` would not fit the solver's heap. */
+function checkSolverSize(size: SolverSize): void {
+    const bytes = solverBytes(size);
+    if (bytes <= SOLVER_MEMORY_BUDGET) return;
+    const mib = (value: number) => (value / (1024 * 1024)).toFixed(1);
+    throw new SolverCapacityError(
+        `The sketch is too large for the constraint solver: ${size.unknowns} unknowns and ${size.equations} ` +
+            `equations would need about ${mib(bytes)} MiB, more than its ${mib(SOLVER_MEMORY_BUDGET)} MiB. ` +
+            "Use fewer points (a B-spline from a scan needs far fewer fit points than scan samples) " +
+            "or split the geometry over several sketches.",
+    );
+}
+
+/** A system refused before solving because it would not fit the solver's heap (`checkSolverSize`). */
+export class SolverCapacityError extends Error {
+    override name = "SolverCapacityError";
+}
+
 let planeGcs: ModuleStatic | undefined;
 let initPromise: Promise<void> | undefined;
+let initOptions: object | undefined;
+/** The aborted module a fresh one is loading for (`replaceAborted`). */
+let replacing: ModuleStatic | undefined;
 
 /**
  * Initializes the PlaneGCS WASM module. Safe to call more than once: later calls
- * reuse the first initialization. In the browser the bundled wasm asset is fetched;
- * node tests pass the wasm bytes.
+ * reuse the first initialization — or wait for the module replacing one that aborted
+ * (`replaceAborted`). In the browser the bundled wasm asset is fetched; node tests
+ * pass the wasm bytes.
  */
 export function initPlaneGcs(wasmBinary?: BufferSource): Promise<void> {
-    if (planeGcs !== undefined) return Promise.resolve();
-    const options = wasmBinary !== undefined ? { wasmBinary } : { locateFile: () => wasmUrl };
-    initPromise ??= (initPlaneGcsModule as (options: object) => Promise<ModuleStatic>)(options).then(
+    initOptions ??= wasmBinary !== undefined ? { wasmBinary } : { locateFile: () => wasmUrl };
+    initPromise ??= loadPlaneGcs(initOptions);
+    return initPromise;
+}
+
+function loadPlaneGcs(options: object): Promise<void> {
+    let loaded: ModuleStatic | undefined;
+    const onAbort = () => replaceAborted(loaded);
+    return (initPlaneGcsModule as (options: object) => Promise<ModuleStatic>)({ ...options, onAbort }).then(
         (module) => {
+            loaded = module;
             planeGcs = module;
         },
     );
-    return initPromise;
+}
+
+/**
+ * An aborted module (`Aborted(OOM)` past `checkSolverSize`, or any other abort) never frees what the
+ * aborted call had allocated, so it fails ever smaller sketches: a fresh instance is loaded in the
+ * background. New systems take it once it is there (`initPlaneGcs` waits for it); the systems alive
+ * meanwhile stay on the old one.
+ */
+function replaceAborted(module: ModuleStatic | undefined): void {
+    if (module === undefined || module !== planeGcs || module === replacing || initOptions === undefined)
+        return;
+    replacing = module;
+    Logger.warn("PlaneGCS aborted; loading a fresh solver module");
+    initPromise = loadPlaneGcs(initOptions).catch((error) => {
+        Logger.error("PlaneGCS could not be reloaded; keeping the aborted module", error);
+    });
 }
 
 export function isPlaneGcsInitialized(): boolean {
@@ -928,15 +1041,17 @@ export class SolverSystem {
     }
 
     free(): void {
-        this.deleteNativeCurves();
-        this.native?.delete();
+        const native = this.native;
         this.native = undefined;
         this.dirty = true;
+        this.deleteNativeCurves();
+        native?.delete();
     }
 
     private deleteNativeCurves(): void {
-        for (const curve of this.nativeCurves.values()) curve.delete();
+        const curves = [...this.nativeCurves.values()];
         this.nativeCurves.clear();
+        for (const curve of curves) curve.delete();
     }
 
     // ------------------------------------------------------------------ Model helpers
@@ -1063,11 +1178,33 @@ export class SolverSystem {
 
     private ensureBuilt(): GcsSystem {
         if (!this.dirty && this.native !== undefined) return this.native;
-        this.deleteNativeCurves();
-        this.native?.delete();
+        // forget the old system before anything can throw: a reference left to a deleted one would
+        // fail every later call (dispose included) with "GcsSystem instance already deleted"
+        this.free();
+        // measured on a dry run first: building the curves of a system too large allocates enough
+        // to abort the module by itself
+        const size: SolverSize = { unknowns: 0, equations: 0, curveTerms: 0 };
+        this.build(countingSystem(size), size);
+        this.nativeCurves.clear();
+        checkSolverSize(size);
         const native = new this.module.GcsSystem();
-        native.set_debug_mode(0);
+        try {
+            this.build(native);
+        } catch (err) {
+            this.deleteNativeCurves();
+            native.delete();
+            throw err;
+        }
         this.defaultMaxIterations = native.get_max_iterations();
+        this.native = native;
+        this.dirty = false;
+        this.applyDragged(this.dragged.size > 0);
+        return native;
+    }
+
+    /** Emits the model into a fresh native system (or a `countingSystem` measuring it into `size`). */
+    private build(native: GcsSystem, size?: SolverSize): void {
+        native.set_debug_mode(0);
 
         this.datumParams = new Set();
         this.structuralDatums = new Set();
@@ -1093,16 +1230,11 @@ export class SolverSystem {
             );
         }
         this.curves.forEach((curve, id) => {
-            if (curve !== undefined) this.emitCurve(native, curve, id);
+            if (curve !== undefined) this.emitCurve(native, curve, id, size);
         });
         this.constraints.forEach((record, id) => {
             if (record !== undefined) new NativeConstraintBuilder(native, this, record, id + 1).emit();
         });
-
-        this.native = native;
-        this.dirty = false;
-        this.applyDragged(this.dragged.size > 0);
-        return native;
     }
 
     /**
@@ -1110,7 +1242,7 @@ export class SolverSystem {
      * at its (fixed) fit parameter. A clamped curve starts and ends on its first and last pole, a
      * periodic one has no ends (its first fit point stands in for them).
      */
-    private emitCurve(native: GcsSystem, curve: CurveRecord, id: number): void {
+    private emitCurve(native: GcsSystem, curve: CurveRecord, id: number, size?: SolverSize): void {
         const { module } = this;
         const index = (paramId: number) => this.nativeIndex[paramId];
         const vector = (values: readonly number[]) => {
@@ -1157,6 +1289,11 @@ export class SolverSystem {
             );
             this.nativeCurves.set(id, bspline);
             const tag = CURVE_TAG_BASE + id;
+            // each point-on-curve equation spans every pole (`SolverSize.curveTerms`)
+            if (size !== undefined) {
+                const fitEquations = shape.parameters.length + (curve.control && curve.periodic ? 1 : 0);
+                size.curveTerms += POINT_ON_BSPLINE_EQUATIONS * fitEquations * curve.poles.length;
+            }
             if (curve.control && curve.periodic) {
                 const u = native.push_p_param(bsplineDomain(shape)[0], true);
                 const point = native.make_point(ends[0], ends[1]);
