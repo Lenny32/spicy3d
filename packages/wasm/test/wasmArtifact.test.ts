@@ -34,6 +34,10 @@ function run(script: string, args: string[], env: Record<string, string> = {}): 
     });
 }
 
+const TAG = "wasm-0123456789abcdef";
+const NEXT_TAG = "wasm-fedcba9876543210";
+const releaseUrl = (tag: string) => `https://github.com/Lenny32/spicy3d/releases/download/${tag}`;
+
 const RELEASE = { "spicy-wasm.wasm": "\0asm kernel bytes", "spicy-wasm.js": "export default () => {};" };
 
 describe("fetch-wasm", () => {
@@ -46,22 +50,24 @@ describe("fetch-wasm", () => {
     let served: Record<string, string>;
     let requests: string[];
 
-    const writeLockFor = (files: Record<string, string>, tag = "wasm-test") =>
+    const writeLockFor = (files: Record<string, string>, tag = TAG, extra: Record<string, unknown> = {}) =>
         writeFileSync(
             lockFile,
             JSON.stringify({
                 schema: 1,
                 inputs: "0".repeat(64),
                 tag,
-                url: `${baseUrl}/${tag}`,
+                url: releaseUrl(tag),
                 files: Object.fromEntries(
                     Object.entries(files).map(([name, content]) => [name, { sha256: sha256(content) }]),
                 ),
+                ...extra,
             }),
         );
     const fetchWasm = (extra: string[] = [], env: Record<string, string> = {}) =>
         run(fetchScript, ["--lib", lib, "--lock", lockFile, ...extra], {
             SPICY3D_WASM_CACHE: cache,
+            SPICY3D_WASM_BASE_URL: baseUrl,
             ...env,
         });
     const libFile = (name: string) => readFileSync(path.join(lib, name), "utf8");
@@ -91,15 +97,15 @@ describe("fetch-wasm", () => {
 
     test("downloads the pinned files, then has nothing to do", async () => {
         const first = await fetchWasm();
-        expect(first.out).toContain("spicy-wasm.wasm of wasm-test");
+        expect(first.out).toContain(`spicy-wasm.wasm of ${TAG}`);
         expect(first.code).toBe(0);
         expect(libFile("spicy-wasm.wasm")).toBe(RELEASE["spicy-wasm.wasm"]);
         expect(libFile("spicy-wasm.js")).toBe(RELEASE["spicy-wasm.js"]);
-        expect(requests).toEqual(["/wasm-test/spicy-wasm.wasm", "/wasm-test/spicy-wasm.js"]);
+        expect(requests).toEqual([`/${TAG}/spicy-wasm.wasm`, `/${TAG}/spicy-wasm.js`]);
 
         const second = await fetchWasm();
         expect(second.code).toBe(0);
-        expect(second.out).toContain("kernel wasm-test is in place");
+        expect(second.out).toContain(`kernel ${TAG} is in place`);
         expect(requests).toHaveLength(2);
     });
 
@@ -140,7 +146,7 @@ describe("fetch-wasm", () => {
         writeFileSync(path.join(offline, "spicy-wasm.wasm"), "other build");
         const result = await fetchWasm([], { SPICY3D_WASM_DIR: offline });
         expect(result.code).toBe(1);
-        expect(result.out).toContain("is not the spicy-wasm.wasm of wasm-test");
+        expect(result.out).toContain(`is not the spicy-wasm.wasm of ${TAG}`);
         expect(requests).toEqual([]);
     });
 
@@ -174,12 +180,45 @@ describe("fetch-wasm", () => {
         expect((await fetchWasm()).code).toBe(0);
         const next = { "spicy-wasm.wasm": "\0asm next kernel", "spicy-wasm.js": RELEASE["spicy-wasm.js"] };
         served = next;
-        writeLockFor(next, "wasm-next");
+        writeLockFor(next, NEXT_TAG);
 
         const result = await fetchWasm();
         expect(result.code).toBe(0);
         expect(libFile("spicy-wasm.wasm")).toBe(next["spicy-wasm.wasm"]);
-        expect(requests.slice(2)).toEqual(["/wasm-next/spicy-wasm.wasm"]);
+        expect(requests.slice(2)).toEqual([`/${NEXT_TAG}/spicy-wasm.wasm`]);
+    });
+
+    test.each([
+        ["a URL of another host", { url: "https://example.com/wasm-0123456789abcdef" }, "url is not"],
+        [
+            "a tag that is not a hash",
+            { tag: "wasm-../../x", url: releaseUrl("wasm-../../x") },
+            "is not wasm-",
+        ],
+        [
+            "a sha256 that is a path",
+            {
+                files: {
+                    "spicy-wasm.wasm": { sha256: "../../evil" },
+                    "spicy-wasm.js": { sha256: "0".repeat(64) },
+                },
+            },
+            "is not 64 hex digits",
+        ],
+    ])("a lock with %s is refused before any download", async (_case, extra, message) => {
+        writeLockFor(RELEASE, TAG, extra);
+        const result = await fetchWasm();
+        expect(result.code).toBe(1);
+        expect(result.out).toContain(message);
+        expect(requests).toEqual([]);
+        expect(existsSync(cache)).toBe(false);
+    });
+
+    test("a mirror must be https, plain http only on localhost", async () => {
+        const result = await fetchWasm([], { SPICY3D_WASM_BASE_URL: "http://mirror.example.com/kernels" });
+        expect(result.code).toBe(1);
+        expect(result.out).toContain("SPICY3D_WASM_BASE_URL must be https");
+        expect(existsSync(path.join(lib, "spicy-wasm.wasm"))).toBe(false);
     });
 });
 

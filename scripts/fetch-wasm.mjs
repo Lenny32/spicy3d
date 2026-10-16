@@ -17,7 +17,8 @@
  * - Sources, first that has the file with the right hash: `SPICY3D_WASM_DIR` (a folder holding
  *   `spicy-wasm.wasm`/`.js`, for machines without internet access), the download cache
  *   (`SPICY3D_WASM_CACHE`, default ~/.cache/spicy3d-wasm, files by sha256, shared by every checkout),
- *   then the release (`SPICY3D_WASM_BASE_URL` instead of the lock's URL, e.g. a mirror).
+ *   then the release: always this repository's release of the lock's tag (`readLock` checks both), or
+ *   the same files under `SPICY3D_WASM_BASE_URL/<tag>/` (a mirror; https, plain http on loopback only).
  * - `SPICY3D_SKIP_WASM_FETCH=1` skips it (jobs that only need the committed .d.ts).
  *
  * `--lib <folder>` / `--lock <file>` stand in for the defaults (tests).
@@ -26,7 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FETCHED_FILES, LIB_DIR, LOCK_FILE, readLock, sha256 } from "./wasm-artifact.mjs";
+import { FETCHED_FILES, LIB_DIR, LOCK_FILE, readLock, releaseUrl, sha256 } from "./wasm-artifact.mjs";
 
 const MARKER = ".fetched.json";
 const ATTEMPTS = 3;
@@ -68,6 +69,24 @@ function writeAtomic(file, data) {
     renameSync(temp, file);
 }
 
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Where the files of `tag` are downloaded from: the release, or a mirror holding `<tag>/<file>`. */
+function releaseBase(tag) {
+    const mirror = env.SPICY3D_WASM_BASE_URL;
+    if (!mirror) return releaseUrl(tag);
+    let url;
+    try {
+        url = new URL(mirror);
+    } catch {
+        throw new Error(`SPICY3D_WASM_BASE_URL ${JSON.stringify(mirror)} is not a URL`);
+    }
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) {
+        throw new Error("SPICY3D_WASM_BASE_URL must be https (plain http only on localhost)");
+    }
+    return `${url.href.replace(/\/$/, "")}/${tag}`;
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function download(url) {
@@ -103,7 +122,7 @@ async function obtain(name, expected, baseUrl, tag) {
             );
         }
     }
-    const url = `${baseUrl.replace(/\/$/, "")}/${name}`;
+    const url = `${baseUrl}/${name}`;
     let data;
     try {
         data = await download(url);
@@ -153,7 +172,7 @@ async function main() {
         return;
     }
 
-    const baseUrl = env.SPICY3D_WASM_BASE_URL || lock.url;
+    const baseUrl = releaseBase(lock.tag);
     const obtained = [];
     for (const name of FETCHED_FILES) {
         if (current[name] === expected[name]) continue;

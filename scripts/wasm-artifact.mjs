@@ -41,8 +41,10 @@ export const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 
 export const tagOf = (inputs) => `wasm-${inputs.slice(0, 16)}`;
 
-export const releaseUrl = (tag, repository = REPOSITORY) =>
-    `https://github.com/${repository}/releases/download/${tag}`;
+const TAG = /^wasm-[0-9a-f]{16}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+
+export const releaseUrl = (tag) => `https://github.com/${REPOSITORY}/releases/download/${tag}`;
 
 function* walk(dir, root) {
     for (const entry of readdirSync(dir).sort()) {
@@ -67,10 +69,28 @@ export function inputsHash(root = ROOT_DIR) {
     return sha256(lines.join("\n"));
 }
 
+/**
+ * The lock, checked before any of it reaches a URL or a file name: a tag of the form `wasm-<16 hex>`
+ * (it goes into the download URL), the release URL of that tag in this repository (downloads never go
+ * where the lock says, only there or to `SPICY3D_WASM_BASE_URL`), and hex sha256 values (they name the
+ * download cache's files).
+ */
 export function readLock(file = LOCK_FILE) {
     const lock = JSON.parse(readFileSync(file, "utf8"));
-    if (lock.schema !== 1 || typeof lock.tag !== "string" || typeof lock.files !== "object") {
-        throw new Error(`${path.relative(ROOT_DIR, file)}: not a wasm lock file (schema 1)`);
+    const name = path.relative(ROOT_DIR, file);
+    if (lock.schema !== 1 || typeof lock.files !== "object" || lock.files === null) {
+        throw new Error(`${name}: not a wasm lock file (schema 1)`);
+    }
+    if (typeof lock.tag !== "string" || !TAG.test(lock.tag)) {
+        throw new Error(`${name}: tag ${JSON.stringify(lock.tag)} is not wasm-<16 hex digits>`);
+    }
+    if (lock.url !== releaseUrl(lock.tag)) {
+        throw new Error(`${name}: url is not ${releaseUrl(lock.tag)}`);
+    }
+    for (const [file, entry] of Object.entries(lock.files)) {
+        if (typeof entry?.sha256 !== "string" || !SHA256.test(entry.sha256)) {
+            throw new Error(`${name}: the sha256 of ${file} is not 64 hex digits`);
+        }
     }
     return lock;
 }
@@ -78,13 +98,13 @@ export function readLock(file = LOCK_FILE) {
 export const fileSha = (file) => (existsSync(file) ? sha256(readFileSync(file)) : undefined);
 
 /** The lock for the built files in `dir`. */
-export function makeLock(dir, inputs, repository = REPOSITORY) {
+export function makeLock(dir, inputs) {
     const files = {};
     for (const name of [...FETCHED_FILES, ...COMMITTED_FILES]) {
         const data = readFileSync(path.join(dir, name));
         files[name] = { sha256: sha256(data), size: data.length };
     }
-    return { schema: 1, inputs, tag: tagOf(inputs), url: releaseUrl(tagOf(inputs), repository), files };
+    return { schema: 1, inputs, tag: tagOf(inputs), url: releaseUrl(tagOf(inputs)), files };
 }
 
 export const writeLock = (lock, file = LOCK_FILE) =>
@@ -153,7 +173,7 @@ function main([command, ...args]) {
         case "lock": {
             const dir = option("--dir");
             if (!dir) throw new Error("lock: --dir <folder with the built files> is required");
-            const lock = makeLock(dir, inputsHash(root), option("--repository") ?? REPOSITORY);
+            const lock = makeLock(dir, inputsHash(root));
             for (const name of COMMITTED_FILES) {
                 const target = path.join(lib, name);
                 if (path.resolve(dir, name) !== target) copyFileSync(path.join(dir, name), target);
