@@ -120,7 +120,10 @@ jobs:
                   node-version: 24
                   cache: npm
 
+            # Biome and clang-format read no kernel binary (scripts/fetch-wasm.mjs).
             - run: npm ci
+              env:
+                  SPICY3D_SKIP_WASM_FETCH: "1"
 
             - name: Biome
               if: needs.changes.outputs.ts == 'true'
@@ -145,7 +148,10 @@ jobs:
                   node-version: 24
                   cache: npm
 
+            # The committed spicy-wasm.d.ts is enough for tsc (scripts/fetch-wasm.mjs).
             - run: npm ci
+              env:
+                  SPICY3D_SKIP_WASM_FETCH: "1"
 
             - run: npx tsc --noEmit -p tsconfig.json
 

@@ -1,0 +1,236 @@
+name: WASM kernel
+
+# The WebAssembly kernel (packages/wasm/lib/spicy-wasm.{wasm,js}) is a release artifact, not a committed
+# file (#191, scripts/wasm-artifact.mjs): packages/wasm/wasm.lock.json pins the release `wasm-<inputs>` and
+# the sha256 of its files; `npm ci` fetches them (scripts/fetch-wasm.mjs). This workflow keeps the lock
+# true, and builds a kernel only when needed:
+#
+# - Job `state` hashes the build inputs (cpp/, the toolchain pins in scripts/setup_wasm_deps.mjs) and
+#   decides:
+#     ok    the release of these inputs exists, holds the pinned files, the lock and the .d.ts match;
+#     lock  the release exists but the lock does not point at it (a run stopped after publishing);
+#     seed  no release yet, but the base branch still commits the pinned files (the move to releases):
+#           they are published as they are;
+#     build no release for these inputs: job `build` compiles them (Emscripten + OCCT, cpp/build cached
+#           per branch, read-only token).
+# - Job `publish` (pull requests from this repository and manual runs on other branches only, never
+#   main/develop) creates the release, commits the lock (and the new .d.ts) to the branch, then starts
+#   this workflow, Code Quality and the offline smoke test on the branch again: a push made with
+#   GITHUB_TOKEN starts no workflow, and the runs that fetched before the release existed failed.
+# - Job `verify` is the check: on main/develop (push) or a fork's pull request a stale lock fails, nothing
+#   is built there.
+
+on:
+    pull_request:
+        branches: ["main", "develop"]
+        paths: &wasm-paths
+            - "cpp/**"
+            - "scripts/setup_wasm_deps.mjs"
+            - "scripts/wasm-artifact.mjs"
+            - "scripts/fetch-wasm.mjs"
+            - "packages/wasm/wasm.lock.json"
+            - "packages/wasm/lib/**"
+            - ".github/workflows/wasm.yml"
+            - "!**.md"
+    push:
+        branches: ["main", "develop"]
+        paths: *wasm-paths
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+# Never cancel halfway: a release without its lock commit is picked up again (`lock`), but a build is
+# long and a newer run waits for it.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: false
+
+jobs:
+    state:
+        name: Kernel release state
+        runs-on: ubuntu-26.04
+        outputs:
+            state: ${{ steps.state.outputs.state }}
+            tag: ${{ steps.state.outputs.tag }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            # The scripts use node's built-in modules only: no npm ci.
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            - id: state
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  BASE_REF: ${{ github.base_ref || 'develop' }}
+              run: |
+                  tag=$(node scripts/wasm-artifact.mjs tag)
+                  locked=$(node -p 'require("./packages/wasm/wasm.lock.json").tag')
+                  if gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir release; then
+                      if [[ "$locked" == "$tag" ]] && node scripts/wasm-artifact.mjs check \
+                          && node scripts/wasm-artifact.mjs verify --dir release; then
+                          state=ok
+                      else
+                          state=lock
+                      fi
+                  else
+                      state=build
+                      if [[ "$locked" == "$tag" ]] && git fetch --depth=1 origin "$BASE_REF"; then
+                          mkdir -p seed
+                          for f in spicy-wasm.wasm spicy-wasm.js spicy-wasm.d.ts; do
+                              git show "FETCH_HEAD:packages/wasm/lib/$f" > "seed/$f" 2> /dev/null || true
+                          done
+                          if node scripts/wasm-artifact.mjs verify --dir seed; then state=seed; fi
+                      fi
+                  fi
+                  echo "state=$state" >> "$GITHUB_OUTPUT"
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "Kernel release \`$tag\` (lock: \`$locked\`): **$state**" >> "$GITHUB_STEP_SUMMARY"
+
+    build:
+        name: Build kernel (Emscripten + OCCT)
+        needs: state
+        if: needs.state.outputs.state == 'build'
+        runs-on: ubuntu-26.04
+        timeout-minutes: 300
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            # emsdk, the OCCT checkout and the object files: only the changed sources compile again. Saved
+            # even when the build fails, so a second attempt does not start from zero.
+            - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: cpp/build
+                  key: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-${{ github.run_id }}
+                  restore-keys: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-
+
+            - run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+            - run: npm run setup:wasm
+
+            - run: npm run build:wasm
+
+            - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              if: always()
+              with:
+                  path: cpp/build
+                  key: wasm-build-v1-${{ hashFiles('scripts/setup_wasm_deps.mjs') }}-${{ github.run_id }}
+
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: wasm-kernel
+                  path: |
+                      packages/wasm/lib/spicy-wasm.wasm
+                      packages/wasm/lib/spicy-wasm.js
+                      packages/wasm/lib/spicy-wasm.d.ts
+                  if-no-files-found: error
+                  retention-days: 3
+
+    publish:
+        name: Publish kernel release
+        needs: [state, build]
+        if: >-
+            always() && contains(fromJSON('["lock","seed","build"]'), needs.state.outputs.state)
+            && needs.state.result == 'success' && needs.build.result != 'failure' && needs.build.result != 'cancelled'
+            && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+                || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main' && github.ref_name != 'develop'))
+        runs-on: ubuntu-26.04
+        permissions:
+            contents: write # the release and the lock commit
+            actions: write # starting the checks again on the branch
+        env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            STATE: ${{ needs.state.outputs.state }}
+            TAG: ${{ needs.state.outputs.tag }}
+            BRANCH: ${{ github.head_ref || github.ref_name }}
+            BASE_REF: ${{ github.base_ref || 'develop' }}
+        steps:
+            # The branch itself (a pull request's default checkout is the merge commit): the lock is
+            # committed on top of it.
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ env.BRANCH }}
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+              with:
+                  node-version: 24
+
+            - if: needs.state.outputs.state == 'build'
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: wasm-kernel
+                  path: out
+
+            - name: Files of the release
+              run: |
+                  mkdir -p out
+                  if [[ "$STATE" == seed ]]; then
+                      git fetch --depth=1 origin "$BASE_REF"
+                      for f in spicy-wasm.wasm spicy-wasm.js spicy-wasm.d.ts; do
+                          git show "FETCH_HEAD:packages/wasm/lib/$f" > "out/$f"
+                      done
+                      node scripts/wasm-artifact.mjs verify --dir out
+                  fi
+                  if [[ "$STATE" != lock ]]; then
+                      # Another run may have published it meanwhile: its files win, a release is never replaced.
+                      if ! gh release create "$TAG" out/spicy-wasm.wasm out/spicy-wasm.js out/spicy-wasm.d.ts \
+                          --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)" --latest=false \
+                          --title "WASM kernel $TAG" \
+                          --notes "spicy-wasm.{wasm,js,d.ts} built from the inputs \`$TAG\` (packages/wasm/wasm.lock.json, #191)."; then
+                          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+                          STATE=lock
+                      fi
+                  fi
+                  if [[ "$STATE" == lock ]]; then
+                      rm -rf out && gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir out
+                  fi
+                  echo "Published or found release \`$TAG\`" >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Commit the lock
+              run: |
+                  node scripts/wasm-artifact.mjs lock --dir out
+                  node scripts/wasm-artifact.mjs check
+                  if git diff --quiet; then
+                      echo "The lock already pins $TAG"
+                      exit 0
+                  fi
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git commit -am "Pin WASM kernel $TAG"
+                  git push origin "HEAD:$BRANCH"
+
+            - name: Run the checks on the branch again
+              run: |
+                  for workflow in wasm.yml quality.yml smoke.yml; do
+                      gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+                  done
+
+    verify:
+        name: Kernel lock up to date
+        needs: [state, publish]
+        if: always()
+        runs-on: ubuntu-26.04
+        steps:
+            - env:
+                  STATE: ${{ needs.state.outputs.state }}
+                  PUBLISHED: ${{ needs.publish.result }}
+                  TAG: ${{ needs.state.outputs.tag }}
+              run: |
+                  if [[ "$STATE" == ok ]]; then
+                      echo "The lock pins $TAG"
+                  elif [[ "$PUBLISHED" == success ]]; then
+                      echo "Published $TAG and pinned it; the checks run again on the new commit."
+                  else
+                      echo "::error::packages/wasm/wasm.lock.json does not pin a published kernel for these sources ($TAG, state ${STATE:-unknown}). A pull request from this repository builds and publishes it; from a fork, a maintainer runs this workflow on a branch."
+                      exit 1
+                  fi
