@@ -16,7 +16,7 @@ What we have added so far:
 - An MCP server that runs inside the page: signed in to a Spicy3D server with MCP, Claude Code, Cursor, VS Code and other MCP clients connect to the server with a personal access token and drive the open document (the MCP panel has the client configs).
 - A ribbon laid out like Fusion 360's, with context-aware shortcuts
 - An adaptive background grid in the viewport
-- CI: lint, typecheck, CodeQL, Semgrep and a dependency audit on pull requests to `develop` and `main`; the test suite runs on pull requests to `main`
+- CI: lint, typecheck, CodeQL (reviewed false positives listed with their reasons in `scripts/codeql-suppressions.mjs`), Semgrep and a dependency audit on pull requests to `develop` and `main`; the test suite runs on pull requests to `main`
 
 ## Features
 
