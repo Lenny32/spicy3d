@@ -440,6 +440,7 @@ export function buildReferenceMeshImportTool(): Tool {
         name: "import_reference_mesh",
         description:
             "Import base64-encoded STL as a lightweight ghost MeshNode without kernel conversion. STL defaults to millimetres. Placement uses millimetres. Move/rotate, visibility and material opacity remain editable with existing node tools. This is display geometry, not a parametric solid. Maximum decoded file size: 32 MiB.",
+        largeArguments: true,
         parameters: {
             type: "object",
             properties: {

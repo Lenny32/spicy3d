@@ -227,6 +227,7 @@ export function buildProgramJobTools(jobs = PAGE_JOBS): Tool[] {
                     timeoutMs: { type: "number", minimum: 1, maximum: 600_000 },
                 },
             },
+            largeArguments: true,
             handler: async (args, _signal, context) => JSON.stringify(jobs.start(args, context)),
         },
         {
@@ -274,7 +275,7 @@ export function buildParametricJobTools(jobs = PARAMETRIC_JOBS): Tool[] {
         {
             name: "start_parametric_job",
             description:
-                "Queue a parametric program and immediately return a jobId. Consecutive editSketch operations coalesce downstream rebuilds, which yield between uncached features. Poll get_parametric_job and get_rebuild_status; cancel_parametric_job rolls back the whole program. Other topology-dependent operations and individual synchronous kernel calls can block until they return. One success is one undo step. Jobs use the shared mutation FIFO, belong to this session/document, and cancel on session end. Default deadline 120s, maximum 600s, 1–256 ops, 1 MiB arguments/results, sixteen retained parametric jobs per page and four active per caller, separate from program and corner jobs (combined maximum 48 retained/12 active); retained ten minutes after completion. Load parametric-modeling for ops.",
+                "Queue a parametric program and immediately return a jobId. Consecutive editSketch operations coalesce downstream rebuilds, which yield between uncached features. Poll get_parametric_job and get_rebuild_status; cancel_parametric_job rolls back the whole program. Other topology-dependent operations and individual synchronous kernel calls can block until they return. One success is one undo step. Jobs use the shared mutation FIFO, belong to this session/document, and cancel on session end. Default deadline 120s, maximum 600s, 1–256 ops, 1 MiB arguments/results (a relay with a smaller message limit carries less: split the program), sixteen retained parametric jobs per page and four active per caller, separate from program and corner jobs (combined maximum 48 retained/12 active); retained ten minutes after completion. Load parametric-modeling for ops.",
             parameters: {
                 ...RUN_PARAMETRIC_PARAMETERS,
                 properties: {
@@ -282,6 +283,7 @@ export function buildParametricJobTools(jobs = PARAMETRIC_JOBS): Tool[] {
                     timeoutMs: { type: "number", minimum: 1, maximum: 600_000 },
                 },
             },
+            largeArguments: true,
             handler: async (args, _signal, context) => JSON.stringify(jobs.start(args, context)),
         },
         {

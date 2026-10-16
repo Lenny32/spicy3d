@@ -318,6 +318,37 @@ describe("RelayTransport", () => {
         ]);
     });
 
+    test("an answer above the relay's message limit becomes an error naming both sizes", async () => {
+        const { relay, sent, receive } = setup();
+        const big = {
+            jsonrpc: "2.0" as const,
+            id: "c1",
+            result: { content: [{ type: "text", text: "x".repeat(2000) }] },
+        };
+        await relay.send(big);
+        expect(sent.at(-1)).toEqual(big); // no limit known yet
+
+        receive({ jsonrpc: "2.0", method: RELAY.welcome, params: { tabId: "t1", maxMessageBytes: 1024 } });
+        await relay.send(big);
+        const refused = sent.at(-1) as Message;
+        expect(refused.id).toBe("c1");
+        expect(refused.error.code).toBe(-32603);
+        expect(refused.error.message).toContain("(1024 bytes)");
+        expect(refused.error.message).toContain(`(${JSON.stringify(big).length} bytes)`);
+
+        const small = { jsonrpc: "2.0" as const, id: "c2", result: { content: [] } };
+        await relay.send(small);
+        expect(sent.at(-1)).toEqual(small);
+        // The tab's own requests and notifications are never rewritten.
+        const tab = {
+            jsonrpc: "2.0" as const,
+            method: RELAY.tab,
+            params: { documentName: "x".repeat(2000) },
+        };
+        await relay.send(tab);
+        expect(sent.at(-1)).toEqual(tab);
+    });
+
     test("listing and initialize never wait for the prompt", () => {
         const { receive, delivered, asked } = setup();
         receive({

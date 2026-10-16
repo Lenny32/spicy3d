@@ -53,6 +53,8 @@ export interface McpServerOptions {
     queue?: SerialQueue;
     /** The largest base64 image a call's result may carry (the relay's message limit); none by default. */
     imageByteBudget?: () => number | undefined;
+    /** The relay's `maxMessageBytes` once it said so; named in the listing of `largeArguments` tools. */
+    maxMessageBytes?: () => number | undefined;
 }
 
 /**
@@ -141,6 +143,14 @@ function usageGuideTool(instructions: string): Tool {
         parameters: { type: "object", properties: {} },
         handler: async () => instructions,
     };
+}
+
+/**
+ * Appended to a `largeArguments` tool's description over a relay: a request above its message
+ * limit is never delivered to the tab, so the agent only sees the relay time out (#174).
+ */
+export function relayLimitNote(maxMessageBytes: number): string {
+    return `This connection's relay carries at most ${maxMessageBytes} bytes per JSON-RPC message, arguments included: a larger call never reaches the tab and only times out, so split it into smaller calls.`;
 }
 
 /** The document snapshot plus where the document is stored and how far it is saved (`document`). */
@@ -242,13 +252,17 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         };
     };
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: currentTools().map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.parameters as { type: "object" },
-        })),
-    }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
+        const limit = options.maxMessageBytes?.();
+        return {
+            tools: currentTools().map((t) => ({
+                name: t.name,
+                description:
+                    limit && t.largeArguments ? `${t.description} ${relayLimitNote(limit)}` : t.description,
+                inputSchema: t.parameters as { type: "object" },
+            })),
+        };
+    });
 
     server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
         const { name, arguments: args } = request.params;

@@ -55,6 +55,8 @@ export class RemoteMcpSession {
     private readonly seen = new Map<string, RemoteAgent>();
     /** Image budget of this relay's calls, from its `maxMessageBytes`. */
     private imageBudget?: number;
+    /** The relay's message limit, named in the listing of tools taking large arguments. */
+    private maxMessageBytes?: number;
     /** Consecutive 1008 closes: their reconnects back off even though each connect succeeds. */
     private policyCloses = 0;
 
@@ -69,13 +71,19 @@ export class RemoteMcpSession {
             onStatus: (status) => state.update({ status }),
             onToolCall: (name, isError) => state.recordCall(name, isError),
             createServer: options.createServer,
-            serverOptions: { imageByteBudget: () => this.imageBudget },
+            serverOptions: {
+                imageByteBudget: () => this.imageBudget,
+                maxMessageBytes: () => this.maxMessageBytes,
+            },
             createTransport: (url) =>
                 new RelayTransport(new PageSocketTransport(url, options.createSocket), {
                     gate: this.gate,
                     onWelcome: ({ tabId, maxMessageBytes }) => {
                         state.update({ tabId });
-                        if (maxMessageBytes) this.imageBudget = imageBudgetFor(maxMessageBytes);
+                        this.maxMessageBytes = maxMessageBytes;
+                        this.imageBudget = maxMessageBytes ? imageBudgetFor(maxMessageBytes) : undefined;
+                        if (maxMessageBytes)
+                            Logger.info(`[mcp] the relay carries messages up to ${maxMessageBytes} bytes`);
                     },
                     onAgents: (agents) => this.onAgents(agents),
                     onAgentSeen: (agent) => this.onAgentSeen(agent),

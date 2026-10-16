@@ -6,7 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMockApplication, createMockDocument } from "@spicy3d/core/test-utils";
 import type { Tool } from "../src/llm/types";
-import { createMcpServer, SerialQueue, toCallToolResult } from "../src/mcp/server";
+import { createMcpServer, relayLimitNote, SerialQueue, toCallToolResult } from "../src/mcp/server";
 import { SKILLS } from "../src/skills";
 import { buildTools } from "../src/tools";
 import { buildAskUserTool } from "../src/tools/askUser";
@@ -251,6 +251,49 @@ describe("image budget per server", () => {
         expect(await budgetSeenBy(() => 5000)).toBe(5000);
         expect(await budgetSeenBy()).toBeUndefined();
         expect(imageByteBudget()).toBeUndefined();
+    });
+});
+
+describe("relay message limit in the listing", () => {
+    async function descriptions(maxMessageBytes?: () => number | undefined) {
+        const program = { ...tool("program", async () => "{}"), largeArguments: true };
+        const server = createMcpServer({
+            tools: [program, tool("small", async () => "{}")],
+            instructions: "x",
+            maxMessageBytes,
+        });
+        const client = new Client({ name: "test", version: "1" });
+        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+        await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+        const { tools } = await client.listTools();
+        await client.close();
+        return Object.fromEntries(tools.map((t) => [t.name, t.description]));
+    }
+
+    test("tools taking large arguments name the relay's limit; the others and a server without a relay don't", async () => {
+        expect(await descriptions(() => 524_288)).toEqual({
+            program: `program tool. ${relayLimitNote(524_288)}`,
+            small: "small tool.",
+            get_usage_guide: expect.any(String),
+        });
+        expect(relayLimitNote(524_288)).toContain("524288 bytes");
+        const plain = await descriptions(() => undefined);
+        expect(plain["program"]).toBe("program tool.");
+        expect((await descriptions())["program"]).toBe("program tool.");
+    });
+
+    test("the job and program tools are the ones flagged", () => {
+        const flagged = buildTools()
+            .filter((t) => t.largeArguments)
+            .map((t) => t.name)
+            .sort();
+        expect(flagged).toEqual([
+            "import_reference_mesh",
+            "run_parametric",
+            "run_program",
+            "start_parametric_job",
+            "start_program_job",
+        ]);
     });
 });
 

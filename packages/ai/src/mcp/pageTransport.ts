@@ -28,6 +28,9 @@ const SOCKET_OPEN = 1; // WebSocket.OPEN
 /** JSON-RPC error of a request the user refused in the pairing prompt. */
 export const PAIRING_DENIED = -32005;
 
+/** JSON-RPC "internal error": an answer the relay could not carry. */
+const INTERNAL_ERROR = -32603;
+
 /** The handshake: answered even for a request that names no session. */
 const HANDSHAKE = new Set(["initialize", "ping"]);
 
@@ -167,6 +170,8 @@ export class RelayTransport implements Transport {
      * (the relay already failed it, and a client retry arrives on the next connection).
      */
     private closed = false;
+    /** The relay's `maxMessageBytes` (welcome); a larger message would be dropped on the way. */
+    private maxMessageBytes?: number;
 
     constructor(
         readonly inner: Transport,
@@ -184,8 +189,26 @@ export class RelayTransport implements Transport {
         return this.inner.start();
     }
 
+    /**
+     * An answer above the relay's message limit would never reach the agent, which would only see
+     * the relay time out: it gets an error naming both sizes instead (#174).
+     */
     send(message: JSONRPCMessage): Promise<void> {
-        return this.inner.send(message);
+        const limit = this.maxMessageBytes;
+        const id = (message as Message).id;
+        if (limit === undefined || id === undefined || (message as Message).method !== undefined)
+            return this.inner.send(message);
+        const bytes = new TextEncoder().encode(JSON.stringify(message)).byteLength;
+        if (bytes <= limit) return this.inner.send(message);
+        Logger.warn(`[mcp] an answer of ${bytes} bytes exceeds the relay's ${limit}-byte limit`);
+        return this.inner.send({
+            jsonrpc: "2.0",
+            id,
+            error: {
+                code: INTERNAL_ERROR,
+                message: `The answer (${bytes} bytes) exceeds the relay's message limit (${limit} bytes) and was not sent; ask for less in one call.`,
+            },
+        });
     }
 
     close(): Promise<void> {
@@ -218,11 +241,9 @@ export class RelayTransport implements Transport {
         const { method } = message;
         if (method === RELAY.welcome) {
             const params = message.params ?? {};
-            this.options.onWelcome?.({
-                tabId: text(params["tabId"]),
-                maxMessageBytes:
-                    typeof params["maxMessageBytes"] === "number" ? params["maxMessageBytes"] : undefined,
-            });
+            const limit = params["maxMessageBytes"];
+            this.maxMessageBytes = typeof limit === "number" && limit > 0 ? limit : undefined;
+            this.options.onWelcome?.({ tabId: text(params["tabId"]), maxMessageBytes: this.maxMessageBytes });
             return;
         }
         if (method === RELAY.agents) {
