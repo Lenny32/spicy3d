@@ -36,8 +36,10 @@ export const PARAMETRIC_FORMAT_VERSION = 15;
  * 4: optional editable text records with frame/layout settings and stable contour identities.
  * 5: explicit Angle datum semantics; migrated clockwise magnitudes retain their stored side.
  * 6: optional Offset constraints; older readers cannot regenerate their derived geometry.
+ * 7: optional entity `name`s, unique per sketch, that later programs address entities by; older
+ * readers would drop them on the next save.
  */
-export const SKETCH_FORMAT_VERSION = 6;
+export const SKETCH_FORMAT_VERSION = 7;
 
 // Changing either payload's shape means bumping its version here, adding
 // `registerMigration("parametric" | "sketch", previous, migrate)` below — a pure function over the
@@ -104,3 +106,6 @@ registerMigration("sketch", 5, (document) => document);
 
 // parametric 14 → 15: absent tolerant option preserves ordinary thicken behavior verbatim.
 registerMigration("parametric", 14, (document) => document);
+
+// sketch 6 → 7: entity names are optional; existing entities stay unnamed — no data to rewrite.
+registerMigration("sketch", 6, (document) => document);

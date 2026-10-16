@@ -38,7 +38,7 @@ const POINT_REF_SCHEMA = {
     properties: {
         entity: {
             description:
-                'Entity id (number), a name given earlier in this call, or "origin" / "xAxis" / "yAxis"',
+                'Entity id (number), an entity name stored in the sketch (this or an earlier call), or "origin" / "xAxis" / "yAxis"',
         },
         point: { type: "number", description: "Zero-based point index within the entity; -1 = last point" },
     },
@@ -93,7 +93,11 @@ const ENTITY_SCHEMA = {
             type: "boolean",
             description: "Construction geometry: constrainable, but never part of a profile",
         },
-        name: { type: "string", description: "Names the entity so later refs in this call can use the name" },
+        name: {
+            type: "string",
+            description:
+                "Names the entity; the name is stored in the sketch, so refs in this and later calls (editSketch) can use it. Unique per sketch",
+        },
     },
     required: ["type"],
 };

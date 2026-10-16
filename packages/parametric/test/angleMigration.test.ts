@@ -6,9 +6,9 @@ import { Document } from "@spicy3d/app";
 import { EMPTY_SCOPE, evaluateVariables, migrateDocument, PubSub, type Serialized } from "@spicy3d/core";
 import { createMockApplication, loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import { migrateAngleSides, migrateSketchAngles } from "../src/angleMigration";
+import { SKETCH_FORMAT_VERSION } from "../src/migrations";
 import { ConstraintKind, type SketchData } from "../src/sketch/sketchModel";
 import { SketchNode } from "../src/sketch/sketchNode";
-import "../src/migrations";
 import "./sketch/setup";
 
 function fixture(): Serialized {
@@ -48,7 +48,7 @@ test.each([
         before = structuredClone(input);
     const migrated = migrateDocument(input);
     expect(migrated.isOk).toBe(true);
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: SKETCH_FORMAT_VERSION });
     const data: SketchData = JSON.parse(sketch(migrated.value)["dataJson"]);
     expect(data.constraints.find((item) => item.kind === ConstraintKind.Angle)).toMatchObject({
         datum,
@@ -127,7 +127,7 @@ test.each([
                 angleSide: -1,
             });
             const saved = loaded!.serialize();
-            expect(saved["moduleVersions"]).toMatchObject({ sketch: 6 });
+            expect(saved["moduleVersions"]).toMatchObject({ sketch: SKETCH_FORMAT_VERSION });
         } finally {
             solver.dispose();
         }
@@ -137,10 +137,10 @@ test.each([
     }
 });
 
-test("Document.load refuses sketch 6 with the existing toast and leaves input untouched", async () => {
+test("Document.load refuses a newer sketch format with the existing toast and leaves input untouched", async () => {
     const app = createMockApplication(),
         input = fixture();
-    input["moduleVersions"]["sketch"] = 7;
+    input["moduleVersions"]["sketch"] = SKETCH_FORMAT_VERSION + 1;
     const before = structuredClone(input),
         pub = rs.spyOn(PubSub.default, "pub");
     try {

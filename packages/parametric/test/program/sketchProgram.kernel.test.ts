@@ -1488,3 +1488,186 @@ test("a non-offset datum discovered during a failing program solve preserves the
         session.dispose();
     }
 });
+
+describe("stored entity names (#163)", () => {
+    const outline: [number, number][] = Array.from({ length: 12 }, (_, i) => {
+        const angle = (2 * Math.PI * i) / 12;
+        return [20 * Math.cos(angle), 12 * Math.sin(angle)];
+    });
+    const named = (sketch: SketchNode) =>
+        Object.fromEntries(
+            sketch.data.entities.filter((e) => e.name !== undefined).map((e) => [e.name, e.id]),
+        );
+
+    test("a later program edits an entity by the name it was created with", () => {
+        const doc = newDoc();
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "2", type: "length" }]);
+        const first = run(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [{ type: "bspline", points: outline, periodic: true, name: "outer" }],
+            },
+        ]);
+        const sketch = sketchOf(doc, first, "s1");
+        const outerId = report(first, "s1").names["outer"];
+        expect(named(sketch)).toEqual({ outer: outerId });
+
+        const second = run(doc, [
+            {
+                op: "editSketch",
+                id: "e1",
+                sketch: sketch.id,
+                actions: [
+                    { action: "offset", entity: "outer", distance: "gap", associative: true, name: "inner" },
+                ],
+            },
+            {
+                op: "editSketch",
+                id: "e2",
+                sketch: sketch.id,
+                actions: [{ action: "setConstruction", entities: ["outer"] }],
+            },
+        ]);
+        const innerId = report(second, "e1").names["inner"];
+        expect(innerId).not.toBe(outerId);
+        expect(named(sketch)).toEqual({ outer: outerId, inner: innerId });
+        expect(entity(sketch, outerId).construction).toBe(true);
+
+        // the regenerated offset target keeps its own name, not its source's
+        doc.variables.setItems([{ id: "gap", name: "gap", expression: "3", type: "length" }]);
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [{ action: "movePoint", entity: "outer", point: 0, to: [22, 0] }],
+            },
+        ]);
+        expect(named(sketch)).toEqual({ outer: outerId, inner: innerId });
+        const info = run(doc, [{ op: "sketchInfo", id: "info", sketch: sketch.id }]).results[
+            "info"
+        ] as SketchInfo;
+        expect(info.entities.map((e) => e.name)).toEqual(["outer", "inner"]);
+    });
+
+    test("names survive saving and reopening the document", async () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            { op: "sketch", id: "s1", entities: [{ type: "circle", params: [0, 0, 5], name: "hole" }] },
+        ]);
+        const sketch = sketchOf(doc, result, "s1");
+        const stored = {
+            __cla$$__: "Document",
+            acts: [],
+            formatVersion: DOCUMENT_FORMAT_VERSION,
+            moduleVersions: DocumentMigrations.moduleVersions(),
+            id: doc.id,
+            name: doc.name,
+            models: doc.modelManager.serialize(),
+        };
+        const decoded = await decodeDocumentFile(await encodeDocumentFile(stored));
+        expect(decoded.isOk).toBe(true);
+        const reopened = newDoc();
+        await reopened.modelManager.deserialize(decoded.value["models"]);
+        const reopenedSketch = nodeById(reopened, sketch.id) as SketchNode;
+        const holeId = report(result, "s1").names["hole"];
+        expect(named(reopenedSketch)).toEqual({ hole: holeId });
+
+        run(reopened, [
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [{ action: "setConstruction", entities: ["hole"] }],
+            },
+        ]);
+        expect(entity(reopenedSketch, holeId).construction).toBe(true);
+    });
+
+    test("a name already stored in the sketch is refused, in the same or a later program", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            { op: "sketch", id: "s1", entities: [{ type: "circle", params: [0, 0, 5], name: "hole" }] },
+        ]);
+        const sketch = sketchOf(doc, result, "s1");
+        const before = structuredClone(sketch.data);
+        const later = runExpectingFailure(doc, [
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [{ action: "add", entities: [{ type: "circle", params: [9, 0, 2], name: "hole" }] }],
+            },
+        ]);
+        expect(later).toContain('the name "hole" is already used');
+        expect(sketch.data).toEqual(before);
+
+        const same = runExpectingFailure(doc, [
+            {
+                op: "sketch",
+                id: "s2",
+                entities: [
+                    { type: "line", params: [0, 0, 1, 0], name: "edge" },
+                    { type: "line", params: [0, 1, 1, 1], name: "edge" },
+                ],
+            },
+        ]);
+        expect(same).toContain('the name "edge" is already used');
+        expect(
+            runExpectingFailure(doc, [
+                { op: "sketch", id: "s3", entities: [{ type: "point", params: [1, 1], name: "origin" }] },
+            ]),
+        ).toContain("reserved");
+    });
+
+    test("copies are unnamed and a removed entity frees its name", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [{ type: "circle", params: [0, 0, 5], name: "hole" }],
+                actions: [{ action: "move", entities: ["hole"], delta: [20, 0], copy: true }],
+            },
+        ]);
+        const sketch = sketchOf(doc, result, "s1");
+        const holeId = report(result, "s1").names["hole"];
+        expect(sketch.data.entities).toHaveLength(2);
+        expect(named(sketch)).toEqual({ hole: holeId });
+
+        run(doc, [
+            {
+                op: "editSketch",
+                sketch: sketch.id,
+                actions: [
+                    { action: "remove", entities: ["hole"] },
+                    { action: "add", entities: [{ type: "circle", params: [40, 0, 2], name: "hole" }] },
+                ],
+            },
+        ]);
+        expect(sketch.data.entities.map((e) => [e.name, e.params])).toEqual([
+            [undefined, [20, 0, 5]],
+            ["hole", [40, 0, 2]],
+        ]);
+    });
+
+    test("a name two merged namings share asks for the id", () => {
+        const doc = newDoc();
+        const result = run(doc, [
+            {
+                op: "sketch",
+                id: "s1",
+                entities: [
+                    { type: "circle", params: [0, 0, 5], name: "a" },
+                    { type: "circle", params: [20, 0, 5], name: "b" },
+                ],
+            },
+        ]);
+        const sketch = sketchOf(doc, result, "s1");
+        const data = structuredClone(sketch.data);
+        for (const e of data.entities) e.name = "hole";
+        Transaction.execute(doc, "merged", () => sketch.setDataEmitShapeChanged(data));
+        const message = runExpectingFailure(doc, [
+            { op: "editSketch", sketch: sketch.id, actions: [{ action: "remove", entities: ["hole"] }] },
+        ]);
+        expect(message).toContain('the name "hole" is shared by entities');
+    });
+});

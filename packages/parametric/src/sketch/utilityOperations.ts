@@ -139,10 +139,12 @@ export function transformSketchSelection(
         return id;
     };
     const mapping = new Map(source.entities.map((e) => [e.id, duplicate ? newEntityId() : e.id]));
-    const entities = source.entities.map((e) => ({
-        ...transformEntity(e, transform),
-        id: mapping.get(e.id)!,
-    }));
+    const entities = source.entities.map((e) => {
+        const entity = { ...transformEntity(e, transform), id: mapping.get(e.id)! };
+        // a name stays with its original: copies are unnamed, so stored names remain unique
+        if (duplicate) delete entity.name;
+        return entity;
+    });
     if (entities.some((e) => e.params.some((p) => !Number.isFinite(p))))
         return Result.err("Transform values must be finite");
     const texts = (source.texts ?? []).map((text) => {

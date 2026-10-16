@@ -17,7 +17,7 @@ import {
 import { loadDocumentFixtures } from "@spicy3d/core/test-utils";
 import fc from "fast-check";
 import "@spicy3d/app";
-import "@spicy3d/parametric";
+import { SKETCH_FORMAT_VERSION } from "@spicy3d/parametric";
 import "@spicy3d/wasm";
 import type { SketchData } from "../../parametric/src/sketch/sketchModel";
 import { SketchSolver } from "../../parametric/src/sketch/solver";
@@ -165,7 +165,7 @@ test.each([
         datum: "tilt",
         angleSide: -1,
     });
-    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: 6 });
+    expect(migrated.value["moduleVersions"]).toMatchObject({ sketch: SKETCH_FORMAT_VERSION });
 });
 
 test.each([4, 5])("resolving a sketch %s datum conflict takes its angle side too", (version) => {
