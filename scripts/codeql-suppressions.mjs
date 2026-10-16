@@ -3,8 +3,9 @@
 
 /**
  * Reviewed CodeQL false positives, kept in the repository instead of dismissed by hand (a dismissed
- * alert comes back as a new one whenever the code around it changes). The CodeQL job of quality.yml writes its SARIF, this script
- * drops the results matching an entry below (same rule *and* same file), then the rest is uploaded.
+ * alert comes back as a new one whenever the code around it changes). The CodeQL job of quality.yml
+ * writes its SARIF, this script drops the results matching an entry below (same rule *and* same
+ * file), then the rest is uploaded.
  * Every dropped result is printed with its reason; an entry matching nothing in a run that ran its
  * rule is a warning, so a stale one gets noticed. Add an entry only with a reason a reviewer can check
  * against the code.
