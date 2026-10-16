@@ -21,6 +21,14 @@ import { collectEdges, groupConnected, hasBranchVertex, needsKernelSplit } from 
 import { captureProfileRef } from "./profileRef";
 import { profileEdgeSeeds } from "./profileSeeds";
 import { MATCH_TOLERANCE } from "./refGeometry";
+import { validateSelfIntersection } from "./selfIntersectionValidation";
+
+/**
+ * #176: a smooth loft interpolates its sections, so unevenly spaced or shrinking sections make
+ * the side overshoot — past a tilted end cap, or folding onto itself — while `checkShape` passes.
+ */
+export const SMOOTH_LOFT_SELF_INTERSECTION =
+    "Smooth loft intersects itself: its surface overshoots between unevenly spaced or shrinking sections. Set Ruled, or space the sections more evenly / add an intermediate section";
 
 /** A section resolved for one rebuild: a closed profile or open wire, with sketch-scoped identity. */
 interface ResolvedLoftSection {
@@ -137,6 +145,19 @@ const loftHandler: FeatureHandler<LoftFeatureData> = {
                 feature.continuity ?? "c2",
             );
             if (!lofted.isOk) return Result.err(lofted.error);
+            // A ruled loft's sides are straight between sections and cannot overshoot.
+            if (feature.ruled !== true) {
+                const clean = validateSelfIntersection(
+                    lofted.value,
+                    context.warn,
+                    context.deferSelfIntersection,
+                    SMOOTH_LOFT_SELF_INTERSECTION,
+                );
+                if (!clean.isOk) {
+                    lofted.value.dispose();
+                    return Result.err(clean.error);
+                }
+            }
             if (tracking !== undefined) trackLoft(feature, sections.value, lofted.value, tracking);
             return lofted;
         } finally {

@@ -109,6 +109,11 @@ available; explicit features, sketchInfo and constructionInfo ops always return 
   solid (default true) caps the ends, false leaves an open surface; ruled: true makes straight faces
   between sections (default smooth, continuity "c2"). The loft follows every section sketch when it
   changes. Always starts a new body — there is no join/cut loft; combine it with the boolean op.
+  A smooth loft interpolates its sections: unevenly spaced or shrinking sections (e.g. a tilted end
+  section close to the previous one at one side) make the side overshoot past an end cap or fold onto
+  itself while checkShape still passes. Rebuilds check smooth lofts for self-intersection in the
+  bounded worker (error "Smooth loft intersects itself…"); fix with ruled: true, more evenly spaced
+  sections or an intermediate section. Compare volume with a ruled loft to spot a large bulge.
   guided: { spine: { nodeId, edgeIndexes? , edgeRefs? }, boundary: { nodeId, edgeIndexes?, edgeRefs? } }
   references an open main spine and one curve that genuinely controls the side boundary. Each path
   uses exactly one of whole-edge indexes or persistent references returned by edges, with 1–128
