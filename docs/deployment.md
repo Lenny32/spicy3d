@@ -154,3 +154,10 @@ The same image and `deployment.json` work on a public HTTPS host: set the server
 SpicySrv's proxy sends `/api/*`, `/ws/*`, `/mcp` and `/mcp/*` to the API and everything else to this
 image, so the app must not serve anything under those paths. The dev server proxies the same paths when
 `SPICY3D_API_URL` is set (README, Development with a server).
+
+## History without the old kernels
+
+The kernels committed before #191 are removed from every branch and tag by
+`scripts/rewrite-history.sh` (#192). Deployments are unaffected: `develop` and `main` keep their exact
+trees, the releases (kernel assets included) and the ghcr images stay, and the next version is still
+the last release tag + 1. The steps around the force push are in [history-rewrite.md](history-rewrite.md).
