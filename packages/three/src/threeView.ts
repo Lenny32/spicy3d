@@ -369,6 +369,7 @@ export class ThreeView extends Observable implements IView {
     }
 
     private renderScene() {
+        if (this._isolatedNodes) this.applyIsolation(this.isolatedVisuals());
         this.prepareGrid();
         if (Config.instance.showGrid) {
             const color = this._dom ? getComputedStyle(this._dom).color : "#333333";
@@ -478,36 +479,18 @@ export class ThreeView extends Observable implements IView {
     }
 
     isolate(nodes: INode[]) {
-        const visuals = nodes
-            .map((x) => this.content.getVisual(x))
-            .filter((x) => x !== undefined) as IVisualObject[];
-        for (const shape of visuals) {
-            if (shape instanceof Object3D) {
-                shape.layers.set(Constants.Layers.Isolation);
-                shape.children.forEach((x) => {
-                    x.layers.set(Constants.Layers.Isolation);
-                });
-            }
-        }
+        this._isolatedNodes = this._isolatedNodes ? this._isolatedNodes.concat(nodes) : nodes;
+        this.applyIsolation(this.visualsOf(nodes));
 
         this.cameraController.camera.layers.disableAll();
         this.cameraController.camera.layers.enable(Constants.Layers.Default);
         this.cameraController.camera.layers.enable(Constants.Layers.Isolation);
-
-        if (!this._isolatedNodes) {
-            this._isolatedNodes = nodes;
-        } else {
-            this._isolatedNodes = this._isolatedNodes.concat(nodes);
-        }
     }
 
     unisolate() {
         if (!this._isolatedNodes) return;
 
-        const shapes = this._isolatedNodes
-            .map((x) => this.content.getVisual(x))
-            .filter((x) => x !== undefined) as IVisualObject[];
-        for (const shape of shapes) {
+        for (const shape of this.isolatedVisuals()) {
             if (shape instanceof Object3D) {
                 shape.layers.set(Constants.Layers.Default);
                 shape.children.forEach((x) => {
@@ -529,6 +512,38 @@ export class ThreeView extends Observable implements IView {
 
         this.cameraController.camera.layers.enableAll();
         this._isolatedNodes = undefined;
+    }
+
+    private applyIsolation(visuals: IVisualObject[]) {
+        for (const shape of visuals) {
+            if (shape instanceof Object3D) {
+                shape.layers.set(Constants.Layers.Isolation);
+                shape.children.forEach((x) => {
+                    x.layers.set(Constants.Layers.Isolation);
+                });
+            }
+        }
+    }
+
+    /**
+     * The isolated nodes' current visuals. A rebuild replaces a visual's meshes (back on their
+     * normal layers) and an undo/rollback can restore a node as a new instance with the same id,
+     * so the isolation is resolved again by id and re-applied before each render (#178).
+     */
+    private isolatedVisuals(): IVisualObject[] {
+        const nodes = this._isolatedNodes ?? [];
+        const stale = new Set(nodes.filter((x) => !this.content.getVisual(x)).map((x) => x.id));
+        if (stale.size > 0) {
+            const current = new Map(
+                this.document.modelManager.findNodes((x) => stale.has(x.id)).map((x) => [x.id, x]),
+            );
+            this._isolatedNodes = nodes.map((x) => (stale.has(x.id) && current.get(x.id)) || x);
+        }
+        return this.visualsOf(this._isolatedNodes ?? []);
+    }
+
+    private visualsOf(nodes: INode[]): IVisualObject[] {
+        return nodes.map((x) => this.content.getVisual(x)).filter((x) => x !== undefined) as IVisualObject[];
     }
 
     detectVisual(x: number, y: number, nodeFilter?: INodeFilter): IVisualObject[] {
