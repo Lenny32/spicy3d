@@ -989,7 +989,7 @@ public:
         return props.Mass();
     }
 
-    // The face's area for measurement: span-wise adaptive integration (massProperties.hpp).
+    // The face's area for measurement: adaptive integration (massProperties.hpp).
     static double measuredArea(const TopoDS_Face& face)
     {
         GProp_GProps props;

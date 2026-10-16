@@ -190,7 +190,7 @@ export interface IFace extends IShape {
      */
     area(): number;
     /**
-     * The face's area for measurement (span-wise adaptive integration, #177); kernels without
+     * The face's area for measurement (adaptive integration, #177); kernels without
      * it leave the method out — use `face.measuredArea?.() ?? face.area()`.
      */
     measuredArea?(): number;
