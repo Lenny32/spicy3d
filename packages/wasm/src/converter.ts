@@ -19,10 +19,36 @@ import {
     type StlTessellationOptions,
 } from "@spicy3d/core";
 import type { ShapeNode } from "../lib/spicy-wasm";
+import { kernelCallFailure } from "./factory";
 import { weldMeshes } from "./indexedMesh";
 import { guardKernelResults } from "./kernelGuard";
 import { OccShape } from "./shape";
 import { exportFaceMesh, shapesToStl } from "./stlWriter";
+
+/**
+ * Whether `text` ends like a whole file of `format`. A writer whose output stream ran out of
+ * memory used to answer the text written so far, cut mid-entity (#170); kernels built before the
+ * C++ writers checked their stream still do, so the end of the file is checked here too.
+ */
+export function isCompleteCadFile(format: "STEP" | "IGES" | "BREP", text: string): boolean {
+    const end = text.trimEnd();
+    if (format === "STEP") return end.endsWith("END-ISO-10303-21;");
+    // The last record of an IGES file is its Terminate section: section letter "T" in column 73.
+    if (format === "IGES") return end.slice(end.lastIndexOf("\n") + 1).charAt(72) === "T";
+    return end.length > 0;
+}
+
+function writeCadFile(format: "STEP" | "IGES" | "BREP", write: () => string): Result<string> {
+    let text: string;
+    try {
+        text = write();
+    } catch (error) {
+        return Result.err(kernelCallFailure(`${format} export`, error));
+    }
+    if (!isCompleteCadFile(format, text))
+        return Result.err(`${format} export failed: the writer produced an incomplete file`);
+    return Result.ok(text);
+}
 
 export class OccShapeConverter implements IShapeConverter {
     private readonly addShapeNode = (
@@ -73,7 +99,9 @@ export class OccShapeConverter implements IShapeConverter {
             }
             throw new Error("Shape is not an OccShape");
         });
-        return Result.ok(wasm.Converter.convertToIges(occShapes, options?.lengthUnit ?? "mm"));
+        return writeCadFile("IGES", () =>
+            wasm.Converter.convertToIges(occShapes, options?.lengthUnit ?? "mm"),
+        );
     }
 
     convertFromIGES(document: IDocument, iges: Uint8Array): Result<FolderNode> {
@@ -118,7 +146,9 @@ export class OccShapeConverter implements IShapeConverter {
             }
             throw new Error("Shape is not an OccShape");
         });
-        return Result.ok(wasm.Converter.convertToStep(occShapes, options?.lengthUnit ?? "mm"));
+        return writeCadFile("STEP", () =>
+            wasm.Converter.convertToStep(occShapes, options?.lengthUnit ?? "mm"),
+        );
     }
 
     convertFromSTEP(document: IDocument, step: Uint8Array): Result<FolderNode> {
@@ -127,7 +157,7 @@ export class OccShapeConverter implements IShapeConverter {
 
     convertToBrep(shape: IShape): Result<string> {
         if (shape instanceof OccShape) {
-            return Result.ok(wasm.Converter.convertToBrep(shape.shape));
+            return writeCadFile("BREP", () => wasm.Converter.convertToBrep(shape.shape));
         }
         return Result.err("Shape is not an OccShape");
     }

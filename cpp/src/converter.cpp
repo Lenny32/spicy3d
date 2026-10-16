@@ -10,6 +10,7 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <DESTEP_Parameters.hxx>
+#include <IFSelect_ReturnStatus.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESControl_Writer.hxx>
 #include <Interface_Static.hxx>
@@ -328,11 +329,23 @@ private:
         return output;
     }
 
+    // A stream that cannot grow (the module's memory is spent) sets badbit and drops the rest of
+    // the output without raising: the writer "succeeds" with a file cut at the buffer's last
+    // capacity (#170). Raise instead, so the export reports an error.
+    static void requireCompleteStream(const std::ostringstream& stream, const char* format)
+    {
+        if (!stream.good()) {
+            std::string message = std::string("the ") + format + " output stream failed (out of memory?)";
+            throw Standard_Failure(message.c_str());
+        }
+    }
+
 public:
     static std::string convertToBrep(const TopoDS_Shape& input)
     {
         std::ostringstream oss;
         BRepTools::Write(input, oss);
+        requireCompleteStream(oss, "BREP");
         return oss.str();
     }
 
@@ -426,7 +439,10 @@ public:
         for (const auto& shape : shapes) {
             stepWriter.Transfer(shape, STEPControl_AsIs, parameters);
         }
-        stepWriter.WriteStream(oss);
+        if (stepWriter.WriteStream(oss) != IFSelect_RetDone) {
+            throw Standard_Failure("the STEP writer did not complete the file");
+        }
+        requireCompleteStream(oss, "STEP");
         return oss.str();
     }
 
@@ -439,7 +455,10 @@ public:
             igesWriter.AddShape(shape);
         }
         igesWriter.ComputeModel();
-        igesWriter.Write(oss);
+        if (!igesWriter.Write(oss)) {
+            throw Standard_Failure("the IGES writer did not complete the file");
+        }
+        requireCompleteStream(oss, "IGES");
         return oss.str();
     }
 
