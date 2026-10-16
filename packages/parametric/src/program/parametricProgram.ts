@@ -1803,11 +1803,18 @@ function runBooleanOp(state: State, op: BooleanOp): void {
 
 function runEditFeatureOp(state: State, op: EditFeatureOp): void {
     const body = resolveBody(state, op.body);
+    const feature = body.features.find((item) => item.id === op.featureId);
+    if (feature === undefined) {
+        // The body methods ignore unknown ids, so a mistyped or stale id would otherwise "succeed".
+        throw new Error(
+            `feature "${String(op.featureId ?? "")}" not found in body "${body.name}" (${body.id}); ` +
+                `read its ${body.features.length} feature ids with the "features" op`,
+        );
+    }
     const before = erroredFeatureIds(body);
     switch (op.action) {
         case "setRadiusLaw": {
-            const feature = body.features.find((item) => item.id === op.featureId);
-            if (feature?.type !== "fillet") throw new Error("Radius laws apply only to fillet features");
+            if (feature.type !== "fillet") throw new Error("Radius laws apply only to fillet features");
             if (op.radiusLaw !== undefined) {
                 const law = resolveFilletRadiusLaw(op.radiusLaw, state.document.variables.evaluate().scope);
                 if (!law.isOk) throw new Error(law.error);
@@ -1828,7 +1835,7 @@ function runEditFeatureOp(state: State, op: EditFeatureOp): void {
             if (op.key === undefined) throw new Error('"setParameter" requires "key"');
             if (op.value === undefined) throw new Error('"setParameter" requires "value"');
             if (
-                body.features.find((feature) => feature.id === op.featureId)?.type === "projection" &&
+                feature.type === "projection" &&
                 (!["directionX", "directionY", "directionZ"].includes(op.key) ||
                     typeof op.value !== "number" ||
                     !Number.isFinite(op.value))

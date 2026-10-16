@@ -1194,6 +1194,69 @@ describe("feature list editing", () => {
         expect(message).toContain("extrude");
         expect(extent(body)).toEqual(before);
     });
+
+    test.each<[string, Partial<ParametricOp>]>([
+        ["setParameter", { action: "setParameter", key: "depth", value: 60 }],
+        ["rename", { action: "rename", value: "Renamed" }],
+        ["suppress", { action: "suppress", value: true }],
+        ["remove", { action: "remove" }],
+        ["moveTo", { action: "moveTo", index: 0 }],
+        ["setRadiusLaw", { action: "setRadiusLaw" }],
+    ])("%s on an unknown feature id fails and rolls the whole program back", (_action, fields) => {
+        const doc = newDoc();
+        const body = createdBody(doc, run(doc, plate(20)), "b1");
+        const features = structuredClone(body.features);
+        const before = extent(body);
+        const position = doc.history.undoCount();
+
+        const message = runExpectingFailure(doc, [
+            {
+                op: "editFeature",
+                body: body.id,
+                featureId: body.features[0].id,
+                action: "rename",
+                value: "Kept?",
+            },
+            { op: "editFeature", body: body.id, featureId: "no-such-feature", ...fields } as ParametricOp,
+        ]);
+
+        expect(message).toBe(
+            `op 1 ("editFeature") failed: feature "no-such-feature" not found in body "${body.name}" ` +
+                `(${body.id}); read its 1 feature ids with the "features" op`,
+        );
+        expect(body.features).toEqual(features);
+        expect(extent(body)).toEqual(before);
+        expect(doc.history.undoCount()).toBe(position);
+    });
+
+    test("the MCP tool reports an unknown feature id as an error naming the feature and body", async () => {
+        const doc = newDoc();
+        const app = createMockApplication();
+        app.activeView = { document: doc } as unknown as typeof app.activeView;
+        doc.selection = createMockSelection();
+        rs.stubGlobal("app", app);
+        try {
+            const body = createdBody(doc, run(doc, plate(20)), "b1");
+            const tool = buildParametricTools()[0];
+            await expect(
+                tool.handler({
+                    ops: [
+                        {
+                            op: "editFeature",
+                            body: body.id,
+                            featureId: "no-such-feature",
+                            action: "setParameter",
+                            key: "depth",
+                            value: 60,
+                        },
+                    ],
+                }),
+            ).rejects.toThrow(`feature "no-such-feature" not found in body "${body.name}"`);
+            expect(extent(body)).toEqual([0, 0, 0, 40, 30, 20]);
+        } finally {
+            rs.unstubAllGlobals();
+        }
+    });
 });
 
 describe("fillet and boolean", () => {
