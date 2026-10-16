@@ -3,7 +3,7 @@
 
 import { ShapeTypes, XYZ } from "@spicy3d/core";
 import { MockShape } from "@spicy3d/core/test-utils";
-import type { OccShapeConverter } from "../src/converter";
+import { isCompleteCadFile, type OccShapeConverter } from "../src/converter";
 import type { ShapeFactory } from "../src/factory";
 import type { OccSolid } from "../src/shape";
 import { createBox, createTestConverter, createTestFactory, unwrapOk } from "./helpers";
@@ -152,6 +152,62 @@ describe("IGES conversion", () => {
     test("convertToIGES with non-OccShape throws", () => {
         const fake = new MockShape({ shapeType: ShapeTypes.solid });
         expect(() => converter.convertToIGES([fake])).toThrow("Shape is not an OccShape");
+    });
+});
+
+// ============================================================================
+// Incomplete CAD files (#170) — a writer whose stream ran out of memory
+// ============================================================================
+
+describe("incomplete CAD export", () => {
+    afterEach(() => {
+        rs.restoreAllMocks();
+    });
+
+    test("complete STEP, IGES and BREP files of the kernel pass the end-of-file check", () => {
+        const box = createBox(factory, 10, 10, 10);
+        expect(isCompleteCadFile("STEP", unwrapOk(converter.convertToSTEP([box])))).toBe(true);
+        expect(isCompleteCadFile("IGES", unwrapOk(converter.convertToIGES([box])))).toBe(true);
+        expect(isCompleteCadFile("BREP", unwrapOk(converter.convertToBrep(box)))).toBe(true);
+    });
+
+    test.each([
+        ["STEP", "convertToSTEP", "convertToStep"],
+        ["IGES", "convertToIGES", "convertToIges"],
+    ] as const)("a %s file cut before its end is an error, not a file", (format, method, binding) => {
+        const box = createBox(factory, 10, 10, 10);
+        const complete = unwrapOk(converter[method]([box]));
+        const cut = complete.slice(0, Math.floor(complete.length * 0.6));
+        expect(isCompleteCadFile(format, cut)).toBe(false);
+        rs.spyOn(wasm.Converter, binding).mockReturnValue(cut);
+
+        const result = converter[method]([box]);
+
+        expect(result.isOk).toBe(false);
+        expect(result.error).toBe(`${format} export failed: the writer produced an incomplete file`);
+    });
+
+    test.each([
+        ["STEP", "convertToStep"],
+        ["IGES", "convertToIges"],
+        ["BREP", "convertToBrep"],
+    ] as const)("a %s writer error of the kernel is returned as an error result", (format, binding) => {
+        const box = createBox(factory, 10, 10, 10);
+        rs.spyOn(wasm.Converter, binding).mockImplementation(() => {
+            throw new Error(`Converter.${binding}: the ${format} output stream failed (out of memory?)`);
+        });
+
+        const result =
+            format === "BREP"
+                ? converter.convertToBrep(box)
+                : format === "STEP"
+                  ? converter.convertToSTEP([box])
+                  : converter.convertToIGES([box]);
+
+        expect(result.isOk).toBe(false);
+        expect(result.error).toBe(
+            `${format} export failed: Converter.${binding}: the ${format} output stream failed (out of memory?)`,
+        );
     });
 });
 
