@@ -51,9 +51,10 @@ interface StoredAutosaveSettings {
  * brings the local value back. Observable (`intervalMinutes`).
  */
 export class AutosaveSettings extends Observable {
-    static readonly current: AutosaveSettings = new AutosaveSettings();
+    // The keys come first: static initializers run in order, and `current` reads them.
     static readonly STORAGE_KEY = "autosave";
     static readonly ACCOUNT_STORAGE_KEY = "autosave.account";
+    static readonly current: AutosaveSettings = new AutosaveSettings();
 
     private store?: IAutosaveSettingsStore;
 
