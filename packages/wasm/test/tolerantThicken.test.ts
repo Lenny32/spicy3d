@@ -6,6 +6,7 @@ import {
     I18n,
     type IDisposable,
     type IShape,
+    type ISolid,
     Line,
     Plane,
     Result,
@@ -166,13 +167,108 @@ test.each([-2.5, -3.75])("tolerant circular loft preserves the ordinary wall at 
     expect(tolerant.checkShape()).toBe(true);
 });
 
-test.each([-2.5, -3.75])("free-form ellipse collapse refuses an unchanged envelope at %s", (thickness) => {
+test.each([
+    -2.5, -3.75,
+])("a free-form tip narrower than the wall at its opening is refused at %s", (thickness) => {
+    // The 3 x 1.8 mm tip is closer than |thickness| to the skin everywhere: the wall would close it.
     const input = taperedLoft(true);
     const result = factory.makeThickSolidTolerant(input, [topOpening(input)], thickness);
     expect(result.isOk).toBe(false);
-    expect(result.error).toContain("free-form crease envelopes are not supported");
+    expect(result.error).toContain("could not build the free-form crease envelope");
     expect(result.error).toContain("input face index");
     expect(result.error).not.toContain("retry with tolerant mode");
+});
+
+// A periodic cubic B-spline hugging a w x h rectangle with corners of radius r (the poles sample
+// the rounded rectangle densely, so the creases keep a radius close to r).
+function roundedSection(w: number, h: number, r: number, z: number) {
+    const poles: XYZ[] = [];
+    const corners = [
+        [w / 2 - r, h / 2 - r, 0],
+        [-(w / 2 - r), h / 2 - r, 90],
+        [-(w / 2 - r), -(h / 2 - r), 180],
+        [w / 2 - r, -(h / 2 - r), 270],
+    ];
+    for (const [x, y, start] of corners)
+        for (let k = 0; k < 12; k++) {
+            const angle = ((start + (90 * k) / 12) * Math.PI) / 180;
+            poles.push(new XYZ(x + r * Math.cos(angle), y + r * Math.sin(angle), z));
+        }
+    const knots = Array.from({ length: poles.length + 1 }, (_, k) => k);
+    const edge = keep(
+        unwrapOk(
+            factory.bspline(
+                poles,
+                knots,
+                knots.map(() => 1),
+                3,
+                true,
+            ),
+        ),
+    );
+    return keep(unwrapOk(factory.wire([edge])));
+}
+
+// The reporter's case: a free-form skin whose creases (radius 2 mm) are sharper than the wall.
+function creasedSkin(): IShape {
+    return keep(
+        unwrapOk(
+            factory.loft([roundedSection(40, 20, 2, 0), roundedSection(36, 16, 2, 30)], true, false, "c0"),
+        ),
+    );
+}
+
+function creasedOpening(input: IShape): IShape {
+    const faces = input.findSubShapes(ShapeTypes.face);
+    owned.push(...faces);
+    const top = faces.find((face) => {
+        const bounds = face.boundingBox();
+        return Math.abs(bounds.min.z - 30) < 1e-5 && Math.abs(bounds.max.z - 30) < 1e-5;
+    });
+    expect(top).not.toBeUndefined();
+    return top!;
+}
+
+test("free-form creases sharper than the wall thicken into a constant-thickness envelope", () => {
+    const input = creasedSkin();
+    const result = factory.makeThickSolidTolerant(input, [creasedOpening(input)], -3.75);
+    expect(result.error).toBeUndefined();
+    const wall = keep(result.value);
+    expect(wall.checkShape()).toBe(true);
+    const check = wall.checkSelfIntersection;
+    if (!check) throw new Error("Missing self-intersection binding");
+    expect(unwrapOk(check.call(wall))).toBe(true);
+    expect(wall.volume()).toBeLessThan(input.volume() * 0.8);
+    expect(wall.volume()).toBeGreaterThan(input.volume() * 0.4);
+    const solids = wall.findSubShapes(ShapeTypes.solid) as ISolid[];
+    owned.push(...solids);
+    expect(solids).toHaveLength(1);
+    const inside = (x: number, y: number) => solids[0].containsPoint(new XYZ(x, y, 15), false, 1e-6);
+    // At mid-height the skin is about 38 x 18 mm: material within 3.75 mm of it, nothing deeper,
+    // and a sharp inner corner where the crease's offset folded.
+    expect(inside(0, 9 - 1)).toBe(true);
+    expect(inside(0, 9 - 3.4)).toBe(true);
+    expect(inside(0, 9 - 4.2)).toBe(false);
+    expect(inside(19 - 3.4, 9 - 3.4)).toBe(true);
+    expect(inside(19 - 4.2, 9 - 4.2)).toBe(false);
+    expect(inside(0, 0)).toBe(false);
+    expect(input.checkShape()).toBe(true);
+});
+
+test("an ordinary offset failure on the creased skin names the crease and points to tolerant mode", () => {
+    const input = creasedSkin();
+    const result = factory.makeThickSolidByJoin(input, [creasedOpening(input)], -2.5, "arc");
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("input face index");
+    expect(result.error).toMatch(/curvature radius [0-9.]+ mm <= \|thickness\| 2\.5 mm/);
+    expect(result.error).toContain("retry with tolerant mode");
+});
+
+test("free-form envelopes are inward only", () => {
+    const input = creasedSkin();
+    const result = factory.makeThickSolidTolerant(input, [creasedOpening(input)], 3.75);
+    expect(result.isOk).toBe(false);
+    expect(result.error).toContain("built inward only");
 });
 
 test.each([1, 2, 3.5, 5])("all-edge fillet radius %s never yields the unchanged opened box", (radius) => {

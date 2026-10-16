@@ -90,7 +90,11 @@ export function thickenFailureDiagnostic(
         return `${error}; local curvature or intersecting offset walls may be responsible. No limiting face was found by bounded sampling${sampled} (${minimum}); reduce |thickness| (${number(Math.abs(thickness))} mm) or smooth the crease. A maximum successful thickness is not known.`;
     }
     const remedy = !region.analytic
-        ? "the free-form crease envelope is not supported by tolerant mode"
+        ? /tolerant/i.test(error)
+            ? "tolerant mode could not build the free-form crease envelope here (a crease barely sharper than the wall, or a part narrower than twice the wall at an opening)"
+            : thickness < 0 && input.shapeType === ShapeTypes.solid
+              ? "or retry with tolerant mode, which trims the free-form crease into a sharp inner corner (inward walls of solids)"
+              : "tolerant mode builds free-form crease envelopes for inward walls of solids only"
         : /tolerant/i.test(error)
           ? "this analytic collapse was not resolved by tolerant mode"
           : input.shapeType === ShapeTypes.solid &&

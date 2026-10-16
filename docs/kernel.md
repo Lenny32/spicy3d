@@ -119,16 +119,41 @@ opening-point rejection would reject that existing 7751 mm³ wall, so it applies
 recovery. The direct synchronous factory applies the many-face limit only after ordinary arc
 fails. The bounded worker accepts larger solids under its fixed deadline.
 
-This is a limited envelope mode, **not a general solution for free-form creases**.
-The free-form crease collapse reported in #121 remains unsupported; tolerant mode does not
-resolve that reporter’s case.
-Tested supported classes are full spheres, ring tori at cavity collapse, plain boxes, and
+Free-form skins (any face that is not a plane, cylinder, cone, sphere or torus) whose ordinary
+offset fails or comes back self-intersecting get a constant-thickness envelope built from cells
+(`cpp/src/thickEnvelope.hpp`, #121), inward only (negative thickness):
+
+1. Every skin face (all faces but the openings) gets its exact offset sheet
+   (`Geom_OffsetSurface`), extended by 2 |thickness| past the face (B-splines extended C2).
+2. A grid over each sheet (cells of |thickness| / 8, refined ×16 where a fold boundary crosses)
+   drops the parts that cannot bound the wall: folded nodes (`d k >= 1` for a principal
+   curvature, the cusp of the offset) and occluded nodes, whose distance to the skin is below
+   |thickness| (measured against a binned cloud of skin samples, which never underestimates).
+   Kept = not folded and within 4 cells of a visible cell, so that two sides still cross where
+   the crease folded. Each kept region becomes one face with its own copy of the surface, cut down
+   to the piece: pieces sharing one surface would be taken for the same domain by the boolean
+   operations and never intersected. Closed directions are also cut at their middle line.
+3. `BOPAlgo_MakerVolume` splits space by the solid's faces and the sheet pieces; a cell inside the
+   solid is wall when points stepped in from up to six of its faces are closer than |thickness|
+   to the skin. Cells whose samples disagree (a sheet failed to close), or a hollow closer to the
+   skin than |thickness| (0.5 % tolerance), fail the envelope instead of returning a wrong wall.
+   The wall cells are glued (`BOPAlgo_GlueFull`), then go through the same repair and checks as
+   the analytic envelope.
+
+The inner surface is the exact |thickness| offset of the skin wherever it is visible, and the
+sides meet at a sharp inner corner where the crease is sharper than the wall: the free-form
+crease case reported in #121 (radius 2 or 3 mm creases at −3.75 mm) thickens. Known limits: a
+crease barely sharper than the wall can leave the two sides missing each other by less than the
+refined grid (the r 2 mm skin at −2.5 mm is refused with "a split cell spans the thickness");
+outward free-form envelopes, open skins and reflex skin edges (whose offsets leave a gap instead
+of crossing) are refused. The free-form envelope is part of the tolerant worker operation and its
+30-second deadline; the 40 × 20 × 30 mm crease fixture takes a few seconds natively.
+Tested supported analytic classes are full spheres, ring tori at cavity collapse, plain boxes, and
 prismatic solids with vertical-edge fillets smaller than the wall, without corner blends.
 Only those vertical fillets were verified; general analytic rolling-ball creases are not
 supported. Boxes filleted on every edge fail in both modes, including at −0.5 mm; the regression
-tests also cover −3.75 mm (radii 1, 2, 3.5 and 5 mm). Free-form crease recovery on B-spline lofts
-or extrusions is refused, while an ordinary offset that succeeds is still usable. Open skins,
-multiple solids, pipe mode and unrecognized cavity collapse remain errors. OCCT 8.0.1's local
+tests also cover −3.75 mm (radii 1, 2, 3.5 and 5 mm). Open skins, multiple solids, pipe mode and
+unrecognized cavity collapse remain errors. OCCT 8.0.1's local
 `BRepOffsetAPI_MakeThickSolid.hxx` documents SelfInter removal as unimplemented and all-parallel
 intersection as incomplete; enabling SelfInter would not provide the requested guarantee.
 The binding is feature-detected; older binaries refuse the opt-in rather than changing its meaning.
@@ -156,9 +181,9 @@ fixtures. Curvature-collapse diagnostics first classify the limiting surface as 
 (plane/cylinder/cone/sphere/torus via GeomAdaptor). Retry advice is narrower: only the tested
 complete single-face sphere/ring-torus cavity class, with no openings. Other analytic solids
 receive a statement that recovery is not verified for that solid; free-form limiting surfaces
-say the free-form crease envelope is unsupported. Every tolerant failure can retain the
-sampled face/region diagnostic, except cancellation/timeouts and native traps. General
-free-form rolling-ball envelopes remain unfinished.
+point an ordinary inward failure of a solid to tolerant mode, and a tolerant failure says the
+crease envelope could not be closed there. Every tolerant failure can retain the
+sampled face/region diagnostic, except cancellation/timeouts and native traps.
 
 ## Dead-kernel state
 
